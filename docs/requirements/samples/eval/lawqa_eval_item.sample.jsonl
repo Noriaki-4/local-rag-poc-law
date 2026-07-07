@@ -1,0 +1,1 @@
+{"questionId":"lawqa-sample-001","question":"次の記述のうち、法令上正しいものはどれか。","choices":{"A":"選択肢A","B":"選択肢B","C":"選択肢C","D":"選択肢D"},"goldAnswer":"C","expectedReferences":[{"lawId":"323AC0000000025","article":"第2条","contentUnitId":"law-323AC0000000025-article-2"}],"notes":"問題文・選択肢・正解はRAG対象にしない。"}

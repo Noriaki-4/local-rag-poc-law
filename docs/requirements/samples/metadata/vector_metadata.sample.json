@@ -1,0 +1,4 @@
+{
+  "note": "This file is kept only as a reference for the original Bedrock Knowledge Bases sidecar style. Step1 and the current Step2 plan use OpenSearch directly, so use opensearch_document.sample.json and opensearch_index_mapping.sample.json for implementation.",
+  "doNotUseForOpenSearchIngestion": true
+}

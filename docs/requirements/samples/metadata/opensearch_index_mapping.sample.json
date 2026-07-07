@@ -1,0 +1,102 @@
+{
+  "settings": {
+    "index": {
+      "knn": true
+    }
+  },
+  "mappings": {
+    "properties": {
+      "documentId": {
+        "type": "keyword"
+      },
+      "contentUnitId": {
+        "type": "keyword"
+      },
+      "parentContentUnitId": {
+        "type": "keyword"
+      },
+      "chunkId": {
+        "type": "keyword"
+      },
+      "deptCode": {
+        "type": "keyword"
+      },
+      "docType": {
+        "type": "keyword"
+      },
+      "contentDomain": {
+        "type": "keyword"
+      },
+      "title": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword"
+          }
+        }
+      },
+      "heading": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword"
+          }
+        }
+      },
+      "sectionPath": {
+        "type": "text"
+      },
+      "articleNumber": {
+        "type": "integer"
+      },
+      "paragraphNumber": {
+        "type": "integer"
+      },
+      "itemNumber": {
+        "type": "integer"
+      },
+      "text": {
+        "type": "text"
+      },
+      "embedding": {
+        "type": "knn_vector",
+        "dimension": 1024,
+        "method": {
+          "name": "hnsw",
+          "space_type": "cosinesimil",
+          "engine": "lucene"
+        }
+      },
+      "publishStatus": {
+        "type": "keyword"
+      },
+      "isLatest": {
+        "type": "boolean"
+      },
+      "confidentiality": {
+        "type": "keyword"
+      },
+      "clearanceLevel": {
+        "type": "integer"
+      },
+      "sourceObjectUri": {
+        "type": "keyword"
+      },
+      "processedObjectUri": {
+        "type": "keyword"
+      },
+      "sourcePage": {
+        "type": "integer"
+      },
+      "parserType": {
+        "type": "keyword"
+      },
+      "chunkStrategy": {
+        "type": "keyword"
+      }
+    }
+  },
+  "_meta": {
+    "embedding_dimension_note": "dimension=1024は仮値。Phase 0で確定したembedding_modelの出力次元に合わせて変更する。"
+  }
+}
