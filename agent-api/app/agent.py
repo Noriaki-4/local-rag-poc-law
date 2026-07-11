@@ -29,8 +29,7 @@ class AgentService:
             citations.extend(_citations_from_results(law_results))
 
         citations = _dedupe_citations(citations)
-        predicted_answer, judgements = self._choice_answer(request, citations)
-        answer_text = self._compose_answer(request, route, citations, predicted_answer, trace)
+        answer_text, predicted_answer, judgements = self._compose_answer(request, route, citations, trace)
 
         return AnswerResponse(
             pattern=request.pattern,
@@ -60,34 +59,22 @@ class AgentService:
             return "multiple_choice_legal_qa"
         return "legal_qa"
 
-    def _choice_answer(self, request: AnswerRequest, citations: list[Citation]) -> tuple[str | None, dict[str, str] | None]:
-        if not request.choices:
-            return None, None
-        labels = sorted(label.upper() for label in request.choices)
-        predicted = "C" if "C" in labels else labels[0]
-        judgements = {
-            label: ("supported" if label == predicted and citations else "not_supported")
-            for label in labels
-        }
-        return predicted, judgements
-
     def _compose_answer(
         self,
         request: AnswerRequest,
         route: list[str],
         citations: list[Citation],
-        predicted_answer: str | None,
         trace: dict[str, Any],
-    ) -> str:
+    ) -> tuple[str, str | None, dict[str, str] | None]:
         if citations:
             try:
-                llm_result = self.llm_client.generate_answer(request, route, citations, predicted_answer)
+                llm_result = self.llm_client.generate_answer(request, route, citations)
             except Exception as exc:
                 trace["llm"] = {
-                    "provider": "ollama",
+                    "provider": self.llm_client.provider,
                     "used": False,
                     "error": str(exc),
-                    "fallback": "deterministic",
+                    "fallback": "no_choice_judgement",
                 }
             else:
                 if llm_result and llm_result.text:
@@ -99,17 +86,24 @@ class AgentService:
                         "inputTokens": llm_result.inputTokens,
                         "outputTokens": llm_result.outputTokens,
                         "estimatedCost": llm_result.estimatedCost,
+                        "validationError": llm_result.validationError,
                     }
-                    return llm_result.text
+                    return llm_result.answer, llm_result.predictedAnswer, llm_result.choiceJudgements
 
-        if predicted_answer:
+        if request.choices:
             return (
-                f"ローカルPOCの決定的フォールバックでは、選択肢 {predicted_answer} を候補として返します。"
-                " 実運用評価では Phase 0 で固定した LLM と実ベクトルに置き換えて判定してください。"
+                "LLM 未使用のため選択肢判定は行いません。"
+                " 評価時は predictedAnswer を null として扱ってください。",
+                None,
+                None,
             )
         if citations:
-            return "検索された根拠候補に基づく回答です。法的判断は引用元を確認し、必要に応じて専門家確認を行ってください。"
-        return "十分な引用根拠を取得できなかったため、断定回答は行いません。"
+            return (
+                "検索された根拠候補に基づく回答です。法的判断は引用元を確認し、必要に応じて専門家確認を行ってください。",
+                None,
+                None,
+            )
+        return "十分な引用根拠を取得できなかったため、断定回答は行いません。", None, None
 
 
 def _citations_from_results(results: list[dict[str, Any]]) -> list[Citation]:

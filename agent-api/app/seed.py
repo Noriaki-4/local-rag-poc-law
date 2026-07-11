@@ -41,7 +41,6 @@ def seed_all(os_client: OpenSearchClient, graph_client: GraphClient) -> dict[str
 def _opensearch_documents(samples_dir: Path) -> list[dict[str, Any]]:
     sample = _read_json(samples_dir / "metadata" / "opensearch_document.sample.json")
     law_fsa = dict(sample)
-    law_fsa["text"] = "金融商品取引法第2条第1項は、有価証券の定義に関する条文である。法令上の判断には条文本文を根拠として確認する。"
     law_fsa["embedding"] = embed_text(_embedding_text(law_fsa), settings.embedding_dimension)
     return [law_fsa]
 

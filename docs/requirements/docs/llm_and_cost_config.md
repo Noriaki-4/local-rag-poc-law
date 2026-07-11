@@ -19,7 +19,7 @@ llm_config:
   timeout_sec: 60
 ```
 
-初期動作確認では、有料 API の想定外トークン消費を避けるため Ollama 上の `gemma4:e4b` を使う。judge は初期では `none` とし、評価はルール評価を主にする。
+初期動作確認では、有料 API の想定外トークン消費を避けるため Ollama 上の `gemma4:e4b` を使う。Claudeを使う場合は `LLM_PROVIDER=anthropic`、`ANTHROPIC_API_KEY`、`ANSWER_MODEL` を `.env` で切り替える。judge は初期では `none` とし、評価はルール評価を主にする。
 
 ## 3. モデル利用パターン
 
@@ -45,10 +45,10 @@ estimated_cost
 
 API利用時は実価格テーブルを設定ファイル化する。ローカルLLMの場合は estimated_cost=0 とし、代わりに推論時間を記録する。
 
-初期 Ollama 実装では、Agent API の trace に以下を記録する。
+Agent API の trace には以下を記録する。
 
 ```text
-provider = ollama
+provider
 model
 inputTokens
 outputTokens

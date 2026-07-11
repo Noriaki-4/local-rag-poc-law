@@ -31,6 +31,7 @@ def main() -> None:
         "items": len(results),
         "answerAccuracy": sum(item["scores"].get("answerAccuracy", 0) for item in results),
         "citationHit": sum(item["scores"].get("citationHit", 0) for item in results),
+        "llmUsed": sum(1 for item in results if item.get("llmUsed")),
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
@@ -71,6 +72,7 @@ def run_lawqa() -> list[dict[str, Any]]:
             for citation in output.get("citations", [])
         }
         citation_hit = bool(expected & retrieved or expected & retrieved_parents)
+        llm_used = bool(output.get("trace", {}).get("llm", {}).get("used"))
         results.append(
             {
                 "runId": f"run-{row['questionId']}",
@@ -86,6 +88,7 @@ def run_lawqa() -> list[dict[str, Any]]:
                 "citations": output["citations"],
                 "predictedAnswer": output.get("predictedAnswer"),
                 "goldAnswer": row["goldAnswer"],
+                "llmUsed": llm_used,
                 "scores": {
                     "answerAccuracy": 1 if output.get("predictedAnswer") == row["goldAnswer"] else 0,
                     "citationHit": 1 if citation_hit else 0,

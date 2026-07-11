@@ -17,6 +17,7 @@
 実装はサンプルデータで起動確認できる。e-Gov 由来の実法令データ、lawqa_jp 本体、実 embedding model は Phase 0 で固定後に差し替える。
 
 初期 LLM は有料 API ではなく、ホストで動く Ollama の `gemma4:e4b` を使う。Docker 内の Agent API からは `http://host.docker.internal:11434` に接続する。
+Claude を使う場合は `LLM_PROVIDER=anthropic` に切り替える。
 
 ## 2. 初回起動
 
@@ -29,7 +30,24 @@ curl -s http://localhost:11434/api/generate \
   -d '{"model":"gemma4:e4b","prompt":"日本語で一文だけ返してください。","stream":false}' | jq .
 ```
 
-Ollama 設定は `docker-compose.yml` の `agent-api.environment` に既定値を入れている。必要に応じて `.env.example` を参考に `.env` を作る。
+LLM 設定は `docker-compose.yml` の `agent-api.environment` に既定値を入れている。必要に応じて `.env.example` を参考に `.env` を作る。
+
+Claude を使う場合の `.env` 例:
+
+```bash
+LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-ant-...
+ANSWER_MODEL=claude-sonnet-5
+ANTHROPIC_MAX_TOKENS=512
+```
+
+Ollama に戻す場合:
+
+```bash
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://host.docker.internal:11434
+ANSWER_MODEL=gemma4:e4b
+```
 
 ```bash
 docker compose up --build -d
@@ -42,7 +60,7 @@ docker compose ps
 curl -s http://localhost:8000/health | jq .
 ```
 
-`/health` の `llm.ok` が `true` であれば、Agent API コンテナから Ollama の `gemma4:e4b` に接続できている。
+`/health` の `llm.ok` が `true` であれば、Agent API コンテナから設定した LLM provider を利用できる。
 
 UI:
 
@@ -131,12 +149,12 @@ lawqa_jp 形式:
 curl -s http://localhost:8000/answer \
   -H 'content-type: application/json' \
   -d '{
-    "question": "次の記述のうち、法令上正しいものはどれか。",
+    "question": "金融商品取引法第2条第1項に照らして、次の記述のうち正しいものはどれか。",
     "choices": {
-      "A": "選択肢A",
-      "B": "選択肢B",
-      "C": "選択肢C",
-      "D": "選択肢D"
+      "A": "有価証券には国債証券および地方債証券が含まれる。",
+      "B": "有価証券には国債証券は含まれるが、地方債証券は含まれない。",
+      "C": "有価証券は株券だけを意味する。",
+      "D": "有価証券の定義は金融商品取引法に置かれていない。"
     },
     "pattern": "pattern_2_rule_based_agentic_rag",
     "userClearanceLevel": 2
@@ -198,7 +216,7 @@ Phase 0 で以下を固定する。
 
 - embedding model / dimension
 - lawqa_jp 評価対象件数と除外条件
-- planner / answer / judge LLM。初期確認は Ollama `gemma4:e4b`、judge は `none`
+- planner / answer / judge LLM。初期確認は Ollama `gemma4:e4b`、Claude利用時は `LLM_PROVIDER=anthropic`
 - Hybrid 検索重み
 - Pattern 3 の tool call / retry 上限
 
@@ -206,7 +224,7 @@ Phase 0 で以下を固定する。
 
 - `agent-api/app/embeddings.py`: 決定的ローカル embedding から実 embedding provider へ変更
 - `agent-api/app/seed.py`: サンプル文書生成から e-Gov 前処理済み文書投入へ変更
-- `agent-api/app/llm.py`: 初期 Ollama provider から必要な LLM provider へ変更
+- `.env`: `LLM_PROVIDER`, `ANSWER_MODEL`, provider別APIキーを変更
 - `agent-api/app/agent.py`: planner / answer / judge の使い分けを拡張
 - `docs/requirements/samples/eval/`: 実評価分割の JSONL に差し替え
 

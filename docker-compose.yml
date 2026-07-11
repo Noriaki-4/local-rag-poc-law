@@ -77,13 +77,17 @@ services:
       MINIO_BUCKET: knowledge-root
       SAMPLES_DIR: /workspace/samples
       EVAL_RESULTS_DIR: /workspace/eval-results
-      LLM_PROVIDER: ollama
-      OLLAMA_BASE_URL: http://host.docker.internal:11434
-      PLANNER_MODEL: gemma4:e4b
-      ANSWER_MODEL: gemma4:e4b
-      JUDGE_MODEL: none
-      LLM_TIMEOUT_SEC: 90
-      LLM_MAX_CONTEXT_CHARS: 4000
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-https://api.anthropic.com}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_VERSION: ${ANTHROPIC_VERSION:-2023-06-01}
+      ANTHROPIC_MAX_TOKENS: ${ANTHROPIC_MAX_TOKENS:-512}
+      PLANNER_MODEL: ${PLANNER_MODEL:-gemma4:e4b}
+      ANSWER_MODEL: ${ANSWER_MODEL:-gemma4:e4b}
+      JUDGE_MODEL: ${JUDGE_MODEL:-none}
+      LLM_TIMEOUT_SEC: ${LLM_TIMEOUT_SEC:-90}
+      LLM_MAX_CONTEXT_CHARS: ${LLM_MAX_CONTEXT_CHARS:-4000}
     ports:
       - "8000:8000"
     depends_on:
