@@ -57,26 +57,7 @@ expectedLawIds
 - `retrievalHit@k`: 検索上位k件に期待根拠が含まれるか
 - `graphExpansionHit`: Graph展開で新たに期待根拠を取得できたか
 
-## 3. 条例マニュアル評価
-
-### 評価タイプ
-
-```text
-manual_only
-law_only
-manual_to_law
-graph_to_manual
-citation_required
-```
-
-### 期待する回答
-
-- 手順本文
-- マニュアル引用
-- 根拠法令引用
-- Graph path
-
-## 4. Trace ログ
+## 3. Trace ログ
 
 すべてのパターンで共通ログを出す。
 
@@ -107,7 +88,7 @@ citation_required
 
 
 
-## 5. 統計的評価設計
+## 4. 統計的評価設計
 
 ### lawqa_jp件数
 
@@ -130,7 +111,7 @@ lawqa_eval_split:
 - accuracy差は問題数が少ない場合、厳密な有意差ではなく探索的評価として扱う。
 - 可能であればbootstrap信頼区間またはMcNemar検定を追加する。
 
-## 6. citationHit / retrievalHit の照合粒度
+## 5. citationHit / retrievalHit の照合粒度
 
 gold referenceが条単位で、retrievalが項・号単位の場合があるため、以下の階層照合を行う。
 
@@ -165,7 +146,7 @@ primary_citation_hit_rate
 partial_credit_score_optional
 ```
 
-## 7. LLM-as-Judgeの扱い
+## 6. LLM-as-Judgeの扱い
 
 `faithfulness`, `route_score`, `decomposition_score` は初期は補助評価とする。
 

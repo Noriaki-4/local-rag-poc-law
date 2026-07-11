@@ -8,7 +8,6 @@ Step2 は、Step1 でローカル Docker 上に構築した Agentic RAG / DeepSe
 - Neptune Analytics を使った GraphRAG
 - Agentic DeepSearch による検索ルート制御
 - lawqa_jp を使った法令 RAG / GraphRAG 評価
-- 条例制定・改正マニュアルを使った manual → law → citation 評価
 - 引用必須の回答・評価ログ設計
 
 Step2 は本番運用完成版ではない。AWS 上で主要構成要素を手動中心で組み合わせ、Step1 のロジック・データセット・評価設計が AWS 構成でも成立するかを確認する。
@@ -23,9 +22,6 @@ Step2 は本番運用完成版ではない。AWS 上で主要構成要素を手�
   AgentCore Runtime または ECS / Lambda 上の Agent API
         |
         +-- law_search_tool
-        |     -> Amazon OpenSearch Service / OpenSearch Serverless
-        |
-        +-- manual_search_tool
         |     -> Amazon OpenSearch Service / OpenSearch Serverless
         |
         +-- graph_search_tool
@@ -117,17 +113,6 @@ s3://<bucket>/knowledge-root/
 8. goldAnswer / expected references と照合する
 ```
 
-### 6.2 条例制定・改正マニュアル評価
-
-```text
-1. 業務質問を Agent UI から投入する
-2. manual_search_tool が OpenSearch で条例制定・改正マニュアルを検索する
-3. graph_search_tool が Neptune Analytics で ProcedureStep → BASED_ON_LAW → Article を辿る
-4. law_search_tool / source_fetch_tool が根拠条文本文を取得する
-5. Agent が手順 + 根拠条文 + 引用 + Graph path を回答する
-6. 評価ログに retrieval / graph / citation / answer の結果を保存する
-```
-
 ## 7. Step2 で試す Agent ロジック
 
 Step2 でも、Step1 と同じ4パターンを比較可能にする。
@@ -146,7 +131,6 @@ Step2 の主目的は、Pattern 1〜3 が AWS 構成でも動くことを確認�
 OpenSearch は、以下の検索を担当する。
 
 - e-Gov由来法令本文の Vector / Hybrid 検索
-- 条例制定・改正マニュアル本文の Vector / Hybrid 検索
 - `docType`, `contentDomain`, `publishStatus`, `isLatest`, `deptCode` 等による metadata filter
 - 引用生成に必要な `documentId`, `contentUnitId`, `sourceObjectUri`, `sourcePage` の返却
 
@@ -154,7 +138,7 @@ Step2 では Amazon OpenSearch Service と OpenSearch Serverless のどちらで
 
 ## 9. Neptune Analytics の役割
 
-Neptune Analytics は、法令・業務手順の関係探索を担当する。
+Neptune Analytics は、法令の関係探索を担当する。
 
 主なノード:
 
@@ -166,9 +150,6 @@ Paragraph
 Item
 Term
 Definition
-Manual
-Procedure
-ProcedureStep
 ```
 
 主なエッジ:
@@ -181,9 +162,6 @@ DEFINES
 USES_TERM
 EXCEPTION_TO
 APPLIES_TO
-HAS_STEP
-NEXT_STEP
-BASED_ON_LAW
 ```
 
 重要な制約:
@@ -204,7 +182,6 @@ AgentCore Runtime
 
 AgentCore Gateway
   - law_search_tool
-  - manual_search_tool
   - graph_search_tool
   - source_fetch_tool
 ```
@@ -301,7 +278,6 @@ Step2 の成功条件は、以下である。
 ```text
 - lawqa_jp の問題文・選択肢から、S3/OpenSearch/Neptuneに登録済みのe-Gov由来法令本文を検索できる
 - predictedAnswer / citations / retrievalHit を評価ログに保存できる
-- 条例制定マニュアル質問で manual → graph → law の探索ができる
 - Graph edge だけでなく、本文引用付きで回答できる
 - Pattern 1〜3 の比較結果を出せる
 - Step1 で作ったデータセット・メタデータ・評価ログ形式を大きく変えずに使える

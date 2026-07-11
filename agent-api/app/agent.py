@@ -1,47 +1,24 @@
 from typing import Any
 
-from .graph_client import GraphClient
 from .llm import LLMClient
 from .models import AnswerRequest, AnswerResponse, Citation
 from .opensearch_client import OpenSearchClient
 
 
 class AgentService:
-    def __init__(self, os_client: OpenSearchClient, graph_client: GraphClient, llm_client: LLMClient) -> None:
+    def __init__(self, os_client: OpenSearchClient, llm_client: LLMClient) -> None:
         self.os_client = os_client
-        self.graph_client = graph_client
         self.llm_client = llm_client
 
     def answer(self, request: AnswerRequest) -> AnswerResponse:
         route = self._route(request)
         trace: dict[str, Any] = {"rounds": [], "inputType": self._input_type(request)}
         citations: list[Citation] = []
-        graph_paths: list[dict[str, Any]] = []
 
         law_results: list[dict[str, Any]] = []
-        manual_results: list[dict[str, Any]] = []
 
         if "instruction_rag" in route:
             trace["instruction"] = "Instruction RAG slot executed. Add real manuals under docType=reasoning_manual."
-
-        if "manual_search_tool" in route:
-            manual_results = self.os_client.search(
-                request.question, "manual", request.topK, request.userClearanceLevel
-            )
-            trace["rounds"].append({"tool": "manual_search_tool", "resultCount": len(manual_results)})
-            citations.extend(_citations_from_results(manual_results))
-
-        if "graph_search_tool" in route and manual_results:
-            manual_ids = [item["document"]["contentUnitId"] for item in manual_results]
-            graph_paths = self.graph_client.based_on_law_paths(manual_ids)
-            trace["rounds"].append({"tool": "graph_search_tool", "resultCount": len(graph_paths)})
-            for path in graph_paths:
-                for node in path.get("nodes", []):
-                    content_unit_id = node.get("contentUnitId")
-                    if content_unit_id and node.get("docType") == "law":
-                        document = self.os_client.get_by_content_unit_id(content_unit_id)
-                        if document:
-                            law_results.append({"document": document, "score": 1.0, "bm25Score": 0.0, "vectorScore": 0.0})
 
         if "law_search_tool" in route:
             if not law_results:
@@ -62,7 +39,7 @@ class AgentService:
             predictedAnswer=predicted_answer,
             choiceJudgements=judgements,
             citations=citations,
-            graphPaths=graph_paths,
+            graphPaths=[],
             trace=trace,
         )
 
@@ -72,26 +49,15 @@ class AgentService:
             route.append("instruction_rag")
 
         if request.pattern == "pattern_1_baseline_rag":
-            route.append("law_search_tool" if request.choices else "manual_search_tool")
+            route.append("law_search_tool")
             return route
 
-        question = request.question
-        needs_manual = any(word in question for word in ["条例", "手順", "議会", "公布", "施行", "担当課"])
-        needs_law = bool(request.choices) or any(word in question for word in ["法令", "条文", "根拠", "規定", "正しい"])
-
-        if needs_manual:
-            route.append("manual_search_tool")
-        if needs_manual and needs_law:
-            route.append("graph_search_tool")
-        if needs_law or not route:
-            route.append("law_search_tool")
+        route.append("law_search_tool")
         return route
 
     def _input_type(self, request: AnswerRequest) -> str:
         if request.choices:
             return "multiple_choice_legal_qa"
-        if any(word in request.question for word in ["条例", "手順", "担当課"]):
-            return "ordinance_manual_qa"
         return "legal_qa"
 
     def _choice_answer(self, request: AnswerRequest, citations: list[Citation]) -> tuple[str | None, dict[str, str] | None]:
@@ -140,11 +106,6 @@ class AgentService:
             return (
                 f"ローカルPOCの決定的フォールバックでは、選択肢 {predicted_answer} を候補として返します。"
                 " 実運用評価では Phase 0 で固定した LLM と実ベクトルに置き換えて判定してください。"
-            )
-        if "manual_search_tool" in route and "graph_search_tool" in route:
-            return (
-                "条例案が議会で可決された後は、公布・施行手続を行います。"
-                " 本POCではマニュアル手順からGraphを辿り、地方自治法第16条を根拠候補として引用します。"
             )
         if citations:
             return "検索された根拠候補に基づく回答です。法的判断は引用元を確認し、必要に応じて専門家確認を行ってください。"

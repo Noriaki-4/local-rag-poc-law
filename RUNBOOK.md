@@ -7,7 +7,7 @@
 構成:
 
 - MinIO: 原本・処理済み成果物・評価データ置き場
-- OpenSearch: 法令・マニュアル本文の BM25 / kNN / Hybrid 検索
+- OpenSearch: 法令本文の BM25 / kNN / Hybrid 検索
 - OpenSearch Dashboards: インデックス確認
 - Neo4j: GraphRAG 検証
 - Agent API: FastAPI
@@ -92,6 +92,9 @@ curl -s -X POST http://localhost:8000/admin/seed | jq .
 - Graph nodes/edges: `docs/requirements/samples/metadata/*.jsonl`
 - MinIO bucket: `knowledge-root`
 - サンプル評価データ: `knowledge-root/eval-data/samples/...`
+- 原本保管用マニュアル: `knowledge-root/source-documents/dept=general-affairs/docType=manual/manual-ordinance-001/source.md`
+
+原本保管用マニュアルは、OpenSearch / Neo4j / 評価データには投入しない。
 
 `/admin/seed` は OpenSearch index と Neo4j graph を作り直す。検証環境の再投入用であり、本番運用向けの差分投入ではない。
 
@@ -103,8 +106,8 @@ Hybrid 検索:
 curl -s http://localhost:8000/search \
   -H 'content-type: application/json' \
   -d '{
-    "query": "条例案が議会で可決された後の公布施行手続",
-    "docType": "manual",
+    "query": "有価証券の定義",
+    "docType": "law",
     "topK": 5,
     "userClearanceLevel": 2
   }' | jq .
@@ -116,21 +119,9 @@ Graph 検索:
 curl -s http://localhost:8000/graph/path \
   -H 'content-type: application/json' \
   -d '{
-    "fromGraphNodeId": "manual-ordinance-001-step-008",
-    "edgeType": "BASED_ON_LAW",
+    "fromGraphNodeId": "law-323AC0000000025",
+    "edgeType": "HAS_CONTENT_UNIT",
     "maxDepth": 1
-  }' | jq .
-```
-
-条例 manual to law 回答:
-
-```bash
-curl -s http://localhost:8000/answer \
-  -H 'content-type: application/json' \
-  -d '{
-    "question": "条例案が議会で可決された後、担当課は何をすべきか。根拠条文も示して。",
-    "pattern": "pattern_3_controlled_agentic_rag",
-    "userClearanceLevel": 2
   }' | jq .
 ```
 

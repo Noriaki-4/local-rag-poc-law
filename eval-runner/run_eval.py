@@ -19,7 +19,6 @@ def main() -> None:
 
     results: list[dict[str, Any]] = []
     results.extend(run_lawqa())
-    results.extend(run_ordinance())
 
     EVAL_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     output_path = EVAL_RESULTS_DIR / f"eval-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.jsonl"
@@ -92,60 +91,6 @@ def run_lawqa() -> list[dict[str, Any]]:
                     "citationHit": 1 if citation_hit else 0,
                     "retrievalHitAt5": 1 if citation_hit else 0,
                     "graphExpansionHit": 0,
-                },
-                "latencyMs": None,
-            }
-        )
-    return results
-
-
-def run_ordinance() -> list[dict[str, Any]]:
-    path = SAMPLES_DIR / "eval" / "ordinance_eval_item.sample.jsonl"
-    rows = read_jsonl(path)
-    results = []
-    for row in rows:
-        response = requests.post(
-            f"{API_URL}/answer",
-            json={
-                "question": row["question"],
-                "pattern": "pattern_3_controlled_agentic_rag",
-                "userClearanceLevel": 2,
-            },
-            timeout=120,
-        )
-        response.raise_for_status()
-        output = response.json()
-        expected_manual = set(row.get("expectedManualContentUnitIds", []))
-        expected_law = set(row.get("expectedLawContentUnitIds", []))
-        expected_edges = set(row.get("expectedGraphEdges", []))
-        retrieved = {citation.get("contentUnitId") for citation in output.get("citations", [])}
-        retrieved_edges = {
-            edge.get("graphEdgeId")
-            for path_item in output.get("graphPaths", [])
-            for edge in path_item.get("edges", [])
-        }
-        citation_hit = bool(expected_manual & retrieved and expected_law & retrieved)
-        graph_hit = bool(expected_edges & retrieved_edges)
-        results.append(
-            {
-                "runId": f"run-{row['questionId']}",
-                "pattern": output["pattern"],
-                "dataset": "ordinance_manual",
-                "questionId": row["questionId"],
-                "inputType": "manual_to_law",
-                "searchPlan": output["route"],
-                "toolCalls": output["trace"].get("rounds", []),
-                "retrievedContentUnitIds": list(retrieved),
-                "retrievedGraphNodeIds": [],
-                "retrievedGraphEdgeIds": list(retrieved_edges),
-                "citations": output["citations"],
-                "predictedAnswer": None,
-                "goldAnswer": None,
-                "scores": {
-                    "answerAccuracy": 1 if output.get("answer") else 0,
-                    "citationHit": 1 if citation_hit else 0,
-                    "retrievalHitAt5": 1 if citation_hit else 0,
-                    "graphExpansionHit": 1 if graph_hit else 0,
                 },
                 "latencyMs": None,
             }

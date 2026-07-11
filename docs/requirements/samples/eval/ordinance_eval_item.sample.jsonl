@@ -1,1 +1,0 @@
-{"questionId":"ord-001","question":"条例案が議会で可決された後、担当課は何をすべきか。根拠条文も示して。","expectedRoute":"manual_to_law","expectedManualContentUnitIds":["manual-ordinance-001-step-008"],"expectedLawContentUnitIds":["law-322AC0000000067-article-16"],"expectedGraphEdges":["edge-manual-ordinance-001-step-008-based-on-law-law-322AC0000000067-article-16"]}

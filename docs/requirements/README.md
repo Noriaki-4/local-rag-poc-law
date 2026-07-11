@@ -8,7 +8,6 @@
 - Neo4j を使った GraphRAG（Step2 では Neptune Analytics へ置換想定）
 - Agentic DeepSearch の段階的ロジック比較
 - 法令QAデータセット lawqa_jp を使った法令RAG検証
-- 条例制定・改正マニュアルを使った manual → law → citation 検証
 - 引用必須の回答・評価ログ設計
 
 ## Step1 の位置づけ
@@ -19,7 +18,6 @@ Step1 は AWS 本番構成の完全再現ではなく、以下をローカルで
 2. 添付メタデータ定義の実運用性
 3. 引用付き回答の生成可否
 4. lawqa_jp による法令RAG評価
-5. 条例制定マニュアルによる業務手順 + 根拠法令探索評価
 
 ## 重要な前提: e-Gov と lawqa_jp の扱い
 
@@ -65,7 +63,7 @@ OpenSearch投入サンプルは非ゼロのダミーベクトルを含むが、�
 ## 想定 Docker コンポーネント
 
 - MinIO: 原本・処理済み成果物・評価データ置き場
-- OpenSearch: 法令本文・マニュアル本文の Vector / Hybrid 検索
+- OpenSearch: 法令本文の Vector / Hybrid 検索
 - OpenSearch Dashboards: インデックス確認用
 - Neo4j: GraphRAG 検証用。Step2 では Neptune Analytics に置換
 - Agent API: FastAPI + LangGraph 等

@@ -71,19 +71,6 @@ class GraphClient:
         with self.driver.session() as session:
             return [dict(record) for record in session.run(query, fromGraphNodeId=from_graph_node_id)]
 
-    def based_on_law_paths(self, manual_content_unit_ids: list[str]) -> list[dict[str, Any]]:
-        if not manual_content_unit_ids:
-            return []
-        query = """
-        MATCH path = (manual)-[rel:BASED_ON_LAW]->(law)
-        WHERE manual.graphNodeId IN $ids
-        RETURN
-          [node IN nodes(path) | properties(node)] AS nodes,
-          [edge IN relationships(path) | properties(edge)] AS edges
-        """
-        with self.driver.session() as session:
-            return [dict(record) for record in session.run(query, ids=manual_content_unit_ids)]
-
 
 def _safe_label(value: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9_]", "_", value)

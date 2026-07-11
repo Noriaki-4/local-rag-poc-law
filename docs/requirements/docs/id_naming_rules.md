@@ -15,11 +15,12 @@ law-<法令番号>
 例:
 
 ```text
-law-322AC0000000067        # 地方自治法
 law-323AC0000000025        # 金融商品取引法
 ```
 
 ### マニュアル
+
+原本保管用マニュアルは、RAG投入やGraph投入を行わない場合でも、原本ファイルの識別名として以下を使える。
 
 ```text
 manual-<domain>-<連番>
@@ -54,15 +55,8 @@ law-<法令番号>-article-<条番号>-paragraph-<項番号>-item-<号番号>
 例:
 
 ```text
-law-322AC0000000067-article-16
 law-323AC0000000025-article-2
 law-323AC0000000025-article-2-paragraph-1
-```
-
-マニュアル:
-
-```text
-manual-ordinance-001-step-008
 ```
 
 MVPでは、Graph nodeの`graphNodeId`は対応する`contentUnitId`と同一でよい。文書ノードは`documentId`と同一にする。
@@ -76,7 +70,7 @@ edge-<from短縮>-<edgeType小文字>-<to短縮>
 例:
 
 ```text
-edge-manual-ordinance-001-step-008-based-on-law-law-322AC0000000067-article-16
+edge-law-323AC0000000025-has-content-unit-article-2
 ```
 
 ## 5. dangling edge禁止
@@ -94,12 +88,12 @@ all_edge.toGraphNodeId in nodeIds
 
 ## 6. サンプル上の確定事項
 
-地方自治法第16条は以下で統一する。
+金融商品取引法第2条は以下で統一する。
 
 ```text
-documentId:    law-322AC0000000067
-contentUnitId: law-322AC0000000067-article-16
-graphNodeId:   law-322AC0000000067-article-16
+documentId:    law-323AC0000000025
+contentUnitId: law-323AC0000000025-article-2
+graphNodeId:   law-323AC0000000025-article-2
 ```
 
-`local-autonomy-law-article-16` のような英語名ベースIDは使用しない。
+`financial-instruments-law-article-2` のような英語名ベースIDは使用しない。

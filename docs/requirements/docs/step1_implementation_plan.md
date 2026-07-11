@@ -34,7 +34,6 @@
 [FastAPI Agent API]
     |
     +-- law_search_tool       -> OpenSearch docType=law
-    +-- manual_search_tool    -> OpenSearch docType=manual
     +-- graph_search_tool     -> Neo4j
     +-- source_fetch_tool     -> MinIO
     +-- citation_builder      -> documentId / contentUnitId / sourcePage
@@ -92,8 +91,7 @@ Phase 1着手前に、以下を確定する。
 
 1. ルールで検索ルートを決定
 2. 条件に応じて GraphRAG を追加
-3. 条例マニュアルでは manual → graph → law を実行
-4. 引用付き回答を生成
+3. 引用付き回答を生成
 
 ### Phase 4: Controlled Agentic RAG
 
@@ -131,14 +129,12 @@ Orchestrator が必ず注入する項目:
 ```text
 publishStatus = published
 isLatest = true
-docType = law / manual / reasoning_manual
+docType = law / reasoning_manual
 ```
 
 ## 9. 引用必須ルール
 
 - 法的判断には law evidence が必須
-- 業務手順には manual evidence が必須
-- manual → law の関係を使った場合、Graph path と law 本文引用を両方出す
 - Graph edge だけで法的根拠の代替にしない
 - 引用が取れない場合は断定しない
 

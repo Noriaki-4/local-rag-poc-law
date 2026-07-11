@@ -1,5 +1,7 @@
 # Agentic RAG ロジック 4パターン
 
+本書は目標とする設計を示す。現行POCコードの `/answer` は全パターンで `law_search_tool` のみを実行し、`graph_search_tool` の組み込みと LLM によるクエリ分解は未実装（Graph 探索は `/graph/path` エンドポイントで個別に検証可能）。
+
 ## Pattern 1: Baseline RAG
 
 ### 位置づけ
@@ -10,7 +12,7 @@
 
 ```text
 Input
-  -> law_search_tool or manual_search_tool
+  -> law_search_tool
   -> source_fetch_tool
   -> citation_builder
   -> answer / predictedAnswer
@@ -36,14 +38,8 @@ Input
 lawqa_jp:
   law_search_tool
 
-手順・受付・確認・入力・登録:
-  manual_search_tool
-
 根拠・条文・法令・規定:
   law_search_tool
-
-手順 + 根拠:
-  manual_search_tool -> graph_search_tool -> law_search_tool
 
 定義・ただし・除く・前条・同条:
   law_search_tool -> graph_search_tool -> source_fetch_tool
@@ -143,9 +139,6 @@ Evaluation Logger
 ### 対応モード
 
 ```text
-manual_law_deepsearch:
-  manual -> graph -> law -> citation
-
 law_deepsearch:
   law -> graph expansion -> citation
 
@@ -158,8 +151,6 @@ lawqa_solver:
 ```text
 1. Pattern 1: lawqa_jp + OpenSearch
 2. Pattern 2: lawqa_jp + 条件付きGraphRAG
-3. Pattern 2: 条例マニュアル manual -> law
-4. Pattern 3: クエリ分解 + 最大2回再検索
-5. Pattern 4の一部: Instruction RAG
+3. Pattern 3: クエリ分解 + 最大2回再検索
+4. Pattern 4の一部: Instruction RAG
 ```
-

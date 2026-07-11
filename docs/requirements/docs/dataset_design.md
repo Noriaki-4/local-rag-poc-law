@@ -10,16 +10,8 @@ datasets/
     egov_law_corpus/       # e-Govから事前取得・前処理した法令本文。RAG検索対象
     instruction_manual/    # lawqa_jp回答方法マニュアル。任意のInstruction RAG対象
 
-  ordinance_manual/
-    source-documents/
-    vector-documents/
-    graph-artifacts/
-    eval/
-
-  local_government_law/
-    source-documents/
-    vector-documents/
-    graph-artifacts/
+  archived_manuals/
+    source-documents/      # 原本保管のみ。RAG/Graph/eval対象外
 ```
 
 
@@ -104,34 +96,24 @@ normalized:   A / B / C / D
 | 2 | Retrieved Context | e-Govから事前取得・登録した法令本文インデックスを検索 | ○ |
 | 3 | Agentic Retrieved Context | クエリ分解 + Vector + Graph | ○ |
 
-## 4. 条例制定・改正マニュアル
+## 4. 原本保管のみのマニュアル
 
-POC用に自作する。目的は、manual → law → citation の検証。
+条例制定・改正業務マニュアルの原本サンプルは、将来検討用に保管する。
+現行POCでは、このマニュアルを OpenSearch / GraphDB / 評価データへ投入しない。
 
-### 主要 contentUnit
+原本:
 
 ```text
-manual-ordinance-001-sec-001: 条例・規則・要綱の違い
-manual-ordinance-001-step-001: 政策目的と制度化の必要性を整理する
-manual-ordinance-001-step-002: 条例・規則・要綱のいずれで定めるか判断する
-manual-ordinance-001-step-003: 関係法令との抵触有無を確認する
-manual-ordinance-001-step-004: 条例案の素案を作成する
-manual-ordinance-001-step-005: 法規担当課へ例規審査を依頼する
-manual-ordinance-001-step-006: 庁内調整・パブリックコメント要否を確認する
-manual-ordinance-001-step-007: 議案として議会へ提出する
-manual-ordinance-001-step-008: 議決後、公布・施行手続を行う
+docs/requirements/samples/source-documents/dept=general-affairs/docType=manual/manual-ordinance-001/source.md
 ```
 
-### Graph例
+扱い:
 
 ```text
-ProcedureStep: manual-ordinance-001-step-007
-  -> BASED_ON_LAW
-Article: law-322AC0000000067-article-96
-
-ProcedureStep: manual-ordinance-001-step-008
-  -> BASED_ON_LAW
-Article: law-322AC0000000067-article-16
+- document_registry へは登録しない
+- OpenSearch へは投入しない
+- Neo4j / Neptune 用 Graph artifact は作成しない
+- eval item は作成しない
 ```
 
 ## 5. フォルダ構成
@@ -155,7 +137,7 @@ knowledge-root/
 
 ## 7. ID命名規則
 
-ID命名規則は `docs/id_naming_rules.md` を正とする。地方自治法は `law-322AC0000000067` をdocumentIdとし、英語名ベースIDは使わない。
+ID命名規則は `docs/id_naming_rules.md` を正とする。
 
 ## 8. OpenSearch向けメタデータ
 

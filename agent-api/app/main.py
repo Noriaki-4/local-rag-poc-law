@@ -13,7 +13,7 @@ from .seed import seed_all
 os_client = OpenSearchClient()
 graph_client = GraphClient()
 llm_client = LLMClient()
-agent_service = AgentService(os_client, graph_client, llm_client)
+agent_service = AgentService(os_client, llm_client)
 
 
 @asynccontextmanager

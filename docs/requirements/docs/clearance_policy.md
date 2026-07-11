@@ -9,7 +9,7 @@ POCで `confidentiality` と `clearanceLevel` の使い分けが揺れないよ�
 | confidentiality | 意味 | requiredClearanceLevel | 備考 |
 |---|---|---:|---|
 | public | 公開情報または公開法令 | 1 | lawqa_jp / e-Gov法令は原則これ |
-| internal | 庁内・組織内資料 | 2 | 条例作成マニュアル等の業務資料 |
+| internal | 庁内・組織内資料 | 2 | 庁内マニュアル等の業務資料 |
 | restricted | 限定共有資料 | 3 | POCでは原則未使用 |
 
 ## 3. フィルタ実装方針

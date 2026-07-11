@@ -14,7 +14,6 @@ REFERENCES
 DEFINES
 USES_TERM
 EXCEPTION_TO
-BASED_ON_LAW
 ```
 
 lawqa_jp向けの主対象:
@@ -27,14 +26,6 @@ USES_TERM
 EXCEPTION_TO
 ```
 
-条例マニュアル向けの主対象:
-
-```text
-BASED_ON_LAW
-HAS_STEP
-NEXT_STEP
-```
-
 ## 3. 抽出方式
 
 | edgeType | 初期抽出方式 | 備考 |
@@ -44,7 +35,6 @@ NEXT_STEP
 | DEFINES | 「...とは」「...をいう」「定義する」等をルール抽出 + 必要に応じLLMレビュー | 金商法第2条などで重要 |
 | USES_TERM | 定義語辞書からルール抽出 | 定義語ノード生成後に実施 |
 | EXCEPTION_TO | 「ただし」「除く」「この限りでない」等を条文内位置つきで抽出 | 自動エッジは低confidenceにする |
-| BASED_ON_LAW | マニュアル内の根拠条文明記はルール抽出。不明示の場合はLLM候補抽出 + 人手確認 | POCサンプルはmanual扱いでconfidence 1.0 |
 
 ## 4. relationSource / relationConfidence
 
@@ -74,9 +64,8 @@ manual:        1.0
 3. 条文番号参照を正規表現で抽出しREFERENCESを生成
 4. 定義語候補を抽出しTerm / Definition / DEFINESを生成
 5. 例外表現を検出しEXCEPTION_TO候補を生成
-6. 条例マニュアルサンプルのBASED_ON_LAWを手動定義
-7. dangling edge検査を実施
-8. 抽出結果をサンプル問題で目視確認
+6. dangling edge検査を実施
+7. 抽出結果をサンプル問題で目視確認
 
 ## 6. 注意点
 
