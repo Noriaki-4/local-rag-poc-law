@@ -26,11 +26,11 @@ class LLMResult:
 
 
 class LLMAnswerPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
-    answer: str
+    answer: str = ""
     predictedAnswer: str | None = None
-    choiceJudgements: dict[str, Literal["supported", "not_supported"]] | None = None
+    choiceJudgements: dict[str, Literal["supported", "not_supported"] | None] | None = None
 
 
 class LLMClient:
@@ -101,7 +101,6 @@ class LLMClient:
             json={
                 "model": settings.answer_model,
                 "prompt": prompt,
-                "format": _answer_json_schema(request),
                 "stream": False,
                 "options": {
                     "temperature": 0,
@@ -143,17 +142,18 @@ class LLMClient:
             json={
                 "model": settings.answer_model,
                 "max_tokens": settings.anthropic_max_tokens,
+                "temperature": 0,
                 "messages": [{"role": "user", "content": prompt}],
-                "output_config": {
-                    "format": {
-                        "type": "json_schema",
-                        "schema": _answer_json_schema(request),
-                    }
-                },
             },
             timeout=settings.llm_timeout_sec,
         )
-        response.raise_for_status()
+        if not response.ok:
+            error_detail = ""
+            try:
+                error_detail = response.json().get("error", {}).get("message", "")
+            except Exception:
+                error_detail = response.text[:200]
+            raise ValueError(f"{response.status_code}: {error_detail}")
         data = response.json()
         raw_text = _anthropic_text(data)
         answer, predicted_answer, choice_judgements, validation_error = _parse_answer_payload(raw_text, request.choices)
@@ -238,12 +238,25 @@ def _answer_json_schema(request: AnswerRequest) -> dict[str, Any]:
     }
 
 
+def _strip_markdown_fence(text: str) -> str:
+    """一部モデルはJSON出力指示があってもMarkdownコードフェンスで囲むため除去する。"""
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        stripped = "\n".join(lines).strip()
+    return stripped
+
+
 def _parse_answer_payload(
     raw_text: str,
     choices: dict[str, str] | None,
 ) -> tuple[str, str | None, dict[str, str] | None, str | None]:
     try:
-        raw_payload = json.loads(raw_text)
+        raw_payload = json.loads(_strip_markdown_fence(raw_text))
     except json.JSONDecodeError as exc:
         return raw_text, None, None, f"json_parse_error: {exc}"
 
@@ -253,7 +266,9 @@ def _parse_answer_payload(
     except (ValidationError, ValueError) as exc:
         return _answer_from_raw_payload(raw_payload, raw_text), None, None, f"validation_error: {exc}"
 
-    return payload.answer, payload.predictedAnswer, payload.choiceJudgements, None
+    predicted_answer = _derive_predicted_answer(payload.predictedAnswer, payload.choiceJudgements)
+    answer_text = payload.answer or "（回答テキストが取得できなかったため、選択肢判定のみ返します。）"
+    return answer_text, predicted_answer, payload.choiceJudgements, None
 
 
 def _validate_choice_fields(payload: LLMAnswerPayload, choices: dict[str, str] | None) -> None:
@@ -263,17 +278,25 @@ def _validate_choice_fields(payload: LLMAnswerPayload, choices: dict[str, str] |
             raise ValueError("Choice judgement fields must be null when choices are absent")
         return
 
-    if payload.predictedAnswer is None:
-        if payload.choiceJudgements is not None:
-            raise ValueError("choiceJudgements must be null when predictedAnswer is null")
-        return
-
-    if payload.predictedAnswer not in labels:
+    if payload.predictedAnswer is not None and payload.predictedAnswer not in labels:
         raise ValueError(f"predictedAnswer must be one of {sorted(labels)} or null")
-    if payload.choiceJudgements is None:
+    if payload.predictedAnswer is not None and payload.choiceJudgements is None:
         raise ValueError("choiceJudgements is required when predictedAnswer is set")
-    if set(payload.choiceJudgements) != labels:
+    if payload.choiceJudgements is not None and set(payload.choiceJudgements) != labels:
         raise ValueError(f"choiceJudgements keys must match {sorted(labels)}")
+
+
+def _derive_predicted_answer(
+    predicted_answer: str | None,
+    choice_judgements: dict[str, str] | None,
+) -> str | None:
+    """predictedAnswer が null でも、judgements で supported がちょうど1つなら答えとみなす。"""
+    if predicted_answer is not None or not choice_judgements:
+        return predicted_answer
+    supported = [label for label, judgement in choice_judgements.items() if judgement == "supported"]
+    if len(supported) == 1:
+        return supported[0]
+    return None
 
 
 def _answer_from_raw_payload(raw_payload: Any, raw_text: str) -> str:

@@ -41,10 +41,10 @@ expectedLawIds
 {
   "predictedAnswer": "C",
   "choiceJudgements": {
-    "A": "contradicted",
+    "A": "not_supported",
     "B": "not_supported",
     "C": "supported",
-    "D": "contradicted"
+    "D": "not_supported"
   },
   "citations": []
 }
@@ -104,6 +104,21 @@ lawqa_eval_split:
 
 初期は全件評価を原則とする。ただし、RAG検索対象に含めないPDFガイドライン由来問題を除外する場合は、除外理由と件数を明示する。
 
+eval-runner は以下の入力を受け付ける。
+
+```text
+LAWQA_EVAL_URL  # lawqa_jp data/selection*.json のURL
+LAWQA_EVAL_PATH # コンテナ内の lawqa_jp data/selection*.json へのパス
+EVAL_LIMIT      # 0なら全件。疎通確認時は10などに制限
+EVAL_OFFSET     # 再開・分割実行用
+EVAL_PATTERN    # 評価対象のAgent pattern
+EVAL_SKIP_SEED  # trueならeval-runner起動時に/admin/seedを呼ばない
+REQUEST_TIMEOUT_SEC
+AGENT_USE_BM25 / AGENT_USE_VECTOR # Agent API側の検索方式。現行POCの既定はBM25 + bge-m3 vector
+```
+
+lawqa_jp native JSON の `コンテキスト` と `output` は Agent API に送らない。`output` と `references` は評価後の答え合わせだけに使う。
+
 ### Pattern間比較
 
 - Pattern 1〜4は同じ問題集合で評価する。
@@ -132,7 +147,8 @@ primary_hit = 0: law_only / miss
 
 `ancestor` は条単位goldに対して上位Articleが取得できている状態であり、初期POCではhit扱いにする。ただし粒度不足として別カウントする。
 
-`law_only` は二値hitには混ぜない。補助スコアとして `partial_credit = 0.5` を別列に保持してもよいが、Pattern間の主集計は exact / descendant / ancestor の件数で比較する。
+`law_only` は、contentUnitId を持つ gold では二値hitに混ぜない。補助スコアとして `partial_credit = 0.5` を別列に保持してもよいが、Pattern間の主集計は exact / descendant / ancestor の件数で比較する。
+ただし lawqa_jp native JSON の `references` が法令URLだけを持ち条・項粒度を持たない場合は、評価可能な上限粒度が law_only になるため、当該入力に限り `citationHit` は法令ID一致として扱う。
 
 報告例:
 

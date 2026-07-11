@@ -49,7 +49,7 @@ class AnswerResponse(BaseModel):
     route: list[str]
     answer: str
     predictedAnswer: str | None = None
-    choiceJudgements: dict[str, str] | None = None
+    choiceJudgements: dict[str, str | None] | None = None
     citations: list[Citation]
     graphPaths: list[dict[str, Any]]
     trace: dict[str, Any]

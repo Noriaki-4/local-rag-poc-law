@@ -11,6 +11,7 @@ Step1ではモデルを固定して比較する。初期候補は以下。
 | 候補 | 用途 | 備考 |
 |---|---|---|
 | multilingual-e5-large 系 | 日本語・多言語の一般的な検索ベースライン | クエリに `query:`、本文に `passage:` prefixを付ける運用が一般的 |
+| bge-m3 | Step1 POC の既定モデル | Ollamaでローカル実行。1024次元、多言語、長文対応 |
 | ruri 系日本語埋め込み | 日本語検索の比較候補 | POCで日本語精度を確認する場合の比較対象 |
 | Bedrock embedding相当 | Step2 AWS移行の比較候補 | Step1ではAPI利用可否・コストに応じて任意 |
 
@@ -21,11 +22,14 @@ Step1ではモデルを固定して比較する。初期候補は以下。
 埋め込みモデルを確定した時点で、OpenSearch mapping の `embedding.dimension` も同時に確定する。
 
 ```text
-embedding_model = FIXME
-embedding_dimension = FIXME
+embedding_provider = ollama
+embedding_model = bge-m3
+embedding_dimension = 1024
+embedding_max_chars = 1000
 ```
 
-例: `multilingual-e5-large` 系を採用する場合は 1024 次元を想定できるが、ruri系やBedrock系など別モデルを採用する場合は次元数が変わる可能性がある。そのため、`samples/metadata/opensearch_index_mapping.sample.json` の `dimension: 1024` は仮値であり、Phase 0のモデル確定後に更新する。
+`samples/metadata/opensearch_index_mapping.sample.json` の `dimension: 1024` は、bge-m3 の出力次元に合わせている。ruri系やBedrock系など別モデルへ変更する場合は、OpenSearch mapping と `EMBEDDING_DIMENSION` を同時に変更して再indexする。
+長大条文をそのまま投入すると初回embeddingが重くなるため、POCでは `EMBEDDING_MAX_CHARS=1000` で embedding 入力を正規化・切り詰める。
 
 ## 3. チャンク戦略
 
@@ -80,9 +84,9 @@ OpenSearchに投入する1ドキュメント例は `samples/metadata/opensearch_
 
 ### OpenSearch投入サンプルの注意
 
-`samples/metadata/opensearch_document.sample.json` の `embedding` は、mapping確認・smoke test用の **非ゼロの1024次元ダミーベクトル**である。`space_type: cosinesimil` ではゼロベクトルのコサイン類似度が定義できず、Lucene engine のkNN ingestで拒否される可能性があるため、ゼロベクトルは使わない。
+`samples/metadata/opensearch_document.sample.json` の `embedding` は、mapping確認・smoke test用の **非ゼロの1024次元ダミーベクトル**である。`/admin/seed` 実行時は `agent-api/app/embeddings.py` が Ollama `bge-m3` から実ベクトルを生成して上書きする。
 
-実運用・評価投入時は、Phase 0で確定した `embedding_model` と `embedding_dimension` に合わせて実ベクトルへ置換する。サンプル用メモや `_note` などの説明フィールドはOpenSearch投入前に除去する。投入スクリプトは、許可フィールド以外をstripしてからPOSTする。
+別embedding providerへ変更する場合は、`embedding_model` と `embedding_dimension` に合わせて実ベクトルへ置換する。サンプル用メモや `_note` などの説明フィールドはOpenSearch投入前に除去する。投入スクリプトは、許可フィールド以外をstripしてからPOSTする。
 
 ## 5. OpenSearch index mapping例
 

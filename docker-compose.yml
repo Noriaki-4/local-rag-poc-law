@@ -77,6 +77,19 @@ services:
       MINIO_BUCKET: knowledge-root
       SAMPLES_DIR: /workspace/samples
       EVAL_RESULTS_DIR: /workspace/eval-results
+      LAWQA_EVAL_PATH: ${LAWQA_EVAL_PATH:-}
+      LAWQA_EVAL_URL: ${LAWQA_EVAL_URL:-}
+      SEED_LAWQA_EGOV: ${SEED_LAWQA_EGOV:-false}
+      LAWQA_EGOV_LAW_IDS: ${LAWQA_EGOV_LAW_IDS:-}
+      EGOV_API_BASE_URL: ${EGOV_API_BASE_URL:-https://laws.e-gov.go.jp/api/1}
+      AGENT_USE_BM25: ${AGENT_USE_BM25:-true}
+      AGENT_USE_VECTOR: ${AGENT_USE_VECTOR:-true}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-ollama}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-bge-m3}
+      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-1024}
+      EMBEDDING_TIMEOUT_SEC: ${EMBEDDING_TIMEOUT_SEC:-120}
+      EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-8}
+      EMBEDDING_MAX_CHARS: ${EMBEDDING_MAX_CHARS:-1000}
       LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-https://api.anthropic.com}
@@ -84,7 +97,7 @@ services:
       ANTHROPIC_VERSION: ${ANTHROPIC_VERSION:-2023-06-01}
       ANTHROPIC_MAX_TOKENS: ${ANTHROPIC_MAX_TOKENS:-512}
       PLANNER_MODEL: ${PLANNER_MODEL:-gemma4:e4b}
-      ANSWER_MODEL: ${ANSWER_MODEL:-gemma4:e4b}
+      ANSWER_MODEL: ${ANSWER_MODEL:-}
       JUDGE_MODEL: ${JUDGE_MODEL:-none}
       LLM_TIMEOUT_SEC: ${LLM_TIMEOUT_SEC:-90}
       LLM_MAX_CONTEXT_CHARS: ${LLM_MAX_CONTEXT_CHARS:-4000}
@@ -99,6 +112,7 @@ services:
         condition: service_healthy
     volumes:
       - ./docs/requirements/samples:/workspace/samples:ro
+      - ./datasets:/workspace/datasets:ro
       - ./eval-results:/workspace/eval-results
 
   agent-ui:
@@ -116,10 +130,18 @@ services:
       AGENT_API_URL: http://agent-api:8000
       SAMPLES_DIR: /workspace/samples
       EVAL_RESULTS_DIR: /workspace/eval-results
+      LAWQA_EVAL_PATH: ${LAWQA_EVAL_PATH:-}
+      LAWQA_EVAL_URL: ${LAWQA_EVAL_URL:-}
+      EVAL_LIMIT: ${EVAL_LIMIT:-0}
+      EVAL_OFFSET: ${EVAL_OFFSET:-0}
+      EVAL_PATTERN: ${EVAL_PATTERN:-pattern_2_rule_based_agentic_rag}
+      EVAL_SKIP_SEED: ${EVAL_SKIP_SEED:-false}
+      REQUEST_TIMEOUT_SEC: ${REQUEST_TIMEOUT_SEC:-120}
     depends_on:
       - agent-api
     volumes:
       - ./docs/requirements/samples:/workspace/samples:ro
+      - ./datasets:/workspace/datasets:ro
       - ./eval-results:/workspace/eval-results
     profiles:
       - eval

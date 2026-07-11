@@ -73,6 +73,9 @@ datasets/
 4. 生成物をMinIOに配置し、OpenSearchとNeo4jに登録する。
 5. 実行時のAgentはe-Govへ直接問い合わせず、ローカルに登録済みのインデックスを検索する。
 
+Step1 POC では `SEED_LAWQA_EGOV=true` を指定した `/admin/seed` により、lawqa_jp の `references` から e-Gov 法令IDを抽出し、e-Gov API の XML を条単位で OpenSearch / Neo4j に投入できる。
+PDF等の e-Gov 以外の参照元は、この自動投入の対象外とする。
+
 
 ## 2.2 選択肢ラベルの正規化
 

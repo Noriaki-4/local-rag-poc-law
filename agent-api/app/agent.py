@@ -1,5 +1,6 @@
 from typing import Any
 
+from .config import settings
 from .llm import LLMClient
 from .models import AnswerRequest, AnswerResponse, Citation
 from .opensearch_client import OpenSearchClient
@@ -23,9 +24,23 @@ class AgentService:
         if "law_search_tool" in route:
             if not law_results:
                 law_results.extend(
-                    self.os_client.search(request.question, "law", request.topK, request.userClearanceLevel)
+                    self.os_client.search(
+                        _search_query(request),
+                        "law",
+                        request.topK,
+                        request.userClearanceLevel,
+                        use_bm25=settings.agent_use_bm25,
+                        use_vector=settings.agent_use_vector,
+                    )
                 )
-            trace["rounds"].append({"tool": "law_search_tool", "resultCount": len(law_results)})
+            trace["rounds"].append(
+                {
+                    "tool": "law_search_tool",
+                    "resultCount": len(law_results),
+                    "useBm25": settings.agent_use_bm25,
+                    "useVector": settings.agent_use_vector,
+                }
+            )
             citations.extend(_citations_from_results(law_results))
 
         citations = _dedupe_citations(citations)
@@ -106,13 +121,21 @@ class AgentService:
         return "十分な引用根拠を取得できなかったため、断定回答は行いません。", None, None
 
 
+def _search_query(request: AnswerRequest) -> str:
+    """lawqa_jp選択式は問題文が汎用文のことが多く、実質的な検索手掛かりは選択肢側にある。"""
+    if not request.choices:
+        return request.question
+    choice_texts = [text for _, text in sorted(request.choices.items())]
+    return " ".join([request.question, *choice_texts])
+
+
 def _citations_from_results(results: list[dict[str, Any]]) -> list[Citation]:
     citations = []
     for item in results:
         document = item["document"]
         citations.append(
             Citation(
-                documentId=document["documentId"],
+                documentId=document.get("documentId"),
                 contentUnitId=document.get("contentUnitId"),
                 title=document.get("title"),
                 heading=document.get("heading"),
