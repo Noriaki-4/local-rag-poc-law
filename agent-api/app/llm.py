@@ -142,7 +142,6 @@ class LLMClient:
             json={
                 "model": settings.answer_model,
                 "max_tokens": settings.anthropic_max_tokens,
-                "temperature": 0,
                 "messages": [{"role": "user", "content": prompt}],
             },
             timeout=settings.llm_timeout_sec,

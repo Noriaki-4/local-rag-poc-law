@@ -92,7 +92,7 @@ class AgentService:
                     "fallback": "no_choice_judgement",
                 }
             else:
-                if llm_result and llm_result.text:
+                if llm_result:
                     trace["llm"] = {
                         "provider": llm_result.provider,
                         "model": llm_result.model,
@@ -103,7 +103,8 @@ class AgentService:
                         "estimatedCost": llm_result.estimatedCost,
                         "validationError": llm_result.validationError,
                     }
-                    return llm_result.answer, llm_result.predictedAnswer, llm_result.choiceJudgements
+                    answer_text = llm_result.text or "十分な引用根拠を取得できなかったため、断定回答は行いません。"
+                    return answer_text, llm_result.predictedAnswer, llm_result.choiceJudgements
 
         if request.choices:
             return (
