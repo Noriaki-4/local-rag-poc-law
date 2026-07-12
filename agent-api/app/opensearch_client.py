@@ -39,6 +39,39 @@ class OpenSearchClient:
         hits = response.json()["hits"]["hits"]
         return hits[0]["_source"] if hits else None
 
+    def get_by_content_unit_ids(
+        self,
+        content_unit_ids: list[str],
+        user_clearance_level: int,
+    ) -> list[dict[str, Any]]:
+        if not content_unit_ids:
+            return []
+        body = {
+            "size": min(max(len(content_unit_ids) * 5, len(content_unit_ids)), 100),
+            "query": {
+                "bool": {
+                    "filter": [
+                        *self._filters(None, user_clearance_level),
+                    ],
+                    "must": [
+                        {
+                            "bool": {
+                                "should": [
+                                    {"terms": {"contentUnitId": content_unit_ids}},
+                                    {"terms": {"parentContentUnitId": content_unit_ids}},
+                                    {"terms": {"articleContentUnitId": content_unit_ids}},
+                                ],
+                                "minimum_should_match": 1,
+                            }
+                        }
+                    ],
+                }
+            },
+        }
+        response = requests.post(f"{self.base_url}/{self.index}/_search", json=body, timeout=10)
+        response.raise_for_status()
+        return [hit["_source"] for hit in response.json()["hits"]["hits"]]
+
     def search(
         self,
         query: str,
@@ -50,13 +83,10 @@ class OpenSearchClient:
     ) -> list[dict[str, Any]]:
         scored: dict[str, dict[str, Any]] = {}
 
-        if use_bm25:
-            for hit in self._bm25_search(query, doc_type, top_k, user_clearance_level):
-                self._merge_score(scored, hit, "bm25Score", 0.4)
-
-        if use_vector:
-            for hit in self._vector_search(query, doc_type, top_k, user_clearance_level):
-                self._merge_score(scored, hit, "vectorScore", 0.6)
+        bm25_hits = self._bm25_search(query, doc_type, top_k, user_clearance_level) if use_bm25 else []
+        vector_hits = self._vector_search(query, doc_type, top_k, user_clearance_level) if use_vector else []
+        self._merge_rrf_hits(scored, bm25_hits, "bm25Score", 0.4)
+        self._merge_rrf_hits(scored, vector_hits, "vectorScore", 0.6)
 
         results = list(scored.values())
         results.sort(key=lambda item: item["score"], reverse=True)
@@ -117,11 +147,23 @@ class OpenSearchClient:
             hits.append({"_source": source, "_score": hit["_score"]})
         return hits[:top_k]
 
-    def _merge_score(self, scored: dict[str, dict[str, Any]], hit: dict[str, Any], score_key: str, weight: float) -> None:
-        source = hit["_source"]
-        content_unit_id = source["contentUnitId"]
-        score = float(hit["_score"] or 0.0)
-        if content_unit_id not in scored:
-            scored[content_unit_id] = {"score": 0.0, "document": source, "bm25Score": 0.0, "vectorScore": 0.0}
-        scored[content_unit_id][score_key] = score
-        scored[content_unit_id]["score"] += weight * score
+    def _merge_rrf_hits(
+        self,
+        scored: dict[str, dict[str, Any]],
+        hits: list[dict[str, Any]],
+        score_key: str,
+        weight: float,
+    ) -> None:
+        for rank, hit in enumerate(hits, start=1):
+            source = hit["_source"]
+            content_unit_id = source["contentUnitId"]
+            raw_score = float(hit["_score"] or 0.0)
+            if content_unit_id not in scored:
+                scored[content_unit_id] = {
+                    "score": 0.0,
+                    "document": source,
+                    "bm25Score": 0.0,
+                    "vectorScore": 0.0,
+                }
+            scored[content_unit_id][score_key] = raw_score
+            scored[content_unit_id]["score"] += weight / (settings.agent_rrf_k + rank)

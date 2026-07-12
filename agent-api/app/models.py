@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 Pattern = Literal[
@@ -8,6 +8,7 @@ Pattern = Literal[
     "pattern_2_rule_based_agentic_rag",
     "pattern_3_controlled_agentic_rag",
     "pattern_4_deepsearch_partial",
+    "pattern_4_deepsearch",
 ]
 
 
@@ -26,12 +27,29 @@ class AnswerRequest(BaseModel):
     pattern: Pattern = "pattern_2_rule_based_agentic_rag"
     userClearanceLevel: int = Field(default=2, ge=1, le=3)
     topK: int = Field(default=5, ge=1, le=20)
+    candidateTopK: int | None = Field(default=None, ge=5, le=100)
+    rerankTopK: int | None = Field(default=None, ge=1, le=50)
+
+    @model_validator(mode="after")
+    def validate_top_k_order(self):
+        if self.candidateTopK is not None and self.candidateTopK < self.topK:
+            raise ValueError("candidateTopK must be greater than or equal to topK")
+        if self.rerankTopK is not None and self.rerankTopK < self.topK:
+            raise ValueError("rerankTopK must be greater than or equal to topK")
+        if (
+            self.candidateTopK is not None
+            and self.rerankTopK is not None
+            and self.rerankTopK > self.candidateTopK
+        ):
+            raise ValueError("rerankTopK must be less than or equal to candidateTopK")
+        return self
 
 
 class GraphPathRequest(BaseModel):
     fromGraphNodeId: str
     edgeType: str | None = None
     maxDepth: int = Field(default=2, ge=1, le=3)
+    userClearanceLevel: int = Field(default=2, ge=1, le=3)
 
 
 class Citation(BaseModel):

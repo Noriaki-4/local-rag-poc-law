@@ -15,6 +15,9 @@
       "parentContentUnitId": {
         "type": "keyword"
       },
+      "articleContentUnitId": {
+        "type": "keyword"
+      },
       "chunkId": {
         "type": "keyword"
       },

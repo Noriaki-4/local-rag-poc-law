@@ -14,6 +14,11 @@ from .graph_client import GraphClient
 from .opensearch_client import OpenSearchClient
 
 EGOV_LAW_ID_PATTERN = re.compile(r"laws\.e-gov\.go\.jp/law/([^/?#]+)")
+ARTICLE_REFERENCE_PATTERN = re.compile(
+    r"(?<![法令])第([一二三四五六七八九十百千〇零\d]+)条((?:の[一二三四五六七八九十百千〇零\d]+)*)"
+)
+JAPANESE_DIGITS = {"〇": 0, "零": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+JAPANESE_UNITS = {"十": 10, "百": 100, "千": 1000}
 
 
 def seed_all(os_client: OpenSearchClient, graph_client: GraphClient) -> dict[str, Any]:
@@ -114,49 +119,191 @@ def _egov_law_documents(law_id: str) -> list[dict[str, Any]]:
 
     title = root.findtext(".//LawTitle") or law_id
     law_num = root.findtext(".//LawNum")
-    documents = []
-    for article in root.iter("Article"):
+
+    # 本則と附則は条番号を別々に振るため（本則第8条と附則第8条が衝突する）、
+    # 附則は law-{id}-suppl-{k}-article-{num} という別名前空間に分離する。
+    suppl_provisions = root.findall(".//SupplProvision")
+    main = root.find(".//MainProvision")
+    if main is not None:
+        main_articles = list(main.iter("Article"))
+    else:
+        suppl_article_ids = {id(article) for suppl in suppl_provisions for article in suppl.iter("Article")}
+        main_articles = [article for article in root.iter("Article") if id(article) not in suppl_article_ids]
+
+    documents: list[dict[str, Any]] = []
+    documents.extend(
+        _section_documents(main_articles, law_id, title, law_num, url, id_prefix="article", section_key="main")
+    )
+    for suppl_index, suppl in enumerate(suppl_provisions):
+        section_key = f"suppl-{suppl_index}"
+        documents.extend(
+            _section_documents(
+                list(suppl.iter("Article")),
+                law_id,
+                title,
+                law_num,
+                url,
+                id_prefix=f"{section_key}-article",
+                section_key=section_key,
+                section_label=_suppl_label(suppl),
+            )
+        )
+    return documents
+
+
+def _suppl_label(suppl: ET.Element) -> str:
+    label = (suppl.findtext("SupplProvisionLabel") or "附則").strip()
+    amend_law_num = suppl.get("AmendLawNum")
+    return f"{label}（{amend_law_num}）" if amend_law_num else label
+
+
+def _section_documents(
+    articles: list[ET.Element],
+    law_id: str,
+    title: str,
+    law_num: str | None,
+    url: str,
+    id_prefix: str,
+    section_key: str,
+    section_label: str | None = None,
+) -> list[dict[str, Any]]:
+    documents: list[dict[str, Any]] = []
+    for article in articles:
         article_num = article.get("Num") or _article_num_from_title(article.findtext("ArticleTitle"))
         if not article_num:
             continue
-        heading = article.findtext("ArticleTitle") or f"第{article_num}条"
+        base_heading = article.findtext("ArticleTitle") or f"第{article_num}条"
+        heading = f"{section_label} {base_heading}".strip() if section_label else base_heading
         caption = article.findtext("ArticleCaption")
         text = _article_text(article)
         if not text:
             continue
-        content_unit_id = f"law-{law_id}-article-{article_num}"
-        documents.append(
+        article_content_unit_id = f"law-{law_id}-{id_prefix}-{article_num}"
+        common = {
+            "documentId": f"law-{law_id}",
+            "deptCode": "common",
+            "docType": "law",
+            "contentDomain": "legal",
+            "title": title,
+            "articleNumber": _int_or_none(article_num),
+            "provisionType": "main" if section_key == "main" else "supplementary",
+            "sectionKey": section_key,
+            "publishStatus": "published",
+            "isLatest": True,
+            "confidentiality": "public",
+            "clearanceLevel": 1,
+            "sourceObjectUri": url,
+            "processedObjectUri": (
+                "minio://knowledge-root/derived-artifacts/vector-documents/"
+                f"dept=common/docType=law/law-{law_id}/"
+            ),
+            "sourcePage": None,
+            "parserType": "egov_xml_rule",
+            "lawNum": law_num,
+        }
+        for chunk in _article_chunks(article, article_content_unit_id, heading, caption):
+            content_unit_id = chunk["contentUnitId"]
+            documents.append(
+                {
+                    **common,
+                    **chunk,
+                    "chunkId": content_unit_id,
+                    "sectionPath": f"{title} > {chunk['heading']}",
+                    "processedObjectUri": f"{common['processedObjectUri']}{content_unit_id}.md",
+                }
+            )
+    return documents
+
+
+def _article_chunks(
+    article: ET.Element,
+    article_content_unit_id: str,
+    heading: str,
+    caption: str | None,
+) -> list[dict[str, Any]]:
+    full_heading = f"{heading} {caption or ''}".strip()
+    full_text = _article_text(article)
+    paragraphs = article.findall("Paragraph")
+    if len(paragraphs) <= 1 and len(full_text) <= settings.embedding_max_chars:
+        return [
             {
-                "documentId": f"law-{law_id}",
-                "contentUnitId": content_unit_id,
+                "contentUnitId": article_content_unit_id,
                 "parentContentUnitId": None,
-                "chunkId": content_unit_id,
-                "deptCode": "common",
-                "docType": "law",
-                "contentDomain": "legal",
-                "title": title,
-                "heading": f"{heading} {caption or ''}".strip(),
-                "sectionPath": f"{title} > {heading}",
-                "articleNumber": _int_or_none(article_num),
+                "articleContentUnitId": article_content_unit_id,
+                "heading": full_heading,
                 "paragraphNumber": None,
                 "itemNumber": None,
-                "text": text,
-                "publishStatus": "published",
-                "isLatest": True,
-                "confidentiality": "public",
-                "clearanceLevel": 1,
-                "sourceObjectUri": url,
-                "processedObjectUri": (
-                    "minio://knowledge-root/derived-artifacts/vector-documents/"
-                    f"dept=common/docType=law/law-{law_id}/{content_unit_id}.md"
-                ),
-                "sourcePage": None,
-                "parserType": "egov_xml_rule",
-                "chunkStrategy": "law_article_split_v1",
-                "lawNum": law_num,
+                "text": full_text,
+                "chunkStrategy": "law_article_v2",
             }
-        )
-    return documents
+        ]
+
+    chunks = []
+    for paragraph_index, paragraph in enumerate(paragraphs, start=1):
+        paragraph_num_text = (paragraph.findtext("ParagraphNum") or str(paragraph_index)).strip()
+        paragraph_num = _japanese_number_to_int(paragraph_num_text) or paragraph_index
+        paragraph_id = f"{article_content_unit_id}-paragraph-{paragraph_num}"
+        paragraph_text = _paragraph_text(paragraph)
+        items = paragraph.findall("Item")
+        if items and len(paragraph_text) > settings.embedding_max_chars:
+            intro_text = _direct_sentence_text(paragraph)
+            if intro_text:
+                chunks.append(
+                    {
+                        "contentUnitId": paragraph_id,
+                        "parentContentUnitId": article_content_unit_id,
+                        "articleContentUnitId": article_content_unit_id,
+                        "heading": f"{full_heading} 第{paragraph_num}項",
+                        "paragraphNumber": paragraph_num,
+                        "itemNumber": None,
+                        "text": f"{paragraph_num}{intro_text}",
+                        "chunkStrategy": "law_article_paragraph_item_split_v2",
+                    }
+                )
+            for item_index, item in enumerate(items, start=1):
+                item_num_text = (item.get("Num") or item.findtext("ItemTitle") or str(item_index)).strip()
+                # 枝番の号（例: '2_2' = 第二号の二）は int 化すると隣の号と衝突するため接尾辞のまま使う。
+                item_suffix = _num_suffix(item_num_text, item_index)
+                item_text = _element_sentence_text(item)
+                if not item_text:
+                    continue
+                chunks.append(
+                    {
+                        "contentUnitId": f"{paragraph_id}-item-{item_suffix}",
+                        "parentContentUnitId": paragraph_id,
+                        "articleContentUnitId": article_content_unit_id,
+                        "heading": f"{full_heading} 第{paragraph_num}項第{item_suffix.replace('_', 'の')}号",
+                        "paragraphNumber": paragraph_num,
+                        "itemNumber": _int_or_none(item_suffix.split("_")[0]),
+                        "text": item_text,
+                        "chunkStrategy": "law_article_paragraph_item_split_v2",
+                    }
+                )
+        elif paragraph_text:
+            chunks.append(
+                {
+                    "contentUnitId": paragraph_id,
+                    "parentContentUnitId": article_content_unit_id,
+                    "articleContentUnitId": article_content_unit_id,
+                    "heading": f"{full_heading} 第{paragraph_num}項",
+                    "paragraphNumber": paragraph_num,
+                    "itemNumber": None,
+                    "text": paragraph_text,
+                    "chunkStrategy": "law_article_paragraph_split_v2",
+                }
+            )
+    return chunks or [
+        {
+            "contentUnitId": article_content_unit_id,
+            "parentContentUnitId": None,
+            "articleContentUnitId": article_content_unit_id,
+            "heading": full_heading,
+            "paragraphNumber": None,
+            "itemNumber": None,
+            "text": full_text,
+            "chunkStrategy": "law_article_v2",
+        }
+    ]
 
 
 def _article_text(article: ET.Element) -> str:
@@ -182,6 +329,24 @@ def _article_text(article: ET.Element) -> str:
     return "\n".join(parts).strip()
 
 
+def _paragraph_text(paragraph: ET.Element) -> str:
+    paragraph_num = (paragraph.findtext("ParagraphNum") or "").strip()
+    text = _element_sentence_text(paragraph)
+    return f"{paragraph_num}{text}".strip()
+
+
+def _direct_sentence_text(paragraph: ET.Element) -> str:
+    sentences = paragraph.findall("./ParagraphSentence//Sentence")
+    return "".join("".join(sentence.itertext()).strip() for sentence in sentences)
+
+
+def _element_sentence_text(element: ET.Element) -> str:
+    return "".join(
+        "".join(sentence.itertext()).strip()
+        for sentence in element.iter("Sentence")
+    )
+
+
 def _article_num_from_title(title: str | None) -> str | None:
     if not title:
         return None
@@ -204,6 +369,7 @@ def _graph_artifacts_from_documents(documents: list[dict[str, Any]]) -> tuple[li
             continue
         document_id = document["documentId"]
         content_unit_id = document["contentUnitId"]
+        article_content_unit_id = document.get("articleContentUnitId") or document.get("parentContentUnitId") or content_unit_id
         nodes_by_id[document_id] = {
             "graphNodeId": document_id,
             "nodeType": "Document",
@@ -215,12 +381,13 @@ def _graph_artifacts_from_documents(documents: list[dict[str, Any]]) -> tuple[li
             "publishStatus": document.get("publishStatus"),
             "isLatest": document.get("isLatest"),
             "confidentiality": document.get("confidentiality"),
+            "clearanceLevel": document.get("clearanceLevel", 3),
         }
-        nodes_by_id[content_unit_id] = {
-            "graphNodeId": content_unit_id,
+        nodes_by_id[article_content_unit_id] = {
+            "graphNodeId": article_content_unit_id,
             "nodeType": "Article",
             "documentId": document_id,
-            "contentUnitId": content_unit_id,
+            "contentUnitId": article_content_unit_id,
             "deptCode": document.get("deptCode"),
             "docType": document.get("docType"),
             "contentDomain": document.get("contentDomain"),
@@ -228,14 +395,15 @@ def _graph_artifacts_from_documents(documents: list[dict[str, Any]]) -> tuple[li
             "publishStatus": document.get("publishStatus"),
             "isLatest": document.get("isLatest"),
             "confidentiality": document.get("confidentiality"),
+            "clearanceLevel": document.get("clearanceLevel", 3),
         }
-        edge_id = f"edge-{document_id}-has-content-unit-{content_unit_id.removeprefix(document_id + '-')}"
+        edge_id = f"edge-{document_id}-has-content-unit-{article_content_unit_id.removeprefix(document_id + '-')}"
         edges.append(
             {
                 "graphEdgeId": edge_id,
                 "edgeType": "HAS_CONTENT_UNIT",
                 "fromGraphNodeId": document_id,
-                "toGraphNodeId": content_unit_id,
+                "toGraphNodeId": article_content_unit_id,
                 "documentId": document_id,
                 "relationSource": "xml_rule",
                 "relationConfidence": 1.0,
@@ -243,7 +411,143 @@ def _graph_artifacts_from_documents(documents: list[dict[str, Any]]) -> tuple[li
                 "isLatest": True,
             }
         )
+        if content_unit_id != article_content_unit_id:
+            parent_id = document.get("parentContentUnitId") or article_content_unit_id
+            if parent_id != article_content_unit_id and parent_id not in nodes_by_id:
+                nodes_by_id[parent_id] = {
+                    "graphNodeId": parent_id,
+                    "nodeType": "Paragraph",
+                    "documentId": document_id,
+                    "contentUnitId": parent_id,
+                    "publishStatus": document.get("publishStatus"),
+                    "isLatest": document.get("isLatest"),
+                    "confidentiality": document.get("confidentiality"),
+                    "clearanceLevel": document.get("clearanceLevel", 3),
+                }
+                edges.append(_hierarchy_edge(article_content_unit_id, parent_id, document_id))
+            node_type = "Item" if document.get("itemNumber") is not None else "Paragraph"
+            nodes_by_id[content_unit_id] = {
+                "graphNodeId": content_unit_id,
+                "nodeType": node_type,
+                "documentId": document_id,
+                "contentUnitId": content_unit_id,
+                "heading": document.get("heading"),
+                "publishStatus": document.get("publishStatus"),
+                "isLatest": document.get("isLatest"),
+                "confidentiality": document.get("confidentiality"),
+                "clearanceLevel": document.get("clearanceLevel", 3),
+            }
+            edges.append(_hierarchy_edge(parent_id, content_unit_id, document_id))
+    edges.extend(_reference_edges(documents))
     return list(nodes_by_id.values()), edges
+
+
+def _hierarchy_edge(from_id: str, to_id: str, document_id: str) -> dict[str, Any]:
+    return {
+        "graphEdgeId": f"edge-{from_id}-has-content-unit-{to_id.removeprefix(document_id + '-')}",
+        "edgeType": "HAS_CONTENT_UNIT",
+        "fromGraphNodeId": from_id,
+        "toGraphNodeId": to_id,
+        "documentId": document_id,
+        "relationSource": "xml_rule",
+        "relationConfidence": 1.0,
+        "publishStatus": "published",
+        "isLatest": True,
+    }
+
+
+def _reference_edges(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    law_documents: dict[str, list[dict[str, Any]]] = {}
+    for document in documents:
+        if document.get("docType") == "law":
+            law_documents.setdefault(document["documentId"], []).append(document)
+
+    edges = []
+    for document_id, scoped_documents in law_documents.items():
+        # 前条・次条の隣接は本則・附則をまたがないよう sectionKey ごとに並べる。
+        section_article_ids: dict[str, list[str]] = {}
+        for document in scoped_documents:
+            section_key = document.get("sectionKey", "main")
+            article_id = document.get("articleContentUnitId") or document.get("parentContentUnitId") or document["contentUnitId"]
+            ids = section_article_ids.setdefault(section_key, [])
+            if article_id not in ids:
+                ids.append(article_id)
+        section_index = {
+            section_key: {article_id: index for index, article_id in enumerate(ids)}
+            for section_key, ids in section_article_ids.items()
+        }
+        # 「第N条」は本則の条文を指す慣行なので、本則の存在する条だけを参照先にする。
+        main_article_ids = set(section_article_ids.get("main", []))
+        for document in scoped_documents:
+            source_id = document["contentUnitId"]
+            section_key = document.get("sectionKey", "main")
+            source_article_id = document.get("articleContentUnitId") or document.get("parentContentUnitId") or source_id
+            ids = section_article_ids[section_key]
+            index = section_index[section_key][source_article_id]
+            text = str(document.get("text") or "")
+            targets = set(_explicit_article_reference_ids(document_id, text)) & main_article_ids
+            if "前条" in text and index > 0:
+                targets.add(ids[index - 1])
+            if "次条" in text and index + 1 < len(ids):
+                targets.add(ids[index + 1])
+            for target_id in sorted(targets):
+                if target_id == source_id:
+                    continue
+                edge_id = f"edge-{source_id}-references-{target_id.removeprefix(document_id + '-')}"
+                edges.append(
+                    {
+                        "graphEdgeId": edge_id,
+                        "edgeType": "REFERENCES",
+                        "fromGraphNodeId": source_id,
+                        "toGraphNodeId": target_id,
+                        "documentId": document_id,
+                        "relationSource": "xml_reference_rule",
+                        "relationConfidence": 0.9,
+                        "publishStatus": "published",
+                        "isLatest": True,
+                    }
+                )
+    return edges
+
+
+def _explicit_article_reference_ids(document_id: str, text: str) -> list[str]:
+    references = []
+    for match in ARTICLE_REFERENCE_PATTERN.finditer(text):
+        parts = [match.group(1), *match.group(2).removeprefix("の").split("の")]
+        numbers = [_japanese_number_to_int(part) for part in parts if part]
+        if any(number is None for number in numbers):
+            continue
+        suffix = "_".join(str(number) for number in numbers)
+        references.append(f"{document_id}-article-{suffix}")
+    return references
+
+
+def _num_suffix(value: str, fallback_index: int) -> str:
+    """条・号番号を contentUnitId の接尾辞へ変換する。'2_2' などの枝番はそのまま保持する。"""
+    value = value.strip()
+    if re.fullmatch(r"\d+(?:_\d+)*", value):
+        return value
+    number = _japanese_number_to_int(value)
+    return str(number) if number is not None else str(fallback_index)
+
+
+def _japanese_number_to_int(value: str) -> int | None:
+    if value.isdigit():
+        return int(value)
+    if not value or any(char not in JAPANESE_DIGITS and char not in JAPANESE_UNITS for char in value):
+        return None
+    if not any(char in JAPANESE_UNITS for char in value):
+        digits = "".join(str(JAPANESE_DIGITS[char]) for char in value)
+        return int(digits)
+    total = 0
+    pending_digit = 0
+    for char in value:
+        if char in JAPANESE_DIGITS:
+            pending_digit = JAPANESE_DIGITS[char]
+        else:
+            total += (pending_digit or 1) * JAPANESE_UNITS[char]
+            pending_digit = 0
+    return total + pending_digit
 
 
 def _embedding_text(document: dict[str, Any]) -> str:

@@ -73,8 +73,19 @@ datasets/
 4. 生成物をMinIOに配置し、OpenSearchとNeo4jに登録する。
 5. 実行時のAgentはe-Govへ直接問い合わせず、ローカルに登録済みのインデックスを検索する。
 
-Step1 POC では `SEED_LAWQA_EGOV=true` を指定した `/admin/seed` により、lawqa_jp の `references` から e-Gov 法令IDを抽出し、e-Gov API の XML を条単位で OpenSearch / Neo4j に投入できる。
+Step1 POC では `SEED_LAWQA_EGOV=true` を指定した `/admin/seed` により、lawqa_jp の `references` から e-Gov 法令IDを抽出し、e-Gov API の XML を条・項・号単位で OpenSearch / Neo4j に投入できる。
 PDF等の e-Gov 以外の参照元は、この自動投入の対象外とする。
+
+### 本則・附則の分離
+
+XMLの `MainProvision`（本則）と `SupplProvision`（附則）は条番号を別々に振り直すため、単純に条番号だけで `contentUnitId` を作ると衝突し、後勝ちで本則条文が失われる（本則第8条が附則第8条に上書きされる等）。投入時は次を守る。
+
+- 本則: `law-<法令番号>-article-<条番号>`
+- 附則: `law-<法令番号>-suppl-<附則index>-article-<条番号>`（[id_naming_rules.md](./id_naming_rules.md) 3.1 参照）
+- 各文書に `provisionType`（`main` / `supplementary`）と `sectionKey` を付与する。
+- 附則も検索対象として投入する。lawqa_jp の参照は主に本則だが、附則（経過措置・罰則等）も設問根拠になり得るため保持する。
+
+条・号の枝番（「第2条の12」「第二号の二」）はアンダースコア連結で保持する（`article-2_12`、`item-2_2`）。
 
 
 ## 2.2 選択肢ラベルの正規化

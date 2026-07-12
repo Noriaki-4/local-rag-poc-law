@@ -1,6 +1,6 @@
 # Agentic RAG ロジック 4パターン
 
-本書は目標とする設計を示す。現行POCコードの `/answer` は全パターンで `law_search_tool` のみを実行し、`graph_search_tool` の組み込みと LLM によるクエリ分解は未実装（Graph 探索は `/graph/path` エンドポイントで個別に検証可能）。
+本書はローカルPOCの実装パターンを示す。`/answer` は Pattern 2 で条件付きGraph展開、Pattern 3/4でLLMクエリ分解、根拠評価、最大2回の再検索、Graph展開、根拠統合を実行する。Plannerが失敗した場合はルールベース分解へフォールバックする。
 
 ## Pattern 1: Baseline RAG
 
@@ -90,8 +90,9 @@ Input
 ### 再検索ポリシー
 
 ```text
-max_retry_rounds = 2
-max_graph_hop = 2
+max_retry_rounds = 1
+max_graph_hop = 1
+max_graph_paths_per_call = 10
 max_total_tool_calls = 8
 max_docs_per_round = 5
 ```
@@ -112,7 +113,7 @@ tool call上限到達
 
 ### 位置づけ
 
-最終系。初期実装では追いすぎない。
+ローカルPOCの最終系。APIでは `pattern_4_deepsearch` を指定する。旧比較用の `pattern_4_deepsearch_partial` も互換入力として残す。
 
 ### ロジック
 
@@ -154,3 +155,18 @@ lawqa_solver:
 3. Pattern 3: クエリ分解 + 最大2回再検索
 4. Pattern 4の一部: Instruction RAG
 ```
+
+## ローカル実装の探索上限
+
+```text
+max_queries = 4
+candidate_top_k = 20
+rerank_top_k = 10
+citation_top_k = 5
+max_retry_rounds = 1
+max_graph_hop = 1
+max_total_tool_calls = 8
+max_wall_time_sec = 110
+```
+
+Pattern 4は、組み込み回答ポリシー、LLMクエリ分解、OpenSearch Hybrid検索、選択肢別Evidence Rerank、構造化Evidence Evaluator、必要時だけNeo4j `REFERENCES` 展開と追検索、回答生成を行う。Evaluatorは20秒timeoutとルールベースfallbackを持つ。AWS移行用のStep 2構成は本実装の対象外とする。

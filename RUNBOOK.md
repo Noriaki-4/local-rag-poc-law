@@ -49,6 +49,23 @@ ANTHROPIC_API_KEY=sk-ant-...
 ANTHROPIC_VERSION=2023-06-01
 ANTHROPIC_MAX_TOKENS=4096
 ANSWER_MODEL=claude-haiku-4-5-20251001
+PLANNER_MODEL=claude-haiku-4-5-20251001
+PLANNER_MAX_TOKENS=1024
+PLANNER_TIMEOUT_SEC=30
+AGENT_USE_LLM_PLANNER=true
+AGENT_MAX_QUERIES=4
+AGENT_MAX_RETRY_ROUNDS=1
+AGENT_MAX_TOTAL_TOOL_CALLS=8
+AGENT_MAX_GRAPH_HOP=1
+AGENT_MAX_GRAPH_PATHS=10
+AGENT_MAX_WALL_TIME_SEC=110
+AGENT_CANDIDATE_TOP_K=20
+AGENT_RERANK_TOP_K=10
+AGENT_RRF_K=60
+AGENT_MAX_LLM_CALLS=3
+EVALUATOR_MODEL=claude-haiku-4-5-20251001
+EVALUATOR_MAX_TOKENS=1024
+EVALUATOR_TIMEOUT_SEC=20
 AGENT_USE_BM25=true
 AGENT_USE_VECTOR=true
 EMBEDDING_PROVIDER=ollama
@@ -143,6 +160,8 @@ curl -s -X POST http://localhost:8000/admin/seed | jq .
 
 - OpenSearch index: `legal-rag-content`
 - Graph nodes/edges: `docs/requirements/samples/metadata/*.jsonl`
+- e-Gov法令投入時のGraph edges: `HAS_CONTENT_UNIT` と、同一法令内の明示的な条文参照から生成した `REFERENCES`
+- e-Gov法令は本則・附則を分けて投入する。本則は `law-<法令番号>-article-<条番号>`、附則は `law-<法令番号>-suppl-<index>-article-<条番号>`（条番号の衝突で本則が消えるのを防ぐ）。各文書に `provisionType` / `sectionKey` を付与。詳細は [id_naming_rules.md](docs/requirements/docs/id_naming_rules.md) 3.1
 - MinIO bucket: `knowledge-root`
 - サンプル評価データ: `knowledge-root/eval-data/samples/...`
 - 原本保管用マニュアル: `knowledge-root/source-documents/dept=general-affairs/docType=manual/manual-ordinance-001/source.md`
@@ -174,7 +193,8 @@ curl -s http://localhost:8000/graph/path \
   -d '{
     "fromGraphNodeId": "law-323AC0000000025",
     "edgeType": "HAS_CONTENT_UNIT",
-    "maxDepth": 1
+    "maxDepth": 1,
+    "userClearanceLevel": 2
   }' | jq .
 ```
 
@@ -192,9 +212,14 @@ curl -s http://localhost:8000/answer \
       "D": "有価証券の定義は金融商品取引法に置かれていない。"
     },
     "pattern": "pattern_2_rule_based_agentic_rag",
-    "userClearanceLevel": 2
+    "userClearanceLevel": 2,
+    "candidateTopK": 20,
+    "rerankTopK": 10,
+    "topK": 5
   }' | jq .
 ```
+
+最終系を確認する場合は、`pattern` に `pattern_4_deepsearch` を指定する。レスポンスの `trace` で分解クエリ、再検索理由、tool call数、Graph node/edge ID、停止理由を確認できる。探索は設定したtool call数・再検索回数・110秒のwall timeを超えない。
 
 ## 5. UI 操作
 
@@ -214,6 +239,16 @@ docker compose --profile eval run --rm eval-runner
 ```
 
 結果は `eval-results/eval-*.jsonl` に保存される。
+
+最終系を少数問で確認する場合:
+
+```bash
+LAWQA_EVAL_URL=https://raw.githubusercontent.com/digital-go-jp/lawqa_jp/main/data/selection.json \
+EVAL_LIMIT=3 \
+EVAL_PATTERN=pattern_4_deepsearch \
+EVAL_SKIP_SEED=true \
+docker compose --profile eval run --rm --no-deps eval-runner
+```
 
 確認:
 

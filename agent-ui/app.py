@@ -34,6 +34,7 @@ pattern = st.selectbox(
         "pattern_2_rule_based_agentic_rag",
         "pattern_3_controlled_agentic_rag",
         "pattern_4_deepsearch_partial",
+        "pattern_4_deepsearch",
     ],
     index=1,
 )
@@ -57,6 +58,18 @@ if use_choices:
 
 user_clearance = st.slider("User clearance level", min_value=1, max_value=3, value=2)
 top_k = st.slider("Top K", min_value=1, max_value=20, value=5)
+candidate_top_k = st.slider(
+    "Candidate Top K",
+    min_value=max(5, top_k),
+    max_value=100,
+    value=max(20, top_k),
+)
+rerank_top_k = st.slider(
+    "Rerank Top K",
+    min_value=top_k,
+    max_value=min(candidate_top_k, 50),
+    value=min(max(10, top_k), candidate_top_k),
+)
 
 if st.button("Ask", type="primary"):
     payload = {
@@ -65,6 +78,8 @@ if st.button("Ask", type="primary"):
         "pattern": pattern,
         "userClearanceLevel": user_clearance,
         "topK": top_k,
+        "candidateTopK": candidate_top_k,
+        "rerankTopK": rerank_top_k,
     }
     try:
         with st.spinner("Searching"):

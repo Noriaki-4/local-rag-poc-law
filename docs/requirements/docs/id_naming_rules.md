@@ -59,6 +59,29 @@ law-323AC0000000025-article-2
 law-323AC0000000025-article-2-paragraph-1
 ```
 
+### 3.1 附則（Supplementary Provisions）
+
+本則と附則は条番号を別々に振り直すため（本則第8条と附則第8条が同居する）、同じ `article-<条番号>` に集約すると衝突し、後勝ちで本則が消える。附則は本則と別の名前空間に分離する。
+
+```text
+law-<法令番号>-suppl-<附則index>-article-<条番号>
+law-<法令番号>-suppl-<附則index>-article-<条番号>-paragraph-<項番号>
+```
+
+- `<附則index>` は e-Gov XML の `SupplProvision` 出現順（0始まり）。`suppl-0` が原始附則、以降は改正法附則。
+- 本則は従来どおり `law-<法令番号>-article-<条番号>`（接頭辞なし）を維持する。lawqa_jp の参照や既存サンプルとの後方互換のため変更しない。
+- OpenSearch文書には `provisionType`（`main` / `supplementary`）と `sectionKey`（`main` / `suppl-<index>`）を付与し、本則・附則を判別できるようにする。
+- 「第N条」という参照は本則の条を指す慣行に従い、参照エッジ（`REFERENCES`）は本則の `article-<条番号>` を指す。「前条」「次条」の隣接は `sectionKey` 内で閉じる。
+
+### 3.2 枝番（条・号の「のN」）
+
+「第2条の12」「第二号の二」のような枝番は、アンダースコアで連結して接尾辞に保持する。int化して丸めると隣接番号と衝突するため行わない。
+
+```text
+第2条の12   -> article-2_12
+第二号の二   -> ...-item-2_2
+```
+
 MVPでは、Graph nodeの`graphNodeId`は対応する`contentUnitId`と同一でよい。文書ノードは`documentId`と同一にする。
 
 ## 4. edge ID

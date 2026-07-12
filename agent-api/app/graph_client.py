@@ -57,19 +57,55 @@ class GraphClient:
                     props=edge,
                 ).consume()
 
-    def paths_from(self, from_graph_node_id: str, edge_type: str | None = None, max_depth: int = 2) -> list[dict[str, Any]]:
+    def paths_from(
+        self,
+        from_graph_node_id: str,
+        edge_type: str | None = None,
+        max_depth: int = 2,
+        user_clearance_level: int = 2,
+    ) -> list[dict[str, Any]]:
+        return self.paths_from_many(
+            [from_graph_node_id],
+            edge_type=edge_type,
+            max_depth=max_depth,
+            user_clearance_level=user_clearance_level,
+        )
+
+    def paths_from_many(
+        self,
+        from_graph_node_ids: list[str],
+        edge_type: str | None = None,
+        max_depth: int = 2,
+        limit: int = 20,
+        user_clearance_level: int = 2,
+    ) -> list[dict[str, Any]]:
+        if not from_graph_node_ids:
+            return []
         if edge_type and not EDGE_TYPE_PATTERN.match(edge_type):
             raise ValueError(f"Invalid edgeType: {edge_type}")
+        if max_depth < 1 or max_depth > 3:
+            raise ValueError("max_depth must be between 1 and 3")
         rel_expr = f":{edge_type}" if edge_type else ""
         query = f"""
-        MATCH path = (start {{graphNodeId: $fromGraphNodeId}})-[{rel_expr}*1..{max_depth}]->(target)
+        MATCH (start)
+        WHERE start.graphNodeId IN $fromGraphNodeIds
+        MATCH path = (start)-[{rel_expr}*1..{max_depth}]->(target)
+        WHERE all(node IN nodes(path) WHERE coalesce(node.clearanceLevel, 3) <= $userClearanceLevel)
         RETURN
           [node IN nodes(path) | properties(node)] AS nodes,
           [rel IN relationships(path) | properties(rel)] AS edges
-        LIMIT 20
+        LIMIT $limit
         """
         with self.driver.session() as session:
-            return [dict(record) for record in session.run(query, fromGraphNodeId=from_graph_node_id)]
+            return [
+                dict(record)
+                for record in session.run(
+                    query,
+                    fromGraphNodeIds=list(dict.fromkeys(from_graph_node_ids)),
+                    limit=max(1, min(limit, 100)),
+                    userClearanceLevel=user_clearance_level,
+                )
+            ]
 
 
 def _safe_label(value: str) -> str:

@@ -56,6 +56,9 @@ expectedLawIds
 - `citationHit`: citations が expectedReferences に当たるか
 - `retrievalHit@k`: 検索上位k件に期待根拠が含まれるか
 - `graphExpansionHit`: Graph展開で新たに期待根拠を取得できたか
+- `citationLawHit`: 期待法令IDと引用法令IDが一致したか
+- `citationArticleHit`: 条単位goldが存在する場合だけ計算。法令URLしかない場合はnull
+- `citationParagraphHit`: 項・号単位goldが存在する場合だけ計算。それ以外はnull
 
 ## 3. Trace ログ
 
@@ -86,6 +89,7 @@ expectedLawIds
 }
 ```
 
+Agent APIのtraceから `retrievedGraphNodeIds`、`retrievedGraphEdgeIds`、`graphExpandedContentUnitIds` を転記する。`graphExpansionHit` はGraph探索が実行されたかではなく、Graphが新規取得した `graphExpandedContentUnitIds` の根拠がgold referenceに一致した場合だけ1とする。各評価行には `referenceGranularity=law|article|paragraph|item` を記録し、lawqa_jp nativeデータのように法令URLしかない場合は `citationHit` を法令単位hitとして明示する。
 
 
 ## 4. 統計的評価設計

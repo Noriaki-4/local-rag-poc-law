@@ -47,6 +47,7 @@ Law -> Article -> Paragraph -> Item
 - Articleが長い場合: Paragraph単位へ分割
 - Paragraphも長い場合: sentence / clause単位へ追加分割
 - `parentContentUnitId` で上位Articleへ戻れるようにする
+- `articleContentUnitId` でParagraph / ItemからArticleへ直接戻れるようにする
 
 ### 長大条文対策
 
@@ -115,9 +116,11 @@ rerank_top_k = 10
 final_top_k  = 5
 ```
 
-OpenSearchの実装上は、BM25とkNNを別々に検索し、アプリ側で正規化・加重和する方式から始める。
+OpenSearchの実装上は、BM25とkNNを別々に検索し、アプリ側でRRF統合する。
 
-補足: OpenSearch 2.19系では、search pipeline の normalization processor を使ったネイティブ hybrid query も比較候補にする。初期実装はアプリ側正規化・加重和で始めるが、Step2でOpenSearch Service / Serverlessへ寄せる際は、ネイティブhybrid方式との挙動差も確認する。
+現行ローカル実装では、BM25とkNNを各20件取得し、`rrf_k=60`のReciprocal Rank Fusionで統合する。Pattern 3/4でも元の質問・選択肢を結合した広い検索を必ず残し、その上で分解クエリをRRF統合する。候補20件から選択肢ごとの関連度を加味して10件を再順位し、最終引用は5件とする。Neo4jから取得した参照条文も同じEvidence集合へ追加するが、最終回答のコンテキストは各引用へ文字予算を均等配分する。
+
+補足: OpenSearch 2.19系では、search pipeline の normalization processorを使ったネイティブhybrid queryも比較候補にする。現行のアプリ側RRFとの挙動差は別実験として扱う。
 
 ## 7. 比較実験で固定する変数
 
