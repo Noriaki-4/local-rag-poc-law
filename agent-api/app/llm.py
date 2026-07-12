@@ -188,14 +188,22 @@ def build_answer_prompt(
             f"{label.upper()}: {text}" for label, text in sorted(request.choices.items())
         )
 
+    choice_commitment_rule = (
+        "選択肢がある場合、predictedAnswer には必ずいずれかの選択肢ラベルを設定してください。"
+        " 引用候補が薄く確信が持てない場合でも、null にはせず、引用候補や一般的な法的知識から最も可能性が高いと考えられる選択肢を選んでください。"
+        " choiceJudgements は各選択肢に supported または not_supported を設定してください（predictedAnswer と一致する選択肢のみ supported）。"
+        " ただし answer 内では、根拠が薄い場合はその旨を明記し、専門家確認が必要であることを伝えてください。"
+        if request.choices
+        else "選択肢がない場合、predictedAnswer と choiceJudgements は null にしてください。"
+    )
+
     return f"""あなたはローカル検証環境の法務RAG回答生成器です。
-外部APIや外部検索は使わず、下の引用候補だけを根拠に日本語で簡潔に回答してください。
+外部APIや外部検索は使わず、下の引用候補を最優先の根拠として日本語で簡潔に回答してください。
 法的判断を断定しすぎず、必要に応じて専門家確認が必要であることが伝わる表現にしてください。
 引用する場合は contentUnitId を文中に含めてください。
 必ずJSONだけを返してください。JSON以外の説明文やMarkdownコードフェンスは不要です。
 answer には正解ラベルだけでなく、引用候補に基づく短い根拠説明を含めてください。
-選択肢がある場合、predictedAnswer は選択肢ラベルまたは null、choiceJudgements は各選択肢に supported または not_supported を設定してください。
-引用候補だけでは判断できない場合、predictedAnswer と choiceJudgements は null にしてください。
+{choice_commitment_rule}
 
 検索ルート: {" -> ".join(route)}
 質問: {request.question}{choices_block}

@@ -32,7 +32,7 @@ class Settings:
     anthropic_base_url = os.getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
     anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
     anthropic_version = os.getenv("ANTHROPIC_VERSION", "2023-06-01")
-    anthropic_max_tokens = int(os.getenv("ANTHROPIC_MAX_TOKENS", "512"))
+    anthropic_max_tokens = int(os.getenv("ANTHROPIC_MAX_TOKENS", "4096"))
     planner_model = os.getenv("PLANNER_MODEL", "gemma4:e4b")
     answer_model = os.getenv("ANSWER_MODEL") or ("claude-sonnet-5" if llm_provider == "anthropic" else "gemma4:e4b")
     judge_model = os.getenv("JUDGE_MODEL", "none")

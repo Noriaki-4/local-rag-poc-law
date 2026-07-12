@@ -47,7 +47,7 @@ Claude を使う場合の `.env` 例:
 LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-...
 ANTHROPIC_VERSION=2023-06-01
-ANTHROPIC_MAX_TOKENS=1024
+ANTHROPIC_MAX_TOKENS=4096
 ANSWER_MODEL=claude-haiku-4-5-20251001
 AGENT_USE_BM25=true
 AGENT_USE_VECTOR=true
@@ -315,7 +315,26 @@ volume も削除して初期化する場合:
 docker compose down -v
 ```
 
-## 9. 実データへ差し替える箇所
+## 9. LLMモデル固有の癖
+
+lawqa_jp 選択式での動作確認で見つかった、モデルごとの挙動差。モデルを切り替える際は再確認すること。
+
+| 項目 | Ollama gemma4:e4b | Anthropic claude-haiku-4-5-20251001 | Anthropic claude-sonnet-5 |
+|---|---|---|---|
+| `temperature` パラメータ | 必須(0で決定的に) | 受理される | **拒否される(400: deprecated)**。Anthropic呼び出しでは送らない |
+| JSON出力の形式 | 素のJSON | **Markdownコードフェンス(` ```json `)で包む**ことがある。剥がす処理が必要 | 素のJSON |
+| スキーマ外フィールド | 出さない | `reasoning` 等の**追加フィールドを付与**することがある。pydanticは`extra="ignore"`にする | 同様の傾向あり |
+| 拡張思考(thinking) | 非対応 | 非対応 | **`thinking`ブロックが`max_tokens`予算を消費**。`max_tokens`不足だと本文(`text`ブロック)が出力される前に打ち切られ、空応答になる。`ANTHROPIC_MAX_TOKENS`は最低4096を確保する(既定値も4096に変更済み) |
+
+`predictedAnswer=null` での棄権について: 当初 claude-sonnet-5 は根拠が弱い問題で棄権する割合が高く見えたが、原因はモデル固有の性質ではなく [llm.py](agent-api/app/llm.py) の `build_answer_prompt()` が「判断できない場合は null にしてください」と明示的に指示していたため。選択肢がある場合は必ずいずれかを選ぶよう指示を変更した結果、claude-sonnet-5 で20問中20問がLLM使用、うち20問中18問正解(90%)まで改善した(小サンプルにつき参考値)。根拠が薄い場合でも `answer` テキスト内でその旨と専門家確認の必要性を明記する指示は維持している。
+
+共通の注意点:
+
+- `agent-api` のコードは Dockerfile で `COPY` されるため、`.env` やコードを変更した後は `docker compose up -d` ではなく `docker compose up --build -d` を使う。`--build` を忘れると古いイメージのまま起動し、変更が反映されない。
+- LLM応答が空文字列の場合でも `trace.llm` に診断情報(`validationError`等)が残るようにしている([agent.py](agent-api/app/agent.py)の`_compose_answer`)。空応答時に原因不明で「LLM未使用」と表示される場合は、この診断ロジックが退行していないか確認する。
+- モデルIDの利用可否はAPIキーの契約プランに依存する。切り替え前に2節のcurlコマンドで動作確認する。
+
+## 10. 実データへ差し替える箇所
 
 Phase 0 で以下を固定する。
 
