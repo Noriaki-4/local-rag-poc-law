@@ -107,7 +107,8 @@ def _read_lawqa_payload(samples_dir: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _egov_law_documents(law_id: str) -> list[dict[str, Any]]:
+def _egov_law_documents(law_id_spec: str) -> list[dict[str, Any]]:
+    law_id, article_range = _parse_law_id_spec(law_id_spec)
     url = f"{settings.egov_api_base_url.rstrip('/')}/lawdata/{law_id}"
     response = requests.get(url, timeout=120)
     response.raise_for_status()
@@ -130,25 +131,59 @@ def _egov_law_documents(law_id: str) -> list[dict[str, Any]]:
         suppl_article_ids = {id(article) for suppl in suppl_provisions for article in suppl.iter("Article")}
         main_articles = [article for article in root.iter("Article") if id(article) not in suppl_article_ids]
 
+    if article_range:
+        start, end = article_range
+        main_articles = [
+            article
+            for article in main_articles
+            if (base := _article_base_num(article.get("Num"))) is not None and start <= base <= end
+        ]
+
     documents: list[dict[str, Any]] = []
     documents.extend(
         _section_documents(main_articles, law_id, title, law_num, url, id_prefix="article", section_key="main")
     )
-    for suppl_index, suppl in enumerate(suppl_provisions):
-        section_key = f"suppl-{suppl_index}"
-        documents.extend(
-            _section_documents(
-                list(suppl.iter("Article")),
-                law_id,
-                title,
-                law_num,
-                url,
-                id_prefix=f"{section_key}-article",
-                section_key=section_key,
-                section_label=_suppl_label(suppl),
+    # 範囲指定時は該当法令の一部条文だけが目的のため、附則（別条番号体系の経過措置等）は対象外にする。
+    if not article_range:
+        for suppl_index, suppl in enumerate(suppl_provisions):
+            section_key = f"suppl-{suppl_index}"
+            documents.extend(
+                _section_documents(
+                    list(suppl.iter("Article")),
+                    law_id,
+                    title,
+                    law_num,
+                    url,
+                    id_prefix=f"{section_key}-article",
+                    section_key=section_key,
+                    section_label=_suppl_label(suppl),
+                )
             )
-        )
     return documents
+
+
+def _parse_law_id_spec(law_id_spec: str) -> tuple[str, tuple[int, int] | None]:
+    """'129AC0000000089:601-622_2' のような指定を (law_id, (開始条番号, 終了条番号)) に分解する。
+    範囲省略時は (law_id, None) を返し、全条投入する。"""
+    if ":" not in law_id_spec:
+        return law_id_spec, None
+    law_id, range_text = law_id_spec.split(":", 1)
+    start_text, _, end_text = range_text.partition("-")
+    start = _article_base_num(start_text)
+    end = _article_base_num(end_text) if end_text else start
+    if start is None or end is None:
+        raise ValueError(f"Invalid article range in LAWQA_EGOV_LAW_IDS entry: {law_id_spec!r}")
+    return law_id, (start, end)
+
+
+def _article_base_num(value: str | None) -> int | None:
+    """'622_2' の枝番を無視した基本条番号（622）を返す。"""
+    if not value:
+        return None
+    try:
+        return int(value.split("_", 1)[0])
+    except ValueError:
+        return None
 
 
 def _suppl_label(suppl: ET.Element) -> str:

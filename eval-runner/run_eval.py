@@ -88,18 +88,56 @@ def run_lawqa() -> list[dict[str, Any]]:
         rows = rows[:EVAL_LIMIT]
     results = []
     for row in rows:
-        response = requests.post(
-            f"{API_URL}/answer",
-            json={
-                "question": row["question"],
-                "choices": row["choices"],
-                "pattern": EVAL_PATTERN,
-                "userClearanceLevel": 2,
-            },
-            timeout=REQUEST_TIMEOUT_SEC,
-        )
-        response.raise_for_status()
-        output = response.json()
+        try:
+            response = requests.post(
+                f"{API_URL}/answer",
+                json={
+                    "question": row["question"],
+                    "choices": row["choices"],
+                    "pattern": EVAL_PATTERN,
+                    "userClearanceLevel": 2,
+                },
+                timeout=REQUEST_TIMEOUT_SEC,
+            )
+            response.raise_for_status()
+            output = response.json()
+        except requests.RequestException as exc:
+            # 1問の一時的な失敗（Anthropic側の瞬断等）で140問全体を止めない。
+            # 失敗を記録して次の問題へ進む。
+            print(f"SKIP {row['questionId']}: request failed: {exc}")
+            results.append(
+                {
+                    "runId": f"run-{row['questionId']}",
+                    "pattern": EVAL_PATTERN,
+                    "dataset": "lawqa_jp",
+                    "source": source,
+                    "questionId": row["questionId"],
+                    "referenceGranularity": None,
+                    "inputType": "multiple_choice_legal_qa",
+                    "searchPlan": [],
+                    "toolCalls": [],
+                    "retrievedContentUnitIds": [],
+                    "retrievedGraphNodeIds": [],
+                    "retrievedGraphEdgeIds": [],
+                    "citations": [],
+                    "predictedAnswer": None,
+                    "goldAnswer": row["goldAnswer"],
+                    "llmUsed": False,
+                    "validationError": None,
+                    "llmError": f"request_failed: {exc}",
+                    "scores": {
+                        "answerAccuracy": 0,
+                        "citationHit": 0,
+                        "citationLawHit": None,
+                        "citationArticleHit": None,
+                        "citationParagraphHit": None,
+                        "retrievalHitAt5": 0,
+                        "graphExpansionHit": 0,
+                    },
+                    "latencyMs": None,
+                }
+            )
+            continue
         expected = {ref["contentUnitId"] for ref in row.get("expectedReferences", []) if ref.get("contentUnitId")}
         expected_law_ids = {ref["lawId"] for ref in row.get("expectedReferences", []) if ref.get("lawId")}
         expected_document_ids = {f"law-{law_id}" for law_id in expected_law_ids}
