@@ -74,7 +74,7 @@ datasets/
 5. 実行時のAgentはe-Govへ直接問い合わせず、ローカルに登録済みのインデックスを検索する。
 
 Step1 POC では `SEED_LAWQA_EGOV=true` を指定した `/admin/seed` により、lawqa_jp の `references` から e-Gov 法令IDを抽出し、e-Gov API の XML を条・項・号単位で OpenSearch / Neo4j に投入できる。
-PDF等の e-Gov 以外の参照元は、この自動投入の対象外とする。
+PDF等の e-Gov 以外の参照元は、この自動投入の対象外とする。必要なPDFは `scripts/download_lawqa_guidance.sh` で原本とSHA-256付きマニフェストを `datasets/lawqa_jp/external-guidance/` に保存する。`SEED_EXTERNAL_GUIDANCE=true` を指定した場合だけ、PDF本文をページ単位でOpenSearchへ投入する。PDFガイドラインは法令関係Graphには投入しない。
 
 ### 本則・附則の分離
 

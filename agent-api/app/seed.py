@@ -1,11 +1,13 @@
 import json
 import re
 import xml.etree.ElementTree as ET
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
 from minio import Minio
 from minio.error import S3Error
+from pypdf import PdfReader
 import requests
 
 from .config import settings
@@ -19,6 +21,8 @@ ARTICLE_REFERENCE_PATTERN = re.compile(
 )
 JAPANESE_DIGITS = {"〇": 0, "零": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
 JAPANESE_UNITS = {"十": 10, "百": 100, "千": 1000}
+# 号チャンクに前置する柱書きの上限文字数。EMBEDDING_MAX_CHARS(既定1000)の中で号本文の場所を残す。
+_ITEM_INTRO_MAX_CHARS = 300
 
 
 def seed_all(os_client: OpenSearchClient, graph_client: GraphClient) -> dict[str, Any]:
@@ -26,7 +30,8 @@ def seed_all(os_client: OpenSearchClient, graph_client: GraphClient) -> dict[str
     mapping = _read_json(samples_dir / "metadata" / "opensearch_index_mapping.sample.json")
     os_client.recreate_index(mapping)
 
-    documents = _opensearch_documents(samples_dir)
+    external_guidance_sources = _external_guidance_sources()
+    documents = _opensearch_documents(samples_dir, external_guidance_sources)
     for document in documents:
         os_client.index_document(document)
     os_client.refresh()
@@ -41,24 +46,144 @@ def seed_all(os_client: OpenSearchClient, graph_client: GraphClient) -> dict[str
     graph_client.seed_nodes(nodes)
     graph_client.seed_edges(edges)
 
-    minio_count = _seed_minio(samples_dir, documents)
+    minio_count = _seed_minio(samples_dir, documents, external_guidance_sources)
 
     return {
         "opensearchDocuments": len(documents),
+        "externalGuidanceDocuments": sum(1 for document in documents if document.get("docType") == "guideline"),
         "graphNodes": len(nodes),
         "graphEdges": len(edges),
         "minioObjects": minio_count,
     }
 
 
-def _opensearch_documents(samples_dir: Path) -> list[dict[str, Any]]:
+def _opensearch_documents(samples_dir: Path, external_guidance_sources: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     sample = _read_json(samples_dir / "metadata" / "opensearch_document.sample.json")
     law_fsa = dict(sample)
     law_fsa["embedding"] = embed_text(_embedding_text(law_fsa))
     documents = [law_fsa]
     if settings.seed_lawqa_egov:
         documents.extend(_lawqa_egov_documents(samples_dir))
+    guidance_documents = _external_guidance_documents(external_guidance_sources or [])
+    for batch in _chunks(guidance_documents, settings.embedding_batch_size):
+        embeddings = embed_texts([_embedding_text(document) for document in batch])
+        for document, embedding in zip(batch, embeddings, strict=True):
+            document["embedding"] = embedding
+    documents.extend(guidance_documents)
     return _dedupe_by_key(documents, "contentUnitId")
+
+
+def _external_guidance_sources() -> list[dict[str, Any]]:
+    if not settings.seed_external_guidance:
+        return []
+
+    manifest_path = settings.external_guidance_manifest
+    if not manifest_path.exists():
+        raise FileNotFoundError(
+            "External guidance manifest not found. Run scripts/download_lawqa_guidance.sh or set EXTERNAL_GUIDANCE_MANIFEST: "
+            f"{manifest_path}"
+        )
+    manifest = _read_json(manifest_path)
+    entries = manifest.get("documents")
+    if not isinstance(entries, list) or not entries:
+        raise ValueError(f"External guidance manifest has no documents: {manifest_path}")
+
+    root = manifest_path.parent.resolve()
+    sources: list[dict[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError("External guidance manifest documents must be objects")
+        required = ["documentId", "title", "authority", "file", "sourceUrl"]
+        missing = [key for key in required if not str(entry.get(key) or "").strip()]
+        if missing:
+            raise ValueError(f"External guidance entry is missing {missing}: {entry}")
+        source_path = (root / str(entry["file"])).resolve()
+        try:
+            source_path.relative_to(root)
+        except ValueError as exc:
+            raise ValueError(f"External guidance file must stay within manifest directory: {entry['file']}") from exc
+        if not source_path.is_file():
+            raise FileNotFoundError(f"External guidance source not found: {source_path}")
+        expected_hash = str(entry.get("sha256") or "").removeprefix("sha256:")
+        if not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+            raise ValueError(f"External guidance entry requires a SHA-256 checksum: {source_path}")
+        actual_hash = sha256(source_path.read_bytes()).hexdigest()
+        if actual_hash != expected_hash:
+            raise ValueError(f"External guidance checksum mismatch: {source_path}")
+        sources.append({**entry, "_sourcePath": source_path})
+    return sorted(sources, key=lambda source: str(source["documentId"]))
+
+
+def _external_guidance_documents(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    documents: list[dict[str, Any]] = []
+    for source in sources:
+        reader = PdfReader(str(source["_sourcePath"]))
+        document_id = str(source["documentId"])
+        title = str(source["title"])
+        raw_object_name = f"source-documents/external-guidance/{Path(str(source['file'])).name}"
+        for page_number, page in enumerate(reader.pages, start=1):
+            text = _normalize_pdf_text(page.extract_text() or "")
+            for chunk_index, chunk_text in enumerate(_pdf_text_chunks(text), start=1):
+                content_unit_id = f"{document_id}-page-{page_number}-chunk-{chunk_index}"
+                documents.append(
+                    {
+                        "documentId": document_id,
+                        "contentUnitId": content_unit_id,
+                        "chunkId": content_unit_id,
+                        "parentContentUnitId": None,
+                        "articleContentUnitId": None,
+                        "deptCode": "common",
+                        "docType": "guideline",
+                        "contentDomain": "legal_guidance",
+                        "title": title,
+                        "heading": f"{title} p.{page_number}",
+                        "sectionPath": f"{source['authority']} > {title} > p.{page_number}",
+                        "text": chunk_text,
+                        "publishStatus": "published",
+                        "isLatest": True,
+                        "confidentiality": "public",
+                        "clearanceLevel": 1,
+                        "sourceObjectUri": f"minio://{settings.minio_bucket}/{raw_object_name}",
+                        "processedObjectUri": (
+                            "minio://"
+                            f"{settings.minio_bucket}/derived-artifacts/vector-documents/"
+                            f"dept=common/docType=guideline/{document_id}/{content_unit_id}.md"
+                        ),
+                        "sourcePage": page_number,
+                        "parserType": "pdf_pypdf_page_chunk_v1",
+                        "chunkStrategy": "guidance_pdf_page_chunk_v1",
+                    }
+                )
+        if not any(document["documentId"] == document_id for document in documents):
+            raise ValueError(f"No extractable text found in external guidance PDF: {source['_sourcePath']}")
+    return documents
+
+
+def _normalize_pdf_text(text: str) -> str:
+    lines = [re.sub(r"[ \\t]+", " ", line).strip() for line in text.replace("\u3000", " ").splitlines()]
+    return "\n".join(line for line in lines if line)
+
+
+def _pdf_text_chunks(text: str) -> list[str]:
+    if not text:
+        return []
+    chunk_size = settings.external_guidance_chunk_chars
+    overlap = min(120, chunk_size // 4)
+    chunks: list[str] = []
+    start = 0
+    while start < len(text):
+        end = min(start + chunk_size, len(text))
+        if end < len(text):
+            boundary = max(text.rfind("\n", start + chunk_size // 2, end), text.rfind("。", start + chunk_size // 2, end))
+            if boundary > start:
+                end = boundary + 1
+        chunk = text[start:end].strip()
+        if chunk:
+            chunks.append(chunk)
+        if end >= len(text):
+            break
+        start = max(end - overlap, start + 1)
+    return chunks
 
 
 def _lawqa_egov_documents(samples_dir: Path) -> list[dict[str, Any]]:
@@ -77,6 +202,17 @@ def _lawqa_egov_law_ids(samples_dir: Path) -> list[str]:
     explicit_ids = [item.strip() for item in settings.lawqa_egov_law_ids.split(",") if item.strip()]
     if explicit_ids:
         return sorted(set(explicit_ids))
+
+    registry_path = samples_dir / "eval" / "law_registry.json"
+    if registry_path.exists():
+        registry = _read_json(registry_path)
+        configured = [
+            str(item.get("seedSpec") or item["lawId"])
+            for item in registry.get("laws", [])
+            if item.get("lawId")
+        ]
+        if configured:
+            return sorted(set(configured))
 
     payload = _read_lawqa_payload(samples_dir)
     law_ids: set[str] = set()
@@ -295,6 +431,9 @@ def _article_chunks(
                         "chunkStrategy": "law_article_paragraph_item_split_v2",
                     }
                 )
+            # 号は「国債証券」のような短い列挙になりがちで、単体では検索文脈を失う。
+            # 親項の柱書き(導入文)を前置して意味的な検索可能性を回復する。
+            item_prefix = intro_text[:_ITEM_INTRO_MAX_CHARS]
             for item_index, item in enumerate(items, start=1):
                 item_num_text = (item.get("Num") or item.findtext("ItemTitle") or str(item_index)).strip()
                 # 枝番の号（例: '2_2' = 第二号の二）は int 化すると隣の号と衝突するため接尾辞のまま使う。
@@ -302,15 +441,16 @@ def _article_chunks(
                 item_text = _element_sentence_text(item)
                 if not item_text:
                     continue
+                item_label = f"第{item_suffix.replace('_', 'の')}号"
                 chunks.append(
                     {
                         "contentUnitId": f"{paragraph_id}-item-{item_suffix}",
                         "parentContentUnitId": paragraph_id,
                         "articleContentUnitId": article_content_unit_id,
-                        "heading": f"{full_heading} 第{paragraph_num}項第{item_suffix.replace('_', 'の')}号",
+                        "heading": f"{full_heading} 第{paragraph_num}項{item_label}",
                         "paragraphNumber": paragraph_num,
                         "itemNumber": _int_or_none(item_suffix.split("_")[0]),
-                        "text": item_text,
+                        "text": f"{item_prefix}\n{item_label}　{item_text}" if item_prefix else item_text,
                         "chunkStrategy": "law_article_paragraph_item_split_v2",
                     }
                 )
@@ -601,7 +741,11 @@ def _chunks(items: list[dict[str, Any]], size: int) -> list[list[dict[str, Any]]
     return [items[index : index + chunk_size] for index in range(0, len(items), chunk_size)]
 
 
-def _seed_minio(samples_dir: Path, documents: list[dict[str, Any]]) -> int:
+def _seed_minio(
+    samples_dir: Path,
+    documents: list[dict[str, Any]],
+    external_guidance_sources: list[dict[str, Any]] | None = None,
+) -> int:
     client = Minio(
         settings.minio_endpoint,
         access_key=settings.minio_access_key,
@@ -625,6 +769,13 @@ def _seed_minio(samples_dir: Path, documents: list[dict[str, Any]]) -> int:
             length=len(content.encode("utf-8")),
             content_type="text/markdown; charset=utf-8",
         )
+        count += 1
+
+    for source in external_guidance_sources or []:
+        source_path = Path(source["_sourcePath"])
+        object_name = f"source-documents/external-guidance/{source_path.name}"
+        data = source_path.read_bytes()
+        client.put_object(settings.minio_bucket, object_name, data=_Bytes(data), length=len(data), content_type="application/pdf")
         count += 1
 
     for path in samples_dir.rglob("*"):

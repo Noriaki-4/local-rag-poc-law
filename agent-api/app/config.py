@@ -19,6 +19,11 @@ class Settings:
     seed_lawqa_egov = os.getenv("SEED_LAWQA_EGOV", "false").lower() in {"1", "true", "yes", "on"}
     lawqa_egov_law_ids = os.getenv("LAWQA_EGOV_LAW_IDS", "")
     egov_api_base_url = os.getenv("EGOV_API_BASE_URL", "https://laws.e-gov.go.jp/api/1")
+    seed_external_guidance = os.getenv("SEED_EXTERNAL_GUIDANCE", "false").lower() in {"1", "true", "yes", "on"}
+    external_guidance_manifest = Path(
+        os.getenv("EXTERNAL_GUIDANCE_MANIFEST", "/workspace/datasets/lawqa_jp/external-guidance/manifest.json")
+    )
+    external_guidance_chunk_chars = max(400, min(int(os.getenv("EXTERNAL_GUIDANCE_CHUNK_CHARS", "900")), 3000))
     agent_use_bm25 = os.getenv("AGENT_USE_BM25", "true").lower() in {"1", "true", "yes", "on"}
     agent_use_vector = os.getenv("AGENT_USE_VECTOR", "true").lower() in {"1", "true", "yes", "on"}
     embedding_provider = os.getenv("EMBEDDING_PROVIDER", "ollama")
@@ -35,9 +40,16 @@ class Settings:
     agent_max_wall_time_sec = max(10, min(int(os.getenv("AGENT_MAX_WALL_TIME_SEC", "110")), 300))
     agent_use_llm_planner = os.getenv("AGENT_USE_LLM_PLANNER", "true").lower() in {"1", "true", "yes", "on"}
     agent_candidate_top_k = max(5, min(int(os.getenv("AGENT_CANDIDATE_TOP_K", "20")), 100))
+    agent_guidance_candidate_top_k = max(1, min(int(os.getenv("AGENT_GUIDANCE_CANDIDATE_TOP_K", "10")), 50))
     agent_rerank_top_k = max(1, min(int(os.getenv("AGENT_RERANK_TOP_K", "10")), 50))
     agent_rrf_k = max(1, int(os.getenv("AGENT_RRF_K", "60")))
     agent_max_llm_calls = max(1, min(int(os.getenv("AGENT_MAX_LLM_CALLS", "3")), 3))
+    rerank_provider = os.getenv("RERANK_PROVIDER", "none").lower()
+    rerank_base_url = os.getenv("RERANK_BASE_URL", "http://localhost:8100")
+    rerank_model = os.getenv("RERANK_MODEL", "hotchpotch/japanese-reranker-base-v2")
+    rerank_candidate_top_k = max(2, min(int(os.getenv("RERANK_CANDIDATE_TOP_K", "30")), 100))
+    rerank_timeout_sec = max(1, min(int(os.getenv("RERANK_TIMEOUT_SEC", "30")), 120))
+    rerank_max_chars = max(256, min(int(os.getenv("RERANK_MAX_CHARS", "3000")), 12000))
     llm_provider = os.getenv("LLM_PROVIDER", "ollama")
     ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
     anthropic_base_url = os.getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")

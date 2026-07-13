@@ -35,3 +35,28 @@ def test_add_reference_dedupes():
     R._add_reference(refs, seen, "law-x", "law-x-article-5")
     R._add_reference(refs, seen, "law-x", "law-x-article-5")
     assert refs == [{"lawId": "law-x", "contentUnitId": "law-x-article-5"}]
+
+
+def test_document_id_of_handles_suppl_ids():
+    assert R._document_id_of("law-323AC0000000025-article-8-paragraph-1") == "law-323AC0000000025"
+    assert R._document_id_of("law-323AC0000000025-suppl-0-article-8") == "law-323AC0000000025"
+
+
+def test_family_of_maps_delegated_laws_to_parent():
+    assert R._family_of("law-340CO0000000321") == "law-323AC0000000025"  # 施行令→金商法
+    assert R._family_of("law-405M50000040014") == "law-323AC0000000025"  # 定義府令→金商法
+    assert R._family_of("law-336M50000100001") == "law-335AC0000000145"  # 施行規則→薬機法
+    assert R._family_of("law-129AC0000000089") == "law-129AC0000000089"  # 民法は自身が親
+    assert R._family_of("law-unknown999") == "law-unknown999"  # 未知法令はそのまま
+
+
+def test_registry_alias_resolves_context_without_egov_call(monkeypatch):
+    monkeypatch.setattr(R, "_egov_title", lambda law_id: (_ for _ in ()).throw(AssertionError(law_id)))
+    context = "## 定義府令\n### 第2条\n#### 第1項"
+
+    references = R._context_expected_references(context, {"405M50000040014"})
+
+    assert {item["contentUnitId"] for item in references} == {
+        "law-405M50000040014-article-2",
+        "law-405M50000040014-article-2-paragraph-1",
+    }

@@ -84,7 +84,45 @@ class FakeLLM:
             answer="第三条を根拠にAと判断します。",
             predictedAnswer="A",
             choiceJudgements={"A": "supported", "B": "not_supported"},
+            questionPolarity="select_entailed",
+            choiceAssessments={
+                "A": {"verdict": "entailed", "citationIds": ["law-test-article-3"], "reason": "第三条に合致"},
+                "B": {"verdict": "contradicted", "citationIds": ["law-test-article-2"], "reason": "条文と矛盾"},
+            },
         )
+
+
+class TypeSeparatedOpenSearch:
+    def __init__(self):
+        self.calls = []
+
+    def search(self, query, doc_type, top_k, clearance, use_bm25=True, use_vector=True):
+        self.calls.append((query, doc_type, top_k))
+        if doc_type == "law":
+            return [{"document": _document("law-test-article-1", "法律の根拠"), "score": 0.01}]
+        if doc_type == "guideline":
+            document = _document("guidance-test-page-1-chunk-1", "ガイドラインの根拠")
+            document["docType"] = "guideline"
+            return [{"document": document, "score": 0.02}]
+        return []
+
+
+def test_evidence_search_keeps_guideline_candidate_pool_separate(monkeypatch):
+    from app import agent as agent_module
+
+    monkeypatch.setattr(agent_module.settings, "agent_guidance_candidate_top_k", 7)
+    os_client = TypeSeparatedOpenSearch()
+    service = AgentService(os_client, FakeGraph(), FakeLLM())
+
+    results, counts = service._search_evidence("ガイドラインの要件", 20, 2)
+
+    assert counts == {"law": 1, "guideline": 1}
+    assert [call[1] for call in os_client.calls] == ["law", "guideline"]
+    assert os_client.calls[1][2] == 7
+    assert [item["document"]["contentUnitId"] for item in results] == [
+        "guidance-test-page-1-chunk-1",
+        "law-test-article-1",
+    ]
 
 
 def test_deepsearch_decomposes_expands_and_merges(monkeypatch):
@@ -114,6 +152,8 @@ def test_deepsearch_decomposes_expands_and_merges(monkeypatch):
     assert response.trace["llmCallCount"] == 3
     assert response.trace["evaluator"]["used"] is True
     assert set(response.trace["choiceEvidence"]) == {"A", "B"}
+    assert response.trace["choiceEvidence"]["A"] == ["law-test-article-3"]
+    assert response.citations[0].contentUnitId == "law-test-article-3"
     assert response.trace["graphExpandedContentUnitIds"] == ["law-test-article-3"]
     assert response.trace["retrievedGraphEdgeIds"] == ["edge-2-3"]
 
@@ -203,3 +243,103 @@ def test_baseline_uses_one_search_without_graph(monkeypatch):
     assert "query_decomposition" not in response.route
     assert "graph_search_tool" not in response.route
     assert response.graphPaths == []
+
+
+def test_extract_article_suffixes_handles_arabic_kanji_and_branches():
+    from app.agent import _extract_article_suffixes
+
+    assert _extract_article_suffixes("金融商品取引法第185条の22により正しいものはどれか。") == ["185_22"]
+    assert _extract_article_suffixes("第百八十五条の二十二の規定") == ["185_22"]
+    assert _extract_article_suffixes("施行令第２条の１２に定める") == ["2_12"]
+    assert _extract_article_suffixes("第8条と第25条を参照") == ["8", "25"]
+    assert _extract_article_suffixes("存続期間は何年ですか") == []
+
+
+def test_matched_law_ids_excludes_parent_only_inside_child_name():
+    from app.agent import _matched_law_ids
+
+    titles = {
+        "law-a": "金融商品取引法",
+        "law-b": "金融商品取引法施行令",
+        "law-c": "借地借家法",
+    }
+    # 施行令のフル名しか出ていない場合、親法は名前の一部として現れただけなので除外する
+    assert _matched_law_ids("金融商品取引法施行令第2条の12に定める取得勧誘", titles) == ["law-b"]
+    # 親法単独でも言及されていれば両方対象
+    both = _matched_law_ids("金融商品取引法第24条及び金融商品取引法施行令第3条", titles)
+    assert set(both) == {"law-a", "law-b"}
+    assert _matched_law_ids("無関係な質問", titles) == []
+
+
+def test_law_article_references_keeps_law_and_article_pairs():
+    from app.agent import _law_article_references
+
+    titles = {
+        "law-act": "金融商品取引法",
+        "law-order": "金融商品取引法施行令",
+    }
+    text = "金融商品取引法第24条及び金融商品取引法施行令第3条による。"
+
+    assert _law_article_references(text, titles) == {
+        "law-act": ["24"],
+        "law-order": ["3"],
+    }
+
+
+def test_pin_ranked_evidence_keeps_direct_reference():
+    from app.agent import _pin_ranked_evidence
+
+    ordinary = {"document": _document("law-test-article-1", "類似条文"), "score": 2.0}
+    pinned = {
+        "document": _document("law-test-article-2", "明示された条文"),
+        "score": 0.0,
+        "mustInclude": True,
+    }
+
+    ranked = _pin_ranked_evidence([ordinary, pinned], 1)
+
+    assert ranked[0]["document"]["contentUnitId"] == "law-test-article-2"
+
+
+class ArticleRefOpenSearch:
+    """条番号直接解決の検証用: 検索は無関係な条文しか返さないが、直接引きは正解条文を返す。"""
+
+    def __init__(self):
+        self.noise = _document("law-test-article-99", "無関係な条文。")
+        self.target = _document("law-test-article-3", "第三条 存続期間は三十年とする。")
+        self.target["articleContentUnitId"] = "law-test-article-3"
+
+    def search(self, query, doc_type, top_k, clearance, use_bm25=True, use_vector=True):
+        return [{"document": self.noise, "score": 1.0, "bm25Score": 2.0, "vectorScore": 0.8}]
+
+    def law_titles(self):
+        return {"law-test": "検証法"}
+
+    def get_by_article_ids(self, article_ids, clearance, max_chunks=30):
+        return [self.target] if "law-test-article-3" in article_ids else []
+
+    def get_by_content_unit_ids(self, content_unit_ids, clearance):
+        return []
+
+
+def test_article_direct_lookup_injects_explicitly_referenced_article(monkeypatch):
+    from app import agent as agent_module
+
+    monkeypatch.setattr(agent_module.settings, "agent_use_llm_planner", False)
+    service = AgentService(ArticleRefOpenSearch(), FakeGraph(), FakeLLM())
+    request = AnswerRequest(
+        question="検証法第3条により正しいものはどれか。",
+        choices={"A": "存続期間は30年である。", "B": "存続期間は10年である。"},
+        pattern="pattern_2_rule_based_agentic_rag",
+        topK=2,
+    )
+
+    response = service.answer(request)
+
+    assert "article_direct_lookup" in response.route
+    cited = {citation.contentUnitId for citation in response.citations}
+    assert "law-test-article-3" in cited
+    lookup_rounds = [r for r in response.trace["rounds"] if r.get("tool") == "article_direct_lookup"]
+    assert lookup_rounds and lookup_rounds[0]["references"] == {"law-test": ["3"]}
+    assert lookup_rounds[0]["selectedCount"] == 1
+    assert response.trace["fusionTopContentUnitIds"][0] == "law-test-article-3"

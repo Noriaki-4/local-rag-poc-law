@@ -11,7 +11,14 @@ import requests
 
 
 API_URL = os.getenv("AGENT_API_URL", "http://localhost:8000").rstrip("/")
-SAMPLES_DIR = Path(os.getenv("SAMPLES_DIR", "/workspace/samples"))
+_CONTAINER_SAMPLES_DIR = Path("/workspace/samples")
+_LOCAL_SAMPLES_DIR = Path(__file__).resolve().parent.parent / "docs" / "requirements" / "samples"
+SAMPLES_DIR = Path(
+    os.getenv(
+        "SAMPLES_DIR",
+        str(_CONTAINER_SAMPLES_DIR if _CONTAINER_SAMPLES_DIR.exists() else _LOCAL_SAMPLES_DIR),
+    )
+)
 EVAL_RESULTS_DIR = Path(os.getenv("EVAL_RESULTS_DIR", "/workspace/eval-results"))
 DEFAULT_LAWQA_PATH = SAMPLES_DIR / "eval" / "lawqa_eval_item.sample.jsonl"
 LAWQA_EVAL_PATH = os.getenv("LAWQA_EVAL_PATH")
@@ -26,6 +33,14 @@ EGOV_API_BASE_URL = os.getenv("EGOV_API_BASE_URL", "https://laws.e-gov.go.jp/api
 CHOICE_LINE_PATTERN = re.compile(r"^([a-dA-D])[\s\u3000]+(.+)$")
 EGOV_LAW_ID_PATTERN = re.compile(r"laws\.e-gov\.go\.jp/law/([^/?#]+)")
 CONTEXT_HEADER_PATTERN = re.compile(r"^(#{2,5})\s+(.+?)\s*$")
+
+LAW_REGISTRY_PATH = SAMPLES_DIR / "eval" / "law_registry.json"
+LAW_REGISTRY = json.loads(LAW_REGISTRY_PATH.read_text(encoding="utf-8")) if LAW_REGISTRY_PATH.exists() else {"laws": []}
+KNOWN_LAW_IDS = [str(item["lawId"]) for item in LAW_REGISTRY["laws"]]
+LAW_FAMILY_ROOT = {
+    str(item["lawId"]): str(item.get("familyRoot") or item["lawId"])
+    for item in LAW_REGISTRY["laws"]
+}
 ARTICLE_HEADER_PATTERN = re.compile(r"^\u7b2c(\d+)\u6761((?:\u306e\d+)*)")
 PARAGRAPH_HEADER_PATTERN = re.compile(r"^\u7b2c(\d+)\u9805$")
 ITEM_HEADER_PATTERN = re.compile(r"^\u7b2c(\d+)\u53f7$")
@@ -33,6 +48,7 @@ FULLWIDTH_DIGITS = str.maketrans("\uff10\uff11\uff12\uff13\uff14\uff15\uff16\uff
 
 # lawId -> e-Gov LawTitle \u306e\u30ad\u30e3\u30c3\u30b7\u30e5\u3002\u30b3\u30f3\u30c6\u30ad\u30b9\u30c8\u306e\u6cd5\u4ee4\u540d\u898b\u51fa\u3057\u3092 lawId \u3078\u5bfe\u5fdc\u4ed8\u3051\u308b\u305f\u3081\u306b\u4f7f\u3046\u3002
 _EGOV_TITLE_CACHE: dict[str, str | None] = {}
+METRIC_VERSION = 3
 
 
 def main() -> None:
@@ -52,16 +68,22 @@ def main() -> None:
     print(f"Wrote {len(results)} eval results to {output_path}")
     item_count = len(results)
     answer_accuracy = sum(item["scores"].get("answerAccuracy", 0) for item in results)
-    citation_hit = sum(item["scores"].get("citationHit", 0) for item in results)
     summary = {
+        "metricVersion": METRIC_VERSION,
         "items": item_count,
         "answerAccuracy": answer_accuracy,
         "answerAccuracyRate": answer_accuracy / item_count if item_count else 0,
-        "citationHit": citation_hit,
-        "citationHitRate": citation_hit / item_count if item_count else 0,
+        "referenceScorable": sum(1 for item in results if item.get("referenceScorable")),
+        # citationHit系は採点可能な問題(referenceScorable)だけで平均する
+        "citationHitRate": _optional_score_rate(results, "citationHit"),
         "citationLawHitRate": _optional_score_rate(results, "citationLawHit"),
+        "citationLawFamilyHitRate": _optional_score_rate(results, "citationLawFamilyHit"),
         "citationArticleHitRate": _optional_score_rate(results, "citationArticleHit"),
         "citationParagraphHitRate": _optional_score_rate(results, "citationParagraphHit"),
+        "candidatePoolHitRate": _optional_score_rate(results, "candidatePoolHit"),
+        "fusionHitRate": _optional_score_rate(results, "fusionHit"),
+        "rerankerHitRate": _optional_score_rate(results, "rerankerHit"),
+        "rerankerUsed": sum(1 for item in results if item.get("rerankerUsed")),
         "llmUsed": sum(1 for item in results if item.get("llmUsed")),
         "validationErrors": sum(1 for item in results if item.get("validationError")),
         "source": results[0].get("source") if results else None,
@@ -107,6 +129,7 @@ def run_lawqa() -> list[dict[str, Any]]:
             print(f"SKIP {row['questionId']}: request failed: {exc}")
             results.append(
                 {
+                    "metricVersion": METRIC_VERSION,
                     "runId": f"run-{row['questionId']}",
                     "pattern": EVAL_PATTERN,
                     "dataset": "lawqa_jp",
@@ -127,11 +150,13 @@ def run_lawqa() -> list[dict[str, Any]]:
                     "llmError": f"request_failed: {exc}",
                     "scores": {
                         "answerAccuracy": 0,
-                        "citationHit": 0,
+                        "citationHit": None,
                         "citationLawHit": None,
+                        "citationLawFamilyHit": None,
                         "citationArticleHit": None,
                         "citationParagraphHit": None,
-                        "retrievalHitAt5": 0,
+                        "candidatePoolHit": None,
+                        "fusionHit": None,
                         "graphExpansionHit": 0,
                     },
                     "latencyMs": None,
@@ -166,7 +191,35 @@ def run_lawqa() -> list[dict[str, Any]]:
             if reference_granularity == "law"
             else citation_article_hit
         )
-        llm_trace = output.get("trace", {}).get("llm", {})
+        # 期待参照が全く無い問題(非e-Gov PDFのみ等)は検索精度を採点できない。
+        reference_scorable = bool(expected_document_ids or expected)
+
+        # 法令ファミリー一致: 親法を期待して委任法令(施行令・府令)を引いたケースを別軸で計測。
+        expected_families = {_family_of(document_id) for document_id in expected_document_ids}
+        retrieved_families = {_family_of(document_id) for document_id in retrieved_document_ids if document_id}
+        citation_law_family_hit = bool(expected_families & retrieved_families) if expected_document_ids else None
+
+        # 候補プール→RRF融合上位→最終引用のどこで期待根拠を落としたかを分離。
+        trace = output.get("trace", {})
+        candidate_ids = set(trace.get("candidatePoolContentUnitIds", trace.get("retrievedContentUnitIds", [])))
+        fusion_ids = set(trace.get("fusionTopContentUnitIds", []))
+        reranker_ids = set(trace.get("rerankerTopContentUnitIds", fusion_ids))
+
+        def _hit_at(ids: set[str]) -> bool | None:
+            if not reference_scorable:
+                return None
+            if reference_granularity == "law":
+                return bool(expected_document_ids & {_document_id_of(item) for item in ids if item})
+            articles = {_article_content_unit_id(item) for item in ids if item}
+            return bool(expected_articles & articles)
+
+        candidate_pool_hit = _hit_at(candidate_ids)
+        fusion_hit = _hit_at(fusion_ids)
+        reranker_hit = _hit_at(reranker_ids)
+        llm_trace = trace.get("llm", {})
+        planner_trace = trace.get("planner", {})
+        evaluator_trace = trace.get("evaluator", {})
+        reranker_trace = trace.get("reranker", {})
         llm_used = bool(llm_trace.get("used"))
         validation_error = llm_trace.get("validationError")
         llm_error = llm_trace.get("error")
@@ -188,6 +241,7 @@ def run_lawqa() -> list[dict[str, Any]]:
         )
         results.append(
             {
+                "metricVersion": METRIC_VERSION,
                 "runId": f"run-{row['questionId']}",
                 "pattern": output["pattern"],
                 "dataset": "lawqa_jp",
@@ -206,16 +260,32 @@ def run_lawqa() -> list[dict[str, Any]]:
                 "llmUsed": llm_used,
                 "validationError": validation_error,
                 "llmError": llm_error,
+                "referenceScorable": reference_scorable,
+                "rerankerUsed": bool(reranker_trace.get("used")),
+                "rerankerModel": reranker_trace.get("model"),
+                "rerankerLatencyMs": reranker_trace.get("latencyMs"),
+                "rerankerError": reranker_trace.get("error"),
+                "llmCallCount": trace.get("llmCallCount"),
+                "elapsedMs": trace.get("elapsedMs"),
+                "agentStopReason": trace.get("stopReason"),
+                "answerLlmStopReason": llm_trace.get("stopReason"),
+                "plannerStopReason": planner_trace.get("stopReason"),
+                "evaluatorStopReason": evaluator_trace.get("stopReason"),
+                "questionPolarity": llm_trace.get("questionPolarity"),
+                "choiceAssessments": llm_trace.get("choiceAssessments"),
                 "scores": {
                     "answerAccuracy": 1 if output.get("predictedAnswer") == row["goldAnswer"] else 0,
-                    "citationHit": 1 if citation_hit else 0,
+                    "citationHit": _optional_binary(citation_hit),
                     "citationLawHit": _optional_binary(citation_law_hit),
+                    "citationLawFamilyHit": _optional_binary(citation_law_family_hit),
                     "citationArticleHit": _optional_binary(citation_article_hit),
                     "citationParagraphHit": _optional_binary(citation_paragraph_hit),
-                    "retrievalHitAt5": 1 if citation_hit else 0,
+                    "candidatePoolHit": _optional_binary(candidate_pool_hit),
+                    "fusionHit": _optional_binary(fusion_hit),
+                    "rerankerHit": _optional_binary(reranker_hit),
                     "graphExpansionHit": 1 if graph_expansion_hit else 0,
                 },
-                "latencyMs": None,
+                "latencyMs": output.get("trace", {}).get("elapsedMs"),
             }
         )
     return results
@@ -247,6 +317,17 @@ def _reference_granularity(expected: set[str]) -> str:
 
 def _article_content_unit_id(content_unit_id: str) -> str:
     return content_unit_id.split("-paragraph-", 1)[0]
+
+
+def _document_id_of(content_unit_id: str) -> str:
+    """contentUnitId から documentId(law-<法令番号>)を取り出す。附則(suppl)IDにも対応。"""
+    return "-".join(str(content_unit_id).split("-")[:2])
+
+
+def _family_of(document_id: str) -> str:
+    """documentId を法令ファミリーの親法IDへ丸める(施行令・府令→親法)。"""
+    law_id = str(document_id).removeprefix("law-")
+    return f"law-{LAW_FAMILY_ROOT.get(law_id, law_id)}"
 
 
 def _optional_binary(value: bool | None) -> int | None:
@@ -285,7 +366,11 @@ def normalize_lawqa_sample(sample: dict[str, Any], index: int) -> dict[str, Any]
     references = [_reference_from_url(url) for url in sample.get("references", [])]
     law_ids = {ref["lawId"] for ref in references if ref.get("lawId")}
     # コンテキスト から条・項・号レベルの正解を補う（採点専用。API へは送らない）。
-    references.extend(_context_expected_references(str(sample.get("コンテキスト") or ""), law_ids))
+    # references は親法しか載せないことが多いため、コンテキスト見出しの対応付けには
+    # 既知のseed対象法令も含める(委任法令が正解根拠の問題を採点可能にする)。
+    references.extend(
+        _context_expected_references(str(sample.get("コンテキスト") or ""), law_ids | set(KNOWN_LAW_IDS))
+    )
     return {
         "questionId": question_id,
         "question": str(sample["問題文"]),
@@ -358,10 +443,19 @@ def _context_expected_references(context: str, law_ids: set[str]) -> list[dict[s
     """lawqa_jp の コンテキスト 見出し（## 法令名 / ### 第N条 / #### 第N項 / ##### 第N号）から
     条・項・号レベルの正解 contentUnitId を組み立てる。API へは送らず採点にのみ使う。"""
     title_to_law_id: dict[str, str] = {}
+    registry_by_id = {str(item["lawId"]): item for item in LAW_REGISTRY["laws"]}
     for law_id in law_ids:
-        title = _egov_title(law_id)
-        if title:
-            title_to_law_id.setdefault(title, law_id)
+        registry_item = registry_by_id.get(law_id)
+        registered_titles = []
+        if registry_item:
+            registered_titles = [registry_item.get("title"), *registry_item.get("aliases", [])]
+        for title in registered_titles:
+            if title:
+                title_to_law_id.setdefault(str(title), law_id)
+        if not registered_titles:
+            title = _egov_title(law_id)
+            if title:
+                title_to_law_id.setdefault(title, law_id)
     if not title_to_law_id:
         return []
 

@@ -1,5 +1,5 @@
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import perf_counter
 from typing import Any, Literal
 
@@ -23,6 +23,12 @@ class LLMResult:
     predictedAnswer: str | None
     choiceJudgements: dict[str, str] | None
     validationError: str | None = None
+    stopReason: str | None = None
+    contentBlockTypes: list[str] | None = None
+    outputChars: int | None = None
+    retryCount: int = 0
+    questionPolarity: str | None = None
+    choiceAssessments: dict[str, dict[str, Any]] | None = None
 
 
 @dataclass
@@ -35,6 +41,8 @@ class SearchPlanResult:
     inputTokens: int | None
     outputTokens: int | None
     validationError: str | None = None
+    stopReason: str | None = None
+    retryCount: int = 0
 
 
 @dataclass
@@ -49,14 +57,25 @@ class EvidenceEvaluationResult:
     inputTokens: int | None
     outputTokens: int | None
     validationError: str | None = None
+    stopReason: str | None = None
+    retryCount: int = 0
+
+
+class LLMChoiceAssessment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    verdict: Literal["entailed", "contradicted", "insufficient"]
+    citationIds: list[str] = Field(default_factory=list)
+    reason: str = ""
 
 
 class LLMAnswerPayload(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     answer: str = ""
+    questionPolarity: Literal["select_entailed", "select_contradicted"] | None = None
     predictedAnswer: str | None = None
-    choiceJudgements: dict[str, Literal["supported", "not_supported"] | None] | None = None
+    choiceAssessments: dict[str, LLMChoiceAssessment] | None = None
 
 
 class SearchPlanPayload(BaseModel):
@@ -139,10 +158,34 @@ class LLMClient:
         evidence_by_choice: dict[str, list[str]] | None = None,
     ) -> LLMResult | None:
         prompt = build_answer_prompt(request, route, citations, evidence_by_choice)
+        timeout = timeout_sec or settings.llm_timeout_sec
+        started = perf_counter()
+        result = self._generate_once(request, prompt, timeout, citations)
+        if result is not None and result.validationError:
+            retry_timeout = _retry_timeout(timeout, started)
+            if retry_timeout is not None:
+                retried = self._generate_once(request, prompt, retry_timeout, citations)
+                if retried is not None:
+                    result = replace(
+                        retried,
+                        retryCount=1,
+                        latencyMs=result.latencyMs + retried.latencyMs,
+                        inputTokens=_sum_optional(result.inputTokens, retried.inputTokens),
+                        outputTokens=_sum_optional(result.outputTokens, retried.outputTokens),
+                    )
+        return result
+
+    def _generate_once(
+        self,
+        request: AnswerRequest,
+        prompt: str,
+        timeout_sec: int | None,
+        citations: list[Citation],
+    ) -> LLMResult | None:
         if self.provider == "ollama":
-            return self._generate_ollama(request, prompt, timeout_sec)
+            return self._generate_ollama(request, prompt, timeout_sec, citations)
         if self.provider == "anthropic":
-            return self._generate_anthropic(request, prompt, timeout_sec)
+            return self._generate_anthropic(request, prompt, timeout_sec, citations)
         return None
 
     def plan_search(
@@ -153,23 +196,24 @@ class LLMClient:
     ) -> SearchPlanResult:
         prompt = build_search_plan_prompt(request, max_queries)
         schema = _search_plan_json_schema(max_queries)
-        if self.provider == "ollama":
-            raw_text, latency_ms, input_tokens, output_tokens = self._ollama_json(
-                prompt,
-                schema,
-                settings.planner_model,
-                timeout_sec or settings.planner_timeout_sec,
-            )
-        elif self.provider == "anthropic":
-            raw_text, latency_ms, input_tokens, output_tokens = self._anthropic_json(
-                prompt,
-                settings.planner_model,
-                settings.planner_max_tokens,
-                timeout_sec or settings.planner_timeout_sec,
-            )
-        else:
-            raise ValueError(f"Unsupported LLM_PROVIDER: {self.provider}")
+        timeout = timeout_sec or settings.planner_timeout_sec
+        started = perf_counter()
+        retry_count = 0
+        raw_text, latency_ms, input_tokens, output_tokens, stop_reason = self._json_transport(
+            prompt, schema, settings.planner_model, settings.planner_max_tokens, timeout
+        )
         queries, graph_required, validation_error = _parse_search_plan(raw_text, max_queries)
+        retry_timeout = _retry_timeout(timeout, started) if validation_error else None
+        if retry_timeout is not None:
+            retry_count = 1
+            first_input_tokens, first_output_tokens = input_tokens, output_tokens
+            raw_text, retry_latency, retry_input_tokens, retry_output_tokens, stop_reason = self._json_transport(
+                prompt, schema, settings.planner_model, settings.planner_max_tokens, retry_timeout
+            )
+            latency_ms += retry_latency
+            input_tokens = _sum_optional(first_input_tokens, retry_input_tokens)
+            output_tokens = _sum_optional(first_output_tokens, retry_output_tokens)
+            queries, graph_required, validation_error = _parse_search_plan(raw_text, max_queries)
         return SearchPlanResult(
             queries=queries,
             graphRequired=graph_required,
@@ -179,6 +223,8 @@ class LLMClient:
             inputTokens=input_tokens,
             outputTokens=output_tokens,
             validationError=validation_error,
+            stopReason=stop_reason,
+            retryCount=retry_count,
         )
 
     def evaluate_evidence(
@@ -190,27 +236,32 @@ class LLMClient:
     ) -> EvidenceEvaluationResult:
         prompt = build_evidence_evaluation_prompt(request, citations, max_queries)
         schema = _evidence_evaluation_json_schema(request, max_queries)
-        if self.provider == "ollama":
-            raw_text, latency_ms, input_tokens, output_tokens = self._ollama_json(
-                prompt,
-                schema,
-                settings.evaluator_model,
-                timeout_sec or settings.evaluator_timeout_sec,
-            )
-        elif self.provider == "anthropic":
-            raw_text, latency_ms, input_tokens, output_tokens = self._anthropic_json(
-                prompt,
-                settings.evaluator_model,
-                settings.evaluator_max_tokens,
-                timeout_sec or settings.evaluator_timeout_sec,
-            )
-        else:
-            raise ValueError(f"Unsupported LLM_PROVIDER: {self.provider}")
+        timeout = timeout_sec or settings.evaluator_timeout_sec
+        started = perf_counter()
+        retry_count = 0
+        raw_text, latency_ms, input_tokens, output_tokens, stop_reason = self._json_transport(
+            prompt, schema, settings.evaluator_model, settings.evaluator_max_tokens, timeout
+        )
         coverage, queries, graph_required, stop, validation_error = _parse_evidence_evaluation(
             raw_text,
             request.choices,
             max_queries,
         )
+        retry_timeout = _retry_timeout(timeout, started) if validation_error else None
+        if retry_timeout is not None:
+            retry_count = 1
+            first_input_tokens, first_output_tokens = input_tokens, output_tokens
+            raw_text, retry_latency, retry_input_tokens, retry_output_tokens, stop_reason = self._json_transport(
+                prompt, schema, settings.evaluator_model, settings.evaluator_max_tokens, retry_timeout
+            )
+            latency_ms += retry_latency
+            input_tokens = _sum_optional(first_input_tokens, retry_input_tokens)
+            output_tokens = _sum_optional(first_output_tokens, retry_output_tokens)
+            coverage, queries, graph_required, stop, validation_error = _parse_evidence_evaluation(
+                raw_text,
+                request.choices,
+                max_queries,
+            )
         return EvidenceEvaluationResult(
             choiceCoverage=coverage,
             followUpQueries=queries,
@@ -222,6 +273,8 @@ class LLMClient:
             inputTokens=input_tokens,
             outputTokens=output_tokens,
             validationError=validation_error,
+            stopReason=stop_reason,
+            retryCount=retry_count,
         )
 
     def _generate_ollama(
@@ -229,6 +282,7 @@ class LLMClient:
         request: AnswerRequest,
         prompt: str,
         timeout_sec: int | None,
+        citations: list[Citation],
     ) -> LLMResult:
         started = perf_counter()
         response = requests.post(
@@ -236,7 +290,7 @@ class LLMClient:
             json={
                 "model": settings.answer_model,
                 "prompt": prompt,
-                "format": _answer_json_schema(request),
+                "format": _answer_json_schema(request, citations),
                 "stream": False,
                 "options": {
                     "temperature": 0,
@@ -248,7 +302,11 @@ class LLMClient:
         response.raise_for_status()
         data = response.json()
         raw_text = str(data.get("response", "")).strip()
-        answer, predicted_answer, choice_judgements, validation_error = _parse_answer_payload(raw_text, request.choices)
+        answer, predicted_answer, choice_judgements, assessments, polarity, validation_error = _parse_answer_payload(
+            raw_text,
+            request.choices,
+            _citation_ids(citations),
+        )
         return LLMResult(
             text=answer,
             provider="ollama",
@@ -261,6 +319,10 @@ class LLMClient:
             predictedAnswer=predicted_answer,
             choiceJudgements=choice_judgements,
             validationError=validation_error,
+            stopReason=data.get("done_reason"),
+            outputChars=len(raw_text),
+            questionPolarity=polarity,
+            choiceAssessments=assessments,
         )
 
     def _generate_anthropic(
@@ -268,6 +330,7 @@ class LLMClient:
         request: AnswerRequest,
         prompt: str,
         timeout_sec: int | None,
+        citations: list[Citation],
     ) -> LLMResult:
         if not settings.anthropic_api_key:
             raise ValueError("ANTHROPIC_API_KEY is required when LLM_PROVIDER=anthropic")
@@ -284,19 +347,24 @@ class LLMClient:
                 "model": settings.answer_model,
                 "max_tokens": settings.anthropic_max_tokens,
                 "messages": [{"role": "user", "content": prompt}],
+                "output_config": {
+                    "format": {
+                        "type": "json_schema",
+                        "schema": _to_anthropic_schema(_answer_json_schema(request, citations)),
+                    }
+                },
             },
             timeout=timeout_sec or settings.llm_timeout_sec,
         )
         if not response.ok:
-            error_detail = ""
-            try:
-                error_detail = response.json().get("error", {}).get("message", "")
-            except Exception:
-                error_detail = response.text[:200]
-            raise ValueError(f"{response.status_code}: {error_detail}")
+            raise ValueError(f"{response.status_code}: {_anthropic_error(response)}")
         data = response.json()
         raw_text = _anthropic_text(data)
-        answer, predicted_answer, choice_judgements, validation_error = _parse_answer_payload(raw_text, request.choices)
+        answer, predicted_answer, choice_judgements, assessments, polarity, validation_error = _parse_answer_payload(
+            raw_text,
+            request.choices,
+            _citation_ids(citations),
+        )
         usage = data.get("usage", {})
         return LLMResult(
             text=answer,
@@ -310,7 +378,27 @@ class LLMClient:
             predictedAnswer=predicted_answer,
             choiceJudgements=choice_judgements,
             validationError=validation_error,
+            stopReason=data.get("stop_reason"),
+            contentBlockTypes=[str(block.get("type")) for block in data.get("content", []) if isinstance(block, dict)],
+            outputChars=len(raw_text),
+            questionPolarity=polarity,
+            choiceAssessments=assessments,
         )
+
+    def _json_transport(
+        self,
+        prompt: str,
+        schema: dict[str, Any],
+        model: str,
+        max_tokens: int,
+        timeout_sec: int,
+    ) -> tuple[str, int, int | None, int | None, str | None]:
+        """provider共通のJSON生成トランスポート。(raw_text, latencyMs, inTokens, outTokens, stopReason)を返す。"""
+        if self.provider == "ollama":
+            return self._ollama_json(prompt, schema, model, timeout_sec)
+        if self.provider == "anthropic":
+            return self._anthropic_json(prompt, schema, model, max_tokens, timeout_sec)
+        raise ValueError(f"Unsupported LLM_PROVIDER: {self.provider}")
 
     def _ollama_json(
         self,
@@ -318,7 +406,7 @@ class LLMClient:
         schema: dict[str, Any],
         model: str,
         timeout_sec: int,
-    ) -> tuple[str, int, int | None, int | None]:
+    ) -> tuple[str, int, int | None, int | None, str | None]:
         started = perf_counter()
         response = requests.post(
             f"{settings.ollama_base_url.rstrip('/')}/api/generate",
@@ -338,15 +426,17 @@ class LLMClient:
             int((perf_counter() - started) * 1000),
             data.get("prompt_eval_count"),
             data.get("eval_count"),
+            data.get("done_reason"),
         )
 
     def _anthropic_json(
         self,
         prompt: str,
+        schema: dict[str, Any],
         model: str,
         max_tokens: int,
         timeout_sec: int,
-    ) -> tuple[str, int, int | None, int | None]:
+    ) -> tuple[str, int, int | None, int | None, str | None]:
         if not settings.anthropic_api_key:
             raise ValueError("ANTHROPIC_API_KEY is required when LLM_PROVIDER=anthropic")
         started = perf_counter()
@@ -361,6 +451,7 @@ class LLMClient:
                 "model": model,
                 "max_tokens": max_tokens,
                 "messages": [{"role": "user", "content": prompt}],
+                "output_config": {"format": {"type": "json_schema", "schema": _to_anthropic_schema(schema)}},
             },
             timeout=timeout_sec,
         )
@@ -373,6 +464,7 @@ class LLMClient:
             int((perf_counter() - started) * 1000),
             usage.get("input_tokens"),
             usage.get("output_tokens"),
+            data.get("stop_reason"),
         )
 
 
@@ -389,20 +481,14 @@ def build_answer_prompt(
         choices_block = "\n選択肢:\n" + "\n".join(
             f"{label.upper()}: {text}" for label, text in sorted(request.choices.items())
         )
-    evidence_matrix_block = ""
-    if evidence_by_choice:
-        evidence_matrix_block = "\n選択肢別の根拠候補contentUnitId:\n" + "\n".join(
-            f"{label}: {', '.join(content_ids) if content_ids else '候補なし'}"
-            for label, content_ids in sorted(evidence_by_choice.items())
-        )
-
     choice_commitment_rule = (
-        "選択肢がある場合、predictedAnswer には必ずいずれかの選択肢ラベルを設定してください。"
-        " 引用候補が薄く確信が持てない場合でも、null にはせず、引用候補や一般的な法的知識から最も可能性が高いと考えられる選択肢を選んでください。"
-        " choiceJudgements は各選択肢に supported または not_supported を設定してください（predictedAnswer と一致する選択肢のみ supported）。"
-        " ただし answer 内では、根拠が薄い場合はその旨を明記し、専門家確認が必要であることを伝えてください。"
+        "まず設問が、条文に適合する選択肢を選ぶ select_entailed か、誤り・非該当を選ぶ select_contradicted かを判定してください。"
+        " 次に各選択肢の記述を独立に検証し、entailed、contradicted、insufficient のいずれかを設定してください。"
+        " 各判定には、実際に根拠とした引用候補のcontentUnitIdだけをcitationIdsへ設定し、短い理由を付けてください。"
+        " 最後にquestionPolarityとchoiceAssessmentsの整合する選択肢をpredictedAnswerへ設定してください。"
+        " 根拠不足でも必ず最も可能性の高い選択肢を選び、answer内で不確実性を明記してください。"
         if request.choices
-        else "選択肢がない場合、predictedAnswer と choiceJudgements は null にしてください。"
+        else "選択肢がない場合、questionPolarity、predictedAnswer、choiceAssessmentsはnullにしてください。"
     )
 
     return f"""あなたはローカル検証環境の法務RAG回答生成器です。
@@ -414,7 +500,7 @@ answer には正解ラベルだけでなく、引用候補に基づく短い根�
 {choice_commitment_rule}
 
 検索ルート: {" -> ".join(route)}
-質問: {request.question}{choices_block}{evidence_matrix_block}
+    質問: {request.question}{choices_block}
 
 引用候補:
 {citation_block}
@@ -467,33 +553,55 @@ queries は最大 {max_queries} 件、各クエリは200文字以内にしてく
 JSON:"""
 
 
-def _answer_json_schema(request: AnswerRequest) -> dict[str, Any]:
+def _answer_json_schema(request: AnswerRequest, citations: list[Citation] | None = None) -> dict[str, Any]:
     labels = sorted(label.upper() for label in (request.choices or {}))
-    judgement_properties = {
-        label: {"type": "string", "enum": ["supported", "not_supported"]}
-        for label in labels
+    citation_ids = _citation_ids(citations or [])
+    citation_id_schema: dict[str, Any] = {"type": "string"}
+    if citation_ids:
+        citation_id_schema["enum"] = citation_ids
+    assessment_schema = {
+        "type": "object",
+        "properties": {
+            "verdict": {"type": "string", "enum": ["entailed", "contradicted", "insufficient"]},
+            "citationIds": {
+                "type": "array",
+                "items": citation_id_schema,
+                "maxItems": 3,
+            },
+            "reason": {"type": "string", "maxLength": 300},
+        },
+        "required": ["verdict", "citationIds", "reason"],
+        "additionalProperties": False,
     }
+    assessment_properties = {label: assessment_schema for label in labels}
     predicted_schema: dict[str, Any]
-    judgements_schema: dict[str, Any]
+    polarity_schema: dict[str, Any]
+    assessments_schema: dict[str, Any]
     if labels:
         predicted_schema = {"type": ["string", "null"], "enum": [*labels, None]}
-        judgements_schema = {
+        polarity_schema = {
+            "type": ["string", "null"],
+            "enum": ["select_entailed", "select_contradicted", None],
+        }
+        assessments_schema = {
             "type": ["object", "null"],
-            "properties": judgement_properties,
+            "properties": assessment_properties,
             "required": labels,
             "additionalProperties": False,
         }
     else:
         predicted_schema = {"type": "null"}
-        judgements_schema = {"type": "null"}
+        polarity_schema = {"type": "null"}
+        assessments_schema = {"type": "null"}
     return {
         "type": "object",
         "properties": {
             "answer": {"type": "string"},
+            "questionPolarity": polarity_schema,
             "predictedAnswer": predicted_schema,
-            "choiceJudgements": judgements_schema,
+            "choiceAssessments": assessments_schema,
         },
-        "required": ["answer", "predictedAnswer", "choiceJudgements"],
+        "required": ["answer", "questionPolarity", "predictedAnswer", "choiceAssessments"],
         "additionalProperties": False,
     }
 
@@ -546,6 +654,77 @@ def _evidence_evaluation_json_schema(request: AnswerRequest, max_queries: int) -
     }
 
 
+# Anthropic構造化出力が未サポートの制約キーワード。件数・文字数の上限はコード側の
+# パーサー(_parse_search_plan等)が同じ値で強制しているため、除去しても安全。
+_ANTHROPIC_UNSUPPORTED_KEYS = ("minItems", "maxItems", "minLength", "maxLength")
+
+
+def _to_anthropic_schema(schema: Any) -> Any:
+    """内部スキーマ(Ollama互換のunion型記法)をAnthropic構造化出力の方言へ変換する。
+
+    Anthropicのスキーマ検証は `"type": ["string", "null"]` のようなunion型と enum の併用を
+    拒否するため、union型を anyOf のブランチへ再帰的に展開する。enum値は各ブランチの型に
+    一致するものだけを残す。また minItems/maxItems 等の未サポート制約は除去する。
+    スキーマ定義自体は1ソース(内部表現)のまま、プロバイダ差はこの変換に閉じ込める。
+    """
+    if isinstance(schema, list):
+        return [_to_anthropic_schema(item) for item in schema]
+    if not isinstance(schema, dict):
+        return schema
+    converted = {
+        key: _to_anthropic_schema(value)
+        for key, value in schema.items()
+        if key not in _ANTHROPIC_UNSUPPORTED_KEYS
+    }
+    type_value = converted.get("type")
+    if not isinstance(type_value, list):
+        return converted
+
+    branches = []
+    for type_name in type_value:
+        if type_name == "null":
+            branches.append({"type": "null"})
+            continue
+        branch = {key: value for key, value in converted.items() if key != "type"}
+        branch["type"] = type_name
+        if "enum" in branch:
+            allowed = [value for value in branch["enum"] if _enum_value_matches_type(value, type_name)]
+            if allowed:
+                branch["enum"] = allowed
+            else:
+                del branch["enum"]
+        if type_name != "object":
+            for object_key in ("properties", "required", "additionalProperties"):
+                branch.pop(object_key, None)
+        branches.append(branch)
+    return {"anyOf": branches}
+
+
+def _enum_value_matches_type(value: Any, type_name: str) -> bool:
+    if type_name == "null":
+        return value is None
+    if type_name == "string":
+        return isinstance(value, str)
+    if type_name == "boolean":
+        return isinstance(value, bool)
+    if type_name == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if type_name == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return value is not None
+
+
+def _retry_timeout(total_timeout_sec: int, started: float) -> int | None:
+    remaining = int(total_timeout_sec - (perf_counter() - started))
+    return remaining if remaining > 1 else None
+
+
+def _sum_optional(first: int | None, second: int | None) -> int | None:
+    if first is None and second is None:
+        return None
+    return int(first or 0) + int(second or 0)
+
+
 def _strip_markdown_fence(text: str) -> str:
     """一部モデルはJSON出力指示があってもMarkdownコードフェンスで囲むため除去する。"""
     stripped = text.strip()
@@ -562,21 +741,42 @@ def _strip_markdown_fence(text: str) -> str:
 def _parse_answer_payload(
     raw_text: str,
     choices: dict[str, str] | None,
-) -> tuple[str, str | None, dict[str, str] | None, str | None]:
+    allowed_citation_ids: list[str] | None = None,
+) -> tuple[
+    str,
+    str | None,
+    dict[str, str] | None,
+    dict[str, dict[str, Any]] | None,
+    str | None,
+    str | None,
+]:
     try:
         raw_payload = json.loads(_strip_markdown_fence(raw_text))
     except json.JSONDecodeError as exc:
-        return raw_text, None, None, f"json_parse_error: {exc}"
+        return raw_text, None, None, None, None, f"json_parse_error: {exc}"
 
     try:
         payload = LLMAnswerPayload.model_validate(raw_payload)
-        _validate_choice_fields(payload, choices)
+        _validate_choice_fields(payload, choices, set(allowed_citation_ids or []))
     except (ValidationError, ValueError) as exc:
-        return _answer_from_raw_payload(raw_payload, raw_text), None, None, f"validation_error: {exc}"
+        return _answer_from_raw_payload(raw_payload, raw_text), None, None, None, None, f"validation_error: {exc}"
 
-    predicted_answer = _derive_predicted_answer(payload.predictedAnswer, payload.choiceJudgements)
     answer_text = payload.answer or "（回答テキストが取得できなかったため、選択肢判定のみ返します。）"
-    return answer_text, predicted_answer, payload.choiceJudgements, None
+    assessments = None
+    if payload.choiceAssessments:
+        assessments = {}
+        for label, assessment in payload.choiceAssessments.items():
+            normalized = assessment.model_dump()
+            normalized["citationIds"] = list(dict.fromkeys(assessment.citationIds))[:3]
+            normalized["reason"] = assessment.reason[:300]
+            assessments[label] = normalized
+    judgements = None
+    if payload.predictedAnswer is not None and choices:
+        judgements = {
+            label.upper(): "supported" if label.upper() == payload.predictedAnswer else "not_supported"
+            for label in choices
+        }
+    return answer_text, payload.predictedAnswer, judgements, assessments, payload.questionPolarity, None
 
 
 def _parse_search_plan(raw_text: str, max_queries: int) -> tuple[list[str], bool, str | None]:
@@ -623,19 +823,43 @@ def _parse_evidence_evaluation(
     return dict(payload.choiceCoverage), queries, payload.graphRequired, payload.stop, None
 
 
-def _validate_choice_fields(payload: LLMAnswerPayload, choices: dict[str, str] | None) -> None:
+def _validate_choice_fields(
+    payload: LLMAnswerPayload,
+    choices: dict[str, str] | None,
+    allowed_citation_ids: set[str],
+) -> None:
     labels = {label.upper() for label in (choices or {})}
     if not labels:
-        if payload.predictedAnswer is not None or payload.choiceJudgements is not None:
-            raise ValueError("Choice judgement fields must be null when choices are absent")
+        if any(
+            value is not None
+            for value in (payload.questionPolarity, payload.predictedAnswer, payload.choiceAssessments)
+        ):
+            raise ValueError("Choice assessment fields must be null when choices are absent")
         return
 
-    if payload.predictedAnswer is not None and payload.predictedAnswer not in labels:
-        raise ValueError(f"predictedAnswer must be one of {sorted(labels)} or null")
-    if payload.predictedAnswer is not None and payload.choiceJudgements is None:
-        raise ValueError("choiceJudgements is required when predictedAnswer is set")
-    if payload.choiceJudgements is not None and set(payload.choiceJudgements) != labels:
-        raise ValueError(f"choiceJudgements keys must match {sorted(labels)}")
+    if payload.questionPolarity is None:
+        raise ValueError("questionPolarity is required when choices are present")
+    if payload.predictedAnswer not in labels:
+        raise ValueError(f"predictedAnswer must be one of {sorted(labels)}")
+    if payload.choiceAssessments is None or set(payload.choiceAssessments) != labels:
+        raise ValueError(f"choiceAssessments keys must match {sorted(labels)}")
+
+    for label, assessment in payload.choiceAssessments.items():
+        unknown = set(assessment.citationIds) - allowed_citation_ids
+        if unknown:
+            raise ValueError(f"choiceAssessments.{label}.citationIds contains unknown IDs: {sorted(unknown)}")
+
+    target_verdict = "entailed" if payload.questionPolarity == "select_entailed" else "contradicted"
+    verdicts = {label: assessment.verdict for label, assessment in payload.choiceAssessments.items()}
+    selected_verdict = verdicts[payload.predictedAnswer]
+    if target_verdict in verdicts.values() and selected_verdict != target_verdict:
+        raise ValueError(f"predictedAnswer must have verdict {target_verdict}")
+    if target_verdict not in verdicts.values() and selected_verdict != "insufficient":
+        raise ValueError("predictedAnswer must be insufficient when no assessment matches questionPolarity")
+
+
+def _citation_ids(citations: list[Citation]) -> list[str]:
+    return list(dict.fromkeys(citation.contentUnitId for citation in citations if citation.contentUnitId))
 
 
 def _derive_predicted_answer(

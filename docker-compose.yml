@@ -63,6 +63,25 @@ services:
       timeout: 5s
       retries: 60
 
+  reranker-api:
+    build: ./reranker-api
+    environment:
+      RERANK_MODEL: ${RERANK_MODEL:-hotchpotch/japanese-reranker-base-v2}
+      RERANK_MAX_LENGTH: ${RERANK_MAX_LENGTH:-512}
+      RERANK_BATCH_SIZE: ${RERANK_BATCH_SIZE:-8}
+      OMP_NUM_THREADS: ${RERANK_CPU_THREADS:-4}
+      MKL_NUM_THREADS: ${RERANK_CPU_THREADS:-4}
+    ports:
+      - "8100:8100"
+    volumes:
+      - reranker_models:/models/huggingface
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 120
+      start_period: 30s
+
   agent-api:
     build: ./agent-api
     environment:
@@ -82,6 +101,9 @@ services:
       SEED_LAWQA_EGOV: ${SEED_LAWQA_EGOV:-false}
       LAWQA_EGOV_LAW_IDS: ${LAWQA_EGOV_LAW_IDS:-}
       EGOV_API_BASE_URL: ${EGOV_API_BASE_URL:-https://laws.e-gov.go.jp/api/1}
+      SEED_EXTERNAL_GUIDANCE: ${SEED_EXTERNAL_GUIDANCE:-false}
+      EXTERNAL_GUIDANCE_MANIFEST: ${EXTERNAL_GUIDANCE_MANIFEST:-/workspace/datasets/lawqa_jp/external-guidance/manifest.json}
+      EXTERNAL_GUIDANCE_CHUNK_CHARS: ${EXTERNAL_GUIDANCE_CHUNK_CHARS:-900}
       AGENT_USE_BM25: ${AGENT_USE_BM25:-true}
       AGENT_USE_VECTOR: ${AGENT_USE_VECTOR:-true}
       AGENT_USE_LLM_PLANNER: ${AGENT_USE_LLM_PLANNER:-true}
@@ -92,9 +114,16 @@ services:
       AGENT_MAX_GRAPH_PATHS: ${AGENT_MAX_GRAPH_PATHS:-10}
       AGENT_MAX_WALL_TIME_SEC: ${AGENT_MAX_WALL_TIME_SEC:-110}
       AGENT_CANDIDATE_TOP_K: ${AGENT_CANDIDATE_TOP_K:-20}
+      AGENT_GUIDANCE_CANDIDATE_TOP_K: ${AGENT_GUIDANCE_CANDIDATE_TOP_K:-10}
       AGENT_RERANK_TOP_K: ${AGENT_RERANK_TOP_K:-10}
       AGENT_RRF_K: ${AGENT_RRF_K:-60}
       AGENT_MAX_LLM_CALLS: ${AGENT_MAX_LLM_CALLS:-3}
+      RERANK_PROVIDER: ${RERANK_PROVIDER:-local_http}
+      RERANK_BASE_URL: ${RERANK_BASE_URL:-http://reranker-api:8100}
+      RERANK_MODEL: ${RERANK_MODEL:-hotchpotch/japanese-reranker-base-v2}
+      RERANK_CANDIDATE_TOP_K: ${RERANK_CANDIDATE_TOP_K:-30}
+      RERANK_TIMEOUT_SEC: ${RERANK_TIMEOUT_SEC:-30}
+      RERANK_MAX_CHARS: ${RERANK_MAX_CHARS:-3000}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-ollama}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-bge-m3}
       EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-1024}
@@ -125,6 +154,8 @@ services:
       neo4j:
         condition: service_healthy
       minio:
+        condition: service_healthy
+      reranker-api:
         condition: service_healthy
     volumes:
       - ./docs/requirements/samples:/workspace/samples:ro
@@ -167,3 +198,4 @@ volumes:
   opensearch_data:
   neo4j_data:
   neo4j_logs:
+  reranker_models:

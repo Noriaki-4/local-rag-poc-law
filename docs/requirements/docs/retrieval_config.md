@@ -118,7 +118,9 @@ final_top_k  = 5
 
 OpenSearchの実装上は、BM25とkNNを別々に検索し、アプリ側でRRF統合する。
 
-現行ローカル実装では、BM25とkNNを各20件取得し、`rrf_k=60`のReciprocal Rank Fusionで統合する。Pattern 3/4でも元の質問・選択肢を結合した広い検索を必ず残し、その上で分解クエリをRRF統合する。候補20件から選択肢ごとの関連度を加味して10件を再順位し、最終引用は5件とする。Neo4jから取得した参照条文も同じEvidence集合へ追加するが、最終回答のコンテキストは各引用へ文字予算を均等配分する。
+現行ローカル実装では、BM25とkNNを各20件取得し、`rrf_k=60`のReciprocal Rank Fusionで統合する。Pattern 3/4でも元の質問・選択肢を結合した広い検索を必ず残し、その上で分解クエリをRRF統合する。OpenSearchとNeo4jの統合候補から最大30件をローカル日本語cross-encoderへ渡し、上位10件を最終回答候補とする。明示条番号から直接解決した`mustInclude`根拠はリランカーで降格させない。最終引用は5件とし、回答コンテキストは各引用へ文字予算を均等配分する。
+
+専用リランカーは`hotchpotch/japanese-reranker-base-v2`をCPUで実行する。障害・timeout時はRRF融合順位へフォールバックし、`trace.reranker`へ利用有無と処理時間を記録する。
 
 補足: OpenSearch 2.19系では、search pipeline の normalization processorを使ったネイティブhybrid queryも比較候補にする。現行のアプリ側RRFとの挙動差は別実験として扱う。
 

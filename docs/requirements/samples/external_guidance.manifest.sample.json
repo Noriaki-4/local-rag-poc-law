@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "purpose": "lawqa_jp の非e-Gov参照資料を、評価goldから分離して原本保管・任意投入する。",
+  "documents": [
+    {
+      "documentId": "guidance-fsa-financial-instruments-business",
+      "title": "金融商品取引業者等向けの総合的な監督指針",
+      "authority": "金融庁",
+      "file": "documents/fsa-financial-instruments-business-supervisory-guidelines.pdf",
+      "sourceUrl": "https://www.fsa.go.jp/common/law/guide/kinyushohin.pdf",
+      "sha256": null
+    },
+    {
+      "documentId": "guidance-fsa-corporate-disclosure-250221",
+      "title": "企業内容等の開示に関する留意事項について（企業内容等開示ガイドライン）",
+      "authority": "金融庁",
+      "file": "documents/fsa-corporate-disclosure-guidelines-250221.pdf",
+      "sourceUrl": "https://www.fsa.go.jp/common/law/kaiji/250221_kaiji.pdf",
+      "downloadUrl": "https://web.archive.org/web/20250319153435id_/https://www.fsa.go.jp/common/law/kaiji/250221_kaiji.pdf",
+      "sourceStatus": "retired_url_archived_snapshot",
+      "sha256": null
+    },
+    {
+      "documentId": "guidance-fsa-tob-disclosure",
+      "title": "株券等の公開買付けに関するQ&A",
+      "authority": "金融庁",
+      "file": "documents/fsa-tob-disclosure-guidelines.pdf",
+      "sourceUrl": "https://www.fsa.go.jp/common/law/kaiji/koukaikaitsuke.pdf",
+      "sha256": null
+    },
+    {
+      "documentId": "guidance-mhlw-000761110",
+      "title": "製造販売業者及び製造業者の法令遵守に関するガイドラインに関する質疑応答集（Q&A）",
+      "authority": "厚生労働省",
+      "file": "documents/mhlw-000761110.pdf",
+      "sourceUrl": "https://www.mhlw.go.jp/content/11120000/000761110.pdf",
+      "sha256": null
+    },
+    {
+      "documentId": "guidance-mhlw-0000179264",
+      "title": "医薬品等適正広告基準",
+      "authority": "厚生労働省",
+      "file": "documents/mhlw-0000179264.pdf",
+      "sourceUrl": "https://www.mhlw.go.jp/file/06-Seisakujouhou-11120000-Iyakushokuhinkyoku/0000179264.pdf",
+      "sha256": null
+    },
+    {
+      "documentId": "guidance-mlit-restoration",
+      "title": "原状回復をめぐるトラブルとガイドライン（再改訂版）",
+      "authority": "国土交通省",
+      "file": "documents/mlit-restoration-guidelines.pdf",
+      "sourceUrl": "https://www.mlit.go.jp/common/001016469.pdf",
+      "sha256": null
+    }
+  ]
+}

@@ -162,6 +162,7 @@ lawqa_solver:
 max_queries = 4
 candidate_top_k = 20
 rerank_top_k = 10
+rerank_candidate_top_k = 30
 citation_top_k = 5
 max_retry_rounds = 1
 max_graph_hop = 1
@@ -169,4 +170,4 @@ max_total_tool_calls = 8
 max_wall_time_sec = 110
 ```
 
-Pattern 4は、組み込み回答ポリシー、LLMクエリ分解、OpenSearch Hybrid検索、選択肢別Evidence Rerank、構造化Evidence Evaluator、必要時だけNeo4j `REFERENCES` 展開と追検索、回答生成を行う。Evaluatorは20秒timeoutとルールベースfallbackを持つ。AWS移行用のStep 2構成は本実装の対象外とする。
+Pattern 4は、組み込み回答ポリシー、LLMクエリ分解、OpenSearch Hybrid検索、構造化Evidence Evaluator、必要時だけNeo4j `REFERENCES` 展開と追検索、ローカル日本語cross-encoderによるEvidence Rerank、回答生成を行う。Evaluatorは20秒timeoutとルールベースfallbackを持ち、リランカーも障害時はRRF融合順位へ戻る。AWS移行用のStep 2構成は本実装の対象外とする。

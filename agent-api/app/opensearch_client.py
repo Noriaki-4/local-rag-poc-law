@@ -39,6 +39,54 @@ class OpenSearchClient:
         hits = response.json()["hits"]["hits"]
         return hits[0]["_source"] if hits else None
 
+    def law_titles(self) -> dict[str, str]:
+        """seed済み法令の documentId -> title 対応表を返す(条番号直接解決用)。"""
+        body = {
+            "size": 0,
+            "aggs": {
+                "docs": {
+                    "terms": {"field": "documentId", "size": 100},
+                    "aggs": {"sample": {"top_hits": {"size": 1, "_source": ["title"]}}},
+                }
+            },
+        }
+        response = requests.post(f"{self.base_url}/{self.index}/_search", json=body, timeout=10)
+        response.raise_for_status()
+        titles: dict[str, str] = {}
+        for bucket in response.json()["aggregations"]["docs"]["buckets"]:
+            hits = bucket["sample"]["hits"]["hits"]
+            if hits:
+                titles[bucket["key"]] = str(hits[0]["_source"].get("title") or "")
+        return titles
+
+    def get_by_article_ids(
+        self,
+        article_content_unit_ids: list[str],
+        user_clearance_level: int,
+        max_chunks: int = 30,
+    ) -> list[dict[str, Any]]:
+        """条ID(articleContentUnitId)で条全体のチャンク群を取得する。
+        項・号分割された条は article ID そのものが contentUnitId に存在しないため、
+        articleContentUnitId フィールド経由で子チャンクも拾う。"""
+        if not article_content_unit_ids:
+            return []
+        body = {
+            "size": max_chunks,
+            "query": {
+                "bool": {
+                    "filter": self._filters(None, user_clearance_level),
+                    "should": [
+                        {"terms": {"contentUnitId": article_content_unit_ids}},
+                        {"terms": {"articleContentUnitId": article_content_unit_ids}},
+                    ],
+                    "minimum_should_match": 1,
+                }
+            },
+        }
+        response = requests.post(f"{self.base_url}/{self.index}/_search", json=body, timeout=10)
+        response.raise_for_status()
+        return [hit["_source"] for hit in response.json()["hits"]["hits"]]
+
     def get_by_content_unit_ids(
         self,
         content_unit_ids: list[str],

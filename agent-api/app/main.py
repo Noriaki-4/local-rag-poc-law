@@ -8,12 +8,14 @@ from .graph_client import GraphClient
 from .llm import LLMClient
 from .models import AnswerRequest, GraphPathRequest, SearchRequest
 from .opensearch_client import OpenSearchClient
+from .reranker import RerankerClient
 from .seed import seed_all
 
 os_client = OpenSearchClient()
 graph_client = GraphClient()
 llm_client = LLMClient()
-agent_service = AgentService(os_client, graph_client, llm_client)
+reranker_client = RerankerClient()
+agent_service = AgentService(os_client, graph_client, llm_client, reranker_client)
 
 
 @asynccontextmanager
@@ -32,6 +34,7 @@ def health() -> dict[str, Any]:
         "opensearch": os_client.health(),
         "neo4j": graph_client.health(),
         "llm": llm_client.health(),
+        "reranker": reranker_client.status(),
     }
 
 

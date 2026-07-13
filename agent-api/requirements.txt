@@ -4,3 +4,4 @@ pydantic==2.10.4
 requests==2.32.3
 neo4j==5.27.0
 minio==7.2.13
+pypdf==5.1.0

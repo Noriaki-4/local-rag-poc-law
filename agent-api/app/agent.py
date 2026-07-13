@@ -6,15 +6,22 @@ from .config import settings
 from .graph_client import GraphClient
 from .llm import LLMClient
 from .models import AnswerRequest, AnswerResponse, Citation
+from .reranker import RerankerClient
+from .seed import _japanese_number_to_int
 from .opensearch_client import OpenSearchClient
-
 
 REFERENCE_CUES = ("前条", "次条", "同条", "前項", "同項", "同号", "ただし", "定義", "準用", "除く")
 # 項・号内の参照。条ノードから兄弟の項・号を辿れば解決できる参照語。
 SIBLING_REFERENCE_CUES = ("前項", "同項", "次項", "前二項", "前三項", "各項", "前各項", "前号", "同号", "次号", "各号", "前各号")
 ARTICLE_REFERENCE_PATTERN = re.compile(r"第[一二三四五六七八九十百千〇零\d]+条")
+# 質問・選択肢中の「第N条(のM)」抽出用。seed.py のパターンと異なり「〜法第N条」も対象にする。
+QUESTION_ARTICLE_PATTERN = re.compile(
+    r"第([0-9一二三四五六七八九十百千〇零]+)条((?:の[0-9一二三四五六七八九十百千〇零]+)*)"
+)
+FULLWIDTH_DIGITS = str.maketrans("０１２３４５６７８９", "0123456789")
 HIERARCHY_EDGE_TYPE = "HAS_CONTENT_UNIT"
 HIERARCHY_MAX_DEPTH = 2
+DIRECT_CHUNKS_PER_ARTICLE = 3
 
 
 class AgentService:
@@ -23,10 +30,12 @@ class AgentService:
         os_client: OpenSearchClient,
         graph_client: GraphClient,
         llm_client: LLMClient,
+        reranker_client: RerankerClient | None = None,
     ) -> None:
         self.os_client = os_client
         self.graph_client = graph_client
         self.llm_client = llm_client
+        self.reranker_client = reranker_client or RerankerClient()
 
     def answer(self, request: AnswerRequest) -> AnswerResponse:
         started = perf_counter()
@@ -69,14 +78,7 @@ class AgentService:
         for query_index, query in enumerate(queries):
             if not _can_call_tool(tool_calls, deadline):
                 break
-            results = self.os_client.search(
-                query,
-                "law",
-                candidate_top_k,
-                request.userClearanceLevel,
-                use_bm25=settings.agent_use_bm25,
-                use_vector=settings.agent_use_vector,
-            )
+            results, source_result_counts = self._search_evidence(query, candidate_top_k, request.userClearanceLevel)
             tool_calls += 1
             search_phase = "broad_search" if query_index == 0 and query == broad_query else "initial_search"
             new_count = _merge_search_results(evidence, results, query, search_phase)
@@ -89,10 +91,17 @@ class AgentService:
                     "query": query,
                     "resultCount": len(results),
                     "newContentUnitCount": new_count,
+                    "sourceResultCounts": source_result_counts,
                     "useBm25": settings.agent_use_bm25,
                     "useVector": settings.agent_use_vector,
                 }
             )
+
+        if _can_call_tool(tool_calls, deadline):
+            article_new = self._inject_article_references(request, evidence, trace)
+            if article_new is not None:
+                tool_calls += 1
+                _append_route(route, "article_direct_lookup")
 
         evaluator_queries: list[str] = []
         evaluator_graph_required = False
@@ -143,14 +152,7 @@ class AgentService:
                 if not _can_call_tool(tool_calls, deadline):
                     stop_reason = "tool_or_time_budget_exhausted"
                     break
-                results = self.os_client.search(
-                    query,
-                    "law",
-                    candidate_top_k,
-                    request.userClearanceLevel,
-                    use_bm25=settings.agent_use_bm25,
-                    use_vector=settings.agent_use_vector,
-                )
+                results, source_result_counts = self._search_evidence(query, candidate_top_k, request.userClearanceLevel)
                 tool_calls += 1
                 retry_rounds = retry_round
                 new_count = _merge_search_results(evidence, results, query, "follow_up_search")
@@ -163,6 +165,7 @@ class AgentService:
                         "query": query,
                         "resultCount": len(results),
                         "newContentUnitCount": new_count,
+                        "sourceResultCounts": source_result_counts,
                         "useBm25": settings.agent_use_bm25,
                         "useVector": settings.agent_use_vector,
                     }
@@ -193,19 +196,67 @@ class AgentService:
                     stop_reason = "evidence_sufficient"
                     break
 
-        citations = _citations_from_evidence(evidence, request, rerank_top_k, request.topK)
-        evidence_by_choice = _choice_evidence_matrix(request, citations)
-        trace["choiceEvidence"] = evidence_by_choice
+        rerank_candidate_top_k = min(
+            len(evidence),
+            max(rerank_top_k, settings.rerank_candidate_top_k),
+        )
+        rerank_candidates = _fusion_ranked_evidence(evidence, rerank_candidate_top_k)
+        fusion_ranked = rerank_candidates[:rerank_top_k]
+        trace["candidatePoolContentUnitIds"] = list(evidence)
+        trace["fusionTopContentUnitIds"] = [item["document"]["contentUnitId"] for item in fusion_ranked]
         _append_route(route, "evidence_merge")
+        remaining = int(deadline - perf_counter())
+        if remaining > 1:
+            rerank_result = self.reranker_client.rerank(
+                _search_query(request),
+                rerank_candidates,
+                timeout_sec=max(1, min(settings.rerank_timeout_sec, remaining)),
+            )
+        else:
+            rerank_result = None
+        if rerank_result is None:
+            final_ranked = fusion_ranked
+            trace["reranker"] = {
+                "used": False,
+                "provider": settings.rerank_provider,
+                "fallback": "time_budget",
+            }
+        else:
+            final_ranked = _pin_ranked_evidence(rerank_result.items, rerank_top_k)
+            trace["reranker"] = {
+                "used": rerank_result.used,
+                "provider": rerank_result.provider,
+                "model": rerank_result.model,
+                "latencyMs": rerank_result.latency_ms,
+                "error": rerank_result.error,
+                "fallback": None if rerank_result.used else "fusion_ranking",
+                "candidateCount": len(rerank_candidates),
+                "scores": rerank_result.scores,
+            }
+            if rerank_result.used:
+                _append_route(route, "evidence_reranker")
+        trace["rerankerTopContentUnitIds"] = [
+            item["document"]["contentUnitId"] for item in final_ranked
+        ]
+        answer_candidates = _citations_from_items(final_ranked)
         _append_route(route, "answer_composer")
-        answer_text, predicted_answer, judgements = self._compose_answer(
+        answer_text, predicted_answer, judgements, assessment_citation_ids = self._compose_answer(
             request,
             route,
-            citations,
+            answer_candidates,
             trace,
             deadline,
-            evidence_by_choice,
+            None,
         )
+        citations = _select_final_citations(answer_candidates, assessment_citation_ids, request.topK)
+        trace["rerankedContentUnitIds"] = [
+            citation.contentUnitId for citation in citations if citation.contentUnitId
+        ]
+        assessments = trace.get("llm", {}).get("choiceAssessments") or {}
+        trace["choiceEvidence"] = {
+            label: assessment.get("citationIds", [])
+            for label, assessment in assessments.items()
+        } or _choice_evidence_matrix(request, citations)
         trace["toolCallCount"] = tool_calls
         trace["retryRounds"] = retry_rounds
         trace["stopReason"] = stop_reason
@@ -219,7 +270,7 @@ class AgentService:
         trace["retrievedGraphNodeIds"] = _graph_node_ids(graph_paths)
         trace["retrievedGraphEdgeIds"] = _graph_edge_ids(graph_paths)
         trace["llmCallCount"] = sum(
-            int(bool(trace.get(key, {}).get("used")))
+            int(trace.get(key, {}).get("attemptCount") or 0)
             for key in ["planner", "evaluator", "llm"]
         )
 
@@ -233,6 +284,41 @@ class AgentService:
             graphPaths=graph_paths,
             trace=trace,
         )
+
+    def _search_evidence(
+        self,
+        query: str,
+        law_top_k: int,
+        user_clearance_level: int,
+    ) -> tuple[list[dict[str, Any]], dict[str, int]]:
+        """法令とガイドラインを別候補プールで検索し、片方の母集団の大きさで取りこぼさない。"""
+        result_groups = {
+            "law": self.os_client.search(
+                query,
+                "law",
+                law_top_k,
+                user_clearance_level,
+                use_bm25=settings.agent_use_bm25,
+                use_vector=settings.agent_use_vector,
+            ),
+            "guideline": self.os_client.search(
+                query,
+                "guideline",
+                min(settings.agent_guidance_candidate_top_k, law_top_k),
+                user_clearance_level,
+                use_bm25=settings.agent_use_bm25,
+                use_vector=settings.agent_use_vector,
+            ),
+        }
+        merged: dict[str, dict[str, Any]] = {}
+        for results in result_groups.values():
+            for result in results:
+                content_unit_id = str(result["document"]["contentUnitId"])
+                existing = merged.get(content_unit_id)
+                if existing is None or float(result.get("score", 0.0)) > float(existing.get("score", 0.0)):
+                    merged[content_unit_id] = result
+        ranked = sorted(merged.values(), key=lambda result: float(result.get("score", 0.0)), reverse=True)
+        return ranked, {source: len(results) for source, results in result_groups.items()}
 
     def _plan_queries(
         self,
@@ -264,6 +350,7 @@ class AgentService:
             trace["planner"] = {
                 "used": False,
                 "error": str(exc),
+                "attemptCount": 1,
                 "fallback": "rule_based_decomposition",
                 "queries": queries,
             }
@@ -280,11 +367,92 @@ class AgentService:
             "inputTokens": result.inputTokens,
             "outputTokens": result.outputTokens,
             "validationError": result.validationError,
+            "stopReason": result.stopReason,
+            "retryCount": result.retryCount,
+            "attemptCount": 1 + result.retryCount,
             "fallback": None if result.queries else "rule_based_decomposition",
             "queries": queries,
             "graphRequired": result.graphRequired,
         }
         return queries, result.graphRequired
+
+    def _inject_article_references(
+        self,
+        request: AnswerRequest,
+        evidence: dict[str, dict[str, Any]],
+        trace: dict[str, Any],
+    ) -> int | None:
+        """質問・選択肢に明示された「法令名+第N条」を検索スコアに依らず候補プールへ直接投入する。
+
+        埋め込み・BM25は条番号の完全一致を保証しないため、明示参照は検索とは別経路で解決する。
+        対象法令は本文中に法令名が現れるものに限定し、無ければ既存候補の上位法令に絞る。
+        """
+        text = _search_query(request)
+        all_suffixes = _extract_article_suffixes(text)
+        if not all_suffixes:
+            return None
+        try:
+            titles = self.os_client.law_titles()
+            references = _law_article_references(text, titles)
+            if not references:
+                matched_laws = _matched_law_ids(text, titles)
+                references = {law_id: all_suffixes for law_id in matched_laws}
+            if not references:
+                ranked = sorted(evidence.values(), key=lambda item: item["score"], reverse=True)
+                matched_laws = list(
+                    dict.fromkeys(item["document"].get("documentId") for item in ranked if item["document"].get("documentId"))
+                )[:2]
+                references = {law_id: all_suffixes for law_id in matched_laws}
+            if not references:
+                return None
+            article_ids = [
+                f"{law_id}-article-{suffix}"
+                for law_id, suffixes in references.items()
+                for suffix in suffixes
+            ]
+            documents = self.os_client.get_by_article_ids(
+                article_ids,
+                request.userClearanceLevel,
+                max_chunks=max(100, len(article_ids) * 30),
+            )
+        except Exception as exc:
+            trace["rounds"].append({"round": 0, "tool": "article_direct_lookup", "error": str(exc)})
+            return None
+        selected_documents = _select_direct_documents(request, documents, DIRECT_CHUNKS_PER_ARTICLE)
+        new_count = 0
+        article_ranks: dict[str, int] = {}
+        for document in selected_documents:
+            content_unit_id = document["contentUnitId"]
+            article_id = str(document.get("articleContentUnitId") or content_unit_id).split("-paragraph-", 1)[0]
+            article_ranks[article_id] = article_ranks.get(article_id, 0) + 1
+            must_include = article_ranks[article_id] == 1
+            if content_unit_id in evidence:
+                item = evidence[content_unit_id]
+                item["sources"].append("article_reference")
+                item["directReference"] = True
+                item["mustInclude"] = item.get("mustInclude", False) or must_include
+            else:
+                evidence[content_unit_id] = {
+                    "document": document,
+                    "score": 0.0,
+                    "sources": ["article_reference"],
+                    "queries": [],
+                    "introducedBy": "article_reference",
+                    "directReference": True,
+                    "mustInclude": must_include,
+                }
+                new_count += 1
+        trace["rounds"].append(
+            {
+                "round": 0,
+                "tool": "article_direct_lookup",
+                "references": references,
+                "resultCount": len(documents),
+                "selectedCount": len(selected_documents),
+                "newContentUnitCount": new_count,
+            }
+        )
+        return new_count
 
     def _should_expand_graph(
         self,
@@ -341,6 +509,7 @@ class AgentService:
                 "provider": self.llm_client.provider,
                 "used": False,
                 "error": str(exc),
+                "attemptCount": 1,
                 "fallback": "rule_based_evaluator",
             }
             return fallback_queries, _query_has_reference_cues(request), False
@@ -353,6 +522,9 @@ class AgentService:
             "inputTokens": result.inputTokens,
             "outputTokens": result.outputTokens,
             "validationError": result.validationError,
+            "stopReason": result.stopReason,
+            "retryCount": result.retryCount,
+            "attemptCount": 1 + result.retryCount,
             "fallback": None if valid else "rule_based_evaluator",
             "choiceCoverage": result.choiceCoverage,
             "followUpQueries": result.followUpQueries,
@@ -409,21 +581,31 @@ class AgentService:
             list(dict.fromkeys(target_ids)),
             request.userClearanceLevel,
         )
+        query_text = _search_query(request)
+        documents.sort(
+            key=lambda document: _text_coverage(
+                query_text,
+                f"{document.get('heading') or ''} {document.get('text') or ''}",
+            ),
+            reverse=True,
+        )
         new_count = 0
-        for document in documents[:candidate_top_k]:
+        for rank, document in enumerate(documents[:candidate_top_k], start=1):
             content_unit_id = document["contentUnitId"]
+            graph_score = 0.35 / (settings.agent_rrf_k + rank)
             if content_unit_id not in evidence:
                 evidence[content_unit_id] = {
                     "document": document,
-                    "score": 0.9 / (settings.agent_rrf_k + 1),
+                    "score": graph_score,
                     "sources": ["graph_expansion"],
                     "queries": [],
                     "introducedBy": "graph_expansion",
                 }
                 new_count += 1
             else:
-                evidence[content_unit_id]["score"] += 0.35 / (settings.agent_rrf_k + 1)
-                evidence[content_unit_id]["sources"].append("graph_expansion")
+                item = evidence[content_unit_id]
+                item["score"] += graph_score
+                item["sources"].append("graph_expansion")
         return paths, new_count
 
     def _input_type(self, request: AnswerRequest) -> str:
@@ -436,8 +618,8 @@ class AgentService:
         citations: list[Citation],
         trace: dict[str, Any],
         deadline: float,
-        evidence_by_choice: dict[str, list[str]],
-    ) -> tuple[str, str | None, dict[str, str] | None]:
+        evidence_by_choice: dict[str, list[str]] | None,
+    ) -> tuple[str, str | None, dict[str, str] | None, list[str]]:
         if citations:
             remaining = int(deadline - perf_counter())
             if remaining <= 1:
@@ -456,6 +638,7 @@ class AgentService:
                         "provider": self.llm_client.provider,
                         "used": False,
                         "error": str(exc),
+                        "attemptCount": 1,
                         "fallback": "no_choice_judgement",
                     }
                 else:
@@ -469,23 +652,36 @@ class AgentService:
                             "outputTokens": llm_result.outputTokens,
                             "estimatedCost": llm_result.estimatedCost,
                             "validationError": llm_result.validationError,
+                            "stopReason": llm_result.stopReason,
+                            "contentBlockTypes": llm_result.contentBlockTypes,
+                            "outputChars": llm_result.outputChars,
+                            "retryCount": llm_result.retryCount,
+                            "attemptCount": 1 + llm_result.retryCount,
+                            "questionPolarity": llm_result.questionPolarity,
+                            "choiceAssessments": llm_result.choiceAssessments,
                         }
                         answer_text = llm_result.text or "十分な引用根拠を取得できなかったため、断定回答は行いません。"
-                        return answer_text, llm_result.predictedAnswer, llm_result.choiceJudgements
+                        assessment_ids = _assessment_citation_ids(
+                            llm_result.choiceAssessments,
+                            llm_result.predictedAnswer,
+                        )
+                        return answer_text, llm_result.predictedAnswer, llm_result.choiceJudgements, assessment_ids
 
         if request.choices:
             return (
                 "LLM 未使用のため選択肢判定は行いません。 評価時は predictedAnswer を null として扱ってください。",
                 None,
                 None,
+                [],
             )
         if citations:
             return (
                 "検索された根拠候補に基づく回答です。法的判断は引用元を確認し、必要に応じて専門家確認を行ってください。",
                 None,
                 None,
+                [],
             )
-        return "十分な引用根拠を取得できなかったため、断定回答は行いません。", None, None
+        return "十分な引用根拠を取得できなかったため、断定回答は行いません。", None, None, []
 
 
 def _search_query(request: AnswerRequest) -> str:
@@ -505,6 +701,101 @@ def _rule_based_decomposition(request: AnswerRequest, max_queries: int) -> list[
 def _query_has_reference_cues(request: AnswerRequest) -> bool:
     text = _search_query(request)
     return sum(1 for cue in REFERENCE_CUES if cue in text) >= 2
+
+
+def _extract_article_suffixes(text: str, limit: int = 5) -> list[str]:
+    """質問・選択肢中の「第N条(のM)」を contentUnitId 接尾辞('185_22'等)へ変換して列挙する。"""
+    suffixes: list[str] = []
+    for match in QUESTION_ARTICLE_PATTERN.finditer(text.translate(FULLWIDTH_DIGITS)):
+        parts = [match.group(1), *match.group(2).removeprefix("の").split("の")]
+        numbers = [_japanese_number_to_int(part) for part in parts if part]
+        if not numbers or any(number is None for number in numbers):
+            continue
+        suffix = "_".join(str(number) for number in numbers)
+        if suffix not in suffixes:
+            suffixes.append(suffix)
+        if len(suffixes) >= limit:
+            break
+    return suffixes
+
+
+def _matched_law_ids(text: str, titles: dict[str, str]) -> list[str]:
+    """本文中に法令名が現れる法令を返す。親法名が施行令等の名前の一部として現れただけの場合は除外する。"""
+    matched = {doc_id: title for doc_id, title in titles.items() if title and title in text}
+    result = []
+    for doc_id, title in matched.items():
+        occurrences = text.count(title)
+        covered = sum(
+            text.count(other_title)
+            for other_id, other_title in matched.items()
+            if other_id != doc_id and title in other_title and len(other_title) > len(title)
+        )
+        if occurrences > covered:
+            result.append(doc_id)
+    return result
+
+
+def _law_article_references(text: str, titles: dict[str, str]) -> dict[str, list[str]]:
+    """法令名と、その法令名から次の法令名までに現れる条番号を対応付ける。"""
+    normalized = text.translate(FULLWIDTH_DIGITS)
+    candidates = []
+    for document_id, title in titles.items():
+        if not title:
+            continue
+        start = 0
+        while (index := normalized.find(title, start)) >= 0:
+            candidates.append((index, index + len(title), document_id, title))
+            start = index + 1
+
+    # 「金融商品取引法施行令」の中にある「金融商品取引法」は長い法令名側へ帰属させる。
+    mentions = []
+    for candidate in sorted(candidates, key=lambda item: (item[0], -(item[1] - item[0]))):
+        if any(candidate[0] < end and start < candidate[1] for start, end, _, _ in mentions):
+            continue
+        mentions.append(candidate)
+    mentions.sort(key=lambda item: item[0])
+
+    references: dict[str, list[str]] = {}
+    for index, (_, end, document_id, _) in enumerate(mentions):
+        segment_end = mentions[index + 1][0] if index + 1 < len(mentions) else len(normalized)
+        suffixes = _extract_article_suffixes(normalized[end:segment_end])
+        if not suffixes:
+            continue
+        bucket = references.setdefault(document_id, [])
+        for suffix in suffixes:
+            if suffix not in bucket:
+                bucket.append(suffix)
+    return references
+
+
+def _select_direct_documents(
+    request: AnswerRequest,
+    documents: list[dict[str, Any]],
+    per_article: int,
+) -> list[dict[str, Any]]:
+    """直接解決した条ごとに、質問・選択肢へ最も近いチャンクだけを残す。"""
+    query_parts = [request.question, *(request.choices or {}).values()]
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for document in documents:
+        content_unit_id = str(document.get("contentUnitId") or "")
+        article_id = str(document.get("articleContentUnitId") or content_unit_id).split("-paragraph-", 1)[0]
+        grouped.setdefault(article_id, []).append(document)
+
+    selected = []
+    for article_id in sorted(grouped):
+        ranked = sorted(
+            grouped[article_id],
+            key=lambda document: max(
+                _text_coverage(
+                    part,
+                    f"{document.get('heading') or ''} {document.get('text') or ''}",
+                )
+                for part in query_parts
+            ),
+            reverse=True,
+        )
+        selected.extend(ranked[:per_article])
+    return selected
 
 
 def _needs_sibling_expansion(request: AnswerRequest, ranked_evidence: list[dict[str, Any]]) -> bool:
@@ -585,7 +876,7 @@ def _citations_from_evidence(
     rerank_top_k: int,
     citation_top_k: int,
 ) -> list[Citation]:
-    ranked = sorted(evidence.values(), key=lambda item: item["score"], reverse=True)[:rerank_top_k]
+    ranked = _fusion_ranked_evidence(evidence, rerank_top_k)
     if not ranked:
         return []
     selected = []
@@ -629,6 +920,92 @@ def _citations_from_evidence(
         )
         for item in ranked
     ]
+
+
+def _fusion_ranked_evidence(
+    evidence: dict[str, dict[str, Any]],
+    rerank_top_k: int,
+) -> list[dict[str, Any]]:
+    """RRF上位へ、明示条番号から直接解決した各条の代表チャンクを必ず含める。"""
+    pinned = sorted(
+        (item for item in evidence.values() if item.get("mustInclude")),
+        key=lambda item: item["score"],
+        reverse=True,
+    )
+    scored = sorted(evidence.values(), key=lambda item: item["score"], reverse=True)
+    ranked = []
+    seen = set()
+    for item in [*pinned, *scored]:
+        content_unit_id = item["document"]["contentUnitId"]
+        if content_unit_id in seen:
+            continue
+        ranked.append(item)
+        seen.add(content_unit_id)
+        if len(ranked) >= rerank_top_k:
+            break
+    return ranked
+
+
+def _pin_ranked_evidence(
+    ordered: list[dict[str, Any]],
+    top_k: int,
+) -> list[dict[str, Any]]:
+    """専用リランカー適用後も、明示条番号から得た必須根拠を上位枠に保持する。"""
+    pinned = [item for item in ordered if item.get("mustInclude")]
+    ranked = []
+    seen = set()
+    for item in [*pinned, *ordered]:
+        content_unit_id = item["document"]["contentUnitId"]
+        if content_unit_id in seen:
+            continue
+        ranked.append(item)
+        seen.add(content_unit_id)
+        if len(ranked) >= top_k:
+            break
+    return ranked
+
+
+def _citations_from_items(items: list[dict[str, Any]]) -> list[Citation]:
+    return [
+        Citation(
+            documentId=item["document"].get("documentId"),
+            contentUnitId=item["document"].get("contentUnitId"),
+            title=item["document"].get("title"),
+            heading=item["document"].get("heading"),
+            sourceObjectUri=item["document"].get("sourceObjectUri"),
+            sourcePage=item["document"].get("sourcePage"),
+            text=item["document"].get("text"),
+        )
+        for item in items
+    ]
+
+
+def _assessment_citation_ids(
+    assessments: dict[str, dict[str, Any]] | None,
+    predicted_answer: str | None,
+) -> list[str]:
+    if not assessments:
+        return []
+    labels = [predicted_answer] if predicted_answer in assessments else []
+    labels.extend(label for label in sorted(assessments) if label != predicted_answer)
+    result = []
+    for label in labels:
+        for content_unit_id in assessments[label].get("citationIds", []):
+            if content_unit_id and content_unit_id not in result:
+                result.append(content_unit_id)
+    return result
+
+
+def _select_final_citations(
+    candidates: list[Citation],
+    assessment_citation_ids: list[str],
+    citation_top_k: int,
+) -> list[Citation]:
+    by_id = {citation.contentUnitId: citation for citation in candidates if citation.contentUnitId}
+    selected = [by_id[content_unit_id] for content_unit_id in assessment_citation_ids if content_unit_id in by_id]
+    selected_ids = {citation.contentUnitId for citation in selected}
+    selected.extend(citation for citation in candidates if citation.contentUnitId not in selected_ids)
+    return selected[:citation_top_k]
 
 
 def _choice_evidence_matrix(

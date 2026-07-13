@@ -21,6 +21,10 @@ Claude を使う場合は `LLM_PROVIDER=anthropic` に切り替える（選択�
 
 embedding は既定で Ollama の `bge-m3` を使う。Agent の検索は `AGENT_USE_BM25=true`, `AGENT_USE_VECTOR=true` の Hybrid 検索を既定にする。
 
+検索候補の最終並べ替えには、ローカルの日本語 cross-encoder
+`hotchpotch/japanese-reranker-base-v2` を使う。`reranker-api` は独立コンテナで動き、
+モデルは `reranker_models` volume にキャッシュする。外部Rerank APIの契約やAPIキーは不要。
+
 ## 2. 初回起動
 
 ホスト側で Ollama、回答生成用 `gemma4:e4b`、embedding 用 `bge-m3` が使えることを確認する。
@@ -63,6 +67,12 @@ AGENT_CANDIDATE_TOP_K=20
 AGENT_RERANK_TOP_K=10
 AGENT_RRF_K=60
 AGENT_MAX_LLM_CALLS=3
+RERANK_PROVIDER=local_http
+RERANK_BASE_URL=http://reranker-api:8100
+RERANK_MODEL=hotchpotch/japanese-reranker-base-v2
+RERANK_CANDIDATE_TOP_K=30
+RERANK_TIMEOUT_SEC=30
+RERANK_MAX_CHARS=3000
 EVALUATOR_MODEL=claude-haiku-4-5-20251001
 EVALUATOR_MAX_TOKENS=1024
 EVALUATOR_TIMEOUT_SEC=20
@@ -112,7 +122,18 @@ docker compose ps
 curl -s http://localhost:8000/health | jq .
 ```
 
-`/health` の `llm.ok` が `true` であれば、Agent API コンテナから設定した LLM provider を利用できる。
+`/health` の `llm.ok` と `reranker.ok` が `true` であれば、Agent APIコンテナから
+設定したLLMとローカルリランカーを利用できる。初回はHugging Faceからモデルを取得するため、
+`reranker-api` がhealthyになるまで数分かかる場合がある。
+
+リランカーを無効化して比較する場合:
+
+```bash
+RERANK_PROVIDER=none docker compose up --build -d agent-api
+```
+
+専用リランカー適用時は `/answer` の `route` に `evidence_reranker` が入り、
+`trace.reranker` にモデル、処理時間、スコア、フォールバック理由が記録される。
 
 UI:
 
@@ -277,7 +298,28 @@ SEED_LAWQA_EGOV=true \
 curl -s -X POST http://localhost:8000/admin/seed | jq .
 ```
 
+### 非e-Govガイドラインの原本保管と投入
+
+lawqa_jp の `selection.json` が参照する非e-Gov資料は、金融庁・厚生労働省・国土交通省のPDF 6件で、20問の根拠に使われる。原本は評価用の問題・正解・コンテキストとは別に保管し、必要なときだけ検索コーパスへ投入する。
+
+```bash
+scripts/download_lawqa_guidance.sh
+```
+
+この操作は `datasets/lawqa_jp/external-guidance/` にPDFと、取得元URL・SHA-256を記録した `manifest.json` を作る。金融庁の旧URL `250221_kaiji.pdf` は現時点で提供終了のため、lawqa_jp参照時点のWeb Archiveスナップショットを取得し、マニフェストにその事実を記録する。
+
+次の指定で、原本をMinIOに保管し、PDF本文をページ単位でOpenSearchに投入する。ガイドラインは法令の委任・準用Graphには入れない。
+
+```bash
+SEED_LAWQA_EGOV=true \
+SEED_EXTERNAL_GUIDANCE=true \
+curl -s -X POST http://localhost:8000/admin/seed | jq .
+```
+
+`externalGuidanceDocuments` が0より大きければ投入された。既定は `false` のため、法令だけの評価結果とガイドライン込みの評価結果は分けて記録する。
+
 `LAWQA_EGOV_LAW_IDS` を指定すると、lawqa_jp から自動抽出せず、指定したe-Gov法令IDだけを投入できる。
+未指定の場合は `docs/requirements/samples/eval/law_registry.json` を使用する。法令ID、評価用の法令ファミリー、部分投入範囲はこのファイルで一元管理する。
 
 ```bash
 LAWQA_EGOV_LAW_IDS=323AC0000000025,340CO0000000321 \
@@ -301,6 +343,10 @@ LAWQA_EVAL_URL=https://raw.githubusercontent.com/digital-go-jp/lawqa_jp/main/dat
 EVAL_SKIP_SEED=true \
 docker compose --profile eval run --rm eval-runner
 ```
+
+評価結果には `metricVersion` が含まれる。version 2では採点不能な参照問題をcitation系指標の分母から除外し、`candidatePoolHit`、`fusionHit`、`citationHit`を段階別に記録するため、version 1のcitation系数値とは直接比較しない。
+
+最終回答では、RRF融合上位（既定10件）をClaudeへ渡し、各選択肢を `entailed`、`contradicted`、`insufficient` のいずれかで独立判定する。設問が正しい記述を求めるか、誤った記述を求めるかは `questionPolarity` として分離し、判定に使用した `citationIds` を優先して最終引用（既定5件）を構成する。評価結果の `choiceAssessments` で判定理由と根拠IDを確認できる。
 
 選択肢順を変えた560件で評価する場合:
 
