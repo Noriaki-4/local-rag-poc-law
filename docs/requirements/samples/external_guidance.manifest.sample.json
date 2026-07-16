@@ -34,7 +34,8 @@
       "authority": "厚生労働省",
       "file": "documents/mhlw-000761110.pdf",
       "sourceUrl": "https://www.mhlw.go.jp/content/11120000/000761110.pdf",
-      "sha256": null
+      "sha256": null,
+      "primaryLawId": "335AC0000000145"
     },
     {
       "documentId": "guidance-mhlw-0000179264",

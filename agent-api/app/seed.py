@@ -21,8 +21,14 @@ ARTICLE_REFERENCE_PATTERN = re.compile(
 )
 JAPANESE_DIGITS = {"〇": 0, "零": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
 JAPANESE_UNITS = {"十": 10, "百": 100, "千": 1000}
+FULLWIDTH_DIGITS = str.maketrans("０１２３４５６７８９", "0123456789")
 # 号チャンクに前置する柱書きの上限文字数。EMBEDDING_MAX_CHARS(既定1000)の中で号本文の場所を残す。
 _ITEM_INTRO_MAX_CHARS = 300
+# ガイドラインPDF内「(法第N条(のM)第P項第K号関係)」形式の条文参照を抽出するためのパターン。
+RELATION_PAREN_PATTERN = re.compile(r"[（(]([^（）()]{0,80}関係)[）)]")
+# 括弧内が「法」等の自己参照トークンで始まる場合のみ抽出対象にする(他法令名は v1 対象外)。
+# 長いトークンを先に判定できるよう長さ降順で並べる。
+GUIDANCE_LAW_SELF_REF_TOKENS = ("当該法律", "同法", "本法", "法")
 
 
 def seed_all(os_client: OpenSearchClient, graph_client: GraphClient) -> dict[str, Any]:
@@ -120,10 +126,16 @@ def _external_guidance_documents(sources: list[dict[str, Any]]) -> list[dict[str
         reader = PdfReader(str(source["_sourcePath"]))
         document_id = str(source["documentId"])
         title = str(source["title"])
+        primary_law_id = str(source.get("primaryLawId") or "").strip() or None
         raw_object_name = f"source-documents/external-guidance/{Path(str(source['file'])).name}"
+        carried_reference: list[str] | None = None
         for page_number, page in enumerate(reader.pages, start=1):
             text = _normalize_pdf_text(page.extract_text() or "")
-            for chunk_index, chunk_text in enumerate(_pdf_text_chunks(text), start=1):
+            page_matches = _guidance_page_relation_matches(text, primary_law_id)
+            for chunk_index, (chunk_start, chunk_text) in enumerate(_pdf_text_chunks(text), start=1):
+                related_article_ids, reference_source = _related_articles_for_chunk(
+                    chunk_start, page_matches, carried_reference
+                )
                 content_unit_id = f"{document_id}-page-{page_number}-chunk-{chunk_index}"
                 documents.append(
                     {
@@ -152,8 +164,12 @@ def _external_guidance_documents(sources: list[dict[str, Any]]) -> list[dict[str
                         "sourcePage": page_number,
                         "parserType": "pdf_pypdf_page_chunk_v1",
                         "chunkStrategy": "guidance_pdf_page_chunk_v1",
+                        "relatedArticleContentUnitIds": related_article_ids,
+                        "articleReferenceSource": reference_source,
                     }
                 )
+            if page_matches:
+                carried_reference = page_matches[-1][1]
         if not any(document["documentId"] == document_id for document in documents):
             raise ValueError(f"No extractable text found in external guidance PDF: {source['_sourcePath']}")
     return documents
@@ -164,12 +180,14 @@ def _normalize_pdf_text(text: str) -> str:
     return "\n".join(line for line in lines if line)
 
 
-def _pdf_text_chunks(text: str) -> list[str]:
+def _pdf_text_chunks(text: str) -> list[tuple[int, str]]:
+    """(チャンク開始オフセット, チャンク本文) のリストを返す。
+    オフセットは条文参照(RELATION_PAREN_PATTERN)の紐付けにのみ使う。"""
     if not text:
         return []
     chunk_size = settings.external_guidance_chunk_chars
     overlap = min(120, chunk_size // 4)
-    chunks: list[str] = []
+    chunks: list[tuple[int, str]] = []
     start = 0
     while start < len(text):
         end = min(start + chunk_size, len(text))
@@ -179,11 +197,53 @@ def _pdf_text_chunks(text: str) -> list[str]:
                 end = boundary + 1
         chunk = text[start:end].strip()
         if chunk:
-            chunks.append(chunk)
+            chunks.append((start, chunk))
         if end >= len(text):
             break
         start = max(end - overlap, start + 1)
     return chunks
+
+
+def _guidance_relation_article_ids(law_id: str, relation_text: str) -> list[str]:
+    """括弧内の '法第18条の2第1項第2号関係' のようなテキストから条レベルの
+    contentUnitId を抽出する。法令名部分が自己参照トークン(法/同法/本法等)で
+    始まらない場合(＝他法令への参照)は v1 では対象外として空を返す。"""
+    compacted = re.sub(r"\s+", "", relation_text).translate(FULLWIDTH_DIGITS)
+    for token in GUIDANCE_LAW_SELF_REF_TOKENS:
+        if compacted.startswith(token):
+            stripped = compacted[len(token):]
+            references = _explicit_article_reference_ids(law_id, stripped)
+            return list(dict.fromkeys(references))
+    return []
+
+
+def _guidance_page_relation_matches(text: str, law_id: str | None) -> list[tuple[int, list[str]]]:
+    """ページ本文全体から (開始オフセット, 条レベルcontentUnitId群) を抽出する。
+    法令条文が空の候補(他法令参照など)は除外する。"""
+    if not law_id:
+        return []
+    matches = []
+    for match in RELATION_PAREN_PATTERN.finditer(text):
+        article_ids = _guidance_relation_article_ids(law_id, match.group(1))
+        if article_ids:
+            matches.append((match.start(), article_ids))
+    return matches
+
+
+def _related_articles_for_chunk(
+    chunk_start: int,
+    page_matches: list[tuple[int, list[str]]],
+    carried_reference: list[str] | None,
+) -> tuple[list[str], str | None]:
+    """あるチャンクに紐付ける条文参照を、同一ページ内の直近の見出しから、
+    無ければ前ページから引き継いだ参照から決定する。"""
+    candidates = [(pos, ids) for pos, ids in page_matches if pos <= chunk_start]
+    if candidates:
+        _, article_ids = max(candidates, key=lambda item: item[0])
+        return article_ids, "guideline_relation_annotation"
+    if carried_reference:
+        return carried_reference, "carried_forward"
+    return [], None
 
 
 def _lawqa_egov_documents(samples_dir: Path) -> list[dict[str, Any]]:

@@ -96,6 +96,12 @@
       },
       "chunkStrategy": {
         "type": "keyword"
+      },
+      "relatedArticleContentUnitIds": {
+        "type": "keyword"
+      },
+      "articleReferenceSource": {
+        "type": "keyword"
       }
     }
   },

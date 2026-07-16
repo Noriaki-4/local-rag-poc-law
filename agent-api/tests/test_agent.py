@@ -343,3 +343,122 @@ def test_article_direct_lookup_injects_explicitly_referenced_article(monkeypatch
     assert lookup_rounds and lookup_rounds[0]["references"] == {"law-test": ["3"]}
     assert lookup_rounds[0]["selectedCount"] == 1
     assert response.trace["fusionTopContentUnitIds"][0] == "law-test-article-3"
+
+
+def _guideline_document(content_unit_id: str, related_article_ids: list[str], text: str = "ガイドライン解説文。") -> dict:
+    document = _document(content_unit_id, text)
+    document["docType"] = "guideline"
+    document["relatedArticleContentUnitIds"] = related_article_ids
+    return document
+
+
+class GuidanceExplainsOpenSearch:
+    """ガイドライン解説からの条文救済の検証用: 検索はガイドラインチャンクのみ返し、
+    法令本体条文は get_by_article_ids 経由でのみ取得できる。"""
+
+    def __init__(self):
+        self.guidance = _guideline_document("guidance-test-page-1-chunk-1", ["law-test-article-18_2"])
+        self.target = _document("law-test-article-18_2", "薬機法第十八条の二 体制を整備すること。")
+        self.target["articleContentUnitId"] = "law-test-article-18_2"
+        self.get_by_article_ids_calls = []
+
+    def search(self, query, doc_type, top_k, clearance, use_bm25=True, use_vector=True):
+        return [{"document": self.guidance, "score": 1.0, "bm25Score": 2.0, "vectorScore": 0.8}]
+
+    def law_titles(self):
+        return {"law-test": "検証法"}
+
+    def get_by_article_ids(self, article_ids, clearance, max_chunks=30):
+        self.get_by_article_ids_calls.append(list(article_ids))
+        return [self.target] if "law-test-article-18_2" in article_ids else []
+
+    def get_by_content_unit_ids(self, content_unit_ids, clearance):
+        return []
+
+
+def test_guidance_explains_lookup_injects_related_article(monkeypatch):
+    from app import agent as agent_module
+
+    monkeypatch.setattr(agent_module.settings, "agent_use_llm_planner", False)
+    service = AgentService(GuidanceExplainsOpenSearch(), FakeGraph(), FakeLLM())
+    request = AnswerRequest(
+        question="役職員が遵守すべき法令遵守体制として正しいものはどれか。",
+        choices={"A": "体制を整備している。", "B": "特に何もしていない。"},
+        pattern="pattern_2_rule_based_agentic_rag",
+        topK=2,
+    )
+
+    response = service.answer(request)
+
+    assert "guidance_explains_lookup" in response.route
+    cited = {citation.contentUnitId for citation in response.citations}
+    assert "law-test-article-18_2" in cited
+    lookup_rounds = [r for r in response.trace["rounds"] if r.get("tool") == "guidance_explains_lookup"]
+    assert lookup_rounds and lookup_rounds[0]["articleIds"] == ["law-test-article-18_2"]
+    assert lookup_rounds[0]["selectedCount"] == 1
+    assert lookup_rounds[0]["newContentUnitCount"] == 1
+
+
+def test_inject_guidance_explained_articles_noop_without_guideline_evidence():
+    os_client = GuidanceExplainsOpenSearch()
+    service = AgentService(os_client, FakeGraph(), FakeLLM())
+    request = AnswerRequest(
+        question="無関係な質問",
+        choices={"A": "選択肢A", "B": "選択肢B"},
+        pattern="pattern_2_rule_based_agentic_rag",
+        topK=2,
+    )
+    law_only_document = _document("law-test-article-1", "第一条 通常の条文。")
+    evidence = {"law-test-article-1": {"document": law_only_document, "score": 1.0}}
+    trace = {"rounds": []}
+
+    result = service._inject_guidance_explained_articles(request, evidence, trace, rerank_top_k=10)
+
+    assert result is None
+    assert "law-test-article-18_2" not in evidence
+    assert os_client.get_by_article_ids_calls == []
+
+
+def test_inject_guidance_explained_articles_ignores_guideline_beyond_rerank_top_k():
+    os_client = GuidanceExplainsOpenSearch()
+    service = AgentService(os_client, FakeGraph(), FakeLLM())
+    request = AnswerRequest(
+        question="役職員が遵守すべき法令遵守体制として正しいものはどれか。",
+        choices={"A": "体制を整備している。", "B": "特に何もしていない。"},
+        pattern="pattern_2_rule_based_agentic_rag",
+        topK=2,
+    )
+    evidence = {
+        "law-test-article-99": {"document": _document("law-test-article-99", "無関係な条文。"), "score": 2.0},
+        "guidance-test-page-1-chunk-1": {"document": os_client.guidance, "score": 1.0},
+    }
+    trace = {"rounds": []}
+
+    result = service._inject_guidance_explained_articles(request, evidence, trace, rerank_top_k=1)
+
+    assert result is None
+    assert "law-test-article-18_2" not in evidence
+    assert os_client.get_by_article_ids_calls == []
+
+
+def test_inject_guidance_explained_articles_dedupes_articles_from_multiple_guideline_chunks():
+    os_client = GuidanceExplainsOpenSearch()
+    service = AgentService(os_client, FakeGraph(), FakeLLM())
+    request = AnswerRequest(
+        question="役職員が遵守すべき法令遵守体制として正しいものはどれか。",
+        choices={"A": "体制を整備している。", "B": "特に何もしていない。"},
+        pattern="pattern_2_rule_based_agentic_rag",
+        topK=2,
+    )
+    second_guideline = _guideline_document("guidance-test-page-2-chunk-1", ["law-test-article-18_2"])
+    evidence = {
+        "guidance-test-page-1-chunk-1": {"document": os_client.guidance, "score": 2.0},
+        "guidance-test-page-2-chunk-1": {"document": second_guideline, "score": 1.0},
+    }
+    trace = {"rounds": []}
+
+    result = service._inject_guidance_explained_articles(request, evidence, trace, rerank_top_k=10)
+
+    assert result == 1
+    assert os_client.get_by_article_ids_calls == [["law-test-article-18_2"]]
+    assert evidence["law-test-article-18_2"]["mustInclude"] is True

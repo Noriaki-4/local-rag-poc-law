@@ -103,6 +103,12 @@ class AgentService:
                 tool_calls += 1
                 _append_route(route, "article_direct_lookup")
 
+        if _can_call_tool(tool_calls, deadline):
+            guidance_new = self._inject_guidance_explained_articles(request, evidence, trace, rerank_top_k)
+            if guidance_new is not None:
+                tool_calls += 1
+                _append_route(route, "guidance_explains_lookup")
+
         evaluator_queries: list[str] = []
         evaluator_graph_required = False
         evaluator_stop = False
@@ -447,6 +453,77 @@ class AgentService:
                 "round": 0,
                 "tool": "article_direct_lookup",
                 "references": references,
+                "resultCount": len(documents),
+                "selectedCount": len(selected_documents),
+                "newContentUnitCount": new_count,
+            }
+        )
+        return new_count
+
+    def _inject_guidance_explained_articles(
+        self,
+        request: AnswerRequest,
+        evidence: dict[str, dict[str, Any]],
+        trace: dict[str, Any],
+        rerank_top_k: int,
+    ) -> int | None:
+        """上位候補にガイドライン解説チャンクが入っている場合、そのチャンクが
+        "(法第N条関係)" として明示する法令条文を、スコアに依らず候補プールへ
+        確実に投入する。
+
+        薄い委任規定(例: 「...体制を整備すること」)は、具体的な言葉で書かれた
+        ガイドライン解説とのスコア競争でRRF/rerankerに負けて最終引用から漏れる
+        ことがある(実測: 薬機法第18条の2第1項第2号)。ガイドラインPDF原文の
+        自己参照見出しをseed時に抽出済みのため、ここでは検索を追加せず
+        メタデータから直接引く。
+        """
+        ranked_evidence = sorted(evidence.values(), key=lambda item: item["score"], reverse=True)[:rerank_top_k]
+        article_ids: list[str] = []
+        for item in ranked_evidence:
+            document = item["document"]
+            if document.get("docType") != "guideline":
+                continue
+            for article_id in document.get("relatedArticleContentUnitIds") or []:
+                if article_id not in article_ids:
+                    article_ids.append(article_id)
+        if not article_ids:
+            return None
+        try:
+            documents = self.os_client.get_by_article_ids(
+                article_ids,
+                request.userClearanceLevel,
+                max_chunks=max(30, len(article_ids) * 30),
+            )
+        except Exception as exc:
+            trace["rounds"].append({"round": 0, "tool": "guidance_explains_lookup", "error": str(exc)})
+            return None
+        selected_documents = _select_direct_documents(request, documents, DIRECT_CHUNKS_PER_ARTICLE)
+        new_count = 0
+        article_ranks: dict[str, int] = {}
+        for document in selected_documents:
+            content_unit_id = document["contentUnitId"]
+            article_id = str(document.get("articleContentUnitId") or content_unit_id).split("-paragraph-", 1)[0]
+            article_ranks[article_id] = article_ranks.get(article_id, 0) + 1
+            must_include = article_ranks[article_id] == 1
+            if content_unit_id in evidence:
+                item = evidence[content_unit_id]
+                item["sources"].append("guidance_explains")
+                item["mustInclude"] = item.get("mustInclude", False) or must_include
+            else:
+                evidence[content_unit_id] = {
+                    "document": document,
+                    "score": 0.0,
+                    "sources": ["guidance_explains"],
+                    "queries": [],
+                    "introducedBy": "guidance_explains",
+                    "mustInclude": must_include,
+                }
+                new_count += 1
+        trace["rounds"].append(
+            {
+                "round": 0,
+                "tool": "guidance_explains_lookup",
+                "articleIds": article_ids,
                 "resultCount": len(documents),
                 "selectedCount": len(selected_documents),
                 "newContentUnitCount": new_count,
