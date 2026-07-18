@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from time import perf_counter
 from typing import Any, Literal
@@ -188,6 +189,38 @@ class LLMClient:
             return self._generate_anthropic(request, prompt, timeout_sec, citations)
         return None
 
+    def _call_with_retry(
+        self,
+        prompt: str,
+        schema: dict[str, Any],
+        model: str,
+        max_tokens: int,
+        timeout: int,
+        parse_fn: Callable[[str], tuple],
+    ) -> tuple[tuple, int, int | None, int | None, str | None, int]:
+        """`_json_transport`を呼び出し、parse_fnの結果の最終要素(validation_error)が
+        真の場合のみ残り時間内で1回だけ再試行してトークンを合算する。
+        戻り値: (parse_fnの結果, latencyMs, inputTokens, outputTokens, stopReason, retryCount)"""
+        started = perf_counter()
+        retry_count = 0
+        raw_text, latency_ms, input_tokens, output_tokens, stop_reason = self._json_transport(
+            prompt, schema, model, max_tokens, timeout
+        )
+        parsed = parse_fn(raw_text)
+        validation_error = parsed[-1]
+        retry_timeout = _retry_timeout(timeout, started) if validation_error else None
+        if retry_timeout is not None:
+            retry_count = 1
+            first_input_tokens, first_output_tokens = input_tokens, output_tokens
+            raw_text, retry_latency, retry_input_tokens, retry_output_tokens, stop_reason = self._json_transport(
+                prompt, schema, model, max_tokens, retry_timeout
+            )
+            latency_ms += retry_latency
+            input_tokens = _sum_optional(first_input_tokens, retry_input_tokens)
+            output_tokens = _sum_optional(first_output_tokens, retry_output_tokens)
+            parsed = parse_fn(raw_text)
+        return parsed, latency_ms, input_tokens, output_tokens, stop_reason, retry_count
+
     def plan_search(
         self,
         request: AnswerRequest,
@@ -197,23 +230,16 @@ class LLMClient:
         prompt = build_search_plan_prompt(request, max_queries)
         schema = _search_plan_json_schema(max_queries)
         timeout = timeout_sec or settings.planner_timeout_sec
-        started = perf_counter()
-        retry_count = 0
-        raw_text, latency_ms, input_tokens, output_tokens, stop_reason = self._json_transport(
-            prompt, schema, settings.planner_model, settings.planner_max_tokens, timeout
-        )
-        queries, graph_required, validation_error = _parse_search_plan(raw_text, max_queries)
-        retry_timeout = _retry_timeout(timeout, started) if validation_error else None
-        if retry_timeout is not None:
-            retry_count = 1
-            first_input_tokens, first_output_tokens = input_tokens, output_tokens
-            raw_text, retry_latency, retry_input_tokens, retry_output_tokens, stop_reason = self._json_transport(
-                prompt, schema, settings.planner_model, settings.planner_max_tokens, retry_timeout
+        (queries, graph_required, validation_error), latency_ms, input_tokens, output_tokens, stop_reason, retry_count = (
+            self._call_with_retry(
+                prompt,
+                schema,
+                settings.planner_model,
+                settings.planner_max_tokens,
+                timeout,
+                lambda raw_text: _parse_search_plan(raw_text, max_queries),
             )
-            latency_ms += retry_latency
-            input_tokens = _sum_optional(first_input_tokens, retry_input_tokens)
-            output_tokens = _sum_optional(first_output_tokens, retry_output_tokens)
-            queries, graph_required, validation_error = _parse_search_plan(raw_text, max_queries)
+        )
         return SearchPlanResult(
             queries=queries,
             graphRequired=graph_required,
@@ -237,31 +263,21 @@ class LLMClient:
         prompt = build_evidence_evaluation_prompt(request, citations, max_queries)
         schema = _evidence_evaluation_json_schema(request, max_queries)
         timeout = timeout_sec or settings.evaluator_timeout_sec
-        started = perf_counter()
-        retry_count = 0
-        raw_text, latency_ms, input_tokens, output_tokens, stop_reason = self._json_transport(
-            prompt, schema, settings.evaluator_model, settings.evaluator_max_tokens, timeout
+        (
+            (coverage, queries, graph_required, stop, validation_error),
+            latency_ms,
+            input_tokens,
+            output_tokens,
+            stop_reason,
+            retry_count,
+        ) = self._call_with_retry(
+            prompt,
+            schema,
+            settings.evaluator_model,
+            settings.evaluator_max_tokens,
+            timeout,
+            lambda raw_text: _parse_evidence_evaluation(raw_text, request.choices, max_queries),
         )
-        coverage, queries, graph_required, stop, validation_error = _parse_evidence_evaluation(
-            raw_text,
-            request.choices,
-            max_queries,
-        )
-        retry_timeout = _retry_timeout(timeout, started) if validation_error else None
-        if retry_timeout is not None:
-            retry_count = 1
-            first_input_tokens, first_output_tokens = input_tokens, output_tokens
-            raw_text, retry_latency, retry_input_tokens, retry_output_tokens, stop_reason = self._json_transport(
-                prompt, schema, settings.evaluator_model, settings.evaluator_max_tokens, retry_timeout
-            )
-            latency_ms += retry_latency
-            input_tokens = _sum_optional(first_input_tokens, retry_input_tokens)
-            output_tokens = _sum_optional(first_output_tokens, retry_output_tokens)
-            coverage, queries, graph_required, stop, validation_error = _parse_evidence_evaluation(
-                raw_text,
-                request.choices,
-                max_queries,
-            )
         return EvidenceEvaluationResult(
             choiceCoverage=coverage,
             followUpQueries=queries,

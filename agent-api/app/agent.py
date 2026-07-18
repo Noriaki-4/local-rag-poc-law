@@ -425,29 +425,9 @@ class AgentService:
             trace["rounds"].append({"round": 0, "tool": "article_direct_lookup", "error": str(exc)})
             return None
         selected_documents = _select_direct_documents(request, documents, DIRECT_CHUNKS_PER_ARTICLE)
-        new_count = 0
-        article_ranks: dict[str, int] = {}
-        for document in selected_documents:
-            content_unit_id = document["contentUnitId"]
-            article_id = str(document.get("articleContentUnitId") or content_unit_id).split("-paragraph-", 1)[0]
-            article_ranks[article_id] = article_ranks.get(article_id, 0) + 1
-            must_include = article_ranks[article_id] == 1
-            if content_unit_id in evidence:
-                item = evidence[content_unit_id]
-                item["sources"].append("article_reference")
-                item["directReference"] = True
-                item["mustInclude"] = item.get("mustInclude", False) or must_include
-            else:
-                evidence[content_unit_id] = {
-                    "document": document,
-                    "score": 0.0,
-                    "sources": ["article_reference"],
-                    "queries": [],
-                    "introducedBy": "article_reference",
-                    "directReference": True,
-                    "mustInclude": must_include,
-                }
-                new_count += 1
+        new_count = _merge_direct_documents_into_evidence(
+            evidence, selected_documents, "article_reference", direct_reference=True
+        )
         trace["rounds"].append(
             {
                 "round": 0,
@@ -498,27 +478,7 @@ class AgentService:
             trace["rounds"].append({"round": 0, "tool": "guidance_explains_lookup", "error": str(exc)})
             return None
         selected_documents = _select_direct_documents(request, documents, DIRECT_CHUNKS_PER_ARTICLE)
-        new_count = 0
-        article_ranks: dict[str, int] = {}
-        for document in selected_documents:
-            content_unit_id = document["contentUnitId"]
-            article_id = str(document.get("articleContentUnitId") or content_unit_id).split("-paragraph-", 1)[0]
-            article_ranks[article_id] = article_ranks.get(article_id, 0) + 1
-            must_include = article_ranks[article_id] == 1
-            if content_unit_id in evidence:
-                item = evidence[content_unit_id]
-                item["sources"].append("guidance_explains")
-                item["mustInclude"] = item.get("mustInclude", False) or must_include
-            else:
-                evidence[content_unit_id] = {
-                    "document": document,
-                    "score": 0.0,
-                    "sources": ["guidance_explains"],
-                    "queries": [],
-                    "introducedBy": "guidance_explains",
-                    "mustInclude": must_include,
-                }
-                new_count += 1
+        new_count = _merge_direct_documents_into_evidence(evidence, selected_documents, "guidance_explains")
         trace["rounds"].append(
             {
                 "round": 0,
@@ -759,6 +719,42 @@ class AgentService:
                 [],
             )
         return "十分な引用根拠を取得できなかったため、断定回答は行いません。", None, None, []
+
+
+def _merge_direct_documents_into_evidence(
+    evidence: dict[str, dict[str, Any]],
+    selected_documents: list[dict[str, Any]],
+    source_tag: str,
+    *,
+    direct_reference: bool = False,
+) -> int:
+    """条番号で直接取得したselected_documentsを、article_ranksでmustInclude判定しつつ
+    evidence辞書へマージする。新規追加件数を返す。"""
+    new_count = 0
+    article_ranks: dict[str, int] = {}
+    for document in selected_documents:
+        content_unit_id = document["contentUnitId"]
+        article_id = str(document.get("articleContentUnitId") or content_unit_id).split("-paragraph-", 1)[0]
+        article_ranks[article_id] = article_ranks.get(article_id, 0) + 1
+        must_include = article_ranks[article_id] == 1
+        if content_unit_id in evidence:
+            item = evidence[content_unit_id]
+            item["sources"].append(source_tag)
+            if direct_reference:
+                item["directReference"] = True
+            item["mustInclude"] = item.get("mustInclude", False) or must_include
+        else:
+            evidence[content_unit_id] = {
+                "document": document,
+                "score": 0.0,
+                "sources": [source_tag],
+                "queries": [],
+                "introducedBy": source_tag,
+                "mustInclude": must_include,
+                **({"directReference": True} if direct_reference else {}),
+            }
+            new_count += 1
+    return new_count
 
 
 def _search_query(request: AnswerRequest) -> str:
