@@ -115,7 +115,7 @@ services:
       AGENT_MAX_WALL_TIME_SEC: ${AGENT_MAX_WALL_TIME_SEC:-110}
       AGENT_CANDIDATE_TOP_K: ${AGENT_CANDIDATE_TOP_K:-20}
       AGENT_GUIDANCE_CANDIDATE_TOP_K: ${AGENT_GUIDANCE_CANDIDATE_TOP_K:-10}
-      AGENT_RERANK_TOP_K: ${AGENT_RERANK_TOP_K:-10}
+      AGENT_RERANK_TOP_K: ${AGENT_RERANK_TOP_K:-16}
       AGENT_RRF_K: ${AGENT_RRF_K:-60}
       AGENT_MAX_LLM_CALLS: ${AGENT_MAX_LLM_CALLS:-3}
       RERANK_PROVIDER: ${RERANK_PROVIDER:-local_http}
@@ -145,7 +145,7 @@ services:
       ANSWER_MODEL: ${ANSWER_MODEL:-}
       JUDGE_MODEL: ${JUDGE_MODEL:-none}
       LLM_TIMEOUT_SEC: ${LLM_TIMEOUT_SEC:-90}
-      LLM_MAX_CONTEXT_CHARS: ${LLM_MAX_CONTEXT_CHARS:-4000}
+      LLM_MAX_CONTEXT_CHARS: ${LLM_MAX_CONTEXT_CHARS:-12000}
     ports:
       - "8000:8000"
     depends_on:
@@ -192,6 +192,25 @@ services:
       - ./eval-results:/workspace/eval-results
     profiles:
       - eval
+
+  # ガイドラインPDFのdocling前処理ワーカー。トリガーは手動のみ:
+  #   docker compose --profile preprocess run --rm preprocess-worker python -m app.cli --sync-local
+  # AWS移行時は同じhandler.handle_s3_eventをS3 Event Notification→Lambda/ECSから呼ぶ。
+  preprocess-worker:
+    build: ./preprocess-worker
+    environment:
+      AWS_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_DEFAULT_REGION: us-east-1
+      PREPROCESS_BUCKET: knowledge-root
+    depends_on:
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./datasets:/workspace/datasets:ro
+    profiles:
+      - preprocess
 
 volumes:
   minio_data:

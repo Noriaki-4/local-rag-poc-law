@@ -29,6 +29,21 @@ RELATION_PAREN_PATTERN = re.compile(r"[（(]([^（）()]{0,80}関係)[）)]")
 # 括弧内が「法」等の自己参照トークンで始まる場合のみ抽出対象にする(他法令名は v1 対象外)。
 # 長いトークンを先に判定できるよう長さ降順で並べる。
 GUIDANCE_LAW_SELF_REF_TOKENS = ("当該法律", "同法", "本法", "法")
+# docling前処理済みの表テキストから「法第N条(のM)」形式の自己参照を抽出するパターン。
+# 「会社法第330条」「施行規則第98条」のような他法令名の一部の「法」は
+# 直前の漢字を否定lookbehindで除外する(表中の自己参照は「法第18条の２」のように単独で書かれ、
+# 直前は空白・行頭・記号になる)。空白除去はマッチ後に参照部分へのみ行う(先に全体から
+# 空白を除くと「整備 法第18条」が「整備法第18条」になりlookbehindが誤発動するため)。
+TABLE_SELF_REF_PATTERN = re.compile(
+    r"(?:当該法律|同法|本法|(?<![一-鿏])法)\s*(第\s*\d+\s*条(?:\s*の\s*\d+)*)"
+)
+# 1表あたりの条文参照の上限。対応表のような大きい表がguidance_explainsへ
+# 過剰なピン留めを流し込むのを防ぐ。
+TABLE_SELF_REF_MAX_ARTICLES = 8
+# docling前処理成果物(派生ゾーン)のプレフィックスとスキーマバージョン。
+# preprocess-worker/app/handler.py の DERIVED_PREFIX と対で維持する。
+PREPROCESSED_GUIDANCE_PREFIX = "derived-artifacts/preprocessed/external-guidance"
+PREPROCESSED_SCHEMA_VERSION = 1
 
 
 def seed_all(os_client: OpenSearchClient, graph_client: GraphClient) -> dict[str, Any]:
@@ -45,8 +60,14 @@ def seed_all(os_client: OpenSearchClient, graph_client: GraphClient) -> dict[str
     nodes = _read_jsonl(samples_dir / "metadata" / "nodes.sample.jsonl")
     edges = _read_jsonl(samples_dir / "metadata" / "edges.sample.jsonl")
     egov_nodes, egov_edges = _graph_artifacts_from_documents(documents)
-    nodes = _dedupe_by_key([*nodes, *egov_nodes], "graphNodeId")
-    edges = _dedupe_by_key([*edges, *egov_edges], "graphEdgeId")
+    guidance_nodes, guidance_edges = _guidance_graph_artifacts(documents)
+    nodes = _dedupe_by_key([*nodes, *egov_nodes, *guidance_nodes], "graphNodeId")
+    edges = _dedupe_by_key([*edges, *egov_edges, *guidance_edges], "graphEdgeId")
+    # EXPLAINSの張り先条文は、法令の部分投入(例: 民法601-622条の2のみ)ではグラフに
+    # 存在しないことがある。dangling assertでseed全体を止めず、該当EXPLAINSだけ落とす。
+    edges, dropped_explains = _drop_dangling_explains_edges(edges, {node["graphNodeId"] for node in nodes})
+    if dropped_explains:
+        print(f"[seed] dropped {dropped_explains} EXPLAINS edge(s) whose target article is not in the graph")
     _assert_no_dangling_edges(nodes, edges)
     graph_client.clear()
     graph_client.seed_nodes(nodes)
@@ -123,56 +144,91 @@ def _external_guidance_sources() -> list[dict[str, Any]]:
 def _external_guidance_documents(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
     documents: list[dict[str, Any]] = []
     for source in sources:
-        reader = PdfReader(str(source["_sourcePath"]))
         document_id = str(source["documentId"])
-        title = str(source["title"])
-        primary_law_id = str(source.get("primaryLawId") or "").strip() or None
-        raw_object_name = f"source-documents/external-guidance/{Path(str(source['file'])).name}"
-        carried_reference: list[str] | None = None
-        for page_number, page in enumerate(reader.pages, start=1):
-            text = _normalize_pdf_text(page.extract_text() or "")
-            page_matches = _guidance_page_relation_matches(text, primary_law_id)
-            for chunk_index, (chunk_start, chunk_text) in enumerate(_pdf_text_chunks(text), start=1):
-                related_article_ids, reference_source = _related_articles_for_chunk(
-                    chunk_start, page_matches, carried_reference
-                )
-                content_unit_id = f"{document_id}-page-{page_number}-chunk-{chunk_index}"
-                documents.append(
-                    {
-                        "documentId": document_id,
-                        "contentUnitId": content_unit_id,
-                        "chunkId": content_unit_id,
-                        "parentContentUnitId": None,
-                        "articleContentUnitId": None,
-                        "deptCode": "common",
-                        "docType": "guideline",
-                        "contentDomain": "legal_guidance",
-                        "title": title,
-                        "heading": f"{title} p.{page_number}",
-                        "sectionPath": f"{source['authority']} > {title} > p.{page_number}",
-                        "text": chunk_text,
-                        "publishStatus": "published",
-                        "isLatest": True,
-                        "confidentiality": "public",
-                        "clearanceLevel": 1,
-                        "sourceObjectUri": f"minio://{settings.minio_bucket}/{raw_object_name}",
-                        "processedObjectUri": (
-                            "minio://"
-                            f"{settings.minio_bucket}/derived-artifacts/vector-documents/"
-                            f"dept=common/docType=guideline/{document_id}/{content_unit_id}.md"
-                        ),
-                        "sourcePage": page_number,
-                        "parserType": "pdf_pypdf_page_chunk_v1",
-                        "chunkStrategy": "guidance_pdf_page_chunk_v1",
-                        "relatedArticleContentUnitIds": related_article_ids,
-                        "articleReferenceSource": reference_source,
-                    }
-                )
-            if page_matches:
-                carried_reference = page_matches[-1][1]
+        primary_law_id = _guidance_primary_law_document_id(source)
+        artifact = _load_guidance_artifact(source)
+        if artifact is not None:
+            chunk_specs = _docling_guidance_chunks(
+                artifact["items"], primary_law_id, settings.external_guidance_chunk_chars
+            )
+            parser_type = "pdf_docling_structured_v1"
+        else:
+            chunk_specs = _pypdf_guidance_chunk_specs(source, primary_law_id)
+            parser_type = "pdf_pypdf_page_chunk_v1"
+        for chunk_index, spec in enumerate(chunk_specs, start=1):
+            documents.append(_guidance_document(source, spec, chunk_index, parser_type))
         if not any(document["documentId"] == document_id for document in documents):
             raise ValueError(f"No extractable text found in external guidance PDF: {source['_sourcePath']}")
     return documents
+
+
+def _pypdf_guidance_chunk_specs(source: dict[str, Any], primary_law_id: str | None) -> list[dict[str, Any]]:
+    """従来のpypdf経路: ページ単位テキストの文字数チャンク。docling前処理成果物が
+    無い場合のフォールバック(初回seedやCI環境でも動く後方互換経路)。"""
+    reader = PdfReader(str(source["_sourcePath"]))
+    specs: list[dict[str, Any]] = []
+    carried_reference: list[str] | None = None
+    for page_number, page in enumerate(reader.pages, start=1):
+        text = _normalize_pdf_text(page.extract_text() or "")
+        page_matches = _guidance_page_relation_matches(text, primary_law_id)
+        for chunk_start, chunk_text in _pdf_text_chunks(text):
+            related_article_ids, reference_source = _related_articles_for_chunk(
+                chunk_start, page_matches, carried_reference
+            )
+            specs.append(
+                {
+                    "page": page_number,
+                    "text": chunk_text,
+                    "chunkStrategy": "guidance_pdf_page_chunk_v1",
+                    "relatedArticleContentUnitIds": related_article_ids,
+                    "articleReferenceSource": reference_source,
+                }
+            )
+        if page_matches:
+            carried_reference = page_matches[-1][1]
+    return specs
+
+
+def _guidance_document(
+    source: dict[str, Any],
+    spec: dict[str, Any],
+    chunk_index: int,
+    parser_type: str,
+) -> dict[str, Any]:
+    document_id = str(source["documentId"])
+    title = str(source["title"])
+    raw_object_name = f"source-documents/external-guidance/{Path(str(source['file'])).name}"
+    page_number = int(spec.get("page") or 1)
+    content_unit_id = f"{document_id}-page-{page_number}-chunk-{chunk_index}"
+    return {
+        "documentId": document_id,
+        "contentUnitId": content_unit_id,
+        "chunkId": content_unit_id,
+        "parentContentUnitId": None,
+        "articleContentUnitId": None,
+        "deptCode": "common",
+        "docType": "guideline",
+        "contentDomain": "legal_guidance",
+        "title": title,
+        "heading": f"{title} p.{page_number}",
+        "sectionPath": f"{source['authority']} > {title} > p.{page_number}",
+        "text": spec["text"],
+        "publishStatus": "published",
+        "isLatest": True,
+        "confidentiality": "public",
+        "clearanceLevel": 1,
+        "sourceObjectUri": f"minio://{settings.minio_bucket}/{raw_object_name}",
+        "processedObjectUri": (
+            "minio://"
+            f"{settings.minio_bucket}/derived-artifacts/vector-documents/"
+            f"dept=common/docType=guideline/{document_id}/{content_unit_id}.md"
+        ),
+        "sourcePage": page_number,
+        "parserType": parser_type,
+        "chunkStrategy": spec["chunkStrategy"],
+        "relatedArticleContentUnitIds": spec["relatedArticleContentUnitIds"],
+        "articleReferenceSource": spec["articleReferenceSource"],
+    }
 
 
 def _normalize_pdf_text(text: str) -> str:
@@ -202,6 +258,16 @@ def _pdf_text_chunks(text: str) -> list[tuple[int, str]]:
             break
         start = max(end - overlap, start + 1)
     return chunks
+
+
+def _guidance_primary_law_document_id(source: dict[str, Any]) -> str | None:
+    """manifestの`primaryLawId`(例: "335AC0000000145"、law_registry.jsonと同じ
+    裸のe-Gov法令番号)を、法令チャンクの実際のdocumentId表記("law-<法令番号>"、
+    id_naming_rules.md参照)へ正規化する。既に"law-"始まりならそのまま使う。"""
+    raw = str(source.get("primaryLawId") or "").strip()
+    if not raw:
+        return None
+    return raw if raw.startswith("law-") else f"law-{raw}"
 
 
 def _guidance_relation_article_ids(law_id: str, relation_text: str) -> list[str]:
@@ -244,6 +310,167 @@ def _related_articles_for_chunk(
     if carried_reference:
         return carried_reference, "carried_forward"
     return [], None
+
+
+def _load_guidance_artifact(source: dict[str, Any]) -> dict[str, Any] | None:
+    """preprocess-workerが派生ゾーンへ置いたdocling前処理JSONを取得する。
+
+    成果物が無い・ストレージへ接続できない場合はNoneを返しpypdf経路へ
+    フォールバックする(初回seedやテスト環境でも動く)。ただし成果物が存在するのに
+    元PDFと食い違う(sourceSha256不一致)場合は、古い成果物での投入を防ぐため
+    fail fastでValueErrorを送出する。"""
+    stem = Path(str(source["file"])).stem
+    object_name = f"{PREPROCESSED_GUIDANCE_PREFIX}/{stem}.json"
+    response = None
+    try:
+        # 成果物が無い/MinIOに届かない環境(テスト・初回seed)で長時間リトライしないよう、
+        # 取得プローブは短いタイムアウト・リトライ無しで行う。
+        import urllib3
+
+        http_client = urllib3.PoolManager(
+            timeout=urllib3.Timeout(connect=2, read=10),
+            retries=urllib3.Retry(total=0),
+        )
+        client = _minio_client(http_client=http_client)
+        response = client.get_object(settings.minio_bucket, object_name)
+        payload = json.loads(response.read().decode("utf-8"))
+    except ValueError:
+        raise
+    except Exception:
+        return None
+    finally:
+        if response is not None:
+            response.close()
+            response.release_conn()
+
+    if payload.get("schemaVersion") != PREPROCESSED_SCHEMA_VERSION:
+        raise ValueError(f"Unsupported preprocessed guidance schema: {object_name}")
+    expected_hash = str(source.get("sha256") or "").removeprefix("sha256:")
+    actual_hash = str(payload.get("sourceSha256") or "").removeprefix("sha256:")
+    if expected_hash != actual_hash:
+        raise ValueError(
+            "Preprocessed guidance artifact is stale (sourceSha256 mismatch). "
+            f"Re-run preprocess-worker for: {object_name}"
+        )
+    items = payload.get("items")
+    if not isinstance(items, list) or not items:
+        raise ValueError(f"Preprocessed guidance artifact has no items: {object_name}")
+    return payload
+
+
+def _docling_guidance_chunks(
+    items: list[dict[str, Any]],
+    law_id: str | None,
+    chunk_chars: int,
+) -> list[dict[str, Any]]:
+    """docling前処理済みアイテム列(section_header/text/table)を検索用チャンクへ変換する。
+
+    - textは直近の見出しをコンテキストに付与しつつchunk_charsまで連結
+    - tableは1表=1チャンク(Markdown表現)とし、セル平文から法令自己参照を抽出
+    - 「(法第N条関係)」注釈のcarried_forwardはpypdf経路と同じ意味論を保つ
+    """
+    chunks: list[dict[str, Any]] = []
+    buffer: list[str] = []
+    buffer_page: int | None = None
+    buffer_annotated = False
+    current_header: str | None = None
+    carried_reference: list[str] | None = None
+
+    def flush() -> None:
+        nonlocal buffer, buffer_page, buffer_annotated
+        if not buffer:
+            return
+        text = "\n".join(buffer)
+        if buffer_annotated:
+            related, source_kind = carried_reference or [], "guideline_relation_annotation"
+        elif carried_reference:
+            related, source_kind = carried_reference, "carried_forward"
+        else:
+            related, source_kind = [], None
+        chunks.append(
+            {
+                "page": buffer_page,
+                "text": text,
+                "chunkStrategy": "guidance_docling_text_chunk_v1",
+                "relatedArticleContentUnitIds": related,
+                "articleReferenceSource": source_kind,
+            }
+        )
+        buffer = []
+        buffer_page = None
+        buffer_annotated = False
+
+    for item in items:
+        item_type = str(item.get("type") or "")
+        text = str(item.get("text") or "").strip()
+        if item_type == "section_header":
+            flush()
+            current_header = text or None
+            continue
+        if item_type == "table":
+            flush()
+            markdown = str(item.get("markdown") or "").strip() or text
+            if not markdown:
+                continue
+            related = _table_self_ref_article_ids(law_id, text or markdown) if law_id else []
+            chunks.append(
+                {
+                    "page": item.get("page"),
+                    "text": markdown,
+                    "chunkStrategy": "guidance_docling_table_v1",
+                    "relatedArticleContentUnitIds": related,
+                    "articleReferenceSource": "guideline_table_annotation" if related else None,
+                }
+            )
+            continue
+        if not text:
+            continue
+        matches = _guidance_page_relation_matches(text, law_id)
+        if matches:
+            carried_reference = matches[-1][1]
+            buffer_annotated = True
+        if not buffer and current_header:
+            buffer.append(current_header)
+        if buffer_page is None:
+            buffer_page = item.get("page")
+        buffer.append(text)
+        if sum(len(part) for part in buffer) >= chunk_chars:
+            flush()
+    flush()
+    return chunks
+
+
+def _table_self_ref_article_ids(
+    law_id: str | None,
+    table_text: str,
+    limit: int = TABLE_SELF_REF_MAX_ARTICLES,
+) -> list[str]:
+    """表テキストから「法第N条(のM)」形式の自己参照を条レベルIDとして抽出する。
+
+    「会社法第330条」「施行規則第98条」のような他法令参照はTABLE_SELF_REF_PATTERNの
+    lookbehindで除外される。上限limit件で打ち切る(大きな対応表対策)。"""
+    if not law_id:
+        return []
+    normalized = table_text.translate(FULLWIDTH_DIGITS)
+    article_ids: list[str] = []
+    for match in TABLE_SELF_REF_PATTERN.finditer(normalized):
+        reference_text = re.sub(r"\s+", "", match.group(1))
+        for reference in _explicit_article_reference_ids(law_id, reference_text):
+            if reference not in article_ids:
+                article_ids.append(reference)
+        if len(article_ids) >= limit:
+            break
+    return article_ids[:limit]
+
+
+def _minio_client(http_client: Any = None) -> Minio:
+    return Minio(
+        settings.minio_endpoint,
+        access_key=settings.minio_access_key,
+        secret_key=settings.minio_secret_key,
+        secure=False,
+        http_client=http_client,
+    )
 
 
 def _lawqa_egov_documents(samples_dir: Path) -> list[dict[str, Any]]:
@@ -677,6 +904,87 @@ def _graph_artifacts_from_documents(documents: list[dict[str, Any]]) -> tuple[li
     return list(nodes_by_id.values()), edges
 
 
+def _guidance_graph_artifacts(
+    documents: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """ガイドライン文書を「羅針盤」としてグラフに載せる。
+
+    文書内の全チャンクの relatedArticleContentUnitIds を文書単位で集約し、
+    ガイドライン文書ノード -EXPLAINS-> 法令条文ノード のエッジを張る。検索時は
+    上位ヒットしたガイドラインチャンクの documentId からこのエッジを辿り、
+    解説対象の条文を特定する(条文本文の取得はOpenSearch側の役割)。
+
+    条文ノードは法令投入側(_graph_artifacts_from_documents)が作るため、ここでは
+    作らない。張り先が存在しないEXPLAINSは seed_all 側の dangling ドロップに委ねる。
+    """
+    ordered_articles_by_document: dict[str, list[str]] = {}
+    representative_by_document: dict[str, dict[str, Any]] = {}
+    for document in documents:
+        if document.get("docType") != "guideline":
+            continue
+        document_id = document["documentId"]
+        representative_by_document.setdefault(document_id, document)
+        articles = ordered_articles_by_document.setdefault(document_id, [])
+        for article_id in document.get("relatedArticleContentUnitIds") or []:
+            if article_id not in articles:
+                articles.append(article_id)
+
+    nodes: list[dict[str, Any]] = []
+    edges: list[dict[str, Any]] = []
+    for document_id, article_ids in ordered_articles_by_document.items():
+        if not article_ids:
+            continue  # 対応表・条文注釈が無い文書はグラフに載せない(孤立ノードを作らない)
+        document = representative_by_document[document_id]
+        nodes.append(
+            {
+                "graphNodeId": document_id,
+                "nodeType": "Document",
+                "documentId": document_id,
+                "deptCode": document.get("deptCode"),
+                "docType": "guideline",
+                "contentDomain": document.get("contentDomain"),
+                "title": document.get("title"),
+                "publishStatus": document.get("publishStatus"),
+                "isLatest": document.get("isLatest"),
+                "confidentiality": document.get("confidentiality"),
+                "clearanceLevel": document.get("clearanceLevel", 1),
+            }
+        )
+        for article_id in article_ids:
+            edges.append(
+                {
+                    "graphEdgeId": f"edge-{document_id}-explains-{article_id}",
+                    "edgeType": "EXPLAINS",
+                    "fromGraphNodeId": document_id,
+                    "toGraphNodeId": article_id,
+                    "documentId": document_id,
+                    "relationSource": "guidance_article_annotation",
+                    "relationConfidence": 0.9,
+                    "publishStatus": "published",
+                    "isLatest": True,
+                }
+            )
+    return nodes, edges
+
+
+def _drop_dangling_explains_edges(
+    edges: list[dict[str, Any]],
+    node_ids: set[str],
+) -> tuple[list[dict[str, Any]], int]:
+    """張り先/張り元ノードがグラフに無い EXPLAINS エッジだけを除去する。
+    EXPLAINS 以外の dangling は _assert_no_dangling_edges で従来どおり検出させる。"""
+    kept: list[dict[str, Any]] = []
+    dropped = 0
+    for edge in edges:
+        if edge.get("edgeType") == "EXPLAINS" and (
+            edge["fromGraphNodeId"] not in node_ids or edge["toGraphNodeId"] not in node_ids
+        ):
+            dropped += 1
+            continue
+        kept.append(edge)
+    return kept, dropped
+
+
 def _hierarchy_edge(from_id: str, to_id: str, document_id: str) -> dict[str, Any]:
     return {
         "graphEdgeId": f"edge-{from_id}-has-content-unit-{to_id.removeprefix(document_id + '-')}",
@@ -806,12 +1114,7 @@ def _seed_minio(
     documents: list[dict[str, Any]],
     external_guidance_sources: list[dict[str, Any]] | None = None,
 ) -> int:
-    client = Minio(
-        settings.minio_endpoint,
-        access_key=settings.minio_access_key,
-        secret_key=settings.minio_secret_key,
-        secure=False,
-    )
+    client = _minio_client()
     try:
         if not client.bucket_exists(settings.minio_bucket):
             client.make_bucket(settings.minio_bucket)

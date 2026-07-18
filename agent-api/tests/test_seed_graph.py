@@ -4,13 +4,18 @@ from hashlib import sha256
 
 from app.seed import (
     _article_chunks,
+    _docling_guidance_chunks,
+    _drop_dangling_explains_edges,
     _external_guidance_documents,
     _external_guidance_sources,
+    _guidance_graph_artifacts,
     _guidance_page_relation_matches,
+    _guidance_primary_law_document_id,
     _guidance_relation_article_ids,
     _japanese_number_to_int,
     _reference_edges,
     _related_articles_for_chunk,
+    _table_self_ref_article_ids,
 )
 
 
@@ -42,6 +47,73 @@ def test_reference_edges_include_explicit_and_previous_article():
     assert ("law-test-article-2", "law-test-article-1") in pairs
     assert ("law-test-article-2", "law-test-article-3") in pairs
     assert all(edge["edgeType"] == "REFERENCES" for edge in edges)
+
+
+def _guideline_chunk(content_unit_id: str, related_article_ids: list[str]) -> dict:
+    return {
+        "documentId": "guidance-test",
+        "contentUnitId": content_unit_id,
+        "docType": "guideline",
+        "deptCode": "common",
+        "contentDomain": "legal_guidance",
+        "title": "検証ガイドライン",
+        "publishStatus": "published",
+        "isLatest": True,
+        "confidentiality": "public",
+        "clearanceLevel": 1,
+        "relatedArticleContentUnitIds": related_article_ids,
+    }
+
+
+def test_guidance_graph_artifacts_builds_document_node_and_explains_edges():
+    documents = [
+        _guideline_chunk("guidance-test-page-6-chunk-1", []),  # 本文チャンク(条文注釈なし)
+        _guideline_chunk("guidance-test-page-20-chunk-1", ["law-335AC0000000145-article-18_2"]),
+        _guideline_chunk(
+            "guidance-test-page-21-chunk-1",
+            ["law-335AC0000000145-article-18_2", "law-335AC0000000145-article-23_35_2"],
+        ),
+    ]
+
+    nodes, edges = _guidance_graph_artifacts(documents)
+
+    assert len(nodes) == 1
+    assert nodes[0]["graphNodeId"] == "guidance-test"
+    assert nodes[0]["nodeType"] == "Document"
+    assert nodes[0]["docType"] == "guideline"
+
+    # 文書単位で条文を集約(重複除去・出現順)し、EXPLAINSエッジを張る。
+    targets = [edge["toGraphNodeId"] for edge in edges]
+    assert targets == ["law-335AC0000000145-article-18_2", "law-335AC0000000145-article-23_35_2"]
+    assert all(edge["edgeType"] == "EXPLAINS" for edge in edges)
+    assert all(edge["fromGraphNodeId"] == "guidance-test" for edge in edges)
+
+
+def test_guidance_graph_artifacts_skips_document_without_article_refs():
+    documents = [_guideline_chunk("guidance-test-page-1-chunk-1", [])]
+
+    nodes, edges = _guidance_graph_artifacts(documents)
+
+    assert nodes == []  # 対応表・注釈が無い文書は孤立ノードを作らない
+    assert edges == []
+
+
+def test_drop_dangling_explains_edges_removes_only_missing_targets():
+    edges = [
+        {"edgeType": "EXPLAINS", "fromGraphNodeId": "guidance-test", "toGraphNodeId": "law-a-article-1"},
+        {"edgeType": "EXPLAINS", "fromGraphNodeId": "guidance-test", "toGraphNodeId": "law-a-article-999"},
+        {"edgeType": "REFERENCES", "fromGraphNodeId": "law-a-article-1", "toGraphNodeId": "law-a-article-2"},
+    ]
+    node_ids = {"guidance-test", "law-a-article-1"}
+
+    kept, dropped = _drop_dangling_explains_edges(edges, node_ids)
+
+    assert dropped == 1
+    # 張り先が存在するEXPLAINSは残す。EXPLAINS以外のdanglingは除去せず assert に委ねる。
+    kept_types = [(edge["edgeType"], edge["toGraphNodeId"]) for edge in kept]
+    assert ("EXPLAINS", "law-a-article-1") in kept_types
+    assert ("EXPLAINS", "law-a-article-999") not in kept_types
+    assert ("REFERENCES", "law-a-article-2") in kept_types
 
 
 def test_long_article_is_split_into_paragraphs_and_items(monkeypatch):
@@ -116,6 +188,20 @@ def test_external_guidance_pdf_is_chunked_with_source_page(monkeypatch, tmp_path
     assert all(len(document["text"]) <= 400 for document in documents)
 
 
+def test_guidance_primary_law_document_id_adds_law_prefix_to_bare_egov_id():
+    # manifestのprimaryLawIdはlaw_registry.jsonと同じ裸のe-Gov法令番号("335AC0000000145")で
+    # 記録される想定。法令チャンクの実際のcontentUnitId表記("law-<法令番号>")へ正規化する。
+    assert _guidance_primary_law_document_id({"primaryLawId": "335AC0000000145"}) == "law-335AC0000000145"
+
+
+def test_guidance_primary_law_document_id_is_idempotent_for_already_prefixed_id():
+    assert _guidance_primary_law_document_id({"primaryLawId": "law-335AC0000000145"}) == "law-335AC0000000145"
+
+
+def test_guidance_primary_law_document_id_returns_none_when_absent():
+    assert _guidance_primary_law_document_id({}) is None
+
+
 def test_guidance_relation_article_ids_extracts_self_referenced_article():
     ids = _guidance_relation_article_ids("law-335AC0000000145", "法第18条の2第1項第2号関係")
     assert ids == ["law-335AC0000000145-article-18_2"]
@@ -185,7 +271,7 @@ def test_external_guidance_carries_reference_across_pages(monkeypatch, tmp_path)
                         "file": "guidance.pdf",
                         "sourceUrl": "https://example.test/guidance.pdf",
                         "sha256": f"sha256:{sha256(source_pdf.read_bytes()).hexdigest()}",
-                        "primaryLawId": "law-test",
+                        "primaryLawId": "test",
                     }
                 ]
             }
@@ -264,6 +350,173 @@ def test_external_guidance_without_primary_law_id_has_no_related_articles(monkey
 
     assert all(document["relatedArticleContentUnitIds"] == [] for document in documents)
     assert all(document["articleReferenceSource"] is None for document in documents)
+
+
+def test_table_self_ref_article_ids_extracts_standalone_law_references():
+    text = "２ 体制の整備 法第18条の２第 １項第２号 法第18条の２第 ３項第２号 規則第98条の ９第２号イ"
+    ids = _table_self_ref_article_ids("law-335AC0000000145", text)
+    assert ids == ["law-335AC0000000145-article-18_2"]
+
+
+def test_table_self_ref_article_ids_skips_other_law_names():
+    assert _table_self_ref_article_ids("law-test", "会社法第330条 民法第644条 施行規則第98条") == []
+
+
+def test_table_self_ref_article_ids_caps_at_limit():
+    text = "".join(f"法第{number}条 " for number in range(1, 20))
+    ids = _table_self_ref_article_ids("law-test", text, limit=8)
+    assert len(ids) == 8
+    assert ids[0] == "law-test-article-1"
+
+
+def test_table_self_ref_article_ids_without_law_id_returns_empty():
+    assert _table_self_ref_article_ids(None, "法第1条") == []
+
+
+def test_docling_guidance_chunks_emits_table_as_single_chunk_with_references():
+    items = [
+        {"type": "section_header", "page": 1, "text": "第２ 法令遵守体制"},
+        {"type": "text", "page": 1, "text": "本文の解説。" * 10},
+        {"type": "table", "page": 19, "text": "体制の整備 法第18条の２第１項第２号", "markdown": "| 項目 | 条文 |\n| 体制の整備 | 法第18条の２第１項第２号 |"},
+    ]
+
+    chunks = _docling_guidance_chunks(items, "law-335AC0000000145", chunk_chars=400)
+
+    table_chunks = [chunk for chunk in chunks if chunk["chunkStrategy"] == "guidance_docling_table_v1"]
+    assert len(table_chunks) == 1
+    assert table_chunks[0]["page"] == 19
+    assert table_chunks[0]["text"].startswith("|")
+    assert table_chunks[0]["relatedArticleContentUnitIds"] == ["law-335AC0000000145-article-18_2"]
+    assert table_chunks[0]["articleReferenceSource"] == "guideline_table_annotation"
+
+    text_chunks = [chunk for chunk in chunks if chunk["chunkStrategy"] == "guidance_docling_text_chunk_v1"]
+    assert text_chunks and text_chunks[0]["text"].startswith("第２ 法令遵守体制")
+    assert text_chunks[0]["page"] == 1
+
+
+def test_docling_guidance_chunks_carries_paren_annotation_forward():
+    items = [
+        {"type": "text", "page": 1, "text": "（法第一条関係）の解説。" + "本文。" * 50},
+        {"type": "text", "page": 2, "text": "続きの解説。" * 50},
+    ]
+
+    chunks = _docling_guidance_chunks(items, "law-test", chunk_chars=100)
+
+    assert chunks[0]["articleReferenceSource"] == "guideline_relation_annotation"
+    assert chunks[0]["relatedArticleContentUnitIds"] == ["law-test-article-1"]
+    assert chunks[-1]["articleReferenceSource"] == "carried_forward"
+    assert chunks[-1]["relatedArticleContentUnitIds"] == ["law-test-article-1"]
+
+
+def _artifact_guidance_manifest(tmp_path, source_pdf_bytes: bytes = b"placeholder") -> tuple:
+    source_pdf = tmp_path / "guidance.pdf"
+    source_pdf.write_bytes(source_pdf_bytes)
+    digest = sha256(source_pdf_bytes).hexdigest()
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "documents": [
+                    {
+                        "documentId": "guidance-test",
+                        "title": "検証ガイドライン",
+                        "authority": "検証庁",
+                        "file": "guidance.pdf",
+                        "sourceUrl": "https://example.test/guidance.pdf",
+                        "sha256": f"sha256:{digest}",
+                        "primaryLawId": "test",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    return manifest_path, digest
+
+
+def test_external_guidance_uses_preprocessed_artifact_when_available(monkeypatch, tmp_path):
+    from app import seed as seed_module
+
+    manifest_path, digest = _artifact_guidance_manifest(tmp_path)
+    artifact = {
+        "schemaVersion": 1,
+        "sourceSha256": f"sha256:{digest}",
+        "converter": "docling",
+        "items": [
+            {"type": "text", "page": 1, "text": "本文の解説。"},
+            {"type": "table", "page": 19, "text": "法第18条の２第１項第２号", "markdown": "| 条文 |\n| 法第18条の２ |"},
+        ],
+    }
+
+    monkeypatch.setattr(seed_module.settings, "seed_external_guidance", True)
+    monkeypatch.setattr(seed_module.settings, "external_guidance_manifest", manifest_path)
+    monkeypatch.setattr(seed_module.settings, "external_guidance_chunk_chars", 400)
+    monkeypatch.setattr(seed_module, "_load_guidance_artifact", lambda source: artifact)
+
+    documents = _external_guidance_documents(_external_guidance_sources())
+
+    assert all(document["parserType"] == "pdf_docling_structured_v1" for document in documents)
+    table_documents = [d for d in documents if d["chunkStrategy"] == "guidance_docling_table_v1"]
+    assert len(table_documents) == 1
+    assert table_documents[0]["sourcePage"] == 19
+    assert table_documents[0]["relatedArticleContentUnitIds"] == ["law-test-article-18_2"]
+
+
+def test_external_guidance_falls_back_to_pypdf_without_artifact(monkeypatch, tmp_path):
+    from app import seed as seed_module
+
+    manifest_path, _ = _artifact_guidance_manifest(tmp_path)
+
+    class FakePage:
+        def extract_text(self):
+            return "本文。" * 100
+
+    class FakeReader:
+        pages = [FakePage()]
+
+    monkeypatch.setattr(seed_module.settings, "seed_external_guidance", True)
+    monkeypatch.setattr(seed_module.settings, "external_guidance_manifest", manifest_path)
+    monkeypatch.setattr(seed_module.settings, "external_guidance_chunk_chars", 400)
+    monkeypatch.setattr(seed_module, "_load_guidance_artifact", lambda source: None)
+    monkeypatch.setattr(seed_module, "PdfReader", lambda _: FakeReader())
+
+    documents = _external_guidance_documents(_external_guidance_sources())
+
+    assert documents
+    assert all(document["parserType"] == "pdf_pypdf_page_chunk_v1" for document in documents)
+
+
+def test_load_guidance_artifact_rejects_stale_source_hash(monkeypatch, tmp_path):
+    from app import seed as seed_module
+
+    manifest_path, _ = _artifact_guidance_manifest(tmp_path)
+    monkeypatch.setattr(seed_module.settings, "seed_external_guidance", True)
+    monkeypatch.setattr(seed_module.settings, "external_guidance_manifest", manifest_path)
+    source = _external_guidance_sources()[0]
+
+    class FakeResponse:
+        def read(self):
+            payload = {"schemaVersion": 1, "sourceSha256": "sha256:" + "f" * 64, "items": [{"type": "text", "page": 1, "text": "x"}]}
+            return json.dumps(payload).encode("utf-8")
+
+        def close(self):
+            pass
+
+        def release_conn(self):
+            pass
+
+    class FakeMinio:
+        def get_object(self, bucket, object_name):
+            return FakeResponse()
+
+    monkeypatch.setattr(seed_module, "_minio_client", lambda http_client=None: FakeMinio())
+
+    try:
+        seed_module._load_guidance_artifact(source)
+    except ValueError as exc:
+        assert "stale" in str(exc)
+    else:
+        raise AssertionError("stale artifact must be rejected")
 
 
 def test_external_guidance_rejects_checksum_mismatch(monkeypatch, tmp_path):

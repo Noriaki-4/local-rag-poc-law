@@ -22,6 +22,12 @@ FULLWIDTH_DIGITS = str.maketrans("０１２３４５６７８９", "0123456789")
 HIERARCHY_EDGE_TYPE = "HAS_CONTENT_UNIT"
 HIERARCHY_MAX_DEPTH = 2
 DIRECT_CHUNKS_PER_ARTICLE = 3
+# ガイドライン文書 -EXPLAINS-> 条文 を辿るエッジ種別。
+GUIDANCE_EXPLAINS_EDGE_TYPE = "EXPLAINS"
+# 1回のguidance_explainsで確実投入する条文の上限。大きい対応表(製品区分×節)が
+# rerank枠(rerank_top_k)を埋め尽くしてガイドライン本文を押し出すのを防ぐ。
+# 条文はEXPLAINSエッジの出現順(=対応表の記載順、先頭に主要条文が来る)で切る。
+GUIDANCE_EXPLAINS_MAX_ARTICLES = 6
 
 
 class AgentService:
@@ -104,7 +110,9 @@ class AgentService:
                 _append_route(route, "article_direct_lookup")
 
         if _can_call_tool(tool_calls, deadline):
-            guidance_new = self._inject_guidance_explained_articles(request, evidence, trace, rerank_top_k)
+            guidance_new = self._inject_guidance_explained_articles(
+                request, evidence, trace, rerank_top_k, graph_paths
+            )
             if guidance_new is not None:
                 tool_calls += 1
                 _append_route(route, "guidance_explains_lookup")
@@ -446,26 +454,43 @@ class AgentService:
         evidence: dict[str, dict[str, Any]],
         trace: dict[str, Any],
         rerank_top_k: int,
+        graph_paths: list[dict[str, Any]],
     ) -> int | None:
         """上位候補にガイドライン解説チャンクが入っている場合、そのチャンクが
-        "(法第N条関係)" として明示する法令条文を、スコアに依らず候補プールへ
-        確実に投入する。
+        解説対象とする法令条文をグラフ(EXPLAINS)経由で特定し、スコアに依らず
+        候補プールへ確実に投入する。
 
         薄い委任規定(例: 「...体制を整備すること」)は、具体的な言葉で書かれた
         ガイドライン解説とのスコア競争でRRF/rerankerに負けて最終引用から漏れる
-        ことがある(実測: 薬機法第18条の2第1項第2号)。ガイドラインPDF原文の
-        自己参照見出しをseed時に抽出済みのため、ここでは検索を追加せず
-        メタデータから直接引く。
+        ことがある(実測: 薬機法第18条の2第1項第2号)。ガイドラインと条文の対応は
+        seed時に「ガイドライン文書 -EXPLAINS-> 条文」エッジとしてグラフへ載せてある。
+        グラフを羅針盤として使い、上位ヒットしたガイドライン文書からEXPLAINSを辿って
+        条文を特定する(条文本文の取得はOpenSearch=Vector RAG側の役割)。最終的に
+        引用するかどうかはLLM(_compose_answer)の判断に委ねる。
         """
         ranked_evidence = sorted(evidence.values(), key=lambda item: item["score"], reverse=True)[:rerank_top_k]
-        article_ids: list[str] = []
+        document_ids: list[str] = []
         for item in ranked_evidence:
             document = item["document"]
             if document.get("docType") != "guideline":
                 continue
-            for article_id in document.get("relatedArticleContentUnitIds") or []:
-                if article_id not in article_ids:
-                    article_ids.append(article_id)
+            document_id = document.get("documentId")
+            if document_id and document_id not in document_ids:
+                document_ids.append(document_id)
+        if not document_ids:
+            return None
+        try:
+            paths = self.graph_client.paths_from_many(
+                document_ids,
+                edge_type=GUIDANCE_EXPLAINS_EDGE_TYPE,
+                max_depth=1,
+                limit=settings.agent_max_graph_paths,
+                user_clearance_level=request.userClearanceLevel,
+            )
+        except Exception as exc:
+            trace["rounds"].append({"round": 0, "tool": "guidance_explains_lookup", "error": str(exc)})
+            return None
+        article_ids = _explains_target_article_ids(paths, GUIDANCE_EXPLAINS_MAX_ARTICLES)
         if not article_ids:
             return None
         try:
@@ -479,10 +504,12 @@ class AgentService:
             return None
         selected_documents = _select_direct_documents(request, documents, DIRECT_CHUNKS_PER_ARTICLE)
         new_count = _merge_direct_documents_into_evidence(evidence, selected_documents, "guidance_explains")
+        graph_paths.extend(paths)
         trace["rounds"].append(
             {
                 "round": 0,
                 "tool": "guidance_explains_lookup",
+                "guidanceDocumentIds": document_ids,
                 "articleIds": article_ids,
                 "resultCount": len(documents),
                 "selectedCount": len(selected_documents),
@@ -869,6 +896,23 @@ def _select_direct_documents(
         )
         selected.extend(ranked[:per_article])
     return selected
+
+
+def _explains_target_article_ids(paths: list[dict[str, Any]], limit: int) -> list[str]:
+    """EXPLAINSパス(ガイドライン文書 -> 条文)の終端ノードから条文IDを抽出する。
+    出現順を保ちつつ重複を除き、上限limit件で切る。"""
+    article_ids: list[str] = []
+    for path in paths:
+        nodes = path.get("nodes") or []
+        if not nodes:
+            continue
+        target = nodes[-1]
+        article_id = target.get("contentUnitId") or target.get("graphNodeId")
+        if article_id and article_id not in article_ids:
+            article_ids.append(article_id)
+        if len(article_ids) >= limit:
+            break
+    return article_ids[:limit]
 
 
 def _needs_sibling_expansion(request: AnswerRequest, ranked_evidence: list[dict[str, Any]]) -> bool:

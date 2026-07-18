@@ -308,7 +308,42 @@ scripts/download_lawqa_guidance.sh
 
 この操作は `datasets/lawqa_jp/external-guidance/` にPDFと、取得元URL・SHA-256を記録した `manifest.json` を作る。金融庁の旧URL `250221_kaiji.pdf` は現時点で提供終了のため、lawqa_jp参照時点のWeb Archiveスナップショットを取得し、マニフェストにその事実を記録する。
 
-次の指定で、原本をMinIOに保管し、PDF本文をページ単位でOpenSearchに投入する。ガイドラインは法令の委任・準用Graphには入れない。
+#### docling前処理(任意だが推奨)
+
+投入前にdoclingでPDFを構造分解(見出し/段落/表)しておくと、表が1表=1チャンクの
+Markdownとして投入され、表中の「法第N条」自己参照が `relatedArticleContentUnitIds` に
+記録される(検索時の `guidance_explains_lookup` が発火しやすくなる)。
+トリガーは手動のみ(このリポジトリでは自動発火の仕組みは持たない):
+
+```bash
+docker compose --profile preprocess build preprocess-worker  # seed.py側と同様、コード変更後は必須
+docker compose --profile preprocess run --rm preprocess-worker \
+  python -m app.cli --sync-local
+```
+
+`seed.py` 側で `_load_guidance_artifact` 等を変更した場合も、`agent-api` を
+`docker compose up --build -d agent-api` で再ビルドしないと反映されない(上記の
+`--build` に関する注意と同じ)。派生JSONを正しく生成しても、agent-apiが古い
+イメージのままだと黙って従来のpypdf経路にフォールバックし続けるので注意。
+
+これは `datasets/.../documents/*.pdf` をMinIOのrawゾーン
+(`source-documents/external-guidance/`)へアップロードし、変換結果JSONを派生ゾーン
+(`derived-artifacts/preprocessed/external-guidance/`)へ書き込む。seedは派生JSONが
+あればそれを優先し、無ければ従来のpypdfページ分割にフォールバックする。派生JSONの
+`sourceSha256` がマニフェストのSHA-256と一致しない場合、seedは古い成果物での投入を
+防ぐためエラーで停止する(前処理を再実行すること)。
+
+- 1件だけ処理する場合: `python -m app.cli --sync-local --only mhlw-000761110`
+- doclingはPyTorch依存でイメージが大きいため、profile `preprocess` 指定時のみビルドされる。
+- 大きいPDF(監督指針479ページ等)はCPU変換に時間がかかる。
+
+AWS移行時の対応: 手動CLIはS3イベント同形のdictを組み立てて
+`preprocess-worker/app/handler.py` の `handle_s3_event()` を呼んでいる。移行後は
+S3 Event Notification → Lambda(コンテナイメージ)/ECS から同じ関数を呼ぶだけで、
+変換ロジック・イベント解析・成果物スキーマは無変更で引き継げる。boto3の接続先も
+`AWS_ENDPOINT_URL` 環境変数を外せば本物のS3に切り替わる。
+
+次の指定で、原本をMinIOに保管し、PDF本文をOpenSearchに投入する(docling前処理済みなら構造チャンク、未処理ならページ単位)。ガイドラインは法令の委任・準用Graphには入れない。
 
 ```bash
 SEED_LAWQA_EGOV=true \

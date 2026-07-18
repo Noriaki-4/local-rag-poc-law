@@ -41,7 +41,7 @@ class Settings:
     agent_use_llm_planner = os.getenv("AGENT_USE_LLM_PLANNER", "true").lower() in {"1", "true", "yes", "on"}
     agent_candidate_top_k = max(5, min(int(os.getenv("AGENT_CANDIDATE_TOP_K", "20")), 100))
     agent_guidance_candidate_top_k = max(1, min(int(os.getenv("AGENT_GUIDANCE_CANDIDATE_TOP_K", "10")), 50))
-    agent_rerank_top_k = max(1, min(int(os.getenv("AGENT_RERANK_TOP_K", "10")), 50))
+    agent_rerank_top_k = max(1, min(int(os.getenv("AGENT_RERANK_TOP_K", "16")), 50))
     agent_rrf_k = max(1, int(os.getenv("AGENT_RRF_K", "60")))
     agent_max_llm_calls = max(1, min(int(os.getenv("AGENT_MAX_LLM_CALLS", "3")), 3))
     rerank_provider = os.getenv("RERANK_PROVIDER", "none").lower()
@@ -65,7 +65,7 @@ class Settings:
     evaluator_timeout_sec = int(os.getenv("EVALUATOR_TIMEOUT_SEC", "20"))
     judge_model = os.getenv("JUDGE_MODEL", "none")
     llm_timeout_sec = int(os.getenv("LLM_TIMEOUT_SEC", "90"))
-    llm_max_context_chars = int(os.getenv("LLM_MAX_CONTEXT_CHARS", "4000"))
+    llm_max_context_chars = int(os.getenv("LLM_MAX_CONTEXT_CHARS", "12000"))
 
 
 settings = Settings()
