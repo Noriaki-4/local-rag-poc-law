@@ -109,6 +109,11 @@ curl -s -X POST http://localhost:8000/answer \
 lawqa_jp の選択式140問（金商法80・薬機法39・借地借家法21）を、`eval-runner` で
 **1問だけ／数問だけ**実行して、システムの予測回答と正解（gold）を比較できます。
 
+> lawqa_jp は**ゴールデンセット**（正解＋必要な条文を持つ）ですが、それらは採点専用で、
+> システムには**問題文と選択肢しか渡しません**（必要な条文を自力で検索できるかを測る）。
+> gold条文の生成と各指標の詳細は
+> [evaluation_design.md](requirements/docs/evaluation_design.md) 2.1 を参照。
+
 ### 5.1 事前準備
 
 法令・ガイドラインが seed 済みであること（RUNBOOK.md の seed 手順）。以下は

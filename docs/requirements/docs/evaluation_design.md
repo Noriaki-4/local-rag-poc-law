@@ -60,6 +60,82 @@ expectedLawIds
 - `citationArticleHit`: 条単位goldが存在する場合だけ計算。法令URLしかない場合はnull
 - `citationParagraphHit`: 項・号単位goldが存在する場合だけ計算。それ以外はnull
 
+### 2.1 ゴールデンセットの構造と「答え」を渡さない保証
+
+lawqa_jp は**ゴールデンセット**であり、各問題は正解に加えて「必要な条文（根拠）」を
+持っている。ただし本POCの評価では、これらの gold 情報を**推論時にはシステムへ渡さず、
+採点にのみ使う**。これにより「必要な条文を与えられて読解するだけ」の穴埋めテストでは
+なく、**必要な条文を自力で検索して引けるか**という検索性能テストになる。
+
+#### データセットが持つ gold フィールド
+
+lawqa_jp native JSON（`data/selection.json`）の1問は次を持つ:
+
+| フィールド | 内容 | 評価での役割 |
+|---|---|---|
+| `問題文` / `選択肢` | 設問と4択 | **入力**（システムへ渡す） |
+| `output` | 正解の選択肢ラベル（例: `c`） | gold回答（採点のみ） |
+| `コンテキスト` | 根拠条文を階層見出し付きで収録（`## 法令名` / `### 第N条` / `#### 第N項` / `##### 第N号` + 本文） | **gold根拠（条・項・号レベル）**（採点のみ） |
+| `references` | e-Gov法令URL・ガイドラインPDF URL | 出典。多くは**親法レベル**（採点のみ） |
+
+#### システムへ渡す入力（gold を含めない）
+
+`eval-runner` が `/answer` へ送るのは `question` と `choices` だけ
+（[run_eval.py](../../../eval-runner/run_eval.py) の `run_lawqa`）。
+`output`・`コンテキスト`・`references` は送らない。システムは seed 済みのローカル
+コーパスから条文を自力検索する。
+
+#### 期待参照（expectedReferences）の生成
+
+gold条文は2経路で `expectedReferences`（採点用の contentUnitId/lawId のリスト）へ変換する
+（`normalize_lawqa_sample`）:
+
+1. `references` のURL → `_reference_from_url` で法令番号（lawId）を抽出。多くは
+   `law-<法令番号>` の**法令レベル**まで。
+2. `コンテキスト` の見出し → `_context_expected_references` で
+   `法令名→lawId` を対応付けたうえで、`### 第N条`→`law-<id>-article-N`、
+   `#### 第N項`→`…-paragraph-P`、`##### 第N号`→`…-item-K` と、**条・項・号レベルの
+   contentUnitId** を組み立てる。`references` が親法しか持たなくても、コンテキストから
+   条文粒度の gold を復元できる。
+
+gold の最も細かい粒度を `referenceGranularity`（`law`/`article`/`paragraph`/`item`）として
+記録し、指標の照合粒度を決める。gold が法令URLしか無ければ上限は `law`。
+
+#### 採点（retrieved citations との突き合わせ）
+
+システムの回答（`predictedAnswer`）と引用（`citations`）を gold と照合する。
+照合はすべて **ID集合の積（共通要素が1つでもあれば hit=1、無ければ 0）** で行う。
+
+- `answerAccuracy` = `predictedAnswer == goldAnswer`（選択肢ラベルの一致、1/0）。
+- **引用の照合は gold の粒度で使う指標を切り替える**:
+  - gold が**法令URLだけ**（`referenceGranularity=law`）→ `citationLawHit` =
+    「期待 documentId 集合 ∩ 引用 documentId 集合 ≠ ∅」。
+  - gold に**条以下がある**（`article`/`paragraph`/`item`）→ `citationArticleHit` =
+    期待・引用の双方を**Article ID に正規化**（`-paragraph-…` / `-item-…` を落とす）した
+    集合の積。`citationParagraphHit` は正規化せず contentUnitId を**厳密一致**で比較。
+  - `citationHit` は「gold が law粒度なら citationLawHit、条以下なら citationArticleHit」を
+    採用する代表値。
+  - `citationLawFamilyHit` は、親法を期待して委任法令（施行令・府令）を引いたケースを
+    救うため、法令ファミリー単位（`law_registry.json` の `familyRoot`）で照合する別軸。
+- gold が全く無い問題（非e-Gov PDFのみが根拠等）は `referenceScorable=false` とし、
+  引用系は `null`（採点対象外。率の分母から除く）。
+- **段階別 hit**（`candidatePoolHit` / `fusionHit` / `rerankerHit`）は、trace の
+  `candidatePoolContentUnitIds` / `fusionTopContentUnitIds` / `rerankerTopContentUnitIds`
+  それぞれに対し上と同じ照合（law粒度なら documentId、条以下なら Article ID 正規化）を行い、
+  **候補プール→RRF融合→reranker のどの段階で gold を落としたか**を切り分ける
+  （検索ミスの原因診断に使う。例: candidatePoolHit=1 かつ rerankerHit=0 なら「候補には
+  あったが再ランクで落とした」）。
+- `graphExpansionHit` は Graph が新規取得した `graphExpandedContentUnitIds`（およびその親条・
+  親法令ID）が gold に当たった場合だけ1。
+
+> 実装は [run_eval.py](../../../eval-runner/run_eval.py) の `run_lawqa` 内。期待側は
+> `expected`（contentUnitId集合）/ `expected_document_ids` / `expected_articles`、引用側は
+> `retrieved` / `retrieved_document_ids` / `retrieved_articles`、段階別は `_hit_at()` に対応。
+
+> 要約: lawqa_jp は「正解＋必要な条文」を持つゴールデンセットだが、それらは
+> **答え合わせ専用**であり、システムには問題文と選択肢しか渡さない。`citationArticleHit`
+> は「システムが自力で引いた条文が、コンテキスト由来の gold条文と一致したか」を測る。
+
 ## 3. Trace ログ
 
 すべてのパターンで共通ログを出す。

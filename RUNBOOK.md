@@ -430,6 +430,10 @@ docker compose --profile eval run --rm eval-runner
 
 - `コンテキスト` と `output` は Agent API には送らない。
 - `output` と `references` は eval-runner の答え合わせだけに使う。
+- lawqa_jp はゴールデンセット（正解＋必要な条文を持つ）だが、それらは採点専用で、
+  システムには問題文と選択肢しか渡さない。gold条文の生成（コンテキスト見出しから
+  条・項・号の contentUnitId を復元）と各指標の照合ロジックの詳細は
+  [evaluation_design.md](docs/requirements/docs/evaluation_design.md) 2.1 を参照。
 - 現行の既定検索は BM25 + bge-m3 vector の Hybrid 検索。
 - `SEED_LAWQA_EGOV=true` を使わない場合、RAGコーパスはサンプル1文書のみなので、全問スコアは検索基盤の完成度ではなく、現在投入済み文書に強く依存する。
 - e-Gov以外のPDF等を参照する問題は、現行の自動投入対象外。`citationHit` は e-Gov 法令ID単位の部分一致も見る。
