@@ -103,13 +103,30 @@ def wait_for_api() -> None:
     raise RuntimeError("Agent API did not become healthy")
 
 
+def _print_question_result(index: int, total: int, result: dict[str, Any]) -> None:
+    """1問ごとの結果を人が読める1行でターミナルへ出す。集計JSONだけだと
+    予測/正解が分からないため、手動での1問確認を分かりやすくする。"""
+    scores = result.get("scores", {})
+    mark = "○" if scores.get("answerAccuracy") == 1 else "×"
+    predicted = result.get("predictedAnswer") or "-"
+    gold = result.get("goldAnswer") or "-"
+    hit_label = {1: "一致", 0: "不一致", None: "-"}.get(scores.get("citationArticleHit"), "-")
+    llm = "LLM使用" if result.get("llmUsed") else "LLM未使用"
+    print(
+        f"[{index}/{total}] {mark} {result.get('questionId')}  "
+        f"予測={predicted} 正解={gold}  引用条文={hit_label}  ({llm})",
+        flush=True,
+    )
+
+
 def run_lawqa() -> list[dict[str, Any]]:
     rows, source = load_lawqa_rows()
     rows = rows[EVAL_OFFSET:]
     if EVAL_LIMIT > 0:
         rows = rows[:EVAL_LIMIT]
     results = []
-    for row in rows:
+    total = len(rows)
+    for index, row in enumerate(rows, start=1):
         try:
             response = requests.post(
                 f"{API_URL}/answer",
@@ -162,6 +179,7 @@ def run_lawqa() -> list[dict[str, Any]]:
                     "latencyMs": None,
                 }
             )
+            _print_question_result(index, total, results[-1])
             continue
         expected = {ref["contentUnitId"] for ref in row.get("expectedReferences", []) if ref.get("contentUnitId")}
         expected_law_ids = {ref["lawId"] for ref in row.get("expectedReferences", []) if ref.get("lawId")}
@@ -288,6 +306,7 @@ def run_lawqa() -> list[dict[str, Any]]:
                 "latencyMs": output.get("trace", {}).get("elapsedMs"),
             }
         )
+        _print_question_result(index, total, results[-1])
     return results
 
 

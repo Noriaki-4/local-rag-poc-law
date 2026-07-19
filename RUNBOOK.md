@@ -191,6 +191,30 @@ curl -s -X POST http://localhost:8000/admin/seed | jq .
 
 `/admin/seed` は OpenSearch index と Neo4j graph を作り直す。検証環境の再投入用であり、本番運用向けの差分投入ではない。
 
+### seed中の挙動（ハングではない）
+
+`SEED_LAWQA_EGOV=true` 込みの seed は、e-Gov法令の取得と**全チャンク（約1.6万件）の埋め込み
+生成をメモリ上で完了してから** OpenSearch へ一括投入する。そのため投入完了までの数分〜
+十数分間、`GET /legal-rag-content/_count` は **0 のまま**になる。これはハングではない。
+
+進行中か（=正常）を確かめる目安:
+
+```bash
+# ネットワーク受信量とメモリが増え続けていれば進行中
+docker stats --no-stream local-rag-poc-law-agent-api-1
+# エラーが出ていないこと
+docker compose logs --tail 30 agent-api | grep -iE "error|exception|traceback"
+```
+
+`/admin/seed` の HTTP レスポンス（`{"status":"seeded", ...}`）が返れば完了。docCount が
+0 のままでも、レスポンスが返るまでは待つこと。埋め込みは Ollama(bge-m3) が律速で、
+このフェーズが最も時間がかかる。
+
+> seed 環境変数（`SEED_LAWQA_EGOV` / `SEED_EXTERNAL_GUIDANCE` 等）は `docker-compose.yml` の
+> `${VAR:-default}` で **agent-api コンテナ起動時に読まれる**。curl 側に付けても効かないため、
+> `SEED_LAWQA_EGOV=true SEED_EXTERNAL_GUIDANCE=true docker compose up -d --build agent-api` の
+> ように **compose up 時**に指定してから seed する。
+
 ## 4. API 動作確認
 
 Hybrid 検索:
