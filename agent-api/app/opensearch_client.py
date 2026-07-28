@@ -1,10 +1,13 @@
+import json
+from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any
 
 import requests
 
 from .config import settings
-from .embeddings import embed_text
+from .embeddings import embed_text, embed_texts
+from .legal_ontology import authority_type_rank, search_authority_types
 
 # 附則(施行期日・経過措置・改正沿革)が根拠になりうる質問の手がかり。
 SUPPLEMENTARY_PROVISION_CUES = (
@@ -19,6 +22,162 @@ SUPPLEMENTARY_PROVISION_CUES = (
     "適用関係",
     "みなし規定",
 )
+
+
+@dataclass(frozen=True)
+class RequirementSearchSpec:
+    """1つのEvidenceRequirementに対する検索範囲(計画書 §9.1, §9.2)。
+
+    元の質問全文ではなく、論点・法的役割・レイヤー・親条文から作った専用クエリを使う。
+    """
+
+    requirement_id: str
+    query: str
+    authority_type: str | None = None
+    document_ids: tuple[str, ...] = ()
+    article_ids: tuple[str, ...] = ()
+    top_k: int = 10
+    key_terms: tuple[str, ...] = ()
+    # 同一法令系統への絞り込み。document_idsと違い、レイヤー(authorityType)の
+    # 絞り込みは維持する(§6.3-7, §9.1)。
+    family_document_ids: tuple[str, ...] = ()
+    # 法令レーンとガイドレーンは同じ候補枠で競争させない(§10)。同じmulti-searchへ
+    # まとめても、doc_typeで結果を別レーンとして扱う。
+    doc_type: str = "law"
+
+
+@dataclass(frozen=True)
+class ArticleCandidate:
+    """Article単位に集約した候補。項・号はArticle確定後に選ぶ(§9.3, §11.8)。"""
+
+    article_id: str
+    document_id: str
+    requirement_id: str
+    score: float = 0.0
+    authority_type: str | None = None
+    authority_rank: int = 0
+    heading: str = ""
+    text: str = ""
+    chunks: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+
+
+def _articles_from_hits(
+    hits: list[dict[str, Any]],
+    spec: RequirementSearchSpec,
+) -> list[dict[str, Any]]:
+    """chunkヒットをArticle単位へ集約する。
+
+    同じArticleの項・号chunksが候補枠を消費する問題(§2-4)を避けるため、候補管理は
+    Article単位で行い、chunkは付随情報として保持する。
+    """
+    by_article: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for hit in hits:
+        source = hit.get("_source") or {}
+        article_id = str(
+            source.get("articleContentUnitId")
+            or source.get("parentContentUnitId")
+            or source.get("contentUnitId")
+            or ""
+        ).split("-paragraph-", 1)[0]
+        if not article_id:
+            continue
+        score = float(hit.get("_score") or 0.0)
+        if article_id not in by_article:
+            order.append(article_id)
+            by_article[article_id] = {
+                "articleId": article_id,
+                "documentId": source.get("documentId"),
+                "requirementId": spec.requirement_id,
+                "score": score,
+                "authorityType": source.get("authorityType"),
+                "authorityRank": authority_type_rank(
+                    spec.authority_type, source.get("authorityType")
+                ),
+                "heading": source.get("heading") or "",
+                "text": source.get("text") or "",
+                "chunks": [source],
+                "retrievalSources": list(hit.get("_retrieval_sources") or []),
+                "directMatch": bool(hit.get("_direct_match")),
+            }
+            continue
+        candidate = by_article[article_id]
+        candidate["score"] = max(candidate["score"], score)
+        candidate["chunks"].append(source)
+        candidate["retrievalSources"] = list(
+            dict.fromkeys(
+                [
+                    *(candidate.get("retrievalSources") or []),
+                    *(hit.get("_retrieval_sources") or []),
+                ]
+            )
+        )
+        candidate["directMatch"] = bool(
+            candidate.get("directMatch") or hit.get("_direct_match")
+        )
+    ordered = [by_article[article_id] for article_id in order]
+    # 完全一致するauthorityTypeを順位上は優先し、未判別候補も落とさない(§5.2)。
+    ordered.sort(
+        key=lambda candidate: (
+            not candidate.get("directMatch"),
+            candidate["authorityRank"],
+            -candidate["score"],
+        )
+    )
+    return ordered
+
+
+def _chunks_from_hits(
+    hits: list[dict[str, Any]],
+    spec: RequirementSearchSpec,
+) -> list[dict[str, Any]]:
+    """ガイド等、条文単位へ集約しない資料のヒットをchunkのまま返す。"""
+    return [
+        {
+            "contentUnitId": str((hit.get("_source") or {}).get("contentUnitId") or ""),
+            "documentId": str((hit.get("_source") or {}).get("documentId") or ""),
+            "requirementId": spec.requirement_id,
+            "score": float(hit.get("_score") or 0.0),
+            "docType": (hit.get("_source") or {}).get("docType"),
+            "authorityType": (hit.get("_source") or {}).get("authorityType"),
+            "text": (hit.get("_source") or {}).get("text") or "",
+            "source": hit.get("_source") or {},
+        }
+        for hit in hits
+    ]
+
+
+def _merge_requirement_hits(
+    scored: dict[str, dict[str, Any]],
+    hits: list[dict[str, Any]],
+    source_kind: str,
+) -> None:
+    """BM25・vector・直接取得をchunk単位でRRF融合する。"""
+    weights = {"bm25": 0.4, "vector": 0.6}
+    for rank, hit in enumerate(hits, start=1):
+        source = hit.get("_source") or {}
+        content_unit_id = str(source.get("contentUnitId") or "")
+        if not content_unit_id:
+            continue
+        entry = scored.setdefault(
+            content_unit_id,
+            {
+                "_source": source,
+                "_score": 0.0,
+                "_retrieval_sources": [],
+                "_direct_match": False,
+            },
+        )
+        if source_kind == "direct":
+            # 明示条文・高信頼Graph接続先は検索語の順位に依存させない。
+            entry["_score"] = max(float(entry["_score"]), 1000.0 - rank)
+            entry["_direct_match"] = True
+        else:
+            entry["_score"] = float(entry["_score"]) + (
+                weights[source_kind] / (settings.agent_rrf_k + rank)
+            )
+        if source_kind not in entry["_retrieval_sources"]:
+            entry["_retrieval_sources"].append(source_kind)
 
 
 class OpenSearchClient:
@@ -216,6 +375,197 @@ class OpenSearchClient:
         results = list(scored.values())
         results.sort(key=lambda item: item["score"], reverse=True)
         return results[:top_k]
+
+    def search_requirement_specs(
+        self,
+        specs: list["RequirementSearchSpec"],
+        *,
+        user_clearance_level: int,
+        timeout_sec: float | None = None,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """複数Requirementの法令内検索を1回のmulti-searchへまとめる(計画書 §11.7)。
+
+        論理クエリ数と外部API呼び出し数を分離し、Requirementごとの逐次HTTP呼び出しへ
+        戻さないための入口。戻り値は requirementId -> Article単位の候補リスト。
+        """
+        if not specs:
+            return {}
+        embeddings_by_query: dict[str, list[float]] = {}
+        if settings.agent_use_vector:
+            unique_queries = list(dict.fromkeys(spec.query for spec in specs if spec.query))
+            try:
+                vectors = embed_texts(
+                    unique_queries,
+                    settings.embedding_dimension,
+                    timeout_sec=timeout_sec,
+                )
+                embeddings_by_query = dict(zip(unique_queries, vectors, strict=True))
+            except Exception:
+                # 埋め込み障害時もBM25・直接取得を継続する。
+                embeddings_by_query = {}
+
+        lines: list[str] = []
+        subqueries: list[tuple[RequirementSearchSpec, str]] = []
+        for spec in specs:
+            for article_id in spec.article_ids:
+                lines.append(json.dumps({"index": self.index}))
+                lines.append(
+                    json.dumps(
+                        self._direct_article_query(
+                            spec,
+                            article_id,
+                            user_clearance_level,
+                        )
+                    )
+                )
+                subqueries.append((spec, "direct"))
+            if settings.agent_use_bm25 or not embeddings_by_query:
+                lines.append(json.dumps({"index": self.index}))
+                lines.append(json.dumps(self._requirement_query(spec, user_clearance_level)))
+                subqueries.append((spec, "bm25"))
+            vector = embeddings_by_query.get(spec.query)
+            if settings.agent_use_vector and vector:
+                lines.append(json.dumps({"index": self.index}))
+                lines.append(
+                    json.dumps(
+                        self._requirement_vector_query(
+                            spec,
+                            vector,
+                            user_clearance_level,
+                        )
+                    )
+                )
+                subqueries.append((spec, "vector"))
+        payload = "\n".join(lines) + "\n"
+        response = requests.post(
+            f"{self.base_url}/{self.index}/_msearch",
+            data=payload.encode("utf-8"),
+            headers={"Content-Type": "application/x-ndjson"},
+            timeout=timeout_sec or 15,
+        )
+        response.raise_for_status()
+        responses = response.json().get("responses", [])
+        hits_by_requirement: dict[str, dict[str, dict[str, Any]]] = {
+            spec.requirement_id: {} for spec in specs
+        }
+        for (spec, source_kind), single in zip(subqueries, responses, strict=False):
+            hits = (single.get("hits") or {}).get("hits") or []
+            _merge_requirement_hits(
+                hits_by_requirement[spec.requirement_id],
+                hits,
+                source_kind,
+            )
+        results: dict[str, list[dict[str, Any]]] = {}
+        for spec in specs:
+            hits = sorted(
+                hits_by_requirement[spec.requirement_id].values(),
+                key=lambda hit: -float(hit.get("_score") or 0.0),
+            )
+            results[spec.requirement_id] = (
+                _articles_from_hits(hits, spec)
+                if spec.doc_type == "law"
+                else _chunks_from_hits(hits, spec)
+            )
+        return results
+
+    def _direct_article_query(
+        self,
+        spec: "RequirementSearchSpec",
+        article_id: str,
+        user_clearance_level: int,
+    ) -> dict[str, Any]:
+        filters = self._requirement_filters(spec, user_clearance_level)
+        return {
+            "size": max(1, settings.layered_max_chunks_per_article),
+            "query": {
+                "bool": {
+                    "filter": [
+                        *filters,
+                        {
+                            "bool": {
+                                "should": [
+                                    {"term": {"contentUnitId": article_id}},
+                                    {"term": {"articleContentUnitId": article_id}},
+                                ],
+                                "minimum_should_match": 1,
+                            }
+                        },
+                    ]
+                }
+            },
+        }
+
+    def _requirement_query(
+        self,
+        spec: "RequirementSearchSpec",
+        user_clearance_level: int,
+    ) -> dict[str, Any]:
+        filters = self._requirement_filters(spec, user_clearance_level)
+        return {
+            "size": spec.top_k,
+            "query": {
+                "bool": {
+                    "filter": filters,
+                    "must": [
+                        {
+                            "multi_match": {
+                                "query": spec.query,
+                                "fields": ["heading^8", "text^2", "title", "sectionPath"],
+                                "type": "best_fields",
+                            }
+                        }
+                    ],
+                }
+            },
+        }
+
+    def _requirement_vector_query(
+        self,
+        spec: "RequirementSearchSpec",
+        vector: list[float],
+        user_clearance_level: int,
+    ) -> dict[str, Any]:
+        filters = self._requirement_filters(spec, user_clearance_level)
+        return {
+            "size": spec.top_k,
+            "query": {
+                "knn": {
+                    "embedding": {
+                        "vector": vector,
+                        "k": max(spec.top_k, 1),
+                        "filter": {"bool": {"filter": filters}},
+                    }
+                }
+            },
+        }
+
+    def _requirement_filters(
+        self,
+        spec: "RequirementSearchSpec",
+        user_clearance_level: int,
+    ) -> list[dict[str, Any]]:
+        filters: list[dict[str, Any]] = [
+            *self._filters(spec.doc_type, user_clearance_level),
+        ]
+        if spec.document_ids:
+            filters.append({"terms": {"documentId": list(spec.document_ids)}})
+        elif spec.family_document_ids:
+            filters.append({"terms": {"documentId": list(spec.family_document_ids)}})
+        authority_types = search_authority_types(spec.authority_type)
+        if authority_types and not spec.document_ids and spec.doc_type == "law":
+            # 未判別(ordinance_unspecified / unknown)を構造的に落とさない(§5.2)。
+            filters.append(
+                {
+                    "bool": {
+                        "should": [
+                            {"terms": {"authorityType": list(authority_types)}},
+                            {"bool": {"must_not": {"exists": {"field": "authorityType"}}}},
+                        ],
+                        "minimum_should_match": 1,
+                    }
+                }
+            )
+        return filters
 
     def _filters(self, doc_type: str | None, user_clearance_level: int) -> list[dict[str, Any]]:
         filters: list[dict[str, Any]] = [

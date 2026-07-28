@@ -1,11 +1,12 @@
 import xml.etree.ElementTree as ET
 import json
 from hashlib import sha256
+from types import SimpleNamespace
 
 from app.seed import (
     _article_chunks,
     _docling_guidance_chunks,
-    _drop_dangling_explains_edges,
+    _drop_dangling_guidance_edges,
     _delegation_edges,
     _external_guidance_documents,
     _external_guidance_sources,
@@ -18,6 +19,7 @@ from app.seed import (
     _parent_law_article_reference_ids,
     _parent_order_article_reference_ids,
     _reference_edges,
+    _remove_stale_vector_objects,
     _related_articles_for_chunk,
     _table_self_ref_article_ids,
 )
@@ -181,16 +183,52 @@ def test_guidance_graph_artifacts_builds_document_node_and_explains_edges():
     assert all(edge["fromGraphNodeId"] == "guidance-test" for edge in edges)
 
 
-def test_guidance_graph_artifacts_skips_document_without_article_refs():
+def test_guidance_graph_artifacts_keeps_document_without_article_refs():
     documents = [_guideline_chunk("guidance-test-page-1-chunk-1", [])]
 
     nodes, edges = _guidance_graph_artifacts(documents)
 
-    assert nodes == []  # 対応表・注釈が無い文書は孤立ノードを作らない
+    assert [node["graphNodeId"] for node in nodes] == ["guidance-test"]
     assert edges == []
 
 
-def test_drop_dangling_explains_edges_removes_only_missing_targets():
+def test_minio_cleanup_removes_only_unreferenced_vector_objects(monkeypatch):
+    from app import seed as seed_module
+
+    monkeypatch.setattr(seed_module.settings, "minio_bucket", "knowledge-root")
+
+    class FakeMinio:
+        def __init__(self):
+            self.removed: list[str] = []
+
+        def list_objects(self, bucket, prefix, recursive):
+            assert bucket == "knowledge-root"
+            assert prefix == "derived-artifacts/vector-documents/"
+            assert recursive is True
+            return [
+                SimpleNamespace(
+                    object_name="derived-artifacts/vector-documents/current.md"
+                ),
+                SimpleNamespace(
+                    object_name="derived-artifacts/vector-documents/stale.md"
+                ),
+            ]
+
+        def remove_objects(self, bucket, delete_objects):
+            self.removed = [item._name for item in delete_objects]
+            return iter(())
+
+    client = FakeMinio()
+    removed = _remove_stale_vector_objects(
+        client,
+        {"derived-artifacts/vector-documents/current.md"},
+    )
+
+    assert removed == 1
+    assert client.removed == ["derived-artifacts/vector-documents/stale.md"]
+
+
+def test_drop_dangling_guidance_edges_removes_only_missing_targets():
     edges = [
         {"edgeType": "EXPLAINS", "fromGraphNodeId": "guidance-test", "toGraphNodeId": "law-a-article-1"},
         {"edgeType": "EXPLAINS", "fromGraphNodeId": "guidance-test", "toGraphNodeId": "law-a-article-999"},
@@ -198,7 +236,7 @@ def test_drop_dangling_explains_edges_removes_only_missing_targets():
     ]
     node_ids = {"guidance-test", "law-a-article-1"}
 
-    kept, dropped = _drop_dangling_explains_edges(edges, node_ids)
+    kept, dropped = _drop_dangling_guidance_edges(edges, node_ids)
 
     assert dropped == 1
     # 張り先が存在するEXPLAINSは残す。EXPLAINS以外のdanglingは除去せず assert に委ねる。

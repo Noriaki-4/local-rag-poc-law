@@ -8,6 +8,14 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 import requests
 
 from .config import settings
+from .legal_issue_planner import (
+    HARD_MAX_PRIMARY_ISSUES,
+    IssuePlan,
+    build_issue_plan_prompt,
+    fallback_issue_plan,
+    issue_plan_json_schema,
+    parse_issue_plan,
+)
 from .models import AnswerRequest, Citation
 
 
@@ -36,6 +44,21 @@ class LLMResult:
 class SearchPlanResult:
     queries: list[str]
     graphRequired: bool
+    provider: str
+    model: str
+    latencyMs: int
+    inputTokens: int | None
+    outputTokens: int | None
+    validationError: str | None = None
+    stopReason: str | None = None
+    retryCount: int = 0
+
+
+@dataclass
+class IssuePlanResult:
+    """structured issue plannerの結果 (layered_legal_evidence_retrieval_plan.md §7.2)。"""
+
+    plan: IssuePlan
     provider: str
     model: str
     latencyMs: int
@@ -158,8 +181,15 @@ class LLMClient:
         citations: list[Citation],
         timeout_sec: int | None = None,
         evidence_by_choice: dict[str, list[str]] | None = None,
+        answer_scope: dict[str, Any] | None = None,
     ) -> LLMResult | None:
-        prompt = build_answer_prompt(request, route, citations, evidence_by_choice)
+        prompt = build_answer_prompt(
+            request,
+            route,
+            citations,
+            evidence_by_choice,
+            answer_scope=answer_scope,
+        )
         timeout = timeout_sec or settings.llm_timeout_sec
         max_tokens = settings.anthropic_max_tokens
         started = perf_counter()
@@ -266,6 +296,45 @@ class LLMClient:
         return SearchPlanResult(
             queries=queries,
             graphRequired=graph_required,
+            provider=self.provider,
+            model=settings.planner_model,
+            latencyMs=latency_ms,
+            inputTokens=input_tokens,
+            outputTokens=output_tokens,
+            validationError=validation_error,
+            stopReason=stop_reason,
+            retryCount=retry_count,
+        )
+
+    def plan_legal_issues(
+        self,
+        request: AnswerRequest,
+        max_issues: int = HARD_MAX_PRIMARY_ISSUES,
+        timeout_sec: int | None = None,
+    ) -> IssuePlanResult:
+        """質問を法的論点へ分解する。失敗時はルールベースのfallback planを返す(§12)。"""
+        prompt = build_issue_plan_prompt(
+            request.question, choices=request.choices, max_issues=max_issues
+        )
+        schema = issue_plan_json_schema(max_issues)
+        timeout = timeout_sec or settings.planner_timeout_sec
+        (
+            (plan, validation_error),
+            latency_ms,
+            input_tokens,
+            output_tokens,
+            stop_reason,
+            retry_count,
+        ) = self._call_with_retry(
+            prompt,
+            schema,
+            settings.planner_model,
+            settings.planner_max_tokens,
+            timeout,
+            lambda raw_text: _parse_issue_plan(raw_text, request.question),
+        )
+        return IssuePlanResult(
+            plan=plan,
             provider=self.provider,
             model=settings.planner_model,
             latencyMs=latency_ms,
@@ -508,11 +577,21 @@ class LLMClient:
         )
 
 
+def _parse_issue_plan(raw_text: str, question: str) -> tuple[IssuePlan, str | None]:
+    try:
+        plan = parse_issue_plan(raw_text, question=question)
+    except Exception as exc:  # プランナー障害で回答経路を落とさない
+        plan = fallback_issue_plan(question, reason=f"issue_plan_error: {type(exc).__name__}")
+    return plan, plan.validation_error
+
+
 def build_answer_prompt(
     request: AnswerRequest,
     route: list[str],
     citations: list[Citation],
     evidence_by_choice: dict[str, list[str]] | None = None,
+    *,
+    answer_scope: dict[str, Any] | None = None,
 ) -> str:
     citation_block = _format_citations_with_budget(citations, settings.llm_max_context_chars)
 
@@ -530,6 +609,7 @@ def build_answer_prompt(
         if request.choices
         else "選択肢がない場合、questionPolarityとchoiceAssessmentsはnullにしてください。"
     )
+    scope_rule = _answer_scope_rule(answer_scope)
 
     return f"""あなたはローカル検証環境の法務RAG回答生成器です。
 外部APIや外部検索は使わず、下の引用候補を最優先の根拠として日本語で簡潔に回答してください。
@@ -539,6 +619,7 @@ contentUnitIdは下の引用候補に書かれた文字列をそのまま書き�
 必ずJSONだけを返してください。JSON以外の説明文やMarkdownコードフェンスは不要です。
 answer には正解ラベルだけでなく、引用候補に基づく短い根拠説明を含めてください。
 {choice_commitment_rule}
+{scope_rule}
 
 検索ルート: {" -> ".join(route)}
     質問: {request.question}{choices_block}
@@ -547,6 +628,25 @@ answer には正解ラベルだけでなく、引用候補に基づく短い根�
 {citation_block}
 
 JSON:"""
+
+
+def _answer_scope_rule(answer_scope: dict[str, Any] | None) -> str:
+    if not answer_scope:
+        return ""
+    status = str(answer_scope.get("answerStatus") or "")
+    omitted = "、".join(answer_scope.get("omittedPrimaryIssueLabels") or [])
+    out_of_scope = "、".join(answer_scope.get("outOfScopeIssueLabels") or [])
+    lines = [
+        f"根拠被覆状態: {status}",
+        "回答コンテキストに含まれない論点を、周辺条文や一般知識から推測して補わないでください。",
+    ]
+    if omitted:
+        lines.append(f"回答してはならない根拠不足の主論点: {omitted}")
+    if out_of_scope:
+        lines.append(f"今回の回答範囲外の論点: {out_of_scope}")
+    if status == "partial_primary_evidence":
+        lines.append("根拠が揃った主論点だけを回答し、不足部分を明示してください。")
+    return "\n".join(lines)
 
 
 def build_evidence_evaluation_prompt(
@@ -983,22 +1083,85 @@ def _anthropic_error(response: requests.Response) -> str:
 
 def _format_citation(index: int, citation: Citation) -> str:
     text = citation.text or ""
+    # ガイドは法令本文の代替にしない。位置づけを引用ごとに明示する(§10-7)。
+    lane = ""
+    if citation.evidenceLane == "guidance":
+        lane = f"資料区分: {citation.evidenceRole or '行政解釈・実務上の取扱い(法令本文ではない)'}\n"
     return (
         f"[{index}]\n"
         f"documentId: {citation.documentId}\n"
         f"contentUnitId: {citation.contentUnitId}\n"
         f"title: {citation.title or ''}\n"
         f"heading: {citation.heading or ''}\n"
+        f"{lane}"
         f"text: {text}"
     )
 
 
 def _format_citations_with_budget(citations: list[Citation], max_chars: int) -> str:
+    return _format_citations_with_stats(citations, max_chars)[0]
+
+
+def citation_context_stats(
+    citations: list[Citation],
+    max_chars: int | None = None,
+) -> dict[str, Any]:
+    """回答promptと同じ整形を行い、chunk切り詰め量だけを返す。"""
+    return _format_citations_with_stats(
+        citations,
+        max_chars if max_chars is not None else settings.llm_max_context_chars,
+    )[1]
+
+
+def _format_citations_with_stats(
+    citations: list[Citation],
+    max_chars: int,
+) -> tuple[str, dict[str, Any]]:
     if not citations:
-        return "引用候補なし"
+        return (
+            "引用候補なし",
+            {
+                "occurred": False,
+                "truncatedChunkCount": 0,
+                "droppedChunkCount": 0,
+                "originalChars": 0,
+                "includedChars": 0,
+            },
+        )
     per_citation_budget = max(300, max_chars // len(citations))
-    blocks = []
-    for index, citation in enumerate(citations, start=1):
-        block = _format_citation(index, citation)
-        blocks.append(block[:per_citation_budget])
-    return "\n\n".join(blocks)[:max_chars]
+    raw_blocks = [
+        _format_citation(index, citation)
+        for index, citation in enumerate(citations, start=1)
+    ]
+    blocks: list[str] = []
+    truncated_count = 0
+    dropped_count = 0
+    remaining = max_chars
+    separator = "\n\n"
+    for raw in raw_blocks:
+        separator_chars = len(separator) if blocks else 0
+        if separator_chars:
+            if remaining <= separator_chars:
+                dropped_count += 1
+                continue
+        allowed = min(per_citation_budget, remaining - separator_chars)
+        included = raw[:allowed]
+        if not included:
+            dropped_count += 1
+            continue
+        if len(included) < len(raw):
+            truncated_count += 1
+        remaining -= separator_chars
+        blocks.append(included)
+        remaining -= len(included)
+    included_text = separator.join(blocks)
+    return (
+        included_text,
+        {
+            "occurred": bool(truncated_count or dropped_count),
+            "truncatedChunkCount": truncated_count,
+            "droppedChunkCount": dropped_count,
+            "originalChars": sum(len(block) for block in raw_blocks),
+            "includedChars": len(included_text),
+        },
+    )

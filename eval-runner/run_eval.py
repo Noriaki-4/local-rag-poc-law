@@ -26,7 +26,10 @@ LAWQA_EVAL_URL = os.getenv("LAWQA_EVAL_URL")
 EVAL_LIMIT = int(os.getenv("EVAL_LIMIT", "0") or "0")
 EVAL_OFFSET = int(os.getenv("EVAL_OFFSET", "0") or "0")
 EVAL_PATTERN = os.getenv("EVAL_PATTERN", "pattern_2_rule_based_agentic_rag")
-REQUEST_TIMEOUT_SEC = int(os.getenv("REQUEST_TIMEOUT_SEC", "120"))
+REQUEST_TIMEOUT_SEC = int(os.getenv("REQUEST_TIMEOUT_SEC", "150"))
+# agent wall timeに対して確保する安全マージン。これを下回るとクライアント側timeoutが
+# agentの正常完了より先に発火し、性能集計が実態とずれる(§11.2)。
+REQUEST_TIMEOUT_SAFETY_MARGIN_SEC = int(os.getenv("REQUEST_TIMEOUT_SAFETY_MARGIN_SEC", "10"))
 EVAL_SKIP_SEED = os.getenv("EVAL_SKIP_SEED", "false").lower() in {"1", "true", "yes", "on"}
 EGOV_API_BASE_URL = os.getenv("EGOV_API_BASE_URL", "https://laws.e-gov.go.jp/api/1").rstrip("/")
 
@@ -54,11 +57,12 @@ FULLWIDTH_DIGITS = str.maketrans("\uff10\uff11\uff12\uff13\uff14\uff15\uff16\uff
 
 # lawId -> e-Gov LawTitle \u306e\u30ad\u30e3\u30c3\u30b7\u30e5\u3002\u30b3\u30f3\u30c6\u30ad\u30b9\u30c8\u306e\u6cd5\u4ee4\u540d\u898b\u51fa\u3057\u3092 lawId \u3078\u5bfe\u5fdc\u4ed8\u3051\u308b\u305f\u3081\u306b\u4f7f\u3046\u3002
 _EGOV_TITLE_CACHE: dict[str, str | None] = {}
-METRIC_VERSION = 5
+METRIC_VERSION = 6
 
 
 def main() -> None:
-    wait_for_api()
+    health = wait_for_api()
+    assert_request_timeout_is_safe(health)
     if not EVAL_SKIP_SEED:
         requests.post(f"{API_URL}/admin/seed", timeout=120).raise_for_status()
 
@@ -116,6 +120,27 @@ def main() -> None:
         "shadowRerankerArticleMicroRecall": _article_micro_recall(
             results, "shadowRerankerMatched"
         ),
+        "layeredContextArticleCompleteHitRate": _optional_score_rate(
+            results, "layeredContextArticleCompleteHit"
+        ),
+        "layeredContextArticleRecall": _optional_score_rate(
+            results, "layeredContextArticleRecall"
+        ),
+        "layeredContextArticleMicroRecall": _article_micro_recall(
+            results, "layeredContextMatched"
+        ),
+        "primaryConclusionGroupCompleteRate": _group_micro_rate(
+            results, "primaryIncluded", "primaryTotal"
+        ),
+        "mandatoryConclusionGroupCompleteRate": _group_micro_rate(
+            results, "mandatoryIncluded", "mandatoryTotal"
+        ),
+        "layeredAnswerStatusCounts": _value_counts(results, "answerStatus"),
+        "layeredShadowIncomplete": sum(
+            1
+            for item in results
+            if (item.get("layeredLegalRetrieval") or {}).get("shadowIncomplete")
+        ),
         "shadowSelectionComplete": sum(
             1
             for item in results
@@ -168,16 +193,43 @@ def main() -> None:
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
-def wait_for_api() -> None:
+def wait_for_api() -> dict[str, Any]:
     for _ in range(60):
         try:
             response = requests.get(f"{API_URL}/health", timeout=5)
             if response.ok:
-                return
+                return response.json()
         except requests.RequestException:
             pass
         time.sleep(2)
     raise RuntimeError("Agent API did not become healthy")
+
+
+def assert_request_timeout_is_safe(health: dict[str, Any]) -> None:
+    """agent wall timeより短いREQUEST_TIMEOUT_SECで評価を開始しない。
+
+    REQUEST_TIMEOUT_SECはeval-runner側の設定であり、agent-api単独では比較できないため、
+    /healthが公開するwall timeと突き合わせる
+    (docs/requirements/docs/layered_legal_evidence_retrieval_plan.md §11.2)。
+    """
+    budget = (health or {}).get("timeBudget") or {}
+    wall_time = budget.get("agentMaxWallTimeSec")
+    if not isinstance(wall_time, (int, float)):
+        print("[eval] warning: /health does not expose timeBudget.agentMaxWallTimeSec")
+        return
+    print(
+        f"[eval] agent time profile={budget.get('profileName')} "
+        f"wallTime={wall_time}s requestTimeout={REQUEST_TIMEOUT_SEC}s"
+    )
+    for warning in budget.get("warnings") or []:
+        print(f"[eval] agent time budget warning: {warning}")
+    if REQUEST_TIMEOUT_SEC <= wall_time + REQUEST_TIMEOUT_SAFETY_MARGIN_SEC:
+        raise RuntimeError(
+            "REQUEST_TIMEOUT_SEC="
+            f"{REQUEST_TIMEOUT_SEC}s is not longer than agent wall time {wall_time}s "
+            f"+ safety margin {REQUEST_TIMEOUT_SAFETY_MARGIN_SEC}s. "
+            "評価を開始せず設定エラーとする。"
+        )
 
 
 def _print_question_result(index: int, total: int, result: dict[str, Any]) -> None:
@@ -318,6 +370,21 @@ def run_lawqa() -> list[dict[str, Any]]:
 
         # 候補プール→RRF融合上位→最終引用のどこで期待根拠を落としたかを分離。
         trace = output.get("trace", {})
+        layered_trace = trace.get("layeredLegalRetrieval") or {}
+        layered_context_ids = set(layered_trace.get("newContextContentUnitIds") or [])
+        (
+            layered_context_hit,
+            layered_context_complete_hit,
+            layered_context_recall,
+            layered_context_matched,
+        ) = _article_scores_at(
+            layered_context_ids,
+            reference_scorable,
+            reference_granularity,
+            expected_document_ids,
+            expected_articles,
+        ) if layered_trace else (None, None, None, None)
+        layered_group_coverage = _layered_group_coverage(layered_trace)
         candidate_ids = set(trace.get("candidatePoolContentUnitIds", trace.get("retrievedContentUnitIds", [])))
         fusion_ids = set(trace.get("fusionTopContentUnitIds", []))
         # v5では新方式を有効化した実行でも旧16件を比較基準として保持する。
@@ -432,6 +499,7 @@ def run_lawqa() -> list[dict[str, Any]]:
                         "fusionMatched": fusion_matched,
                         "rerankerMatched": reranker_matched,
                         "shadowRerankerMatched": shadow_reranker_matched,
+                        "layeredContextMatched": layered_context_matched,
                     }
                     if citation_matched is not None
                     else None
@@ -475,6 +543,13 @@ def run_lawqa() -> list[dict[str, Any]]:
                     if shadow_selection
                     else None
                 ),
+                "layeredLegalRetrieval": layered_trace or None,
+                "answerStatus": (
+                    (layered_trace.get("answerControl") or {}).get("answerStatus")
+                    or (layered_trace.get("contextCoverage") or {}).get("answerStatus")
+                ),
+                "layeredGroupCoverage": layered_group_coverage,
+                "contextTruncation": layered_trace.get("contextTruncation"),
                 "questionPolarity": llm_trace.get("questionPolarity"),
                 "choiceAssessments": llm_trace.get("choiceAssessments"),
                 "scores": {
@@ -500,6 +575,11 @@ def run_lawqa() -> list[dict[str, Any]]:
                         shadow_reranker_complete_hit
                     ),
                     "shadowRerankerArticleRecall": shadow_reranker_recall,
+                    "layeredContextHit": _optional_binary(layered_context_hit),
+                    "layeredContextArticleCompleteHit": _optional_binary(
+                        layered_context_complete_hit
+                    ),
+                    "layeredContextArticleRecall": layered_context_recall,
                     "graphExpansionHit": 1 if graph_expansion_hit else 0,
                 },
                 "latencyMs": output.get("trace", {}).get("elapsedMs"),
@@ -611,6 +691,48 @@ def _article_micro_recall(results: list[dict[str, Any]], matched_key: str) -> fl
     expected = sum(item["expected"] for item in coverages)
     matched = sum(item[matched_key] for item in coverages)
     return matched / expected if expected else None
+
+
+def _layered_group_coverage(layered_trace: dict[str, Any]) -> dict[str, Any] | None:
+    if not layered_trace:
+        return None
+    coverage = layered_trace.get("contextCoverage") or {}
+    primary = set(coverage.get("primaryConclusionGroupIds") or [])
+    primary_included = set(coverage.get("includedPrimaryConclusionGroupIds") or [])
+    mandatory_included = set(coverage.get("includedConclusionGroupIds") or [])
+    mandatory_omitted = set(coverage.get("omittedConclusionGroupIds") or [])
+    mandatory = mandatory_included | mandatory_omitted
+    return {
+        "primaryTotal": len(primary),
+        "primaryIncluded": len(primary & primary_included),
+        "mandatoryTotal": len(mandatory),
+        "mandatoryIncluded": len(mandatory_included),
+        "additionalChunksNeeded": int(coverage.get("additionalChunksNeeded") or 0),
+    }
+
+
+def _group_micro_rate(
+    results: list[dict[str, Any]],
+    included_key: str,
+    total_key: str,
+) -> float | None:
+    coverages = [
+        item["layeredGroupCoverage"]
+        for item in results
+        if item.get("layeredGroupCoverage")
+    ]
+    total = sum(int(item.get(total_key) or 0) for item in coverages)
+    included = sum(int(item.get(included_key) or 0) for item in coverages)
+    return included / total if total else None
+
+
+def _value_counts(results: list[dict[str, Any]], key: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in results:
+        value = item.get(key)
+        if value is not None:
+            counts[str(value)] = counts.get(str(value), 0) + 1
+    return counts
 
 
 def normalize_lawqa_payload(payload: Any) -> list[dict[str, Any]]:

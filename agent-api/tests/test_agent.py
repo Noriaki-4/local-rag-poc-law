@@ -72,7 +72,15 @@ class FakeLLM:
             outputTokens=5,
         )
 
-    def generate_answer(self, request, route, citations, timeout_sec=None, evidence_by_choice=None):
+    def generate_answer(
+        self,
+        request,
+        route,
+        citations,
+        timeout_sec=None,
+        evidence_by_choice=None,
+        answer_scope=None,
+    ):
         return LLMResult(
             text="第三条を根拠にAと判断します。",
             provider="fake",

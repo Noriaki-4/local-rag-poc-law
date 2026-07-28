@@ -21,6 +21,15 @@ class RerankRequest(BaseModel):
     top_n: int | None = Field(default=None, ge=1, le=100)
 
 
+class RerankBatchItem(BaseModel):
+    query: str = Field(min_length=1)
+    documents: list[str] = Field(min_length=1, max_length=100)
+
+
+class RerankBatchRequest(BaseModel):
+    items: list[RerankBatchItem] = Field(min_length=1, max_length=32)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global model
@@ -64,5 +73,40 @@ def rerank(request: RerankRequest) -> dict[str, Any]:
     return {
         "model": MODEL_ID,
         "results": ranked[:top_n],
+        "latencyMs": int((perf_counter() - started) * 1000),
+    }
+
+
+@app.post("/rerank/batch")
+def rerank_batch(request: RerankBatchRequest) -> dict[str, Any]:
+    """複数Requirementのquery-documentペアを1回のCrossEncoder.predictへまとめる。"""
+    if model is None:
+        raise HTTPException(status_code=503, detail="reranker model is still loading")
+    started = perf_counter()
+    pairs: list[tuple[str, str]] = []
+    spans: list[tuple[int, int]] = []
+    for item in request.items:
+        begin = len(pairs)
+        pairs.extend((item.query, document) for document in item.documents)
+        spans.append((begin, len(pairs)))
+    scores = model.predict(
+        pairs,
+        batch_size=BATCH_SIZE,
+        show_progress_bar=False,
+    )
+    items = []
+    for begin, end in spans:
+        ranked = sorted(
+            (
+                {"index": local_index, "relevance_score": float(scores[global_index])}
+                for local_index, global_index in enumerate(range(begin, end))
+            ),
+            key=lambda item: item["relevance_score"],
+            reverse=True,
+        )
+        items.append({"results": ranked})
+    return {
+        "model": MODEL_ID,
+        "items": items,
         "latencyMs": int((perf_counter() - started) * 1000),
     }

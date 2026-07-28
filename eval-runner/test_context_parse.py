@@ -9,8 +9,8 @@ import re
 import run_eval as R
 
 
-def test_metric_version_is_five_for_shadow_context_evaluation():
-    assert R.METRIC_VERSION == 5
+def test_metric_version_is_six_for_layered_context_evaluation():
+    assert R.METRIC_VERSION == 6
 
 
 def test_article_suffix_matches_seed_format():
@@ -112,6 +112,35 @@ def test_old_context_ids_stay_the_shadow_baseline_when_active():
     }
 
 
+def test_layered_group_coverage_counts_complete_groups():
+    trace = {
+        "contextCoverage": {
+            "primaryConclusionGroupIds": ["g1", "g2"],
+            "includedPrimaryConclusionGroupIds": ["g1"],
+            "includedConclusionGroupIds": ["g1", "g3"],
+            "omittedConclusionGroupIds": ["g2"],
+            "additionalChunksNeeded": 2,
+        }
+    }
+
+    assert R._layered_group_coverage(trace) == {
+        "primaryTotal": 2,
+        "primaryIncluded": 1,
+        "mandatoryTotal": 3,
+        "mandatoryIncluded": 2,
+        "additionalChunksNeeded": 2,
+    }
+
+
+def test_group_micro_rate_uses_group_count_not_question_count():
+    rows = [
+        {"layeredGroupCoverage": {"primaryIncluded": 1, "primaryTotal": 2}},
+        {"layeredGroupCoverage": {"primaryIncluded": 1, "primaryTotal": 1}},
+    ]
+
+    assert R._group_micro_rate(rows, "primaryIncluded", "primaryTotal") == 2 / 3
+
+
 def test_known_dataset_issues_are_kept_outside_normalized_question_content():
     issue = R.KNOWN_ISSUES["金商法_第2章_選択式_根拠条文_問題番号63"]
 
@@ -129,3 +158,26 @@ def test_registry_alias_resolves_context_without_egov_call(monkeypatch):
         "law-405M50000040014-article-2",
         "law-405M50000040014-article-2-paragraph-1",
     }
+
+
+def test_request_timeout_shorter_than_wall_time_is_rejected(monkeypatch):
+    """agent wall timeより短いREQUEST_TIMEOUT_SECで評価を開始しない (計画書 §11.2)。"""
+    monkeypatch.setattr(R, "REQUEST_TIMEOUT_SEC", 100)
+    monkeypatch.setattr(R, "REQUEST_TIMEOUT_SAFETY_MARGIN_SEC", 10)
+    try:
+        R.assert_request_timeout_is_safe({"timeBudget": {"agentMaxWallTimeSec": 110}})
+    except RuntimeError as error:
+        assert "REQUEST_TIMEOUT_SEC" in str(error)
+    else:
+        raise AssertionError("short REQUEST_TIMEOUT_SEC must raise")
+
+
+def test_request_timeout_with_margin_is_accepted(monkeypatch):
+    monkeypatch.setattr(R, "REQUEST_TIMEOUT_SEC", 300)
+    monkeypatch.setattr(R, "REQUEST_TIMEOUT_SAFETY_MARGIN_SEC", 10)
+    R.assert_request_timeout_is_safe({"timeBudget": {"agentMaxWallTimeSec": 280}})
+
+
+def test_missing_time_budget_only_warns(monkeypatch):
+    monkeypatch.setattr(R, "REQUEST_TIMEOUT_SEC", 10)
+    R.assert_request_timeout_is_safe({})

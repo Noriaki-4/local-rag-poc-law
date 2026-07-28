@@ -4,11 +4,14 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 
 from .agent import AgentService
+from .config import settings
 from .graph_client import GraphClient
+from .legal_ontology import GRAPH_SCHEMA_VERSION
 from .llm import LLMClient
 from .models import AnswerRequest, GraphPathRequest, SearchRequest
 from .opensearch_client import OpenSearchClient
 from .reranker import RerankerClient
+from .retrieval_budget import current_profile
 from .seed import seed_all
 
 os_client = OpenSearchClient()
@@ -29,12 +32,29 @@ app = FastAPI(title="Local Agentic RAG POC", version="0.1.0", lifespan=lifespan)
 
 @app.get("/health")
 def health() -> dict[str, Any]:
+    profile = current_profile()
     return {
         "status": "ok",
         "opensearch": os_client.health(),
         "neo4j": graph_client.health(),
         "llm": llm_client.health(),
         "reranker": reranker_client.status(),
+        # クライアント(eval-runner等)が自身のrequest timeoutと突き合わせるために公開する
+        # (layered_legal_evidence_retrieval_plan.md §11.2)。
+        "timeBudget": {
+            "profileName": profile.name,
+            "agentMaxWallTimeSec": profile.wall_time_sec,
+            "minimumAnswerReserveSec": profile.minimum_answer_reserve_sec,
+            "llmTimeoutSec": profile.llm_timeout_sec,
+            "fullAnswerSafeReserveSec": profile.full_answer_safe_reserve_sec,
+            "fullAnswerSafeExplorationBudgetSec": profile.full_answer_safe_exploration_budget_sec,
+            "warnings": list(profile.warnings()),
+        },
+        "layeredLegalRetrieval": {
+            "active": settings.agent_layered_legal_retrieval,
+            "shadow": settings.agent_layered_legal_retrieval_shadow,
+            "graphSchemaVersion": GRAPH_SCHEMA_VERSION,
+        },
     }
 
 

@@ -13,7 +13,8 @@ from .evidence_selector import (
     select_issue_covered_context,
 )
 from .graph_client import GraphClient
-from .llm import LLMClient
+from .layered_shadow import run_layered_retrieval
+from .llm import LLMClient, citation_context_stats
 from .models import AnswerRequest, AnswerResponse, Citation
 from .reranker import RerankerClient
 from .seed import _japanese_number_to_int
@@ -444,6 +445,13 @@ class AgentService:
         trace["rerankerTopContentUnitIds"] = [
             item["document"]["contentUnitId"] for item in final_ranked
         ]
+        final_ranked = self._apply_layered_legal_retrieval(
+            request,
+            final_ranked,
+            deadline,
+            trace,
+            route,
+        )
         answer_candidates = _citations_from_items(final_ranked)
         structural_citation_ids = _graph_closure_citations_for_request(
             request,
@@ -492,6 +500,11 @@ class AgentService:
         trace["llmCallCount"] = sum(
             int(trace.get(key, {}).get("attemptCount") or 0)
             for key in ["planner", "evaluator", "llm"]
+        ) + int(
+            (
+                trace.get("layeredLegalRetrieval", {}).get("issuePlanner", {})
+            ).get("attemptCount")
+            or 0
         )
 
         return AnswerResponse(
@@ -504,6 +517,105 @@ class AgentService:
             graphPaths=graph_paths,
             trace=trace,
         )
+
+    def _layered_explicit_references(self, request: AnswerRequest) -> list[dict[str, Any]]:
+        """質問に明示された法令名・条番号を、既存の決定的パーサーで条IDへ解決する。
+
+        plannerには条番号を断定させず、この結果をP0のRequirementとして統合する(§7.2)。
+        """
+        try:
+            titles = self.os_client.law_titles()
+        except Exception:  # noqa: BLE001 - 明示参照が取れないだけで新方式を止めない
+            return []
+        references: list[dict[str, Any]] = []
+        for document_id, provisions in _law_provision_references(request.question, titles).items():
+            title = titles.get(document_id, "")
+            for provision in provisions:
+                references.append(
+                    {
+                        "articleContentUnitId": (
+                            f"{document_id}-article-{provision['articleSuffix']}"
+                        ),
+                        "documentId": document_id,
+                        "matchedText": f"{title} 第{provision['articleSuffix']}条",
+                    }
+                )
+        return references
+
+    def _apply_layered_legal_retrieval(
+        self,
+        request: AnswerRequest,
+        final_ranked: list[dict[str, Any]],
+        deadline: float,
+        trace: dict[str, Any],
+        route: list[str],
+    ) -> list[dict[str, Any]]:
+        """法令レイヤー別探索(vNext)をshadowまたはactiveで実行する。
+
+        shadowでは現行コンテキストを変更せずtraceだけを残す。新方式の内部障害は
+        現行回答へ影響してはならないため、例外はここで握りつぶす。active時の意味上の
+        根拠不足・予算不足は通常回答へ隠さず、answerStatusとして回答制御へ渡す
+        (docs/requirements/docs/layered_legal_evidence_retrieval_plan.md §11.3, §19)。
+        """
+        active = settings.agent_layered_legal_retrieval
+        if not active and not settings.agent_layered_legal_retrieval_shadow:
+            return final_ranked
+        old_context_stats = citation_context_stats(
+            _citations_from_items(final_ranked),
+            settings.llm_max_context_chars,
+        )
+        try:
+            outcome = run_layered_retrieval(
+                request=request,
+                os_client=self.os_client,
+                graph_client=self.graph_client,
+                reranker_client=self.reranker_client,
+                llm_client=self.llm_client,
+                deadline=deadline,
+                explicit_references=self._layered_explicit_references(request),
+                shadow=not active,
+                # 論理LLM呼び出し数の上限内でだけ構造化plannerを呼ぶ(§11.4)。
+                allow_planner_call=(
+                    settings.agent_use_llm_planner and settings.agent_max_llm_calls >= 4
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001 - 新方式の障害で現行回答を止めない
+            trace["layeredLegalRetrieval"] = {
+                "enabled": True,
+                "mode": "active" if active else "shadow",
+                "error": str(exc),
+                "fallback": "legacy_retrieval",
+            }
+            return final_ranked
+
+        trace["layeredLegalRetrieval"] = outcome.trace
+        trace["layeredLegalRetrieval"]["oldContextContentUnitIds"] = [
+            evidence_content_id(item) for item in final_ranked
+        ]
+        trace["layeredLegalRetrieval"]["newContextContentUnitIds"] = [
+            evidence_content_id(item) for item in outcome.assembly.items
+        ]
+        trace["layeredLegalRetrieval"]["contextTruncation"] = {
+            "oldContext": old_context_stats,
+            "newContext": {
+                **citation_context_stats(
+                    _citations_from_items(outcome.assembly.items),
+                    settings.llm_max_context_chars,
+                ),
+                "computedInShadow": not active,
+            },
+        }
+        if not active:
+            return final_ranked
+        _append_route(route, "layered_legal_retrieval")
+        if not outcome.usable_for_answer:
+            if outcome.trace.get("internalFailure"):
+                trace["layeredLegalRetrieval"]["fallback"] = "legacy_retrieval"
+                return final_ranked
+            # 意味上の根拠不足を旧経路の通常回答で隠さない。内部障害だけを例外経路で
+            # legacyへfallbackし、ここでは空コンテキストとanswerStatusを回答制御へ渡す。
+            return []
+        return outcome.assembly.items
 
     def _apply_issue_coverage_selection(
         self,
@@ -1529,6 +1641,27 @@ class AgentService:
         deadline: float,
         evidence_by_choice: dict[str, list[str]] | None,
     ) -> tuple[str, str | None, dict[str, str] | None, list[str]]:
+        layered_control = _layered_answer_control(trace)
+        if (
+            layered_control
+            and layered_control.get("answerStatus")
+            == "insufficient_primary_evidence"
+        ):
+            omitted = "、".join(
+                layered_control.get("omittedPrimaryIssueLabels") or ["主たる論点"]
+            )
+            trace["llm"] = {
+                "provider": self.llm_client.provider,
+                "used": False,
+                "error": "insufficient_primary_evidence",
+            }
+            return (
+                f"主たる論点（{omitted}）の根拠を回答コンテキストへ収められなかったため、"
+                "この質問には根拠付きで回答できません。",
+                None,
+                None,
+                [],
+            )
         if citations:
             remaining = int(deadline - perf_counter())
             if remaining <= 1:
@@ -1541,6 +1674,7 @@ class AgentService:
                         citations,
                         timeout_sec=max(1, min(settings.llm_timeout_sec, remaining)),
                         evidence_by_choice=evidence_by_choice,
+                        answer_scope=layered_control,
                     )
                 except Exception as exc:
                     trace["llm"] = {
@@ -1570,11 +1704,31 @@ class AgentService:
                             "choiceAssessments": llm_result.choiceAssessments,
                         }
                         answer_text = llm_result.text or "十分な引用根拠を取得できなかったため、断定回答は行いません。"
+                        if (
+                            layered_control
+                            and layered_control.get("answerStatus")
+                            == "partial_primary_evidence"
+                        ):
+                            omitted = "、".join(
+                                layered_control.get("omittedPrimaryIssueLabels")
+                                or ["一部の主論点"]
+                            )
+                            answer_text = (
+                                f"一部の主論点（{omitted}）は根拠不足のため回答できません。"
+                                f"{answer_text}"
+                            )
                         assessment_ids = _assessment_citation_ids(
                             llm_result.choiceAssessments,
                             llm_result.predictedAnswer,
                         )
-                        return answer_text, llm_result.predictedAnswer, llm_result.choiceJudgements, assessment_ids
+                        predicted = (
+                            None
+                            if layered_control
+                            and layered_control.get("answerStatus")
+                            == "partial_primary_evidence"
+                            else llm_result.predictedAnswer
+                        )
+                        return answer_text, predicted, llm_result.choiceJudgements, assessment_ids
 
         if request.choices:
             return (
@@ -2534,16 +2688,39 @@ def _is_law_document(document: dict[str, Any]) -> bool:
 def _citations_from_items(items: list[dict[str, Any]]) -> list[Citation]:
     return [
         Citation(
-            documentId=item["document"].get("documentId"),
-            contentUnitId=item["document"].get("contentUnitId"),
+            documentId=str(item["document"].get("documentId") or ""),
+            contentUnitId=str(item["document"].get("contentUnitId") or ""),
             title=item["document"].get("title"),
             heading=item["document"].get("heading"),
             sourceObjectUri=item["document"].get("sourceObjectUri"),
             sourcePage=item["document"].get("sourcePage"),
             text=item["document"].get("text"),
+            evidenceLane=_evidence_lane(item),
+            evidenceRole=item.get("evidenceRole"),
         )
         for item in items
     ]
+
+
+def _evidence_lane(item: dict[str, Any]) -> str:
+    """法令レーンとガイドレーンを引用単位で区別する(§10)。"""
+    lane = item.get("evidenceLane")
+    if lane:
+        return str(lane)
+    return "law" if _is_law_document(item.get("document", {})) else "guidance"
+
+
+def _layered_answer_control(trace: dict[str, Any]) -> dict[str, Any] | None:
+    layered = trace.get("layeredLegalRetrieval") or {}
+    if layered.get("mode") != "active":
+        return None
+    control = layered.get("answerControl") or {}
+    status = control.get("answerStatus") or (
+        layered.get("contextCoverage") or {}
+    ).get("answerStatus")
+    if not status:
+        return None
+    return {**control, "answerStatus": status}
 
 
 def _graph_closure_citation_ids(

@@ -30,6 +30,69 @@ lawqa_jp 140問、関係エッジのサンプル監査によって調整する�
 本システムは法的判断の正しさを保証しない。回答は検索された法令・行政資料に基づく参考情報とし、
 具体的な事案では必要に応じて専門家による確認を求める。
 
+## 1.1 実装状況（2026-07-28時点）
+
+本書の設計に対する実装の到達点。コード・テストの所在を含めて記録する。
+
+| 範囲 | 状況 | 主なモジュール |
+|---|---|---|
+| §5-6 オントロジー(authorityType / role / edge registry / schema version) | 実装済み | `agent-api/app/legal_ontology.py` |
+| §6.1 referenceKind・derivedFromEdgeId・IMPLEMENTS段階confidence・MENTIONS・RelationAssertion | 実装済み(再シード要) | `agent-api/app/seed.py`, `legal_relation_resolver.py` |
+| §6.3 Graph監査 | 実装済み(seed時に自動実行、違反はmanifestとログへ) | `agent-api/app/graph_audit.py` |
+| §7 論点・EvidenceRequirement・conclusionGroup | 実装済み | `evidence_requirements.py`, `legal_issue_planner.py` |
+| §8 ラウンド単位の反復探索・子Requirement生成・停止条件 | 実装済み | `layered_retriever.py` |
+| §8.5 複数edge type batch traversal・Neo4j timeout | 実装済み | `graph_client.py` |
+| §9 レイヤー・役割別BM25/Vector/直接取得・Requirement別Cross-Encoder・充足判定 | 実装済み | `opensearch_client.py`, `requirement_reranker.py`, `requirement_satisfaction.py` |
+| §6.3-7/§9.1 委任先探索の法令系統スコープ | 実装済み(law_registryのfamilyRootで同一系統へ限定) | `law_family.py` |
+| §10 ガイドレーン(ガイド検索→EXPLAINS→法令本文→補助枠) | 実装済み | `agent-api/app/guidance_lane.py` |
+| §11 上限・時間予算・shadow予算 | 実装済み(初期値案のまま。Phase 0実測で確定) | `retrieval_budget.py`, `config.py` |
+| §11.6 conclusionGroup単位の原子的コンテキスト配分・answerStatus | 実装済み | `layered_context_assembler.py` |
+| §8.7 条件付きLLM再計画(最大1回) | **未実装** | - |
+| §10-7 ガイドの位置づけ表示(行政解釈として明示) | 実装済み(`Citation.evidenceLane` / 回答プロンプト) | `models.py`, `llm.py` |
+| §13 trace | 実装済み(`trace.layeredLegalRetrieval`) | `layered_shadow.py` |
+| §11.2 /healthのwall time公開とeval-runnerの整合検証 | 実装済み | `agent-api/app/main.py`, `eval-runner/run_eval.py` |
+| §15 Phase 0の実測(旧方式baseline・Cross-Encoderスループット・切り詰め計測) | **未実施**。稼働環境が必要 | `scripts/graph_inventory.py` |
+| §15 Phase 6の切替判断(20問・140問評価) | **未実施** | - |
+| §17 group被覆・新コンテキスト条文到達・answerStatusの評価ランナー反映 | 実装済み(metricVersion 6) | `eval-runner/run_eval.py` |
+
+### 再シード後の実測 (2026-07-28, 280秒運用評価profile)
+
+`SEED_LAWQA_EGOV=true SEED_EXTERNAL_GUIDANCE=true` でフル再シード(21分)し、shadowで確認した結果。
+
+| 項目 | 結果 |
+|---|---|
+| Graph監査(§6.3) | 違反0件。schema version 3。Document / Article / Paragraph / Itemの全ノードへversionを付与 |
+| authorityType | act 2,502 / cabinet_office_ordinance 1,620 / ministerial_ordinance 968 / cabinet_order 635 / guidance 6(Documentノード)。`ordinance_unspecified`と`unknown`は0件 |
+| authoritySource | registry人手確認 7,291件 / lawId自動判定 7,450件 / docType 1,717件 |
+| IMPLEMENTS | 4,475 → 4,415件。confidence 0.98が3,594件、0.90が821件。固定0.95を廃止し、単純参照だけの60件はREFERENCESのままにした |
+| MENTIONS / RelationAssertion | 0件。現コーパスでは安全に抽出できる根拠が無いことを確認済み。全6ガイドのDocumentノードは登録し、関係を推測で生成しない |
+| MinIO同期 | OpenSearchが参照する16,458 vector文書と同期。過去seedの未参照5,606件を削除し、以後のseedでも管理prefix内を自動同期 |
+| §2の失敗ケース(公開買付府令10条) | 到達。最終16枠に法律27条の3・施行令9条の3・府令10条の3レイヤーが揃い`answerStatus=complete` |
+| shadow phase | 13〜16秒 / 予算20秒。現行回答への影響なし |
+
+判明した設計上の問題と対応:
+
+1. cue由来の子Requirement(準用・ただし書等)は仮説であり、候補が1件も見つからないことがある。
+   初期実装は候補ゼロのmandatory memberをgroupの被覆対象から外していたため、不足した根拠を
+   隠して`complete`になり得た。mandatory memberは候補ゼロでもgroupに残し、group全体を
+   `omitted_context_budget` / `unresolvedForAnswer`へ送るよう修正した(§11.6-3, §8.8)。
+2. 委任先の検索が別の法令系統(薬機法の質問に対する金融商品取引法施行令)へ届いていた。
+   親条文の`familyRoot`内へ限定する`law_family.py`を追加した(§6.3-7)。
+
+未確定のまま残っている点:
+
+- 1論点あたりのRequirement数がcue検出で増えやすい(実測で1論点→17件)。上限内には収まるが、
+  Article候補枠の希釈度合いはPhase 0/6で計測して`MAX_REQUIREMENTS_TOTAL`等を再設定する。
+- Phase 0のCross-Encoderスループット計測と旧方式baselineは未実施。
+
+feature flagは既定で無効。`AGENT_LAYERED_LEGAL_RETRIEVAL_SHADOW=true` でshadow、
+`AGENT_LAYERED_LEGAL_RETRIEVAL=true` でactive(主論点groupを被覆できた場合だけ新コンテキストを
+回答へ渡す)。主論点の意味上の根拠不足時は旧経路の通常回答へ戻さず、利用者へ根拠不足を
+明示して断定を止める。新方式の内部障害時だけ旧経路へ戻る。
+
+Phase 0の実測値が入るまで、§11.1の上限とprofile選択は暫定値である。20秒(110秒profile)を
+合格ゲートとして採用済みという意味ではない。
+
 ## 2. 背景と確認済みの問題
 
 20回の自然言語質問では、期待した根拠条文61件に対して次の結果だった。

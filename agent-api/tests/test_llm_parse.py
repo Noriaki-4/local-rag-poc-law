@@ -12,6 +12,7 @@ from app.llm import (
     _resolve_predicted_answer,
     _sum_optional,
     _to_anthropic_schema,
+    citation_context_stats,
 )
 from app.models import AnswerRequest, Citation
 
@@ -221,6 +222,21 @@ def test_citation_budget_keeps_every_citation_visible():
 
     assert len(block) <= 4000
     assert all(f"article-{index}" in block for index in range(1, 6))
+
+
+def test_citation_context_stats_report_prompt_truncation_deterministically():
+    citations = [
+        Citation(documentId="law-test", contentUnitId=f"article-{index}", text="本文" * 1000)
+        for index in range(1, 4)
+    ]
+
+    stats = citation_context_stats(citations, 1200)
+    block = _format_citations_with_budget(citations, 1200)
+
+    assert stats["occurred"] is True
+    assert stats["truncatedChunkCount"] > 0
+    assert stats["includedChars"] == len(block)
+    assert stats["includedChars"] <= 1200
 
 
 def test_valid_evidence_evaluation():

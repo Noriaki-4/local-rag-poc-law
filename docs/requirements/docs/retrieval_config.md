@@ -105,6 +105,30 @@ OpenSearchに投入する1ドキュメント例は `samples/metadata/opensearch_
 - `documentId`, `contentUnitId`, `docType`, `contentDomain`: filter / join用
 - `publishStatus`, `isLatest`, `deptCode`, `clearanceLevel`: 必須フィルタ用
 - `sourceObjectUri`, `sourcePage`: citation用
+- `authorityType`, `authoritySource`: 法令レイヤー(法律/政令/省令/内閣府令/未判別/ガイド)での絞り込み用
+
+### authorityType（法令レイヤー）
+
+`docType=law|guideline` は資料種別であり、法令レイヤーではない。レイヤー別の探索
+(`layered_legal_evidence_retrieval_plan.md` §5.2)のために `authorityType` を別フィールドで持つ。
+
+| 値 | 意味 |
+|---|---|
+| `act` | 法律 |
+| `cabinet_order` | 政令 |
+| `ministerial_ordinance` | 省令 |
+| `cabinet_office_ordinance` | 内閣府令 |
+| `ordinance_unspecified` | M系で省令・内閣府令を未判別 |
+| `guidance` | ガイド・監督指針・Q&A(規範的レイヤーに含めない) |
+| `unknown` | 判定不能 |
+
+生成元の優先順位は law_registry の人手確認値 → lawId/LawType → 未判別。e-Gov `LawType` は
+内閣府令も `MinisterialOrdinance` に含むため、M系をこの値だけで確定しない。タイトルや
+`LawNum` から作る値は監査候補であり確定値にしない。
+
+省令・内閣府令を指定した検索では、完全一致を順位上優先しつつ `ordinance_unspecified` と
+`unknown` も検索対象に含める(未判別を理由に構造的に落とさない)。`documentId` が確定して
+いる場合は `authorityType` が未判別でもその法令内を直接検索する。
 
 ## 6. Hybrid検索の初期設定
 

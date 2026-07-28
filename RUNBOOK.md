@@ -173,6 +173,10 @@ password: minioadmin
 
 Agent API から OpenSearch / Neo4j / MinIO にサンプルを投入する。
 
+seed時は、OpenSearchへ今回投入する`processedObjectUri`を正として
+`derived-artifacts/vector-documents/`を同期する。過去のseedで残った未参照vector文書は削除するが、
+`source-documents/`、`eval-data/`、`derived-artifacts/preprocessed/`は削除しない。
+
 ```bash
 curl -s -X POST http://localhost:8000/admin/seed | jq .
 ```
@@ -269,6 +273,66 @@ curl -s http://localhost:8000/answer \
 ```
 
 最終系を確認する場合は、`pattern` に `pattern_4_deepsearch` を指定する。レスポンスの `trace` で分解クエリ、再検索理由、tool call数、Graph node/edge ID、停止理由を確認できる。探索は設定したtool call数・再検索回数・110秒のwall timeを超えない。
+
+### 時間予算プロファイルの確認
+
+`/health` が採用中の時間profileを公開する。eval-runnerは起動時にこれと `REQUEST_TIMEOUT_SEC` を
+突き合わせ、agent wall timeより短い場合は評価を開始せず設定エラーにする。
+
+```bash
+curl -s http://localhost:8000/health | jq '.timeBudget, .layeredLegalRetrieval'
+```
+
+`timeBudget.warnings` に次が出た場合は、Phase 0 の実測後に値を明示設定する
+(自動では書き換えない。`docs/requirements/docs/layered_legal_evidence_retrieval_plan.md` §11.2)。
+
+- `AGENT_ANSWER_RESERVE_SEC < LLM_TIMEOUT_SEC`: 回答LLMがtimeout上限まで使うとwall timeを超え得る
+- componentの設定timeout×最大呼び出し回数の合計が full-answer-safe 探索予算を超えている
+
+### 法令レイヤー別探索 vNext (shadow)
+
+`AGENT_LAYERED_LEGAL_RETRIEVAL_SHADOW=true` にすると、現行の検索・回答を変えずに
+新方式(論点→必要根拠スロット→レイヤー別探索→conclusionGroup単位のコンテキスト選抜)を
+同一リクエスト内で実行し、`trace.layeredLegalRetrieval` へ記録する。
+
+```bash
+curl -s http://localhost:8000/answer -H 'content-type: application/json' \
+  -d '{"question":"公開買付けの手続が必要になるのはどのような場合ですか","pattern":"pattern_4_deepsearch","userClearanceLevel":2,"topK":5}' \
+  | jq '.trace.layeredLegalRetrieval | {mode, contextCoverage, expansionRounds, stopReason, shadowIncomplete}'
+```
+
+主な確認項目:
+
+- `legalIssuePlan`: 論点分解(条番号はplannerではなく決定的パーサーの結果を使う)
+- `guidanceLane`: ガイドから辿れた条文候補。`explainedArticleIdsByIssue` は EXPLAINS 由来で
+  法令本文の直接取得に使い、`mentionedArticleIdsByIssue` と未確認 `guidanceRelationAssertions`
+  は検索範囲の拡張だけに使う(ガイドだけで法令Requirementをresolvedにしない)
+- `evidenceRequirements` / `requirementTransitions`: 必要根拠スロットの状態遷移と未解決理由
+- `satisfactionByRequirement`: 候補Articleが論点語・法的役割または信頼済み直接取得によって
+  Requirementを満たしたと判定した理由
+- `conclusionGroups` / `contextCoverage.answerStatus`: 主論点groupを完全被覆できたか
+- `graphEdgesAccepted` / `graphEdgesRejected`: どの関係を信頼して辿ったか
+- `timeBudget` / `shadowIncomplete`: shadowが回答前の安全余白を侵していないか
+
+`AGENT_LAYERED_LEGAL_RETRIEVAL=true`(active)にすると、主論点groupを被覆できた場合だけ
+新方式のコンテキストを回答LLMへ渡す。主論点の根拠が被覆できない場合は、旧経路の根拠で
+通常回答したように見せず、利用者へ根拠不足を表示して断定を止める。新方式の内部エラー時だけ
+旧経路へ戻る。
+ガイドは法令mandatory枠を満たさず、主論点groupを完全被覆できたときにだけ補助枠
+(既定2件)へ入り、引用には `evidenceLane: "guidance"` と「行政解釈・実務上の取扱い」が付く。
+切替はPhase 6の評価(自然言語20問・lawqa_jp 140問)の合格後に行う。
+
+### Graph棚卸し (Phase 0)
+
+seed済みGraphのnode/edge種別・件数、registryとの一致、authorityTypeの分布を出す。
+
+```bash
+uv run --with neo4j --with requests python scripts/graph_inventory.py
+```
+
+`ordinance_unspecified` が残る法令は、省令か内閣府令かを人手で確認して
+`docs/requirements/samples/eval/law_registry.json` の `authorityType` へ明示する。
+推測で確定してはならないが、未判別を理由にレイヤー指定検索から除外もしない。
 
 ## 5. UI 操作
 
@@ -423,7 +487,7 @@ EVAL_SKIP_SEED=true \
 docker compose --profile eval run --rm eval-runner
 ```
 
-評価結果には `metricVersion` が含まれる。version 5では従来のany-hitに加えて、
+評価結果には `metricVersion` が含まれる。version 6では従来のany-hitに加えて、
 期待条文の完全到達率（`*ArticleCompleteHit`）と条文再現率（`*ArticleRecall`）を段階別に記録する。
 集計では問題単位のマクロ平均に加え、全期待条文を分母にする
 `*ArticleMicroRecall` も確認できる。
@@ -431,8 +495,11 @@ docker compose --profile eval run --rm eval-runner
 `shadowRerankerArticleCompleteHit/Recall` とそのマクロ・ミクロ集計も記録する。
 Shadow選抜が時間切れ・再ランカー障害で完了しなかった問題は比較指標から除き、
 `shadowSelectionIncomplete` に件数を出す。
+法令レイヤー別探索を有効にした実行では、`layeredContextArticleCompleteHit/Recall`、
+`primaryConclusionGroupCompleteRate`、`mandatoryConclusionGroupCompleteRate`、
+`layeredAnswerStatusCounts`、旧・新コンテキスト別の`contextTruncation`も記録する。
 また、`lawqa_known_issues.json` の既知問題を除く診断正答率を公式正答率とは別に出す。
-version 4以前とは評価項目が異なるため直接比較しない。
+version 5以前とは評価項目が異なるため直接比較しない。
 
 最終回答では、RRF融合上位をClaudeへ渡し、各選択肢を `entailed`、`contradicted`、
 `insufficient` のいずれかで独立判定する。Claudeは最終ラベルを出力せず、
@@ -600,7 +667,7 @@ lawqa_jp 選択式での動作確認で見つかった、モデルごとの挙�
 | `AGENT_MAX_WALL_TIME_SEC` | 200 | 280 | 検索約30〜40秒 + 回答生成180秒を収める(コード側の上限は300) |
 | `REQUEST_TIMEOUT_SEC` | 240 | 360 | 評価クライアントがサーバの全体予算より先に諦めないようにする |
 
-`REQUEST_TIMEOUT_SEC` は評価クライアント側([run_eval.py](eval-runner/run_eval.py))の待ち時間で、既定値は120秒。サーバの全体予算より短いと、**時間はかかったが正しく返ってきた回答をクライアントが捨てる**ため、必ず全体予算より長くする。
+`REQUEST_TIMEOUT_SEC` は評価クライアント側([run_eval.py](eval-runner/run_eval.py))の待ち時間で、既定値は150秒。eval-runnerは起動時に `/health` の `timeBudget.agentMaxWallTimeSec` と突き合わせ、`REQUEST_TIMEOUT_SEC <= wall time + REQUEST_TIMEOUT_SAFETY_MARGIN_SEC`(既定10秒)の場合は評価を開始せず設定エラーにする。サーバの全体予算より短いと、**時間はかかったが正しく返ってきた回答をクライアントが捨てる**ため、必ず全体予算より長くする。
 
 `predictedAnswer=null` での棄権について: 当初 claude-sonnet-5 は根拠が弱い問題で棄権する割合が高く見えたが、原因はモデル固有の性質ではなく [llm.py](agent-api/app/llm.py) の `build_answer_prompt()` が「判断できない場合は null にしてください」と明示的に指示していたため。選択肢がある場合は必ずいずれかを選ぶよう指示を変更した結果、claude-sonnet-5 で20問中20問がLLM使用、うち20問中18問正解(90%)まで改善した(小サンプルにつき参考値)。根拠が薄い場合でも `answer` テキスト内でその旨と専門家確認の必要性を明記する指示は維持している。
 

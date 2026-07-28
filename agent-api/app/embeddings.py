@@ -6,21 +6,40 @@ import requests
 from .config import settings
 
 
-def embed_text(text: str, dimension: int | None = None) -> list[float]:
-    return embed_texts([text], dimension)[0]
+def embed_text(
+    text: str,
+    dimension: int | None = None,
+    *,
+    timeout_sec: float | None = None,
+) -> list[float]:
+    return embed_texts([text], dimension, timeout_sec=timeout_sec)[0]
 
 
-def embed_texts(texts: list[str], dimension: int | None = None) -> list[list[float]]:
+def embed_texts(
+    texts: list[str],
+    dimension: int | None = None,
+    *,
+    timeout_sec: float | None = None,
+) -> list[list[float]]:
     expected_dimension = dimension or settings.embedding_dimension
     provider = settings.embedding_provider.lower()
     if provider == "ollama":
-        return _ollama_embed_texts(texts, expected_dimension)
+        return _ollama_embed_texts(
+            texts,
+            expected_dimension,
+            timeout_sec=timeout_sec,
+        )
     if provider in {"hash", "deterministic", "local"}:
         return [_hash_embed_text(text, expected_dimension) for text in texts]
     raise ValueError(f"Unsupported EMBEDDING_PROVIDER: {settings.embedding_provider}")
 
 
-def _ollama_embed_texts(texts: list[str], expected_dimension: int) -> list[list[float]]:
+def _ollama_embed_texts(
+    texts: list[str],
+    expected_dimension: int,
+    *,
+    timeout_sec: float | None = None,
+) -> list[list[float]]:
     if not texts:
         return []
 
@@ -29,7 +48,7 @@ def _ollama_embed_texts(texts: list[str], expected_dimension: int) -> list[list[
     response = requests.post(
         url,
         json={"model": settings.embedding_model, "input": inputs, "truncate": True},
-        timeout=settings.embedding_timeout_sec,
+        timeout=timeout_sec or settings.embedding_timeout_sec,
     )
     if not response.ok:
         raise ValueError(f"Ollama embedding request failed: status={response.status_code} body={response.text[:500]}")

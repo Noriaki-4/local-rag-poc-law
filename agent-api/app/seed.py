@@ -6,13 +6,24 @@ from pathlib import Path
 from typing import Any
 
 from minio import Minio
+from minio.deleteobjects import DeleteObject
 from minio.error import S3Error
 from pypdf import PdfReader
 import requests
 
 from .config import settings
 from .embeddings import embed_text, embed_texts
+from .graph_audit import audit_graph
 from .graph_client import GraphClient
+from .legal_ontology import (
+    AUTHORITY_GUIDANCE,
+    GRAPH_SCHEMA_VERSION,
+    REFERENCE_KIND_DELEGATION_PARENT,
+    RELATION_STATUS_UNVERIFIED,
+    UNVERIFIED_ASSERTION_CONFIDENCE,
+    resolve_authority_type,
+)
+from .legal_relation_resolver import assess_implements, classify_reference_kind
 from .opensearch_client import OpenSearchClient
 
 EGOV_LAW_ID_PATTERN = re.compile(r"laws\.e-gov\.go\.jp/law/([^/?#]+)")
@@ -54,6 +65,19 @@ TABLE_SELF_REF_MAX_ARTICLES = 8
 # preprocess-worker/app/handler.py の DERIVED_PREFIX と対で維持する。
 PREPROCESSED_GUIDANCE_PREFIX = "derived-artifacts/preprocessed/external-guidance"
 PREPROCESSED_SCHEMA_VERSION = 1
+# ガイドライン本文中の「(施行)令第N条(のM)」形式。ガイドが示唆する法令間関係の候補抽出に使う。
+GUIDANCE_ORDER_ARTICLE_PATTERN = re.compile(
+    r"(?:施行令|(?<![一-鿏])令)第([一二三四五六七八九十百千〇零\d]+)条"
+    r"((?:の[一二三四五六七八九十百千〇零\d]+)*)"
+)
+# 1ガイドライン文書から作るRelationAssertionの上限。未確認関係で候補枠を埋めない。
+GUIDANCE_ASSERTION_MAX_PER_DOCUMENT = 12
+# 条文注釈として明示された参照だけをEXPLAINSにする。前ページからの引き継ぎは
+# 明示的な解説対象ではないためMENTIONSに落とす(§6.1)。
+GUIDANCE_EXPLAINS_REFERENCE_SOURCES = (
+    "guideline_relation_annotation",
+    "guideline_table_annotation",
+)
 
 
 def seed_all(os_client: OpenSearchClient, graph_client: GraphClient) -> dict[str, Any]:
@@ -69,24 +93,32 @@ def seed_all(os_client: OpenSearchClient, graph_client: GraphClient) -> dict[str
 
     nodes = _read_jsonl(samples_dir / "metadata" / "nodes.sample.jsonl")
     edges = _read_jsonl(samples_dir / "metadata" / "edges.sample.jsonl")
-    egov_nodes, egov_edges = _graph_artifacts_from_documents(
-        documents,
-        _law_family_roots(samples_dir),
-    )
-    guidance_nodes, guidance_edges = _guidance_graph_artifacts(documents)
+    law_family_roots = _law_family_roots(samples_dir)
+    egov_nodes, egov_edges = _graph_artifacts_from_documents(documents, law_family_roots)
+    guidance_nodes, guidance_edges = _guidance_graph_artifacts(documents, law_family_roots)
     nodes = _dedupe_by_key([*nodes, *egov_nodes, *guidance_nodes], "graphNodeId")
     edges = _dedupe_by_key([*edges, *egov_edges, *guidance_edges], "graphEdgeId")
-    # EXPLAINSの張り先条文は、法令の部分投入(例: 民法601-622条の2のみ)ではグラフに
-    # 存在しないことがある。dangling assertでseed全体を止めず、該当EXPLAINSだけ落とす。
-    edges, dropped_explains = _drop_dangling_explains_edges(edges, {node["graphNodeId"] for node in nodes})
-    if dropped_explains:
-        print(f"[seed] dropped {dropped_explains} EXPLAINS edge(s) whose target article is not in the graph")
+    # ガイド由来エッジの張り先条文は、法令の部分投入ではグラフに存在しないことがある。
+    # dangling assertでseed全体を止めず、該当エッジだけ落とす。
+    edges, dropped_guidance = _drop_dangling_guidance_edges(edges, {node["graphNodeId"] for node in nodes})
+    if dropped_guidance:
+        print(
+            f"[seed] dropped {dropped_guidance} guidance edge(s) whose target article is not in the graph"
+        )
     _assert_no_dangling_edges(nodes, edges)
+    # seed直後の自動検査(§6.3)。投入は止めず、違反はmanifestとログへ残して監査可能にする。
+    audit = audit_graph(nodes, edges)
+    for violation in audit.violations:
+        print(f"[seed][graph-audit] {violation}")
     graph_client.clear()
     graph_client.seed_nodes(nodes)
     graph_client.seed_edges(edges)
 
-    minio_count = _seed_minio(samples_dir, documents, external_guidance_sources)
+    minio_count, minio_stale_removed = _seed_minio(
+        samples_dir,
+        documents,
+        external_guidance_sources,
+    )
 
     return {
         "opensearchDocuments": len(documents),
@@ -94,12 +126,29 @@ def seed_all(os_client: OpenSearchClient, graph_client: GraphClient) -> dict[str
         "graphNodes": len(nodes),
         "graphEdges": len(edges),
         "minioObjects": minio_count,
+        "minioStaleVectorObjectsRemoved": minio_stale_removed,
+        # オントロジー変更時に再シードが必要かを判別できるよう、manifestへ残す(§6.3)。
+        "graphSchemaVersion": GRAPH_SCHEMA_VERSION,
+        "edgeTypeCounts": _count_by_key(edges, "edgeType"),
+        "nodeTypeCounts": _count_by_key(nodes, "nodeType"),
+        "authorityTypeCounts": _count_by_key(nodes, "authorityType"),
+        "graphAudit": audit.as_dict(),
     }
+
+
+def _count_by_key(items: list[dict[str, Any]], key: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in items:
+        value = item.get(key)
+        if value is None:
+            continue
+        counts[str(value)] = counts.get(str(value), 0) + 1
+    return dict(sorted(counts.items()))
 
 
 def _opensearch_documents(samples_dir: Path, external_guidance_sources: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     sample = _read_json(samples_dir / "metadata" / "opensearch_document.sample.json")
-    law_fsa = dict(sample)
+    law_fsa = _with_authority_type(dict(sample), _law_registry_entries(samples_dir))
     law_fsa["embedding"] = embed_text(_embedding_text(law_fsa))
     documents = [law_fsa]
     if settings.seed_lawqa_egov:
@@ -241,6 +290,9 @@ def _guidance_document(
         "chunkStrategy": spec["chunkStrategy"],
         "relatedArticleContentUnitIds": spec["relatedArticleContentUnitIds"],
         "articleReferenceSource": spec["articleReferenceSource"],
+        # ガイドは規範的法令レイヤーに含めず、補助資料レーンとして別管理する(§5.2, §10)。
+        "authorityType": AUTHORITY_GUIDANCE,
+        "authoritySource": "doc_type",
     }
 
 
@@ -486,11 +538,47 @@ def _minio_client(http_client: Any = None) -> Minio:
     )
 
 
+def _law_registry_entries(samples_dir: Path) -> dict[str, dict[str, Any]]:
+    """law_registry.jsonのlawId別エントリ。authorityTypeの正の値をここから読む(§5.2)。"""
+    registry_path = samples_dir / "eval" / "law_registry.json"
+    if not registry_path.exists():
+        return {}
+    registry = _read_json(registry_path)
+    return {
+        str(item["lawId"]): item
+        for item in registry.get("laws", [])
+        if item.get("lawId")
+    }
+
+
+def _with_authority_type(
+    document: dict[str, Any],
+    registry_entries: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """documentIdからauthorityTypeを解決して付与する(既に値がある場合は尊重する)。"""
+    if document.get("authorityType"):
+        return document
+    law_id = str(document.get("documentId") or "").removeprefix("law-")
+    entry = registry_entries.get(law_id, {})
+    resolution = resolve_authority_type(
+        law_id,
+        registry_authority_type=entry.get("authorityType"),
+        title=document.get("title"),
+        doc_type=document.get("docType"),
+    )
+    return {
+        **document,
+        "authorityType": resolution.authority_type,
+        "authoritySource": resolution.authority_source,
+    }
+
+
 def _lawqa_egov_documents(samples_dir: Path) -> list[dict[str, Any]]:
     law_ids = _lawqa_egov_law_ids(samples_dir)
+    registry_entries = _law_registry_entries(samples_dir)
     documents: list[dict[str, Any]] = []
     for law_id in law_ids:
-        documents.extend(_egov_law_documents(law_id))
+        documents.extend(_egov_law_documents(law_id, registry_entries))
     for batch in _chunks(documents, settings.embedding_batch_size):
         embeddings = embed_texts([_embedding_text(document) for document in batch])
         for document, embedding in zip(batch, embeddings, strict=True):
@@ -556,7 +644,10 @@ def _read_lawqa_payload(samples_dir: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _egov_law_documents(law_id_spec: str) -> list[dict[str, Any]]:
+def _egov_law_documents(
+    law_id_spec: str,
+    registry_entries: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     law_id, article_range = _parse_law_id_spec(law_id_spec)
     url = f"{settings.egov_api_base_url.rstrip('/')}/lawdata/{law_id}"
     response = requests.get(url, timeout=120)
@@ -569,6 +660,16 @@ def _egov_law_documents(law_id_spec: str) -> list[dict[str, Any]]:
 
     title = root.findtext(".//LawTitle") or law_id
     law_num = root.findtext(".//LawNum")
+    # e-Gov LawTypeは内閣府令も MinisterialOrdinance に含むため、M系はregistryの
+    # 人手確認値を正とする(§5.2)。registryに無い場合は ordinance_unspecified のままにする。
+    law_element = root.find(".//Law")
+    entry = (registry_entries or {}).get(law_id, {})
+    authority = resolve_authority_type(
+        law_id,
+        registry_authority_type=entry.get("authorityType"),
+        law_type=law_element.get("LawType") if law_element is not None else None,
+        title=title,
+    )
 
     # 本則と附則は条番号を別々に振るため（本則第8条と附則第8条が衝突する）、
     # 附則は law-{id}-suppl-{k}-article-{num} という別名前空間に分離する。
@@ -590,7 +691,17 @@ def _egov_law_documents(law_id_spec: str) -> list[dict[str, Any]]:
 
     documents: list[dict[str, Any]] = []
     documents.extend(
-        _section_documents(main_articles, law_id, title, law_num, url, id_prefix="article", section_key="main")
+        _section_documents(
+            main_articles,
+            law_id,
+            title,
+            law_num,
+            url,
+            id_prefix="article",
+            section_key="main",
+            authority_type=authority.authority_type,
+            authority_source=authority.authority_source,
+        )
     )
     # 範囲指定時は該当法令の一部条文だけが目的のため、附則（別条番号体系の経過措置等）は対象外にする。
     if not article_range:
@@ -606,6 +717,8 @@ def _egov_law_documents(law_id_spec: str) -> list[dict[str, Any]]:
                     id_prefix=f"{section_key}-article",
                     section_key=section_key,
                     section_label=_suppl_label(suppl),
+                    authority_type=authority.authority_type,
+                    authority_source=authority.authority_source,
                 )
             )
     return documents
@@ -650,6 +763,8 @@ def _section_documents(
     id_prefix: str,
     section_key: str,
     section_label: str | None = None,
+    authority_type: str | None = None,
+    authority_source: str | None = None,
 ) -> list[dict[str, Any]]:
     documents: list[dict[str, Any]] = []
     for article in articles:
@@ -684,6 +799,8 @@ def _section_documents(
             "sourcePage": None,
             "parserType": "egov_xml_rule",
             "lawNum": law_num,
+            "authorityType": authority_type,
+            "authoritySource": authority_source,
         }
         for chunk in _article_chunks(article, article_content_unit_id, heading, caption):
             content_unit_id = chunk["contentUnitId"]
@@ -861,6 +978,8 @@ def _graph_artifacts_from_documents(
         document_id = document["documentId"]
         content_unit_id = document["contentUnitId"]
         article_content_unit_id = document.get("articleContentUnitId") or document.get("parentContentUnitId") or content_unit_id
+        authority_type = document.get("authorityType")
+        authority_source = document.get("authoritySource")
         nodes_by_id[document_id] = {
             "graphNodeId": document_id,
             "nodeType": "Document",
@@ -873,6 +992,9 @@ def _graph_artifacts_from_documents(
             "isLatest": document.get("isLatest"),
             "confidentiality": document.get("confidentiality"),
             "clearanceLevel": document.get("clearanceLevel", 3),
+            "authorityType": authority_type,
+            "authoritySource": authority_source,
+            "graphSchemaVersion": GRAPH_SCHEMA_VERSION,
         }
         nodes_by_id[article_content_unit_id] = {
             "graphNodeId": article_content_unit_id,
@@ -887,6 +1009,9 @@ def _graph_artifacts_from_documents(
             "isLatest": document.get("isLatest"),
             "confidentiality": document.get("confidentiality"),
             "clearanceLevel": document.get("clearanceLevel", 3),
+            "authorityType": authority_type,
+            "authoritySource": authority_source,
+            "graphSchemaVersion": GRAPH_SCHEMA_VERSION,
         }
         edge_id = f"edge-{document_id}-has-content-unit-{article_content_unit_id.removeprefix(document_id + '-')}"
         edges.append(
@@ -910,10 +1035,13 @@ def _graph_artifacts_from_documents(
                     "nodeType": "Paragraph",
                     "documentId": document_id,
                     "contentUnitId": parent_id,
+                    "authorityType": authority_type,
+                    "authoritySource": authority_source,
                     "publishStatus": document.get("publishStatus"),
                     "isLatest": document.get("isLatest"),
                     "confidentiality": document.get("confidentiality"),
                     "clearanceLevel": document.get("clearanceLevel", 3),
+                    "graphSchemaVersion": GRAPH_SCHEMA_VERSION,
                 }
                 edges.append(_hierarchy_edge(article_content_unit_id, parent_id, document_id))
             node_type = "Item" if document.get("itemNumber") is not None else "Paragraph"
@@ -922,11 +1050,14 @@ def _graph_artifacts_from_documents(
                 "nodeType": node_type,
                 "documentId": document_id,
                 "contentUnitId": content_unit_id,
+                "authorityType": authority_type,
+                "authoritySource": authority_source,
                 "heading": document.get("heading"),
                 "publishStatus": document.get("publishStatus"),
                 "isLatest": document.get("isLatest"),
                 "confidentiality": document.get("confidentiality"),
                 "clearanceLevel": document.get("clearanceLevel", 3),
+                "graphSchemaVersion": GRAPH_SCHEMA_VERSION,
             }
             edges.append(_hierarchy_edge(parent_id, content_unit_id, document_id))
     reference_edges = _reference_edges(documents)
@@ -936,8 +1067,27 @@ def _graph_artifacts_from_documents(
     return list(nodes_by_id.values()), edges
 
 
+def _article_texts(documents: list[dict[str, Any]]) -> dict[str, str]:
+    """条ID -> 条全体の本文。委任文言の検出は項・号チャンク単位では判断できない。"""
+    texts: dict[str, str] = {}
+    for document in documents:
+        if document.get("docType") != "law":
+            continue
+        article_id = str(
+            document.get("articleContentUnitId")
+            or document.get("parentContentUnitId")
+            or document["contentUnitId"]
+        ).split("-paragraph-", 1)[0]
+        text = str(document.get("text") or "")
+        if not text:
+            continue
+        texts[article_id] = f"{texts.get(article_id, '')}\n{text}".strip()
+    return texts
+
+
 def _guidance_graph_artifacts(
     documents: list[dict[str, Any]],
+    law_family_roots: dict[str, str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """ガイドライン文書を「羅針盤」としてグラフに載せる。
 
@@ -946,10 +1096,15 @@ def _guidance_graph_artifacts(
     上位ヒットしたガイドラインチャンクの documentId からこのエッジを辿り、
     解説対象の条文を特定する(条文本文の取得はOpenSearch側の役割)。
 
+    条文注釈・対応表で明示された参照だけを EXPLAINS とし、前ページからの引き継ぎ
+    (carried_forward)は MENTIONS にする。MENTIONS は候補発見の補助であって、
+    探索拡張の信頼経路にも根拠充足にも使わない(§6.1, §10)。
+
     条文ノードは法令投入側(_graph_artifacts_from_documents)が作るため、ここでは
     作らない。張り先が存在しないEXPLAINSは seed_all 側の dangling ドロップに委ねる。
     """
     ordered_articles_by_document: dict[str, list[str]] = {}
+    explained_articles_by_document: dict[str, set[str]] = {}
     representative_by_document: dict[str, dict[str, Any]] = {}
     for document in documents:
         if document.get("docType") != "guideline":
@@ -957,15 +1112,19 @@ def _guidance_graph_artifacts(
         document_id = document["documentId"]
         representative_by_document.setdefault(document_id, document)
         articles = ordered_articles_by_document.setdefault(document_id, [])
+        explained = explained_articles_by_document.setdefault(document_id, set())
+        reference_source = document.get("articleReferenceSource")
+        # articleReferenceSourceが無い(旧形式・手動投入)場合は明示注記として扱う。
+        is_explicit = reference_source is None or reference_source in GUIDANCE_EXPLAINS_REFERENCE_SOURCES
         for article_id in document.get("relatedArticleContentUnitIds") or []:
             if article_id not in articles:
                 articles.append(article_id)
+            if is_explicit:
+                explained.add(article_id)
 
     nodes: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
     for document_id, article_ids in ordered_articles_by_document.items():
-        if not article_ids:
-            continue  # 対応表・条文注釈が無い文書はグラフに載せない(孤立ノードを作らない)
         document = representative_by_document[document_id]
         nodes.append(
             {
@@ -980,35 +1139,134 @@ def _guidance_graph_artifacts(
                 "isLatest": document.get("isLatest"),
                 "confidentiality": document.get("confidentiality"),
                 "clearanceLevel": document.get("clearanceLevel", 1),
+                "authorityType": AUTHORITY_GUIDANCE,
+                "authoritySource": "doc_type",
+                "graphSchemaVersion": GRAPH_SCHEMA_VERSION,
             }
         )
+        explained = explained_articles_by_document.get(document_id, set())
         for article_id in article_ids:
-            edges.append(
-                {
-                    "graphEdgeId": f"edge-{document_id}-explains-{article_id}",
-                    "edgeType": "EXPLAINS",
-                    "fromGraphNodeId": document_id,
-                    "toGraphNodeId": article_id,
-                    "documentId": document_id,
-                    "relationSource": "guidance_article_annotation",
-                    "relationConfidence": 0.9,
-                    "publishStatus": "published",
-                    "isLatest": True,
-                }
-            )
+            if article_id in explained:
+                edges.append(
+                    {
+                        "graphEdgeId": f"edge-{document_id}-explains-{article_id}",
+                        "edgeType": "EXPLAINS",
+                        "fromGraphNodeId": document_id,
+                        "toGraphNodeId": article_id,
+                        "documentId": document_id,
+                        "relationSource": "guidance_article_annotation",
+                        "relationConfidence": 0.9,
+                        "publishStatus": "published",
+                        "isLatest": True,
+                    }
+                )
+            else:
+                edges.append(
+                    {
+                        "graphEdgeId": f"edge-{document_id}-mentions-{article_id}",
+                        "edgeType": "MENTIONS",
+                        "fromGraphNodeId": document_id,
+                        "toGraphNodeId": article_id,
+                        "documentId": document_id,
+                        "relationSource": "guidance_mention_rule",
+                        "relationConfidence": 0.5,
+                        "publishStatus": "published",
+                        "isLatest": True,
+                    }
+                )
+    nodes.extend(_guidance_relation_assertions(documents, law_family_roots or {}))
     return nodes, edges
 
 
-def _drop_dangling_explains_edges(
+def _guidance_relation_assertions(
+    documents: list[dict[str, Any]],
+    law_family_roots: dict[str, str],
+) -> list[dict[str, Any]]:
+    """ガイドが示唆する法令間関係を、未確認のRelationAssertionノードとして保存する(§6.1)。
+
+    正式なArticle間エッジにはしない。`unverified`のまま候補拡張だけに使い、根拠充足・
+    mustInclude・法令関係図の確定線には使わない。法令本文で確認した後に正式な関係を作る。
+
+    v1では、条文注釈で法律の条(A)に紐づいたチャンク本文に「(施行)令第N条」がある場合に、
+    同一法令系統の施行令の条(B)への IMPLEMENTS 候補を作る。それ以外の示唆表現は対象外。
+    """
+    decree_by_family = {
+        law_family_roots.get(document["documentId"], document["documentId"]): document["documentId"]
+        for document in documents
+        if document.get("docType") == "law" and str(document.get("title") or "").endswith("施行令")
+    }
+    available_articles = {
+        str(
+            document.get("articleContentUnitId")
+            or document.get("parentContentUnitId")
+            or document["contentUnitId"]
+        ).split("-paragraph-", 1)[0]
+        for document in documents
+        if document.get("docType") == "law"
+    }
+    assertions: dict[str, dict[str, Any]] = {}
+    counts: dict[str, int] = {}
+    for document in documents:
+        if document.get("docType") != "guideline":
+            continue
+        source_articles = list(document.get("relatedArticleContentUnitIds") or [])
+        text = str(document.get("text") or "")
+        if not source_articles or not text:
+            continue
+        guidance_document_id = str(document["documentId"])
+        for from_article_id in source_articles:
+            if from_article_id not in available_articles:
+                continue
+            law_document_id = from_article_id.split("-article-", 1)[0]
+            family_root = law_family_roots.get(law_document_id, law_document_id)
+            decree_document_id = decree_by_family.get(family_root)
+            if not decree_document_id or decree_document_id == law_document_id:
+                continue
+            for to_article_id in _prefixed_article_reference_ids(
+                decree_document_id,
+                text,
+                GUIDANCE_ORDER_ARTICLE_PATTERN,
+            ):
+                if to_article_id not in available_articles:
+                    continue
+                if counts.get(guidance_document_id, 0) >= GUIDANCE_ASSERTION_MAX_PER_DOCUMENT:
+                    break
+                assertion_id = f"assertion-{from_article_id}-implements-{to_article_id}"
+                if assertion_id in assertions:
+                    continue
+                counts[guidance_document_id] = counts.get(guidance_document_id, 0) + 1
+                assertions[assertion_id] = {
+                    "graphNodeId": assertion_id,
+                    "nodeType": "RelationAssertion",
+                    "assertionId": assertion_id,
+                    "fromArticleId": from_article_id,
+                    "toArticleId": to_article_id,
+                    "suggestedType": "IMPLEMENTS",
+                    "assertedByDocumentId": guidance_document_id,
+                    "sourceText": text[:200],
+                    "confidence": UNVERIFIED_ASSERTION_CONFIDENCE,
+                    "status": RELATION_STATUS_UNVERIFIED,
+                    "publishStatus": "published",
+                    "isLatest": True,
+                    "clearanceLevel": document.get("clearanceLevel", 1),
+                    "graphSchemaVersion": GRAPH_SCHEMA_VERSION,
+                }
+    return list(assertions.values())
+
+
+def _drop_dangling_guidance_edges(
     edges: list[dict[str, Any]],
     node_ids: set[str],
 ) -> tuple[list[dict[str, Any]], int]:
-    """張り先/張り元ノードがグラフに無い EXPLAINS エッジだけを除去する。
-    EXPLAINS 以外の dangling は _assert_no_dangling_edges で従来どおり検出させる。"""
+    """張り先/張り元ノードがグラフに無いガイド由来エッジだけを除去する。
+
+    法令の部分投入(例: 民法601-622条の2のみ)では、ガイドが解説する条文がグラフに
+    存在しないことがある。ガイド以外の dangling は _assert_no_dangling_edges で
+    従来どおり検出させる。"""
     kept: list[dict[str, Any]] = []
     dropped = 0
     for edge in edges:
-        if edge.get("edgeType") == "EXPLAINS" and (
+        if edge.get("edgeType") in {"EXPLAINS", "MENTIONS"} and (
             edge["fromGraphNodeId"] not in node_ids or edge["toGraphNodeId"] not in node_ids
         ):
             dropped += 1
@@ -1076,6 +1334,8 @@ def _reference_edges(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
                         "fromGraphNodeId": source_id,
                         "toGraphNodeId": target_id,
                         "documentId": document_id,
+                        # 原文上の参照は事実として保存し、法的な意味は referenceKind で表す(§6.1)。
+                        "referenceKind": classify_reference_kind(text),
                         "relationSource": "xml_reference_rule",
                         "relationConfidence": 0.9,
                         "publishStatus": "published",
@@ -1123,6 +1383,9 @@ def _incorporation_edges(
                 "fromGraphNodeId": target_article_id,
                 "toGraphNodeId": source_article_id,
                 "documentId": reference["documentId"],
+                # 派生エッジは元の原文参照へ辿れるようにする。同一意味の順逆エッジを
+                # 独立した事実として管理しない(§6.1)。
+                "derivedFromEdgeId": reference["graphEdgeId"],
                 "relationSource": "incorporation_reference_rule",
                 "relationConfidence": 0.9,
                 "publishStatus": "published",
@@ -1158,6 +1421,12 @@ def _delegation_edges(
         law_family_roots.get(document_id, document_id): document_id
         for document_id, title in document_titles.items()
         if title.endswith("施行令")
+    }
+    article_texts = _article_texts(documents)
+    authority_types = {
+        str(document["documentId"]): document.get("authorityType")
+        for document in documents
+        if document.get("docType") == "law"
     }
     edges: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -1203,12 +1472,23 @@ def _delegation_edges(
                         "fromGraphNodeId": lower_article_id,
                         "toGraphNodeId": parent_article_id,
                         "documentId": lower_document_id,
+                        "referenceKind": REFERENCE_KIND_DELEGATION_PARENT,
                         "relationSource": "subordinate_law_parent_reference",
                         "relationConfidence": 0.95,
                         "publishStatus": "published",
                         "isLatest": True,
                     }
                 )
+            # 下位法令が親条文を参照するだけで IMPLEMENTS を確定しない。親条文の委任文言、
+            # または同一法令系統かつ下位法令側の具体化表現を確認する(§6.1)。
+            assessment = assess_implements(
+                parent_text=article_texts.get(parent_article_id, ""),
+                child_text=text,
+                child_authority_type=authority_types.get(lower_document_id),
+                same_family=True,
+            )
+            if not assessment.is_implements:
+                continue
             edge_id = f"edge-{parent_article_id}-implements-{lower_article_id}"
             if edge_id in seen:
                 continue
@@ -1220,8 +1500,11 @@ def _delegation_edges(
                     "fromGraphNodeId": parent_article_id,
                     "toGraphNodeId": lower_article_id,
                     "documentId": lower_document_id,
+                    "derivedFromEdgeId": reference_edge_id,
                     "relationSource": "subordinate_law_parent_reference",
-                    "relationConfidence": 0.95,
+                    "relationConfidence": assessment.confidence,
+                    "delegationWordingDetected": assessment.delegation_wording_detected,
+                    "specificationWordingDetected": assessment.specification_wording_detected,
                     "publishStatus": "published",
                     "isLatest": True,
                 }
@@ -1326,13 +1609,19 @@ def _seed_minio(
     samples_dir: Path,
     documents: list[dict[str, Any]],
     external_guidance_sources: list[dict[str, Any]] | None = None,
-) -> int:
+) -> tuple[int, int]:
     client = _minio_client()
     try:
         if not client.bucket_exists(settings.minio_bucket):
             client.make_bucket(settings.minio_bucket)
     except S3Error:
         raise
+
+    expected_vector_objects = {
+        str(document["processedObjectUri"]).replace("minio://knowledge-root/", "")
+        for document in documents
+    }
+    stale_removed = _remove_stale_vector_objects(client, expected_vector_objects)
 
     count = 0
     for document in documents:
@@ -1364,7 +1653,43 @@ def _seed_minio(
             data = path.read_bytes()
             client.put_object(settings.minio_bucket, object_name, data=_Bytes(data), length=len(data))
             count += 1
-    return count
+    return count, stale_removed
+
+
+def _remove_stale_vector_objects(
+    client: Minio,
+    expected_object_names: set[str],
+) -> int:
+    """現行OpenSearch投入対象から外れた派生vector文書だけを削除する。
+
+    原本・評価データ・前処理成果物は対象にしない。seedを繰り返してもMinIOへ旧chunkが
+    蓄積し続けないよう、管理対象prefixを限定して同期する。
+    """
+    prefix = "derived-artifacts/vector-documents/"
+    stale = [
+        item.object_name
+        for item in client.list_objects(
+            settings.minio_bucket,
+            prefix=prefix,
+            recursive=True,
+        )
+        if item.object_name not in expected_object_names
+    ]
+    if not stale:
+        return 0
+    errors = list(
+        client.remove_objects(
+            settings.minio_bucket,
+            (DeleteObject(object_name) for object_name in stale),
+        )
+    )
+    if errors:
+        first = errors[0]
+        raise RuntimeError(
+            "Failed to remove stale MinIO vector object: "
+            f"{getattr(first, 'object_name', '')} {getattr(first, 'message', first)}"
+        )
+    return len(stale)
 
 
 class _Bytes:
