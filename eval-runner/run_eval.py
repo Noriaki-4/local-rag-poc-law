@@ -36,6 +36,12 @@ CONTEXT_HEADER_PATTERN = re.compile(r"^(#{2,5})\s+(.+?)\s*$")
 
 LAW_REGISTRY_PATH = SAMPLES_DIR / "eval" / "law_registry.json"
 LAW_REGISTRY = json.loads(LAW_REGISTRY_PATH.read_text(encoding="utf-8")) if LAW_REGISTRY_PATH.exists() else {"laws": []}
+KNOWN_ISSUES_PATH = SAMPLES_DIR / "eval" / "lawqa_known_issues.json"
+KNOWN_ISSUES = (
+    json.loads(KNOWN_ISSUES_PATH.read_text(encoding="utf-8")).get("issues", {})
+    if KNOWN_ISSUES_PATH.exists()
+    else {}
+)
 KNOWN_LAW_IDS = [str(item["lawId"]) for item in LAW_REGISTRY["laws"]]
 LAW_FAMILY_ROOT = {
     str(item["lawId"]): str(item.get("familyRoot") or item["lawId"])
@@ -48,7 +54,7 @@ FULLWIDTH_DIGITS = str.maketrans("\uff10\uff11\uff12\uff13\uff14\uff15\uff16\uff
 
 # lawId -> e-Gov LawTitle \u306e\u30ad\u30e3\u30c3\u30b7\u30e5\u3002\u30b3\u30f3\u30c6\u30ad\u30b9\u30c8\u306e\u6cd5\u4ee4\u540d\u898b\u51fa\u3057\u3092 lawId \u3078\u5bfe\u5fdc\u4ed8\u3051\u308b\u305f\u3081\u306b\u4f7f\u3046\u3002
 _EGOV_TITLE_CACHE: dict[str, str | None] = {}
-METRIC_VERSION = 3
+METRIC_VERSION = 5
 
 
 def main() -> None:
@@ -79,15 +85,86 @@ def main() -> None:
         "citationLawHitRate": _optional_score_rate(results, "citationLawHit"),
         "citationLawFamilyHitRate": _optional_score_rate(results, "citationLawFamilyHit"),
         "citationArticleHitRate": _optional_score_rate(results, "citationArticleHit"),
+        "citationArticleCompleteHitRate": _optional_score_rate(results, "citationArticleCompleteHit"),
+        "citationArticleRecall": _optional_score_rate(results, "citationArticleRecall"),
+        "citationArticleMicroRecall": _article_micro_recall(results, "citationMatched"),
         "citationParagraphHitRate": _optional_score_rate(results, "citationParagraphHit"),
         "candidatePoolHitRate": _optional_score_rate(results, "candidatePoolHit"),
+        "candidatePoolArticleCompleteHitRate": _optional_score_rate(
+            results, "candidatePoolArticleCompleteHit"
+        ),
+        "candidatePoolArticleRecall": _optional_score_rate(results, "candidatePoolArticleRecall"),
+        "candidatePoolArticleMicroRecall": _article_micro_recall(
+            results, "candidatePoolMatched"
+        ),
         "fusionHitRate": _optional_score_rate(results, "fusionHit"),
+        "fusionArticleCompleteHitRate": _optional_score_rate(results, "fusionArticleCompleteHit"),
+        "fusionArticleRecall": _optional_score_rate(results, "fusionArticleRecall"),
+        "fusionArticleMicroRecall": _article_micro_recall(results, "fusionMatched"),
         "rerankerHitRate": _optional_score_rate(results, "rerankerHit"),
+        "rerankerArticleCompleteHitRate": _optional_score_rate(
+            results, "rerankerArticleCompleteHit"
+        ),
+        "rerankerArticleRecall": _optional_score_rate(results, "rerankerArticleRecall"),
+        "rerankerArticleMicroRecall": _article_micro_recall(results, "rerankerMatched"),
+        "shadowRerankerArticleCompleteHitRate": _optional_score_rate(
+            results, "shadowRerankerArticleCompleteHit"
+        ),
+        "shadowRerankerArticleRecall": _optional_score_rate(
+            results, "shadowRerankerArticleRecall"
+        ),
+        "shadowRerankerArticleMicroRecall": _article_micro_recall(
+            results, "shadowRerankerMatched"
+        ),
+        "shadowSelectionComplete": sum(
+            1
+            for item in results
+            if (item.get("shadowSelection") or {}).get("complete")
+        ),
+        "shadowSelectionIncomplete": sum(
+            1
+            for item in results
+            if item.get("shadowSelection")
+            and not item["shadowSelection"].get("complete")
+        ),
         "rerankerUsed": sum(1 for item in results if item.get("rerankerUsed")),
         "llmUsed": sum(1 for item in results if item.get("llmUsed")),
         "validationErrors": sum(1 for item in results if item.get("validationError")),
+        "knownDatasetIssues": sum(1 for item in results if item.get("datasetIssue")),
         "source": results[0].get("source") if results else None,
     }
+    diagnostic_results = [item for item in results if item.get("diagnosticScorable", True)]
+    summary["diagnosticScorable"] = len(diagnostic_results)
+    summary["diagnosticAnswerAccuracy"] = sum(
+        item["scores"].get("answerAccuracy", 0) for item in diagnostic_results
+    )
+    summary["diagnosticAnswerAccuracyRate"] = (
+        summary["diagnosticAnswerAccuracy"] / len(diagnostic_results) if diagnostic_results else None
+    )
+    summary["diagnosticRerankerArticleCompleteHitRate"] = _optional_score_rate(
+        diagnostic_results,
+        "rerankerArticleCompleteHit",
+    )
+    summary["diagnosticRerankerArticleRecall"] = _optional_score_rate(
+        diagnostic_results,
+        "rerankerArticleRecall",
+    )
+    summary["diagnosticRerankerArticleMicroRecall"] = _article_micro_recall(
+        diagnostic_results,
+        "rerankerMatched",
+    )
+    summary["diagnosticShadowRerankerArticleCompleteHitRate"] = _optional_score_rate(
+        diagnostic_results,
+        "shadowRerankerArticleCompleteHit",
+    )
+    summary["diagnosticShadowRerankerArticleRecall"] = _optional_score_rate(
+        diagnostic_results,
+        "shadowRerankerArticleRecall",
+    )
+    summary["diagnosticShadowRerankerArticleMicroRecall"] = _article_micro_recall(
+        diagnostic_results,
+        "shadowRerankerMatched",
+    )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
@@ -144,6 +221,7 @@ def run_lawqa() -> list[dict[str, Any]]:
             # 1問の一時的な失敗（Anthropic側の瞬断等）で140問全体を止めない。
             # 失敗を記録して次の問題へ進む。
             print(f"SKIP {row['questionId']}: request failed: {exc}")
+            dataset_issue = KNOWN_ISSUES.get(row["questionId"])
             results.append(
                 {
                     "metricVersion": METRIC_VERSION,
@@ -165,17 +243,35 @@ def run_lawqa() -> list[dict[str, Any]]:
                     "llmUsed": False,
                     "validationError": None,
                     "llmError": f"request_failed: {exc}",
+                    "datasetIssue": dataset_issue,
+                    "diagnosticScorable": not bool(
+                        dataset_issue and dataset_issue.get("excludeFromDiagnosticAccuracy")
+                    ),
+                    "articleCoverage": None,
                     "scores": {
                         "answerAccuracy": 0,
                         "citationHit": None,
                         "citationLawHit": None,
                         "citationLawFamilyHit": None,
                         "citationArticleHit": None,
+                        "citationArticleCompleteHit": None,
+                        "citationArticleRecall": None,
                         "citationParagraphHit": None,
                         "candidatePoolHit": None,
+                        "candidatePoolArticleCompleteHit": None,
+                        "candidatePoolArticleRecall": None,
                         "fusionHit": None,
+                        "fusionArticleCompleteHit": None,
+                        "fusionArticleRecall": None,
+                        "rerankerHit": None,
+                        "rerankerArticleCompleteHit": None,
+                        "rerankerArticleRecall": None,
+                        "shadowRerankerHit": None,
+                        "shadowRerankerArticleCompleteHit": None,
+                        "shadowRerankerArticleRecall": None,
                         "graphExpansionHit": 0,
                     },
+                    "shadowSelection": None,
                     "latencyMs": None,
                 }
             )
@@ -194,11 +290,14 @@ def run_lawqa() -> list[dict[str, Any]]:
         citation_law_hit = bool(expected_document_ids & retrieved_document_ids) if expected_document_ids else None
         expected_articles = {_article_content_unit_id(content_unit_id) for content_unit_id in expected}
         retrieved_articles = {_article_content_unit_id(content_unit_id) for content_unit_id in retrieved if content_unit_id}
-        citation_article_hit = (
-            bool(expected_articles & retrieved_articles)
-            if reference_granularity in {"article", "paragraph", "item"}
-            else None
-        )
+        if reference_granularity in {"article", "paragraph", "item"}:
+            citation_article_hit, citation_article_complete_hit, citation_article_recall = (
+                _article_coverage(expected_articles, retrieved_articles)
+            )
+            citation_matched = len(expected_articles & retrieved_articles)
+        else:
+            citation_article_hit = citation_article_complete_hit = citation_article_recall = None
+            citation_matched = None
         citation_paragraph_hit = (
             bool(expected & retrieved or expected & retrieved_parents)
             if reference_granularity in {"paragraph", "item"}
@@ -221,19 +320,59 @@ def run_lawqa() -> list[dict[str, Any]]:
         trace = output.get("trace", {})
         candidate_ids = set(trace.get("candidatePoolContentUnitIds", trace.get("retrievedContentUnitIds", [])))
         fusion_ids = set(trace.get("fusionTopContentUnitIds", []))
-        reranker_ids = set(trace.get("rerankerTopContentUnitIds", fusion_ids))
+        # v5では新方式を有効化した実行でも旧16件を比較基準として保持する。
+        # oldContextContentUnitIds がない旧traceだけ従来キーへフォールバックする。
+        reranker_ids = _old_context_ids(trace, fusion_ids)
+        shadow_selection = trace.get("shadowSelection")
+        shadow_ids = set(trace.get("newContextContentUnitIds", []))
 
-        def _hit_at(ids: set[str]) -> bool | None:
-            if not reference_scorable:
-                return None
-            if reference_granularity == "law":
-                return bool(expected_document_ids & {_document_id_of(item) for item in ids if item})
-            articles = {_article_content_unit_id(item) for item in ids if item}
-            return bool(expected_articles & articles)
-
-        candidate_pool_hit = _hit_at(candidate_ids)
-        fusion_hit = _hit_at(fusion_ids)
-        reranker_hit = _hit_at(reranker_ids)
+        candidate_pool_hit, candidate_complete_hit, candidate_recall, candidate_matched = (
+            _article_scores_at(
+                candidate_ids,
+                reference_scorable,
+                reference_granularity,
+                expected_document_ids,
+                expected_articles,
+            )
+        )
+        fusion_hit, fusion_complete_hit, fusion_recall, fusion_matched = (
+            _article_scores_at(
+                fusion_ids,
+                reference_scorable,
+                reference_granularity,
+                expected_document_ids,
+                expected_articles,
+            )
+        )
+        reranker_hit, reranker_complete_hit, reranker_recall, reranker_matched = (
+            _article_scores_at(
+                reranker_ids,
+                reference_scorable,
+                reference_granularity,
+                expected_document_ids,
+                expected_articles,
+            )
+        )
+        if shadow_selection and shadow_selection.get("complete"):
+            (
+                shadow_reranker_hit,
+                shadow_reranker_complete_hit,
+                shadow_reranker_recall,
+                shadow_reranker_matched,
+            ) = _article_scores_at(
+                shadow_ids,
+                reference_scorable,
+                reference_granularity,
+                expected_document_ids,
+                expected_articles,
+            )
+        else:
+            (
+                shadow_reranker_hit,
+                shadow_reranker_complete_hit,
+                shadow_reranker_recall,
+                shadow_reranker_matched,
+            ) = (None, None, None, None)
         llm_trace = trace.get("llm", {})
         planner_trace = trace.get("planner", {})
         evaluator_trace = trace.get("evaluator", {})
@@ -257,6 +396,10 @@ def run_lawqa() -> list[dict[str, Any]]:
             or expected & graph_parents
             or expected_document_ids & graph_document_ids
         )
+        dataset_issue = KNOWN_ISSUES.get(row["questionId"])
+        diagnostic_scorable = not bool(
+            dataset_issue and dataset_issue.get("excludeFromDiagnosticAccuracy")
+        )
         results.append(
             {
                 "metricVersion": METRIC_VERSION,
@@ -279,6 +422,20 @@ def run_lawqa() -> list[dict[str, Any]]:
                 "validationError": validation_error,
                 "llmError": llm_error,
                 "referenceScorable": reference_scorable,
+                "datasetIssue": dataset_issue,
+                "diagnosticScorable": diagnostic_scorable,
+                "articleCoverage": (
+                    {
+                        "expected": len(expected_articles),
+                        "citationMatched": citation_matched,
+                        "candidatePoolMatched": candidate_matched,
+                        "fusionMatched": fusion_matched,
+                        "rerankerMatched": reranker_matched,
+                        "shadowRerankerMatched": shadow_reranker_matched,
+                    }
+                    if citation_matched is not None
+                    else None
+                ),
                 "rerankerUsed": bool(reranker_trace.get("used")),
                 "rerankerModel": reranker_trace.get("model"),
                 "rerankerLatencyMs": reranker_trace.get("latencyMs"),
@@ -289,6 +446,35 @@ def run_lawqa() -> list[dict[str, Any]]:
                 "answerLlmStopReason": llm_trace.get("stopReason"),
                 "plannerStopReason": planner_trace.get("stopReason"),
                 "evaluatorStopReason": evaluator_trace.get("stopReason"),
+                "shadowSelection": (
+                    {
+                        **shadow_selection,
+                        "oldContextContentUnitIds": trace.get(
+                            "oldContextContentUnitIds",
+                            [],
+                        ),
+                        "newContextContentUnitIds": trace.get(
+                            "newContextContentUnitIds",
+                            [],
+                        ),
+                        "bestAspectCandidateMissingFrom30": trace.get(
+                            "bestAspectCandidateMissingFrom30",
+                            [],
+                        ),
+                        "graphInheritedCandidateMissingFrom30": trace.get(
+                            "graphInheritedCandidateMissingFrom30",
+                            [],
+                        ),
+                        "skippedAspectQueries": trace.get(
+                            "skippedAspectQueries",
+                            [],
+                        ),
+                        "aspectPhaseBudgetMs": trace.get("aspectPhaseBudgetMs"),
+                        "aspectPhaseElapsedMs": trace.get("aspectPhaseElapsedMs"),
+                    }
+                    if shadow_selection
+                    else None
+                ),
                 "questionPolarity": llm_trace.get("questionPolarity"),
                 "choiceAssessments": llm_trace.get("choiceAssessments"),
                 "scores": {
@@ -297,10 +483,23 @@ def run_lawqa() -> list[dict[str, Any]]:
                     "citationLawHit": _optional_binary(citation_law_hit),
                     "citationLawFamilyHit": _optional_binary(citation_law_family_hit),
                     "citationArticleHit": _optional_binary(citation_article_hit),
+                    "citationArticleCompleteHit": _optional_binary(citation_article_complete_hit),
+                    "citationArticleRecall": citation_article_recall,
                     "citationParagraphHit": _optional_binary(citation_paragraph_hit),
                     "candidatePoolHit": _optional_binary(candidate_pool_hit),
+                    "candidatePoolArticleCompleteHit": _optional_binary(candidate_complete_hit),
+                    "candidatePoolArticleRecall": candidate_recall,
                     "fusionHit": _optional_binary(fusion_hit),
+                    "fusionArticleCompleteHit": _optional_binary(fusion_complete_hit),
+                    "fusionArticleRecall": fusion_recall,
                     "rerankerHit": _optional_binary(reranker_hit),
+                    "rerankerArticleCompleteHit": _optional_binary(reranker_complete_hit),
+                    "rerankerArticleRecall": reranker_recall,
+                    "shadowRerankerHit": _optional_binary(shadow_reranker_hit),
+                    "shadowRerankerArticleCompleteHit": _optional_binary(
+                        shadow_reranker_complete_hit
+                    ),
+                    "shadowRerankerArticleRecall": shadow_reranker_recall,
                     "graphExpansionHit": 1 if graph_expansion_hit else 0,
                 },
                 "latencyMs": output.get("trace", {}).get("elapsedMs"),
@@ -338,6 +537,50 @@ def _article_content_unit_id(content_unit_id: str) -> str:
     return content_unit_id.split("-paragraph-", 1)[0]
 
 
+def _article_coverage(
+    expected_articles: set[str],
+    retrieved_articles: set[str],
+) -> tuple[bool | None, bool | None, float | None]:
+    if not expected_articles:
+        return None, None, None
+    overlap = expected_articles & retrieved_articles
+    return bool(overlap), expected_articles <= retrieved_articles, len(overlap) / len(expected_articles)
+
+
+def _article_scores_at(
+    ids: set[str],
+    reference_scorable: bool,
+    reference_granularity: str,
+    expected_document_ids: set[str],
+    expected_articles: set[str],
+) -> tuple[bool | None, bool | None, float | None, int | None]:
+    if not reference_scorable:
+        return None, None, None, None
+    if reference_granularity == "law":
+        law_hit = bool(
+            expected_document_ids
+            & {_document_id_of(item) for item in ids if item}
+        )
+        return law_hit, None, None, None
+    articles = {_article_content_unit_id(item) for item in ids if item}
+    any_hit, complete_hit, recall = _article_coverage(
+        expected_articles,
+        articles,
+    )
+    return any_hit, complete_hit, recall, len(expected_articles & articles)
+
+
+def _old_context_ids(
+    trace: dict[str, Any],
+    fallback_ids: set[str],
+) -> set[str]:
+    """新方式の有効化後も、比較基準には変更前の16件を使う。"""
+    return set(
+        trace.get("oldContextContentUnitIds")
+        or trace.get("rerankerTopContentUnitIds", fallback_ids)
+    )
+
+
 def _document_id_of(content_unit_id: str) -> str:
     """contentUnitId から documentId(law-<法令番号>)を取り出す。附則(suppl)IDにも対応。"""
     return "-".join(str(content_unit_id).split("-")[:2])
@@ -356,6 +599,18 @@ def _optional_binary(value: bool | None) -> int | None:
 def _optional_score_rate(results: list[dict[str, Any]], key: str) -> float | None:
     values = [item["scores"].get(key) for item in results if item["scores"].get(key) is not None]
     return sum(values) / len(values) if values else None
+
+
+def _article_micro_recall(results: list[dict[str, Any]], matched_key: str) -> float | None:
+    coverages = [
+        item["articleCoverage"]
+        for item in results
+        if item.get("articleCoverage")
+        and item["articleCoverage"].get(matched_key) is not None
+    ]
+    expected = sum(item["expected"] for item in coverages)
+    matched = sum(item[matched_key] for item in coverages)
+    return matched / expected if expected else None
 
 
 def normalize_lawqa_payload(payload: Any) -> list[dict[str, Any]]:

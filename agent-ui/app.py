@@ -3,38 +3,27 @@ import os
 import requests
 import streamlit as st
 
+from evidence_map import (
+    build_evidence_dot,
+    citation_label,
+    group_citations,
+    humanize_citation_ids,
+)
+from example_questions import (
+    LEVELS,
+    evaluate_example,
+    examples_by_level,
+    find_example,
+)
+
 
 API_URL = os.getenv("AGENT_API_URL", "http://localhost:8000").rstrip("/")
 DEFAULT_PATTERN = "pattern_4_deepsearch"
 
-# 投入済み法令・ガイドラインに沿った質問例。利用者がそのまま試せるものを厳選する。
-# 詳しい回答可能範囲は docs/USER_GUIDE.md を参照。
-EXAMPLE_QUESTIONS = {
-    "借地借家・賃貸借（民法/借地借家法）": [
-        "借地権の存続期間は何年ですか。根拠条文も示してください。",
-        "賃貸借が終了したとき、敷金はいつ返還されますか。",
-        "借地権の存続期間が満了した場合、借地上の建物はどう扱われますか。",
-    ],
-    "金融商品取引法": [
-        "有価証券の定義に国債証券は含まれますか。根拠条文も示してください。",
-        "有価証券報告書は誰が、いつまでに提出する必要がありますか。",
-        "株券等の公開買付けとは何ですか。",
-    ],
-    "薬機法（医薬品医療機器等法）": [
-        "製造販売業者が整備すべき法令遵守体制とはどのようなものですか。根拠条文も示してください。",
-        "総括製造販売責任者の役割は何ですか。",
-    ],
-}
-
-
-def _flatten_examples() -> list[str]:
-    return [q for questions in EXAMPLE_QUESTIONS.values() for q in questions]
-
-
 st.set_page_config(page_title="法令RAG 質問デモ", layout="wide")
 st.title("法令RAG 質問デモ")
 st.caption(
-    "投入済みの法令・ガイドラインに基づいて質問へ回答し、根拠条文を引用します。"
+    "複数の法令・ガイドラインを横断検索して質問へ回答し、根拠のつながりを図で示します。"
     " 質問のコツや詳しい手順は docs/USER_GUIDE.md を参照してください。"
 )
 
@@ -51,17 +40,33 @@ with st.expander("📚 回答できる範囲（対応している法令・ガイ
     )
 
 if "question_text" not in st.session_state:
-    st.session_state.question_text = _flatten_examples()[0]
+    st.session_state.question_text = ""
+
+with st.expander(f"🧭 法令横断の質問例（Lv.1〜Lv.{LEVELS[-1].level}）", expanded=True):
+    st.caption(
+        "すべて複数の資料を横断する質問です。難易度は論点の多さではなく、"
+        "**横断する資料の構造**（何階層の法令まで、ガイドラインまで見る必要があるか）で分けています。"
+        " 質問文には**参照先の法令名をあえて書いていません**。"
+        "「想定する参照先」は答え合わせ用で、そこへ自力でたどり着けるかを確認してください。"
+    )
+    for level, examples in examples_by_level():
+        st.markdown(f"**Lv.{level.level} {level.name}** — {level.criteria}")
+        st.markdown(
+            "\n".join(
+                [
+                    "| テーマ | 質問例 | 想定する参照先 | 法令時点 |",
+                    "|---|---|---|---|",
+                    *[
+                        f"| {example.title} | {example.question} | {example.expected} | "
+                        f"{example.legal_as_of} |"
+                        for example in examples
+                    ],
+                ]
+            )
+        )
+    st.caption("試したい質問文を一覧からコピーし、下の入力欄へ貼り付けてください。")
 
 with st.sidebar:
-    st.subheader("質問例")
-    st.caption("クリックすると入力欄にセットされます。")
-    for law_family, questions in EXAMPLE_QUESTIONS.items():
-        st.markdown(f"**{law_family}**")
-        for example in questions:
-            if st.button(example, key=f"ex-{example}", use_container_width=True):
-                st.session_state.question_text = example
-
     with st.expander("環境チェック（開発者向け）", expanded=False):
         if st.button("Health check"):
             try:
@@ -113,7 +118,8 @@ with st.expander("詳細設定（開発者向け・通常は変更不要）", ex
         max_value=20,
         value=5,
         help="回答の根拠として最終的に引用・表示する件数の上限。既定5件。"
-        "増やすと根拠を広く出せるが関連の薄い条文も混ざりやすく、減らすと主要な根拠に絞られる。",
+        "増やすと根拠を広く出せるが関連の薄い条文も混ざりやすく、減らすと主要な根拠に絞られる。"
+        "回答本文が挙げた条文は、この上限を超えても引用一覧に表示される。",
     )
     candidate_top_k = st.slider(
         "Candidate Top K（1クエリあたりの検索候補件数）",
@@ -152,20 +158,97 @@ if st.button("質問する", type="primary"):
             response.raise_for_status()
         result = response.json()
 
+        citations = result.get("citations", [])
+
         st.subheader("回答")
-        st.write(result.get("answer"))
+        # 回答本文はcontentUnitIdで引用するため、そのままでは読めない。条文名へ置き換える。
+        st.write(humanize_citation_ids(result.get("answer") or "", citations))
 
         if result.get("predictedAnswer"):
             st.metric("選択式の判定", result["predictedAnswer"])
             st.json(result.get("choiceJudgements"))
 
-        citations = result.get("citations", [])
+        citation_groups = group_citations(citations)
+        law_groups = [group for group in citation_groups if group["kind"] == "law"]
+
+        st.subheader("引用した資料の内訳")
+        count_columns = st.columns(2)
+        count_columns[0].metric("引用した法令", f"{len(law_groups)}種類")
+        count_columns[1].metric("法令・資料の合計", f"{len(citation_groups)}種類")
+        if citation_groups:
+            heading = "複数の資料を引用しました" if len(citation_groups) > 1 else "引用した資料"
+            st.info(
+                f"{heading}（**内容が質問に適合しているかは要確認**）: "
+                + " ／ ".join(group["title"] for group in citation_groups)
+            )
+            st.caption(
+                "引用の件数や法令の種類数は、検索精度そのものではありません。"
+                "引用条文を開いて、質問に答える内容かを確認してください。"
+            )
+        else:
+            st.warning("引用できる条文・資料を確認できませんでした。")
+
+        # 例題は採点基準が分かっているため、文書・必要条文・回答要点を事後照合する。
+        # この情報はAgent APIへ送らず、検索・回答生成には影響させない。
+        matched_example = find_example(question)
+        if matched_example:
+            evaluation = evaluate_example(
+                matched_example,
+                citations,
+                result.get("answer"),
+            )
+            all_statuses = (
+                ("想定資料", evaluation.source_statuses),
+                ("必要条文・資料", evaluation.evidence_statuses),
+                ("回答要点", evaluation.answer_point_statuses),
+            )
+            passed_count = sum(
+                status.reached for _, statuses in all_statuses for status in statuses
+            )
+            status_count = sum(len(statuses) for _, statuses in all_statuses)
+            st.markdown(
+                f"**例題「{matched_example.title}」の答え合わせ**"
+                f"（採点項目 {passed_count}/{status_count}）"
+            )
+            st.markdown(
+                "\n".join(
+                    [
+                        "| 確認段階 | 採点項目 | 結果 |",
+                        "|---|---|---|",
+                        *[
+                            f"| {category} | {status.name} | "
+                            f"{'確認' if status.reached else '**未確認**'} |"
+                            for category, statuses in all_statuses
+                            for status in statuses
+                        ],
+                    ]
+                )
+            )
+            if not evaluation.passed:
+                st.caption(
+                    "文書名だけでなく、質問に必要な条文と回答要点まで確認しています。"
+                    "これは検索・回答後の採点であり、採点基準はAgent APIへ送っていません。"
+                    "検索とLLMには揺らぎがあるため、複数回の到達率も確認してください。"
+                )
+
+        evidence_dot = build_evidence_dot(
+            question,
+            citations,
+            result.get("graphPaths", []),
+        )
+        if evidence_dot:
+            st.graphviz_chart(evidence_dot, use_container_width=True)
+            st.caption(
+                "**実線**はグラフ上で確認できた条文参照・解説関係、"
+                "**点線**は法令名の命名規則からの推定（条文同士の委任関係までは未確認）、"
+                "**破線**は正式な上下関係ではなく、この回答で併せて根拠にした関係です。"
+            )
+
         st.subheader(f"根拠として引用した条文・資料（{len(citations)}件）")
         if not citations:
             st.info("引用できる条文が見つかりませんでした。質問の範囲が投入済み法令の外かもしれません。")
         for citation in citations:
-            label = " ".join(filter(None, [citation.get("title"), citation.get("heading")]))
-            with st.expander(label or citation.get("contentUnitId") or "引用"):
+            with st.expander(citation_label(citation)):
                 st.write(citation.get("text"))
                 source = citation.get("sourceObjectUri")
                 if source:

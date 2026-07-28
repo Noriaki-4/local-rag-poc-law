@@ -104,7 +104,12 @@ gold の最も細かい粒度を `referenceGranularity`（`law`/`article`/`parag
 #### 採点（retrieved citations との突き合わせ）
 
 システムの回答（`predictedAnswer`）と引用（`citations`）を gold と照合する。
-照合はすべて **ID集合の積（共通要素が1つでもあれば hit=1、無ければ 0）** で行う。
+従来の `*Hit` は **ID集合の積（共通要素が1つでもあれば hit=1）** を後方互換のため残す。
+複数の期待条文を一つでも取得した場合と、全部取得した場合を区別するため、
+metricVersion 5 では `*ArticleCompleteHit` と `*ArticleRecall` に加え、論点被覆型選抜を
+Shadow modeで計算した `shadowRerankerArticleCompleteHit` /
+`shadowRerankerArticleRecall` を記録する。Shadow選抜が全論点で完了した問題だけを
+旧16件との精度比較に使い、時間切れ・再ランカー障害で不完全になった問題は別件数にする。
 
 - `answerAccuracy` = `predictedAnswer == goldAnswer`（選択肢ラベルの一致、1/0）。
 - **引用の照合は gold の粒度で使う指標を切り替える**:
@@ -113,6 +118,10 @@ gold の最も細かい粒度を `referenceGranularity`（`law`/`article`/`parag
   - gold に**条以下がある**（`article`/`paragraph`/`item`）→ `citationArticleHit` =
     期待・引用の双方を**Article ID に正規化**（`-paragraph-…` / `-item-…` を落とす）した
     集合の積。`citationParagraphHit` は正規化せず contentUnitId を**厳密一致**で比較。
+  - `citationArticleCompleteHit` = 期待Article集合が引用Article集合の部分集合なら1。
+    `citationArticleRecall` = 一致した期待Article数 / 期待Article総数。集計値は問題ごとの
+    再現率のマクロ平均で、`citationArticleMicroRecall` は全問題の一致条文数 /
+    全期待条文数として集計する。各行の `articleCoverage` に期待数と段階別一致数を残す。
   - `citationHit` は「gold が law粒度なら citationLawHit、条以下なら citationArticleHit」を
     採用する代表値。
   - `citationLawFamilyHit` は、親法を期待して委任法令（施行令・府令）を引いたケースを
@@ -125,12 +134,30 @@ gold の最も細かい粒度を `referenceGranularity`（`law`/`article`/`parag
   **候補プール→RRF融合→reranker のどの段階で gold を落としたか**を切り分ける
   （検索ミスの原因診断に使う。例: candidatePoolHit=1 かつ rerankerHit=0 なら「候補には
   あったが再ランクで落とした」）。
+- 各段階にも `candidatePoolArticleCompleteHit/Recall`、
+  `fusionArticleCompleteHit/Recall`、`rerankerArticleCompleteHit/Recall` を記録し、
+  集計には各段階の `*ArticleMicroRecall` も出す。
+- 論点被覆型選抜のShadow modeでは、同一の再ランカー入力30件・同一の全文再ランク結果から
+  現行16件と新16件を作り、新16件について
+  `shadowRerankerArticleCompleteHit/Recall` と `shadowRerankerArticleMicroRecall` を出す。
+  Agent APIのtraceにgoldは渡さず、eval-runnerが評価後に
+  `newContextContentUnitIds` と期待条文を照合する。集計は全問と
+  `diagnosticScorable=true` の2系統を出す。
 - `graphExpansionHit` は Graph が新規取得した `graphExpandedContentUnitIds`（およびその親条・
   親法令ID）が gold に当たった場合だけ1。
 
 > 実装は [run_eval.py](../../../eval-runner/run_eval.py) の `run_lawqa` 内。期待側は
 > `expected`（contentUnitId集合）/ `expected_document_ids` / `expected_articles`、引用側は
-> `retrieved` / `retrieved_document_ids` / `retrieved_articles`、段階別は `_hit_at()` に対応。
+> `retrieved` / `retrieved_document_ids` / `retrieved_articles`、完全到達・再現率は
+> `_article_coverage()` に対応。
+
+#### データセット既知問題
+
+法令時点の不一致、誤goldの疑い、複数正解の疑いは
+`lawqa_known_issues.json` で評価データと分離して管理する。公式の `answerAccuracy` は変更せず、
+該当問題を除いた診断用の `diagnosticAnswerAccuracyRate` を別に出す。既知問題の情報は
+評価後にだけ付与し、Agent APIへ送る質問・選択肢、検索、再ランキング、回答プロンプトには
+渡さない。
 
 > 要約: lawqa_jp は「正解＋必要な条文」を持つゴールデンセットだが、それらは
 > **答え合わせ専用**であり、システムには問題文と選択肢しか渡さない。`citationArticleHit`

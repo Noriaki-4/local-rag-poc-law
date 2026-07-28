@@ -9,6 +9,10 @@ import re
 import run_eval as R
 
 
+def test_metric_version_is_five_for_shadow_context_evaluation():
+    assert R.METRIC_VERSION == 5
+
+
 def test_article_suffix_matches_seed_format():
     assert R._article_suffix("第5条") == "5"
     assert R._article_suffix("第2条の12") == "2_12"
@@ -48,6 +52,71 @@ def test_family_of_maps_delegated_laws_to_parent():
     assert R._family_of("law-336M50000100001") == "law-335AC0000000145"  # 施行規則→薬機法
     assert R._family_of("law-129AC0000000089") == "law-129AC0000000089"  # 民法は自身が親
     assert R._family_of("law-unknown999") == "law-unknown999"  # 未知法令はそのまま
+
+
+def test_article_coverage_distinguishes_any_hit_complete_hit_and_recall():
+    expected = {"law-a-article-1", "law-a-article-2", "law-b-article-3"}
+    retrieved = {"law-a-article-1", "law-b-article-3", "law-noise-article-9"}
+
+    any_hit, complete_hit, recall = R._article_coverage(expected, retrieved)
+
+    assert any_hit is True
+    assert complete_hit is False
+    assert recall == 2 / 3
+
+
+def test_article_micro_recall_aggregates_articles_instead_of_questions():
+    results = [
+        {"articleCoverage": {"expected": 3, "citationMatched": 2}},
+        {"articleCoverage": {"expected": 1, "citationMatched": 1}},
+        {"articleCoverage": None},
+    ]
+
+    assert R._article_micro_recall(results, "citationMatched") == 3 / 4
+
+
+def test_shadow_context_uses_the_same_article_coverage_calculation():
+    expected_articles = {
+        "law-a-article-1",
+        "law-b-article-2",
+    }
+    shadow_ids = {
+        "law-a-article-1-paragraph-1",
+        "law-b-article-2",
+        "law-noise-article-9",
+    }
+
+    any_hit, complete_hit, recall, matched = R._article_scores_at(
+        shadow_ids,
+        True,
+        "paragraph",
+        {"law-a", "law-b"},
+        expected_articles,
+    )
+
+    assert any_hit is True
+    assert complete_hit is True
+    assert recall == 1.0
+    assert matched == 2
+
+
+def test_old_context_ids_stay_the_shadow_baseline_when_active():
+    trace = {
+        "oldContextContentUnitIds": ["law-a-article-1"],
+        "rerankerTopContentUnitIds": ["law-b-article-2"],
+        "newContextContentUnitIds": ["law-b-article-2"],
+    }
+
+    assert R._old_context_ids(trace, {"law-fallback-article-3"}) == {
+        "law-a-article-1"
+    }
+
+
+def test_known_dataset_issues_are_kept_outside_normalized_question_content():
+    issue = R.KNOWN_ISSUES["金商法_第2章_選択式_根拠条文_問題番号63"]
+
+    assert issue["issueType"] == "suspected_gold_error"
+    assert issue["excludeFromDiagnosticAccuracy"] is True
 
 
 def test_registry_alias_resolves_context_without_egov_call(monkeypatch):

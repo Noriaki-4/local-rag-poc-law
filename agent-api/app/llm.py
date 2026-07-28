@@ -68,6 +68,7 @@ class LLMChoiceAssessment(BaseModel):
     verdict: Literal["entailed", "contradicted", "insufficient"]
     citationIds: list[str] = Field(default_factory=list)
     reason: str = ""
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
 class LLMAnswerPayload(BaseModel):
@@ -160,12 +161,19 @@ class LLMClient:
     ) -> LLMResult | None:
         prompt = build_answer_prompt(request, route, citations, evidence_by_choice)
         timeout = timeout_sec or settings.llm_timeout_sec
+        max_tokens = settings.anthropic_max_tokens
         started = perf_counter()
-        result = self._generate_once(request, prompt, timeout, citations)
+        result = self._generate_once(request, prompt, timeout, citations, max_tokens)
         if result is not None and result.validationError:
             retry_timeout = _retry_timeout(timeout, started)
             if retry_timeout is not None:
-                retried = self._generate_once(request, prompt, retry_timeout, citations)
+                retried = self._retry_answer(
+                    request,
+                    prompt,
+                    retry_timeout,
+                    citations,
+                    _retry_max_tokens(max_tokens, result.stopReason),
+                )
                 if retried is not None:
                     result = replace(
                         retried,
@@ -176,17 +184,32 @@ class LLMClient:
                     )
         return result
 
+    def _retry_answer(
+        self,
+        request: AnswerRequest,
+        prompt: str,
+        timeout_sec: int,
+        citations: list[Citation],
+        max_tokens: int,
+    ) -> LLMResult | None:
+        """再試行が失敗しても1回目の結果を残せるよう、例外を呼び出し元へ伝えない。"""
+        try:
+            return self._generate_once(request, prompt, timeout_sec, citations, max_tokens)
+        except Exception:
+            return None
+
     def _generate_once(
         self,
         request: AnswerRequest,
         prompt: str,
         timeout_sec: int | None,
         citations: list[Citation],
+        max_tokens: int | None = None,
     ) -> LLMResult | None:
         if self.provider == "ollama":
             return self._generate_ollama(request, prompt, timeout_sec, citations)
         if self.provider == "anthropic":
-            return self._generate_anthropic(request, prompt, timeout_sec, citations)
+            return self._generate_anthropic(request, prompt, timeout_sec, citations, max_tokens)
         return None
 
     def _call_with_retry(
@@ -347,6 +370,7 @@ class LLMClient:
         prompt: str,
         timeout_sec: int | None,
         citations: list[Citation],
+        max_tokens: int | None = None,
     ) -> LLMResult:
         if not settings.anthropic_api_key:
             raise ValueError("ANTHROPIC_API_KEY is required when LLM_PROVIDER=anthropic")
@@ -361,7 +385,7 @@ class LLMClient:
             },
             json={
                 "model": settings.answer_model,
-                "max_tokens": settings.anthropic_max_tokens,
+                "max_tokens": max_tokens or settings.anthropic_max_tokens,
                 "messages": [{"role": "user", "content": prompt}],
                 "output_config": {
                     "format": {
@@ -500,17 +524,18 @@ def build_answer_prompt(
     choice_commitment_rule = (
         "まず設問が、条文に適合する選択肢を選ぶ select_entailed か、誤り・非該当を選ぶ select_contradicted かを判定してください。"
         " 次に各選択肢の記述を独立に検証し、entailed、contradicted、insufficient のいずれかを設定してください。"
-        " 各判定には、実際に根拠とした引用候補のcontentUnitIdだけをcitationIdsへ設定し、短い理由を付けてください。"
-        " 最後にquestionPolarityとchoiceAssessmentsの整合する選択肢をpredictedAnswerへ設定してください。"
-        " 根拠不足でも必ず最も可能性の高い選択肢を選び、answer内で不確実性を明記してください。"
+        " 各判定には、実際に根拠とした引用候補のcontentUnitIdだけをcitationIdsへ設定し、短い理由と0から1のconfidenceを付けてください。"
+        " 最終選択肢はプログラムがquestionPolarity、verdict、confidenceから決定するため、answerには最終ラベルを書かないでください。"
+        " 根拠不足はinsufficientとし、answer内で不確実性を明記してください。"
         if request.choices
-        else "選択肢がない場合、questionPolarity、predictedAnswer、choiceAssessmentsはnullにしてください。"
+        else "選択肢がない場合、questionPolarityとchoiceAssessmentsはnullにしてください。"
     )
 
     return f"""あなたはローカル検証環境の法務RAG回答生成器です。
 外部APIや外部検索は使わず、下の引用候補を最優先の根拠として日本語で簡潔に回答してください。
 法的判断を断定しすぎず、必要に応じて専門家確認が必要であることが伝わる表現にしてください。
 引用する場合は contentUnitId を文中に含めてください。
+contentUnitIdは下の引用候補に書かれた文字列をそのまま書き写し、候補にないIDを作らないでください。
 必ずJSONだけを返してください。JSON以外の説明文やMarkdownコードフェンスは不要です。
 answer には正解ラベルだけでなく、引用候補に基づく短い根拠説明を含めてください。
 {choice_commitment_rule}
@@ -585,16 +610,15 @@ def _answer_json_schema(request: AnswerRequest, citations: list[Citation] | None
                 "maxItems": 3,
             },
             "reason": {"type": "string", "maxLength": 300},
+            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
         },
-        "required": ["verdict", "citationIds", "reason"],
+        "required": ["verdict", "citationIds", "reason", "confidence"],
         "additionalProperties": False,
     }
     assessment_properties = {label: assessment_schema for label in labels}
-    predicted_schema: dict[str, Any]
     polarity_schema: dict[str, Any]
     assessments_schema: dict[str, Any]
     if labels:
-        predicted_schema = {"type": ["string", "null"], "enum": [*labels, None]}
         polarity_schema = {
             "type": ["string", "null"],
             "enum": ["select_entailed", "select_contradicted", None],
@@ -606,7 +630,6 @@ def _answer_json_schema(request: AnswerRequest, citations: list[Citation] | None
             "additionalProperties": False,
         }
     else:
-        predicted_schema = {"type": "null"}
         polarity_schema = {"type": "null"}
         assessments_schema = {"type": "null"}
     return {
@@ -614,10 +637,9 @@ def _answer_json_schema(request: AnswerRequest, citations: list[Citation] | None
         "properties": {
             "answer": {"type": "string"},
             "questionPolarity": polarity_schema,
-            "predictedAnswer": predicted_schema,
             "choiceAssessments": assessments_schema,
         },
-        "required": ["answer", "questionPolarity", "predictedAnswer", "choiceAssessments"],
+        "required": ["answer", "questionPolarity", "choiceAssessments"],
         "additionalProperties": False,
     }
 
@@ -672,7 +694,14 @@ def _evidence_evaluation_json_schema(request: AnswerRequest, max_queries: int) -
 
 # Anthropic構造化出力が未サポートの制約キーワード。件数・文字数の上限はコード側の
 # パーサー(_parse_search_plan等)が同じ値で強制しているため、除去しても安全。
-_ANTHROPIC_UNSUPPORTED_KEYS = ("minItems", "maxItems", "minLength", "maxLength")
+_ANTHROPIC_UNSUPPORTED_KEYS = (
+    "minItems",
+    "maxItems",
+    "minLength",
+    "maxLength",
+    "minimum",
+    "maximum",
+)
 
 
 def _to_anthropic_schema(schema: Any) -> Any:
@@ -681,6 +710,7 @@ def _to_anthropic_schema(schema: Any) -> Any:
     Anthropicのスキーマ検証は `"type": ["string", "null"]` のようなunion型と enum の併用を
     拒否するため、union型を anyOf のブランチへ再帰的に展開する。enum値は各ブランチの型に
     一致するものだけを残す。また minItems/maxItems 等の未サポート制約は除去する。
+    number の minimum/maximum も同様にAnthropic側では除去し、Pydanticで検証する。
     スキーマ定義自体は1ソース(内部表現)のまま、プロバイダ差はこの変換に閉じ込める。
     """
     if isinstance(schema, list):
@@ -728,6 +758,17 @@ def _enum_value_matches_type(value: Any, type_name: str) -> bool:
     if type_name == "number":
         return isinstance(value, (int, float)) and not isinstance(value, bool)
     return value is not None
+
+
+def _retry_max_tokens(max_tokens: int, stop_reason: str | None) -> int:
+    """出力上限に達して打ち切られた場合だけ、再試行の枠を広げる。
+
+    応答にthinkingブロックが含まれると、思考だけで上限に達しtextブロックが返らない。
+    同じ枠で投げ直しても同じ結果になるため、枠を倍にして本文まで到達させる。
+    """
+    if stop_reason != "max_tokens":
+        return max_tokens
+    return min(max_tokens * 2, settings.anthropic_max_tokens_ceiling)
 
 
 def _retry_timeout(total_timeout_sec: int, started: float) -> int | None:
@@ -786,13 +827,15 @@ def _parse_answer_payload(
             normalized["citationIds"] = list(dict.fromkeys(assessment.citationIds))[:3]
             normalized["reason"] = assessment.reason[:300]
             assessments[label] = normalized
+    predicted_answer = _resolve_predicted_answer(payload.questionPolarity, assessments)
     judgements = None
-    if payload.predictedAnswer is not None and choices:
+    if predicted_answer is not None and choices:
         judgements = {
-            label.upper(): "supported" if label.upper() == payload.predictedAnswer else "not_supported"
+            label.upper(): "supported" if label.upper() == predicted_answer else "not_supported"
             for label in choices
         }
-    return answer_text, payload.predictedAnswer, judgements, assessments, payload.questionPolarity, None
+        answer_text = f"結論: 選択肢{predicted_answer}。{answer_text}"
+    return answer_text, predicted_answer, judgements, assessments, payload.questionPolarity, None
 
 
 def _parse_search_plan(raw_text: str, max_queries: int) -> tuple[list[str], bool, str | None]:
@@ -855,8 +898,6 @@ def _validate_choice_fields(
 
     if payload.questionPolarity is None:
         raise ValueError("questionPolarity is required when choices are present")
-    if payload.predictedAnswer not in labels:
-        raise ValueError(f"predictedAnswer must be one of {sorted(labels)}")
     if payload.choiceAssessments is None or set(payload.choiceAssessments) != labels:
         raise ValueError(f"choiceAssessments keys must match {sorted(labels)}")
 
@@ -865,13 +906,41 @@ def _validate_choice_fields(
         if unknown:
             raise ValueError(f"choiceAssessments.{label}.citationIds contains unknown IDs: {sorted(unknown)}")
 
-    target_verdict = "entailed" if payload.questionPolarity == "select_entailed" else "contradicted"
-    verdicts = {label: assessment.verdict for label, assessment in payload.choiceAssessments.items()}
-    selected_verdict = verdicts[payload.predictedAnswer]
-    if target_verdict in verdicts.values() and selected_verdict != target_verdict:
-        raise ValueError(f"predictedAnswer must have verdict {target_verdict}")
-    if target_verdict not in verdicts.values() and selected_verdict != "insufficient":
-        raise ValueError("predictedAnswer must be insufficient when no assessment matches questionPolarity")
+
+def _resolve_predicted_answer(
+    question_polarity: str | None,
+    assessments: dict[str, dict[str, Any]] | None,
+) -> str | None:
+    """選択肢別判定から最終ラベルを決定し、LLMの重複判断をなくす。
+
+    設問極性に合う verdict を優先し、複数ある場合は confidence、引用数、ラベル順で
+    決定する。該当 verdict が無い場合は insufficient を同じ規則で選ぶ。
+    """
+    if not question_polarity or not assessments:
+        return None
+    target_verdict = "entailed" if question_polarity == "select_entailed" else "contradicted"
+    candidates = [
+        (label, assessment)
+        for label, assessment in assessments.items()
+        if assessment.get("verdict") == target_verdict
+    ]
+    if not candidates:
+        candidates = [
+            (label, assessment)
+            for label, assessment in assessments.items()
+            if assessment.get("verdict") == "insufficient"
+        ]
+    if not candidates:
+        candidates = list(assessments.items())
+    ranked = sorted(
+        candidates,
+        key=lambda item: (
+            -float(item[1].get("confidence") or 0.0),
+            -len(item[1].get("citationIds") or []),
+            item[0],
+        ),
+    )
+    return ranked[0][0] if ranked else None
 
 
 def _citation_ids(citations: list[Citation]) -> list[str]:

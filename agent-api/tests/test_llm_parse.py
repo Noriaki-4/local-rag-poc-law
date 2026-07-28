@@ -9,6 +9,7 @@ from app.llm import (
     _parse_answer_payload,
     _parse_evidence_evaluation,
     _parse_search_plan,
+    _resolve_predicted_answer,
     _sum_optional,
     _to_anthropic_schema,
 )
@@ -24,10 +25,25 @@ def _payload(**overrides) -> str:
         "questionPolarity": "select_entailed",
         "predictedAnswer": "A",
         "choiceAssessments": {
-            "A": {"verdict": "entailed", "citationIds": [CITATION_IDS[0]], "reason": "条文に合致"},
-            "B": {"verdict": "contradicted", "citationIds": [CITATION_IDS[0]], "reason": "条文と矛盾"},
-            "C": {"verdict": "contradicted", "citationIds": [CITATION_IDS[1]], "reason": "条文と矛盾"},
-            "D": {"verdict": "insufficient", "citationIds": [], "reason": "根拠不足"},
+            "A": {
+                "verdict": "entailed",
+                "citationIds": [CITATION_IDS[0]],
+                "reason": "条文に合致",
+                "confidence": 0.9,
+            },
+            "B": {
+                "verdict": "contradicted",
+                "citationIds": [CITATION_IDS[0]],
+                "reason": "条文と矛盾",
+                "confidence": 0.8,
+            },
+            "C": {
+                "verdict": "contradicted",
+                "citationIds": [CITATION_IDS[1]],
+                "reason": "条文と矛盾",
+                "confidence": 0.7,
+            },
+            "D": {"verdict": "insufficient", "citationIds": [], "reason": "根拠不足", "confidence": 0.4},
         },
     }
     payload.update(overrides)
@@ -39,7 +55,7 @@ class TestParseAnswerPayload:
         answer, predicted, judgements, assessments, polarity, error = _parse_answer_payload(
             _payload(), CHOICES, CITATION_IDS
         )
-        assert answer == "根拠説明"
+        assert answer == "結論: 選択肢A。根拠説明"
         assert predicted == "A"
         assert judgements["A"] == "supported"
         assert assessments["A"]["verdict"] == "entailed"
@@ -71,13 +87,13 @@ class TestParseAnswerPayload:
         assert parsed_assessments["B"]["verdict"] == "contradicted"
         assert polarity == "select_contradicted"
 
-    def test_predicted_out_of_labels_is_rejected(self):
+    def test_model_prediction_is_ignored_and_derived_from_assessments(self):
         _, predicted, judgements, _, _, error = _parse_answer_payload(
             _payload(predictedAnswer="E"), CHOICES, CITATION_IDS
         )
-        assert predicted is None
-        assert judgements is None
-        assert error.startswith("validation_error")
+        assert predicted == "A"
+        assert judgements["A"] == "supported"
+        assert error is None
 
     def test_assessment_keys_mismatch_is_rejected(self):
         raw_payload = json.loads(_payload())
@@ -116,12 +132,12 @@ class TestParseAnswerPayload:
         assert error is None
         assert assessments["A"]["citationIds"] == ids[:3]
 
-    def test_prediction_must_match_question_polarity(self):
+    def test_inconsistent_model_prediction_is_repaired(self):
         _, predicted, _, _, _, error = _parse_answer_payload(
             _payload(predictedAnswer="B"), CHOICES, CITATION_IDS
         )
-        assert predicted is None
-        assert "verdict entailed" in error
+        assert predicted == "A"
+        assert error is None
 
     def test_no_choices_requires_null_fields(self):
         raw = _payload(questionPolarity=None, predictedAnswer=None, choiceAssessments=None)
@@ -138,7 +154,11 @@ class TestParseAnswerPayload:
         assert error.startswith("validation_error")
 
     def test_validation_error_keeps_answer_field(self):
-        answer, _, _, _, _, error = _parse_answer_payload(_payload(predictedAnswer="E"), CHOICES, CITATION_IDS)
+        raw_payload = json.loads(_payload())
+        raw_payload["choiceAssessments"]["A"]["verdict"] = "invalid"
+        answer, _, _, _, _, error = _parse_answer_payload(
+            json.dumps(raw_payload), CHOICES, CITATION_IDS
+        )
         assert answer == "根拠説明"
         assert error is not None
 
@@ -159,6 +179,18 @@ class TestDerivePredictedAnswer:
     )
     def test_derives_only_when_single_supported(self, judgements, expected):
         assert _derive_predicted_answer(None, judgements) == expected
+
+
+class TestResolvePredictedAnswer:
+    def test_uses_question_polarity_and_confidence(self):
+        assessments = {
+            "A": {"verdict": "entailed", "confidence": 0.4, "citationIds": ["a"]},
+            "B": {"verdict": "entailed", "confidence": 0.9, "citationIds": ["b"]},
+            "C": {"verdict": "contradicted", "confidence": 1.0, "citationIds": ["c"]},
+        }
+
+        assert _resolve_predicted_answer("select_entailed", assessments) == "B"
+        assert _resolve_predicted_answer("select_contradicted", assessments) == "C"
 
 
 class TestParseSearchPlan:
@@ -254,33 +286,36 @@ class TestToAnthropicSchema:
         request = AnswerRequest(question="q", choices=CHOICES)
         citations = [Citation(documentId="law-test", contentUnitId=CITATION_IDS[0])]
         converted = _to_anthropic_schema(_answer_json_schema(request, citations))
-        predicted = converted["properties"]["predictedAnswer"]
-        assert "anyOf" in predicted
-        assert {"type": "null"} in predicted["anyOf"]
-        string_branch = next(b for b in predicted["anyOf"] if b.get("type") == "string")
-        assert string_branch["enum"] == ["A", "B", "C", "D"]
+        assert "predictedAnswer" not in converted["properties"]
         assessments = converted["properties"]["choiceAssessments"]
         assert {"type": "null"} in assessments["anyOf"]
         object_branch = next(b for b in assessments["anyOf"] if b.get("type") == "object")
         assert object_branch["additionalProperties"] is False
         citation_schema = object_branch["properties"]["A"]["properties"]["citationIds"]["items"]
         assert citation_schema["enum"] == [CITATION_IDS[0]]
+        assert "confidence" in object_branch["properties"]["A"]["required"]
 
     def test_no_choices_schema_converts(self):
         request = AnswerRequest(question="q")
         converted = _to_anthropic_schema(_answer_json_schema(request))
-        assert converted["properties"]["predictedAnswer"] == {"type": "null"}
+        assert "predictedAnswer" not in converted["properties"]
         assert converted["properties"]["choiceAssessments"] == {"type": "null"}
 
     def test_unsupported_constraint_keywords_are_stripped(self):
         schema = {
             "type": "array",
-            "items": {"type": "string", "minLength": 1, "maxLength": 200},
+            "items": {
+                "type": "number",
+                "minLength": 1,
+                "maxLength": 200,
+                "minimum": 0,
+                "maximum": 1,
+            },
             "minItems": 1,
             "maxItems": 4,
         }
         converted = _to_anthropic_schema(schema)
-        assert converted == {"type": "array", "items": {"type": "string"}}
+        assert converted == {"type": "array", "items": {"type": "number"}}
 
 
 def test_evidence_evaluation_rejects_choice_key_mismatch():

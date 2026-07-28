@@ -89,6 +89,8 @@ OpenSearch投入サンプルは非ゼロのダミーベクトルを含むが、�
 - `docs/step2_transition_plan.md`: Step2 AWS実現イメージ・移行計画
 - `docs/id_naming_rules.md`: ID命名規則と参照整合ルール
 - `docs/retrieval_config.md`: 埋め込み・チャンク・Hybrid検索設計
+- `docs/legal_issue_coverage_retrieval.md`: 法令向け論点被覆型根拠検索の移行設計
+- `docs/layered_legal_evidence_retrieval_plan.md`: 法令レイヤー・法的役割別の根拠探索vNext設計・実装計画
 - `docs/graph_edge_construction.md`: Graphエッジ構築方式
 - `docs/llm_and_cost_config.md`: LLM選定・固定変数・コスト前提
 - `samples/`: JSONL / YAML / docker-compose サンプル

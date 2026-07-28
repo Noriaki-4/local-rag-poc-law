@@ -19,6 +19,16 @@ EGOV_LAW_ID_PATTERN = re.compile(r"laws\.e-gov\.go\.jp/law/([^/?#]+)")
 ARTICLE_REFERENCE_PATTERN = re.compile(
     r"(?<![法令])第([一二三四五六七八九十百千〇零\d]+)条((?:の[一二三四五六七八九十百千〇零\d]+)*)"
 )
+PARENT_LAW_ARTICLE_PATTERN = re.compile(
+    r"(?:当該法律|同法|本法|(?<![一-鿏])法)"
+    r"第([一二三四五六七八九十百千〇零\d]+)条"
+    r"((?:の[一二三四五六七八九十百千〇零\d]+)*)"
+)
+PARENT_ORDER_ARTICLE_PATTERN = re.compile(
+    r"(?:当該政令|同令|本令|(?<![一-鿏])令)"
+    r"第([一二三四五六七八九十百千〇零\d]+)条"
+    r"((?:の[一二三四五六七八九十百千〇零\d]+)*)"
+)
 JAPANESE_DIGITS = {"〇": 0, "零": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
 JAPANESE_UNITS = {"十": 10, "百": 100, "千": 1000}
 FULLWIDTH_DIGITS = str.maketrans("０１２３４５６７８９", "0123456789")
@@ -59,7 +69,10 @@ def seed_all(os_client: OpenSearchClient, graph_client: GraphClient) -> dict[str
 
     nodes = _read_jsonl(samples_dir / "metadata" / "nodes.sample.jsonl")
     edges = _read_jsonl(samples_dir / "metadata" / "edges.sample.jsonl")
-    egov_nodes, egov_edges = _graph_artifacts_from_documents(documents)
+    egov_nodes, egov_edges = _graph_artifacts_from_documents(
+        documents,
+        _law_family_roots(samples_dir),
+    )
     guidance_nodes, guidance_edges = _guidance_graph_artifacts(documents)
     nodes = _dedupe_by_key([*nodes, *egov_nodes, *guidance_nodes], "graphNodeId")
     edges = _dedupe_by_key([*edges, *egov_edges, *guidance_edges], "graphEdgeId")
@@ -514,6 +527,19 @@ def _lawqa_egov_law_ids(samples_dir: Path) -> list[str]:
     return sorted(law_ids)
 
 
+def _law_family_roots(samples_dir: Path) -> dict[str, str]:
+    """law_registryの法令IDを、グラフで使うdocumentId形式へ正規化する。"""
+    registry_path = samples_dir / "eval" / "law_registry.json"
+    if not registry_path.exists():
+        return {}
+    registry = _read_json(registry_path)
+    return {
+        f"law-{item['lawId']}": f"law-{item.get('familyRoot') or item['lawId']}"
+        for item in registry.get("laws", [])
+        if item.get("lawId")
+    }
+
+
 def _read_lawqa_payload(samples_dir: Path) -> Any:
     if settings.lawqa_eval_url:
         response = requests.get(settings.lawqa_eval_url, timeout=60)
@@ -823,7 +849,10 @@ def _int_or_none(value: str) -> int | None:
         return None
 
 
-def _graph_artifacts_from_documents(documents: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _graph_artifacts_from_documents(
+    documents: list[dict[str, Any]],
+    law_family_roots: dict[str, str] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     nodes_by_id: dict[str, dict[str, Any]] = {}
     edges = []
     for document in documents:
@@ -900,7 +929,10 @@ def _graph_artifacts_from_documents(documents: list[dict[str, Any]]) -> tuple[li
                 "clearanceLevel": document.get("clearanceLevel", 3),
             }
             edges.append(_hierarchy_edge(parent_id, content_unit_id, document_id))
-    edges.extend(_reference_edges(documents))
+    reference_edges = _reference_edges(documents)
+    edges.extend(reference_edges)
+    edges.extend(_incorporation_edges(documents, reference_edges))
+    edges.extend(_delegation_edges(documents, law_family_roots or {}))
     return list(nodes_by_id.values()), edges
 
 
@@ -1051,6 +1083,187 @@ def _reference_edges(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     }
                 )
     return edges
+
+
+def _incorporation_edges(
+    documents: list[dict[str, Any]],
+    reference_edges: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """準用される条文から、準用元の条文へ逆引きする APPLIED_BY を生成する。
+
+    通常の REFERENCES は「準用元→準用先」なので、準用される規定から適用場面を
+    探したい質問では辿れない。準用語を含む参照だけを反転し、条単位へ集約する。
+    """
+    source_articles = {
+        document["contentUnitId"]: str(
+            document.get("articleContentUnitId")
+            or document.get("parentContentUnitId")
+            or document["contentUnitId"]
+        ).split("-paragraph-", 1)[0]
+        for document in documents
+        if document.get("docType") == "law" and "準用" in str(document.get("text") or "")
+    }
+    edges: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for reference in reference_edges if reference_edges is not None else _reference_edges(documents):
+        source_article_id = source_articles.get(reference["fromGraphNodeId"])
+        if not source_article_id:
+            continue
+        target_article_id = reference["toGraphNodeId"]
+        if target_article_id == source_article_id:
+            continue
+        edge_id = f"edge-{target_article_id}-applied-by-{source_article_id}"
+        if edge_id in seen:
+            continue
+        seen.add(edge_id)
+        edges.append(
+            {
+                "graphEdgeId": edge_id,
+                "edgeType": "APPLIED_BY",
+                "fromGraphNodeId": target_article_id,
+                "toGraphNodeId": source_article_id,
+                "documentId": reference["documentId"],
+                "relationSource": "incorporation_reference_rule",
+                "relationConfidence": 0.9,
+                "publishStatus": "published",
+                "isLatest": True,
+            }
+        )
+    return edges
+
+
+def _delegation_edges(
+    documents: list[dict[str, Any]],
+    law_family_roots: dict[str, str],
+) -> list[dict[str, Any]]:
+    """下位法令の親法参照から、双方向に辿れる委任関係を生成する。
+
+    下位法令側の「法第五条第一項に規定する政令で定めるもの」のような文言を
+    REFERENCES（下位→親）として保持し、その逆向きに IMPLEMENTS（親→下位）も張る。
+    これにより、親法の薄い委任規定から具体化条文へも、先に取得した府令等から
+    根拠となる親法条文へもたどれる。
+    """
+    available_articles = {
+        str(document.get("articleContentUnitId") or document.get("parentContentUnitId") or document["contentUnitId"])
+        .split("-paragraph-", 1)[0]
+        for document in documents
+        if document.get("docType") == "law"
+    }
+    document_titles = {
+        str(document["documentId"]): str(document.get("title") or "")
+        for document in documents
+        if document.get("docType") == "law"
+    }
+    family_decrees = {
+        law_family_roots.get(document_id, document_id): document_id
+        for document_id, title in document_titles.items()
+        if title.endswith("施行令")
+    }
+    edges: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for document in documents:
+        if document.get("docType") != "law":
+            continue
+        lower_document_id = str(document["documentId"])
+        parent_document_id = law_family_roots.get(lower_document_id)
+        if not parent_document_id or parent_document_id == lower_document_id:
+            continue
+        lower_article_id = str(
+            document.get("articleContentUnitId")
+            or document.get("parentContentUnitId")
+            or document["contentUnitId"]
+        ).split("-paragraph-", 1)[0]
+        if lower_article_id not in available_articles:
+            continue
+        text = str(document.get("text") or "")
+        referenced_parent_articles = _parent_law_article_reference_ids(
+            parent_document_id,
+            text,
+        )
+        decree_document_id = family_decrees.get(parent_document_id)
+        if decree_document_id and decree_document_id != lower_document_id:
+            referenced_parent_articles.extend(
+                _parent_order_article_reference_ids(
+                    decree_document_id,
+                    text,
+                )
+            )
+        for parent_article_id in dict.fromkeys(referenced_parent_articles):
+            if parent_article_id not in available_articles:
+                continue
+            reference_edge_id = (
+                f"edge-{lower_article_id}-references-{parent_article_id}"
+            )
+            if reference_edge_id not in seen:
+                seen.add(reference_edge_id)
+                edges.append(
+                    {
+                        "graphEdgeId": reference_edge_id,
+                        "edgeType": "REFERENCES",
+                        "fromGraphNodeId": lower_article_id,
+                        "toGraphNodeId": parent_article_id,
+                        "documentId": lower_document_id,
+                        "relationSource": "subordinate_law_parent_reference",
+                        "relationConfidence": 0.95,
+                        "publishStatus": "published",
+                        "isLatest": True,
+                    }
+                )
+            edge_id = f"edge-{parent_article_id}-implements-{lower_article_id}"
+            if edge_id in seen:
+                continue
+            seen.add(edge_id)
+            edges.append(
+                {
+                    "graphEdgeId": edge_id,
+                    "edgeType": "IMPLEMENTS",
+                    "fromGraphNodeId": parent_article_id,
+                    "toGraphNodeId": lower_article_id,
+                    "documentId": lower_document_id,
+                    "relationSource": "subordinate_law_parent_reference",
+                    "relationConfidence": 0.95,
+                    "publishStatus": "published",
+                    "isLatest": True,
+                }
+            )
+    return edges
+
+
+def _parent_law_article_reference_ids(parent_document_id: str, text: str) -> list[str]:
+    return _prefixed_article_reference_ids(
+        parent_document_id,
+        text,
+        PARENT_LAW_ARTICLE_PATTERN,
+    )
+
+
+def _parent_order_article_reference_ids(
+    parent_document_id: str,
+    text: str,
+) -> list[str]:
+    return _prefixed_article_reference_ids(
+        parent_document_id,
+        text,
+        PARENT_ORDER_ARTICLE_PATTERN,
+    )
+
+
+def _prefixed_article_reference_ids(
+    parent_document_id: str,
+    text: str,
+    pattern: re.Pattern[str],
+) -> list[str]:
+    references = []
+    for match in pattern.finditer(text):
+        parts = [match.group(1), *match.group(2).removeprefix("の").split("の")]
+        numbers = [_japanese_number_to_int(part) for part in parts if part]
+        if not numbers or any(number is None for number in numbers):
+            continue
+        suffix = "_".join(str(number) for number in numbers)
+        content_unit_id = f"{parent_document_id}-article-{suffix}"
+        if content_unit_id not in references:
+            references.append(content_unit_id)
+    return references
 
 
 def _explicit_article_reference_ids(document_id: str, text: str) -> list[str]:

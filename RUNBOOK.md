@@ -57,7 +57,7 @@ PLANNER_MODEL=claude-haiku-4-5-20251001
 PLANNER_MAX_TOKENS=1024
 PLANNER_TIMEOUT_SEC=30
 AGENT_USE_LLM_PLANNER=true
-AGENT_MAX_QUERIES=4
+AGENT_MAX_QUERIES=5
 AGENT_MAX_RETRY_ROUNDS=1
 AGENT_MAX_TOTAL_TOOL_CALLS=8
 AGENT_MAX_GRAPH_HOP=1
@@ -181,7 +181,11 @@ curl -s -X POST http://localhost:8000/admin/seed | jq .
 
 - OpenSearch index: `legal-rag-content`
 - Graph nodes/edges: `docs/requirements/samples/metadata/*.jsonl`
-- e-Gov法令投入時のGraph edges: `HAS_CONTENT_UNIT` と、同一法令内の明示的な条文参照から生成した `REFERENCES`
+- e-Gov法令投入時のGraph edges: `HAS_CONTENT_UNIT`、同一法令内の明示的な条文参照から
+  生成した `REFERENCES`、下位法令の「法第N条」参照を親法律へ、府省令等の
+  「令第N条」参照を同じ法令系統の施行令へ結ぶ `REFERENCES` と、その逆向きに
+  親法律・施行令側から具体化条文を引く `IMPLEMENTS`、
+  準用先の規定から準用元を逆引きする `APPLIED_BY`
 - e-Gov法令は本則・附則を分けて投入する。本則は `law-<法令番号>-article-<条番号>`、附則は `law-<法令番号>-suppl-<index>-article-<条番号>`（条番号の衝突で本則が消えるのを防ぐ）。各文書に `provisionType` / `sectionKey` を付与。詳細は [id_naming_rules.md](docs/requirements/docs/id_naming_rules.md) 3.1
 - MinIO bucket: `knowledge-root`
 - サンプル評価データ: `knowledge-root/eval-data/samples/...`
@@ -276,6 +280,22 @@ curl -s http://localhost:8000/answer \
 UI では回答、検索ルート、citations、Graph paths、trace を確認できる。
 
 ## 6. 評価実行
+
+UIの自然言語例題12問は、文書・必要条文・回答要点の3段階で確認する。
+採点用の条文ID・要点はAgent APIへ送信しない。
+
+```bash
+TOP_K=5 RUNS=1 CONCURRENCY=1 python3 scripts/check_example_questions.py
+```
+
+検索とLLMの揺らぎを見る場合は `RUNS=3` など複数回実行する。
+
+この採点は登録済み12問の質問文との完全一致時だけ適用される。言い換え・追記を含む質問と
+新規質問は採点対象外であり、検索・回答は実行されても合否は出ない。必須条文と回答要点は
+例題ごとの手動定義で、回答要点の文字列照合は否定・例外・当てはめの正しさを保証しない。
+したがって結果は開発用の回帰指標として扱い、未知質問への正答率として報告しないこと。
+法令改正、投入データ、質問文を変更した場合は
+[example_questions.py](agent-ui/example_questions.py) の採点基準も見直す。
 
 サンプル評価を実行する。
 
@@ -403,9 +423,93 @@ EVAL_SKIP_SEED=true \
 docker compose --profile eval run --rm eval-runner
 ```
 
-評価結果には `metricVersion` が含まれる。version 2では採点不能な参照問題をcitation系指標の分母から除外し、`candidatePoolHit`、`fusionHit`、`citationHit`を段階別に記録するため、version 1のcitation系数値とは直接比較しない。
+評価結果には `metricVersion` が含まれる。version 5では従来のany-hitに加えて、
+期待条文の完全到達率（`*ArticleCompleteHit`）と条文再現率（`*ArticleRecall`）を段階別に記録する。
+集計では問題単位のマクロ平均に加え、全期待条文を分母にする
+`*ArticleMicroRecall` も確認できる。
+論点被覆型選抜をShadow modeで実行した場合は、
+`shadowRerankerArticleCompleteHit/Recall` とそのマクロ・ミクロ集計も記録する。
+Shadow選抜が時間切れ・再ランカー障害で完了しなかった問題は比較指標から除き、
+`shadowSelectionIncomplete` に件数を出す。
+また、`lawqa_known_issues.json` の既知問題を除く診断正答率を公式正答率とは別に出す。
+version 4以前とは評価項目が異なるため直接比較しない。
 
-最終回答では、RRF融合上位（既定10件）をClaudeへ渡し、各選択肢を `entailed`、`contradicted`、`insufficient` のいずれかで独立判定する。設問が正しい記述を求めるか、誤った記述を求めるかは `questionPolarity` として分離し、判定に使用した `citationIds` を優先して最終引用（既定5件）を構成する。評価結果の `choiceAssessments` で判定理由と根拠IDを確認できる。
+最終回答では、RRF融合上位をClaudeへ渡し、各選択肢を `entailed`、`contradicted`、
+`insufficient` のいずれかで独立判定する。Claudeは最終ラベルを出力せず、
+`questionPolarity`、各判定の `verdict` と `confidence` からコードが `predictedAnswer` を決定する。
+判定に使用した `citationIds` を優先して最終引用（既定5件）を構成する。
+
+`IMPLEMENTS` と `APPLIED_BY` はseed時に生成するため、この変更を既存環境へ反映するには
+agent-apiをbuild後、`/admin/seed` を再実行する。特に「令第N条」を施行令へ結ぶ
+委任関係もseed済みGraphの内容なので、再seedせずにコードだけ更新した場合は追加されない。
+Graph展開は上位ノードごとに少数ずつ取得した後、質問との語句被覆と接続先法令の多様性で
+経路を選び、一つの条文や一つの法令の参照先だけで `AGENT_MAX_GRAPH_PATHS` を
+使い切らないようにする。
+このうち親法参照・`IMPLEMENTS`・`APPLIED_BY` で機械的に確定した対象だけは、
+接続先法令を分散させながら最大4 Articleを再ランカー入力に保持する。同一Articleの
+複数項・号は最も質問に近い1チャンクだけを強制対象とし、他のチャンクは候補プールから
+削除しない。
+再ランカー上位に既に入った必須候補は並べ替えず、上位外の必須候補だけを非必須の末尾と
+交換する。通常のGraph候補の救済は再ランカー上限から4件下までとし、分解クエリの代表を
+起点に見つかったGraph候補はこの距離制限を設けない。ただし、明示条番号・分解論点・Graph
+を合わせた再ランカー上位外からの救済は合計2件までであり、低順位候補による上位枠の
+置き換えを限定する。
+
+複数論点の自然言語質問では、質問全文だけによる再ランクで短い論点の条文が落ちないよう、
+プランナーが生成した分解クエリごとに検索20位以内をローカル再ランカーで再評価し、
+各クエリ最大3件・重複Articleを除く代表を全体で最大12件、再ランカー入力へ保持する。
+代表は1クエリが枠を独占しないようラウンドロビンで選ぶ。この情報はgoldではなく、
+実行時の検索結果とローカル再ランカーだけから決める。`AGENT_MAX_QUERIES=5`は質問全文1件と
+分解クエリ最大4件の合計であり、プランナーへも分解クエリの残り枠を明示する。
+分解クエリ代表と資料ごとの代表を合わせても再ランカー入力の半分までとし、残り半分は
+融合スコア順の候補を維持する。証拠評価器が追加した検索語についても、条番号が明示されて
+いれば条・項・号を直接取得し、同検索語内のローカル再ランク代表を最大2件保持する。
+
+再ランカー入力30件から回答コンテキスト16件を選ぶ論点被覆型方式は
+[legal_issue_coverage_retrieval.md](docs/requirements/docs/legal_issue_coverage_retrieval.md)
+に従う。既定では現行16件を回答へ使いながら新16件も計算するShadow modeである。
+
+```text
+AGENT_ISSUE_COVERAGE_SELECTION=false
+AGENT_ISSUE_COVERAGE_SHADOW=true
+AGENT_ANSWER_RESERVE_SEC=60
+```
+
+新方式を回答へ反映する場合は `AGENT_ISSUE_COVERAGE_SELECTION=true` にしてagent-apiを
+再buildする。共通保護枠は16件中最大8chunks、明示条文はそのうち最大4chunksで、
+少なくとも8chunksは質問全文の再ランク順から採用する。Graph候補は検索順位を偽装せず、
+接続元の論点を別状態で継承して30件確定後に再評価する。
+
+後段論点再ランクは回答生成用の予約時間を侵食しない。`AGENT_ANSWER_RESERVE_SEC` は
+`LLM_TIMEOUT_SEC`とは独立した最低予約で、論点フェーズ全体の上限は
+`RERANK_TIMEOUT_SEC`である。Shadow 140問の前に次の20問確認を行う。
+
+```bash
+LAWQA_EVAL_URL=https://raw.githubusercontent.com/digital-go-jp/lawqa_jp/main/data/selection.json \
+EVAL_LIMIT=20 \
+EVAL_SKIP_SEED=true \
+REQUEST_TIMEOUT_SEC=360 \
+AGENT_ANSWER_RESERVE_SEC=60 \
+docker compose --profile eval run --rm eval-runner
+```
+
+結果の `shadowSelectionComplete/Incomplete`、`aspectPhaseBudgetMs`、
+`aspectPhaseElapsedMs`、`skippedAspectQueries`、`request_failed` を確認し、
+後段フェーズが恒常的にスキップされる場合は140問へ進まない。
+
+同じ検索語を法令・ガイドラインなど資料種別を変えて検索する場合、Agent APIプロセス内で
+クエリ埋め込みと未絞り込みKNN結果をLRUキャッシュする。資料種別、公開状態、最新版、
+clearanceの絞り込みはキャッシュ取得後にも適用するため、検索対象の境界は変えずに
+Ollama埋め込みとOpenSearch KNNの重複実行だけを避ける。
+
+最終引用でGraph経路を最大1件確保するのは、引用上限を厳守する選択式だけである。
+自由入力では回答本文が参照したIDを上限外でも回収できるため、Graph候補を強制引用しない。
+選択式でも、Graph pinによる救済前から再ランカー上位にあった候補だけを対象にする。
+選択は経路の起点条文が再ランク後にどれだけ質問へ
+関連しているかを優先し、同順位の場合だけ`IMPLEMENTS`、親法`REFERENCES`、
+`APPLIED_BY`の順にする。
+これはLLMが指定した直接根拠を複数押し出さず、法令間の接続根拠も利用者が確認できるように
+するためである。一般のGraph候補やガイドラインは固定しない。
 
 選択肢順を変えた560件で評価する場合:
 
@@ -437,6 +541,9 @@ docker compose --profile eval run --rm eval-runner
 - 現行の既定検索は BM25 + bge-m3 vector の Hybrid 検索。
 - `SEED_LAWQA_EGOV=true` を使わない場合、RAGコーパスはサンプル1文書のみなので、全問スコアは検索基盤の完成度ではなく、現在投入済み文書に強く依存する。
 - e-Gov以外のPDF等を参照する問題は、現行の自動投入対象外。`citationHit` は e-Gov 法令ID単位の部分一致も見る。
+- `predictedAnswer` が空で不正解になった場合は、検索失敗と即断せず
+  `trace.llm.validationError` とAgent APIログを確認する。接続切断・タイムアウト等で
+  回答生成だけが失敗した試行は、候補・再ランカー・最終引用の段階別指標と分けて扱う。
 
 ## 7. ログ確認
 
@@ -468,7 +575,32 @@ lawqa_jp 選択式での動作確認で見つかった、モデルごとの挙�
 | `temperature` パラメータ | 必須(0で決定的に) | 受理される | **拒否される(400: deprecated)**。Anthropic呼び出しでは送らない |
 | JSON出力の形式 | 素のJSON | **Markdownコードフェンス(` ```json `)で包む**ことがある。剥がす処理が必要 | 素のJSON |
 | スキーマ外フィールド | 出さない | `reasoning` 等の**追加フィールドを付与**することがある。pydanticは`extra="ignore"`にする | 同様の傾向あり |
-| 拡張思考(thinking) | 非対応 | 非対応 | **`thinking`ブロックが`max_tokens`予算を消費**。`max_tokens`不足だと本文(`text`ブロック)が出力される前に打ち切られ、空応答になる。`ANTHROPIC_MAX_TOKENS`は最低4096を確保する(既定値も4096に変更済み) |
+| 拡張思考(thinking) | 非対応 | 非対応 | **`thinking`ブロックが`max_tokens`予算を消費**。`max_tokens`不足だと本文(`text`ブロック)が出力される前に打ち切られ、空応答になる。`ANTHROPIC_MAX_TOKENS`は16384を確保する(既定値も16384に変更済み) |
+
+`ANTHROPIC_MAX_TOKENS` を8192から16384へ引き上げた根拠(2026-07-25 実測、lawqa_jp 金商法_第3章_問題番号51):
+
+| | contentBlockTypes | 出力トークン | 本文の文字数 | stopReason |
+|---|---|---|---|---|
+| 成功時 | `thinking`, `text` | 6,459 | 1,565 | `end_turn` |
+| 失敗時 | **`thinking` のみ** | 8,192(上限到達) | **0** | **`max_tokens`** |
+
+失敗時は入力17,314トークン、成功時は9,146トークンで、引用候補を多く渡した回ほど思考が伸びて上限に達する。同じ設問が実行のたびに成否を変えるのはこのため。8192でも足りない場合があるため16384を既定とし、あわせて [llm.py](agent-api/app/llm.py) の `generate_answer()` に次の2点を実装している。
+
+- `stopReason=max_tokens` で失敗した再試行は、同じ枠ではなく**枠を倍**(上限 `ANTHROPIC_MAX_TOKENS_CEILING`)にして投げ直す。同じ枠での再試行は同じ空応答になり、時間とトークンを二重に捨てるため。
+- 再試行が例外(タイムアウト等)で落ちても、**1回目の結果を破棄しない**。従来は例外が伝播して1回目の判定ごと失われ、`llmUsed=false`として不正解扱いになっていた。
+
+### タイムアウト設定はトークン枠とセットで調整する
+
+`ANTHROPIC_MAX_TOKENS` だけを上げると、次は**時間**が制約になる。枠を広げた分だけモデルが長く生成するためで、上記設問では成功時の出力が9,971トークンに達し、1回の呼び出しが120秒を超えて `read timeout=120` で落ちた。トークン枠を上げるときは時間も併せて引き上げる。
+
+| 設定 | 変更前 | 変更後 | 理由 |
+|---|---|---|---|
+| `ANTHROPIC_MAX_TOKENS` | 8192 | 16384 | 思考込みで本文まで到達させる |
+| `LLM_TIMEOUT_SEC` | 120 | 180 | 1万トークン規模の生成が120秒に収まらない |
+| `AGENT_MAX_WALL_TIME_SEC` | 200 | 280 | 検索約30〜40秒 + 回答生成180秒を収める(コード側の上限は300) |
+| `REQUEST_TIMEOUT_SEC` | 240 | 360 | 評価クライアントがサーバの全体予算より先に諦めないようにする |
+
+`REQUEST_TIMEOUT_SEC` は評価クライアント側([run_eval.py](eval-runner/run_eval.py))の待ち時間で、既定値は120秒。サーバの全体予算より短いと、**時間はかかったが正しく返ってきた回答をクライアントが捨てる**ため、必ず全体予算より長くする。
 
 `predictedAnswer=null` での棄権について: 当初 claude-sonnet-5 は根拠が弱い問題で棄権する割合が高く見えたが、原因はモデル固有の性質ではなく [llm.py](agent-api/app/llm.py) の `build_answer_prompt()` が「判断できない場合は null にしてください」と明示的に指示していたため。選択肢がある場合は必ずいずれかを選ぶよう指示を変更した結果、claude-sonnet-5 で20問中20問がLLM使用、うち20問中18問正解(90%)まで改善した(小サンプルにつき参考値)。根拠が薄い場合でも `answer` テキスト内でその旨と専門家確認の必要性を明記する指示は維持している。
 

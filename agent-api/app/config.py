@@ -32,12 +32,25 @@ class Settings:
     embedding_timeout_sec = int(os.getenv("EMBEDDING_TIMEOUT_SEC", "120"))
     embedding_batch_size = int(os.getenv("EMBEDDING_BATCH_SIZE", "8"))
     embedding_max_chars = int(os.getenv("EMBEDDING_MAX_CHARS", "1000"))
-    agent_max_queries = max(1, min(int(os.getenv("AGENT_MAX_QUERIES", "4")), 8))
+    agent_max_queries = max(2, min(int(os.getenv("AGENT_MAX_QUERIES", "5")), 8))
     agent_max_retry_rounds = max(0, min(int(os.getenv("AGENT_MAX_RETRY_ROUNDS", "1")), 2))
     agent_max_total_tool_calls = max(1, min(int(os.getenv("AGENT_MAX_TOTAL_TOOL_CALLS", "8")), 16))
     agent_max_graph_hop = max(1, min(int(os.getenv("AGENT_MAX_GRAPH_HOP", "1")), 3))
     agent_max_graph_paths = max(1, min(int(os.getenv("AGENT_MAX_GRAPH_PATHS", "10")), 50))
     agent_max_wall_time_sec = max(10, min(int(os.getenv("AGENT_MAX_WALL_TIME_SEC", "110")), 300))
+    agent_answer_reserve_sec = max(
+        1,
+        min(
+            int(os.getenv("AGENT_ANSWER_RESERVE_SEC", "60")),
+            max(1, agent_max_wall_time_sec - 1),
+        ),
+    )
+    agent_issue_coverage_selection = os.getenv(
+        "AGENT_ISSUE_COVERAGE_SELECTION", "false"
+    ).lower() in {"1", "true", "yes", "on"}
+    agent_issue_coverage_shadow = os.getenv(
+        "AGENT_ISSUE_COVERAGE_SHADOW", "true"
+    ).lower() in {"1", "true", "yes", "on"}
     agent_use_llm_planner = os.getenv("AGENT_USE_LLM_PLANNER", "true").lower() in {"1", "true", "yes", "on"}
     agent_candidate_top_k = max(5, min(int(os.getenv("AGENT_CANDIDATE_TOP_K", "20")), 100))
     agent_guidance_candidate_top_k = max(1, min(int(os.getenv("AGENT_GUIDANCE_CANDIDATE_TOP_K", "10")), 50))
@@ -55,7 +68,11 @@ class Settings:
     anthropic_base_url = os.getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
     anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
     anthropic_version = os.getenv("ANTHROPIC_VERSION", "2023-06-01")
-    anthropic_max_tokens = int(os.getenv("ANTHROPIC_MAX_TOKENS", "4096"))
+    # 応答にthinkingブロックが含まれ、その分もmax_tokensを消費する。思考だけで枠を使い切ると
+    # 本文(text)が返らずJSONパースに失敗するため、本文が載る余裕を見て大きめに取る。
+    anthropic_max_tokens = int(os.getenv("ANTHROPIC_MAX_TOKENS", "16384"))
+    # 上限到達時に再試行で広げる際の天井。
+    anthropic_max_tokens_ceiling = int(os.getenv("ANTHROPIC_MAX_TOKENS_CEILING", "32768"))
     answer_model = os.getenv("ANSWER_MODEL") or ("claude-sonnet-5" if llm_provider == "anthropic" else "gemma4:e4b")
     planner_model = os.getenv("PLANNER_MODEL") or answer_model
     planner_max_tokens = int(os.getenv("PLANNER_MAX_TOKENS", "1024"))

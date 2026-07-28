@@ -11,6 +11,8 @@ Phase 1では以下に絞る。
 ```text
 HAS_CONTENT_UNIT
 REFERENCES
+IMPLEMENTS
+APPLIED_BY
 DEFINES
 USES_TERM
 EXCEPTION_TO
@@ -21,6 +23,8 @@ lawqa_jp向けの主対象:
 ```text
 HAS_CONTENT_UNIT
 REFERENCES
+IMPLEMENTS
+APPLIED_BY
 DEFINES
 USES_TERM
 EXCEPTION_TO
@@ -32,6 +36,8 @@ EXCEPTION_TO
 |---|---|---|
 | HAS_CONTENT_UNIT | XML構造からルール生成 | 信頼度1.0 |
 | REFERENCES | 条文中の「第X条」「前条」「同項」「同号」等をルール抽出 | 法令XMLの構造と正規表現で生成 |
+| IMPLEMENTS | 下位法令の「法第X条」または「令第X条」REFERENCESを反転し、親法律・施行令の条文から下位法令条文へ接続 | 委任規定の逆引き。下位→親はREFERENCESとして保持 |
+| APPLIED_BY | 「準用」を含むREFERENCESを反転して準用先から準用元へ接続 | 準用関係の逆引き |
 | DEFINES | 「...とは」「...をいう」「定義する」等をルール抽出 + 必要に応じLLMレビュー | 金商法第2条などで重要 |
 | USES_TERM | 定義語辞書からルール抽出 | 定義語ノード生成後に実施 |
 | EXCEPTION_TO | 「ただし」「除く」「この限りでない」等を条文内位置つきで抽出 | 自動エッジは低confidenceにする |
@@ -63,14 +69,21 @@ manual:        1.0
 1. 法令XMLからLaw / Article / Paragraph / Itemノードを生成
 2. HAS_CONTENT_UNITを生成
 3. 条文番号参照を正規表現で抽出しREFERENCESを生成
-4. 定義語候補を抽出しTerm / Definition / DEFINESを生成
-5. 例外表現を検出しEXCEPTION_TO候補を生成
-6. dangling edge検査を実施
-7. 抽出結果をサンプル問題で目視確認
+4. 下位法令の親法律・施行令参照からIMPLEMENTS、準用参照からAPPLIED_BYを逆向きに生成
+5. 定義語候補を抽出しTerm / Definition / DEFINESを生成
+6. 例外表現を検出しEXCEPTION_TO候補を生成
+7. dangling edge検査を実施
+8. 抽出結果をサンプル問題で目視確認
 
 ## 6. 注意点
 
 Graph edgeだけで回答しない。Graphは関連条文の展開に使い、最終回答では必ずsource_fetch_toolで本文を取得して引用する。
+
+委任関係は法令系統ごとに解決する。府省令等の「法第X条」は系統の親法律へ、
+「令第X条」「同令第X条」「本令第X条」「当該政令第X条」は同じ系統でタイトルが
+「施行令」で終わる政令へ接続する。単に同じ条番号を持つ別法令へは接続しない。
+この関係はseed時に生成するため、抽出規則を変更した環境では `/admin/seed` による
+Graph再構築が必要になる。
 
 ## 6.1 EXPLAINS(ガイドライン→法令条文)
 

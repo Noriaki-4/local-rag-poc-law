@@ -1,3 +1,4 @@
+from functools import lru_cache
 from typing import Any
 
 import requests
@@ -5,11 +6,31 @@ import requests
 from .config import settings
 from .embeddings import embed_text
 
+# 附則(施行期日・経過措置・改正沿革)が根拠になりうる質問の手がかり。
+SUPPLEMENTARY_PROVISION_CUES = (
+    "附則",
+    "経過措置",
+    "施行日",
+    "施行期日",
+    "いつから",
+    "改正前",
+    "改正後",
+    "旧法",
+    "適用関係",
+    "みなし規定",
+)
+
 
 class OpenSearchClient:
     def __init__(self) -> None:
         self.base_url = settings.opensearch_url.rstrip("/")
         self.index = settings.opensearch_index
+        self._law_titles_cache: dict[str, str] | None = None
+
+    @lru_cache(maxsize=256)
+    def _query_embedding(self, query: str, dimension: int) -> tuple[float, ...]:
+        """同じ検索語を資料種別ごとに検索しても、Ollamaへの埋め込み要求は1回にする。"""
+        return tuple(embed_text(query, dimension))
 
     def health(self) -> bool:
         try:
@@ -23,6 +44,9 @@ class OpenSearchClient:
         body = {key: value for key, value in mapping.items() if key in {"settings", "mappings", "aliases"}}
         response = requests.put(f"{self.base_url}/{self.index}", json=body, timeout=30)
         response.raise_for_status()
+        self._law_titles_cache = None
+        self._query_embedding.cache_clear()
+        self._raw_vector_hits.cache_clear()
 
     def index_document(self, document: dict[str, Any]) -> None:
         doc_id = document["contentUnitId"]
@@ -41,6 +65,8 @@ class OpenSearchClient:
 
     def law_titles(self) -> dict[str, str]:
         """seed済み法令の documentId -> title 対応表を返す(条番号直接解決用)。"""
+        if self._law_titles_cache is not None:
+            return dict(self._law_titles_cache)
         body = {
             "size": 0,
             "aggs": {
@@ -57,7 +83,58 @@ class OpenSearchClient:
             hits = bucket["sample"]["hits"]["hits"]
             if hits:
                 titles[bucket["key"]] = str(hits[0]["_source"].get("title") or "")
-        return titles
+        self._law_titles_cache = titles
+        return dict(titles)
+
+    def search_by_document_id(
+        self,
+        query: str,
+        document_id: str,
+        top_k: int,
+        user_clearance_level: int,
+    ) -> list[dict[str, Any]]:
+        """明示された法令内をBM25検索し、巨大な法令群の中で候補が埋もれるのを防ぐ。
+
+        この補助検索に限り、既定では本則へ絞る(附則は改正沿革が多く、法令名だけで
+        引くと本則の候補を押し出すため)。附則が根拠になりうる語がある場合は絞らない。
+        通常のlaw検索は附則も対象なので、ここで絞っても附則が引けなくなるわけではない。
+        """
+        section_filters = []
+        if not any(cue in query for cue in SUPPLEMENTARY_PROVISION_CUES):
+            section_filters.append({"term": {"sectionKey": "main"}})
+        body = {
+            "size": top_k,
+            "query": {
+                "bool": {
+                    "filter": [
+                        *self._filters("law", user_clearance_level),
+                        {"term": {"documentId": document_id}},
+                        *section_filters,
+                    ],
+                    "must": [
+                        {
+                            "multi_match": {
+                                "query": query,
+                                # 法令はdocumentIdで確定済みなので、法令名の反復より条見出しを優先する。
+                                "fields": ["heading^8", "text^2", "sectionPath"],
+                                "type": "best_fields",
+                            }
+                        }
+                    ],
+                }
+            },
+        }
+        response = requests.post(f"{self.base_url}/{self.index}/_search", json=body, timeout=15)
+        response.raise_for_status()
+        return [
+            {
+                "document": hit["_source"],
+                "score": 1.0 / (settings.agent_rrf_k + rank),
+                "bm25Score": float(hit["_score"] or 0.0),
+                "vectorScore": 0.0,
+            }
+            for rank, hit in enumerate(response.json()["hits"]["hits"], start=1)
+        ]
 
     def get_by_article_ids(
         self,
@@ -177,14 +254,10 @@ class OpenSearchClient:
     def _vector_search(
         self, query: str, doc_type: str | None, top_k: int, user_clearance_level: int
     ) -> list[dict[str, Any]]:
-        body = {
-            "size": max(top_k * 3, 10),
-            "query": {"knn": {"embedding": {"vector": embed_text(query, settings.embedding_dimension), "k": max(top_k * 3, 10)}}},
-        }
-        response = requests.post(f"{self.base_url}/{self.index}/_search", json=body, timeout=20)
-        response.raise_for_status()
+        vector_k = max(settings.agent_candidate_top_k * 3, top_k * 3, 10)
+        raw_hits = self._raw_vector_hits(query, vector_k)
         hits = []
-        for hit in response.json()["hits"]["hits"]:
+        for hit in raw_hits:
             source = hit["_source"]
             if source.get("publishStatus") != "published" or not source.get("isLatest"):
                 continue
@@ -194,6 +267,37 @@ class OpenSearchClient:
                 continue
             hits.append({"_source": source, "_score": hit["_score"]})
         return hits[:top_k]
+
+    @lru_cache(maxsize=256)
+    def _raw_vector_hits(
+        self,
+        query: str,
+        vector_k: int,
+    ) -> tuple[dict[str, Any], ...]:
+        """同一語の法令・ガイドライン検索で、同じKNN検索を重複実行しない。"""
+        body = {
+            "size": vector_k,
+            "query": {
+                "knn": {
+                    "embedding": {
+                        "vector": self._query_embedding(
+                            query,
+                            settings.embedding_dimension,
+                        ),
+                        "k": vector_k,
+                    }
+                }
+            },
+        }
+        response = requests.post(f"{self.base_url}/{self.index}/_search", json=body, timeout=20)
+        response.raise_for_status()
+        return tuple(
+            {
+                "_source": hit["_source"],
+                "_score": hit["_score"],
+            }
+            for hit in response.json()["hits"]["hits"]
+        )
 
     def _merge_rrf_hits(
         self,

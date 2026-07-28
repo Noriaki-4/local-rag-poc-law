@@ -1,5 +1,10 @@
 # 埋め込み・チャンク・Hybrid検索設計
 
+> 自然言語の複数論点質問について、再ランカー入力30件から回答コンテキスト16件を
+> 論点被覆型で選ぶ移行設計は
+> [legal_issue_coverage_retrieval.md](legal_issue_coverage_retrieval.md) を参照。
+> 同方式はfeature flag付きで実装され、本書の現行Hybrid検索を候補生成として利用する。
+
 ## 1. 目的
 
 Vector / Hybrid RAGの比較実験で、実装者が最初に踏む問題を明示する。特に、金商法第2条のような長大な定義条文を想定する。

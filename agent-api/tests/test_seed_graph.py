@@ -6,6 +6,7 @@ from app.seed import (
     _article_chunks,
     _docling_guidance_chunks,
     _drop_dangling_explains_edges,
+    _delegation_edges,
     _external_guidance_documents,
     _external_guidance_sources,
     _guidance_graph_artifacts,
@@ -13,6 +14,9 @@ from app.seed import (
     _guidance_primary_law_document_id,
     _guidance_relation_article_ids,
     _japanese_number_to_int,
+    _incorporation_edges,
+    _parent_law_article_reference_ids,
+    _parent_order_article_reference_ids,
     _reference_edges,
     _related_articles_for_chunk,
     _table_self_ref_article_ids,
@@ -47,6 +51,94 @@ def test_reference_edges_include_explicit_and_previous_article():
     assert ("law-test-article-2", "law-test-article-1") in pairs
     assert ("law-test-article-2", "law-test-article-3") in pairs
     assert all(edge["edgeType"] == "REFERENCES" for edge in edges)
+
+
+def test_delegation_edges_reverse_subordinate_law_parent_references():
+    parent = _document("5", "第五条 政令で定めるものを除く。")
+    subordinate = {
+        **_document("2_13", "法第五条第一項に規定する政令で定める有価証券を定める。"),
+        "documentId": "law-order",
+        "contentUnitId": "law-order-article-2_13",
+    }
+
+    edges = _delegation_edges(
+        [parent, subordinate],
+        {"law-test": "law-test", "law-order": "law-test"},
+    )
+
+    assert _parent_law_article_reference_ids(
+        "law-test", "法第五条第一項及び同法第六条に規定する事項"
+    ) == ["law-test-article-5", "law-test-article-6"]
+    assert [
+        (edge["fromGraphNodeId"], edge["toGraphNodeId"], edge["edgeType"])
+        for edge in edges
+    ] == [
+        ("law-order-article-2_13", "law-test-article-5", "REFERENCES"),
+        ("law-test-article-5", "law-order-article-2_13", "IMPLEMENTS"),
+    ]
+
+
+def test_delegation_edges_link_ordinance_order_references():
+    act = {
+        **_document("2", "第二条 政令で定める。"),
+        "title": "検証法",
+    }
+    order = {
+        **_document("1_7", "第一条の七 内閣府令で定める方式による。"),
+        "documentId": "law-order",
+        "contentUnitId": "law-order-article-1_7",
+        "title": "検証法施行令",
+    }
+    ordinance = {
+        **_document("13", "令第一条の七第二号に規定する方式を定める。"),
+        "documentId": "law-ordinance",
+        "contentUnitId": "law-ordinance-article-13",
+        "title": "検証法施行規則",
+    }
+
+    edges = _delegation_edges(
+        [act, order, ordinance],
+        {
+            "law-test": "law-test",
+            "law-order": "law-test",
+            "law-ordinance": "law-test",
+        },
+    )
+
+    assert _parent_order_article_reference_ids(
+        "law-order",
+        "令第一条の七第二号及び同令第二条に規定する事項",
+    ) == ["law-order-article-1_7", "law-order-article-2"]
+    assert (
+        "law-ordinance-article-13",
+        "law-order-article-1_7",
+        "REFERENCES",
+    ) in {
+        (edge["fromGraphNodeId"], edge["toGraphNodeId"], edge["edgeType"])
+        for edge in edges
+    }
+    assert (
+        "law-order-article-1_7",
+        "law-ordinance-article-13",
+        "IMPLEMENTS",
+    ) in {
+        (edge["fromGraphNodeId"], edge["toGraphNodeId"], edge["edgeType"])
+        for edge in edges
+    }
+
+
+def test_incorporation_edges_reverse_mutatis_mutandis_references():
+    documents = [
+        _document("1", "第一条 基本要件を定める。"),
+        _document("2", "第二条 第一条の規定を準用する。"),
+    ]
+
+    edges = _incorporation_edges(documents)
+
+    assert [
+        (edge["fromGraphNodeId"], edge["toGraphNodeId"], edge["edgeType"])
+        for edge in edges
+    ] == [("law-test-article-1", "law-test-article-2", "APPLIED_BY")]
 
 
 def _guideline_chunk(content_unit_id: str, related_article_ids: list[str]) -> dict:

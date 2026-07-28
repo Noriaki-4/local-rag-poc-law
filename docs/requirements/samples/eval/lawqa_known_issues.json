@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "issues": {
+    "薬機法_第3章_選択式_関連法令_問題番号30": {
+      "issueType": "temporal_version_mismatch",
+      "status": "review_required",
+      "excludeFromDiagnosticAccuracy": true,
+      "note": "データセットの根拠は「対面により」だが、現行法コーパスは「対面等により」であり、選択肢の真偽が法令時点で変わる。"
+    },
+    "金商法_第2章_選択式_関連法令_問題番号59": {
+      "issueType": "temporal_version_mismatch",
+      "status": "review_required",
+      "excludeFromDiagnosticAccuracy": true,
+      "note": "譲渡制限の要件がデータセット作成時の条文と現行法コーパスで異なり、gold選択肢を現行法で再現できない。"
+    },
+    "金商法_第2章_選択式_根拠条文_問題番号63": {
+      "issueType": "suspected_gold_error",
+      "status": "review_required",
+      "excludeFromDiagnosticAccuracy": true,
+      "note": "問題文は未処分の場合を問うため第19条第1項第1号が対応するが、goldは処分済みの場合の第2号になっている。"
+    },
+    "金商法_第3章_選択式_関連法令_問題番号50": {
+      "issueType": "multiple_valid_answers",
+      "status": "review_required",
+      "excludeFromDiagnosticAccuracy": true,
+      "note": "施行令第16条の6第1項の文言上、goldのAに加えてDも適用除外に該当すると読め、単一正解性に疑義がある。"
+    }
+  }
+}
