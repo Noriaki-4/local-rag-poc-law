@@ -1,5 +1,6 @@
 """agent.pyへのvNext配線テスト (計画書 §19 互換性, §12 フォールバック)。"""
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -97,6 +98,132 @@ class TestFeatureFlags:
         assert trace["layeredLegalRetrieval"]["contextCoverage"]["answerStatus"]
         assert "layered_legal_retrieval" not in route
 
+
+class TestLLMDirectedRetrievalShadow:
+    def test_disabled_does_not_run(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            agent_module.settings,
+            "agent_llm_directed_retrieval_shadow",
+            False,
+        )
+        trace: dict[str, Any] = {}
+
+        _service()._apply_llm_directed_retrieval_shadow(
+            _request(), _deadline(), trace
+        )
+
+        assert "llmDirectedLegalRetrieval" not in trace
+
+    def test_shadow_trace_is_connected_without_changing_answer_context(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            agent_module.settings,
+            "agent_llm_directed_retrieval_shadow",
+            True,
+        )
+        monkeypatch.setattr(
+            agent_module,
+            "run_llm_directed_research_shadow",
+            lambda **kwargs: SimpleNamespace(
+                trace={
+                    "mode": "shadow",
+                    "connectedToAnswer": False,
+                    "selectedContentUnitIds": ["new-evidence"],
+                }
+            ),
+        )
+        trace: dict[str, Any] = {}
+
+        _service()._apply_llm_directed_retrieval_shadow(
+            _request(), _deadline(), trace
+        )
+
+        assert trace["llmDirectedLegalRetrieval"]["selectedContentUnitIds"] == [
+            "new-evidence"
+        ]
+        assert trace["llmDirectedLegalRetrieval"]["connectedToAnswer"] is False
+
+    def test_internal_failure_is_isolated(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            agent_module.settings,
+            "agent_llm_directed_retrieval_shadow",
+            True,
+        )
+
+        def fail(**kwargs: Any) -> Any:
+            raise RuntimeError("research failed")
+
+        monkeypatch.setattr(
+            agent_module,
+            "run_llm_directed_research_shadow",
+            fail,
+        )
+        trace: dict[str, Any] = {}
+
+        _service()._apply_llm_directed_retrieval_shadow(
+            _request(), _deadline(), trace
+        )
+        assert trace["llmDirectedLegalRetrieval"]["status"] == "internal_error"
+        assert trace["llmDirectedLegalRetrieval"]["incomplete"] is True
+
+
+class TestLLMDirectedRetrievalActive:
+    def test_active_bypasses_legacy_and_uses_llm_selected_evidence(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            agent_module.settings, "agent_llm_directed_retrieval", True
+        )
+        monkeypatch.setattr(
+            agent_module,
+            "run_llm_directed_research",
+            lambda **kwargs: SimpleNamespace(
+                selected_evidence=(
+                    {
+                        "contentUnitId": "law-test-article-2",
+                        "articleId": "law-test-article-2",
+                        "documentId": "law-test",
+                        "docType": "law",
+                        "title": "検証法",
+                        "heading": "第2条",
+                        "text": "要件を定める。",
+                    },
+                ),
+                trace={
+                    "mode": "active",
+                    "connectedToAnswer": True,
+                    "status": "ready",
+                    "stopReason": "llm_ready",
+                    "availableEvidenceContentUnitIds": ["law-test-article-2"],
+                    "llmCallCount": 2,
+                    "toolCallCount": 1,
+                    "turns": [],
+                },
+            ),
+        )
+        service = _service()
+        monkeypatch.setattr(
+            service,
+            "_compose_answer",
+            lambda *args, **kwargs: ("根拠付き回答", None, None, []),
+        )
+
+        response = service.answer(_request())
+
+        assert response.route == [
+            "llm_directed_legal_research",
+            "answer_composer",
+        ]
+        assert response.answer == "根拠付き回答"
+        assert response.citations[0].contentUnitId == "law-test-article-2"
+        assert "planner" not in response.trace
+
+class TestActiveFeatureFlag:
     def test_active_uses_new_context_when_primary_groups_are_covered(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

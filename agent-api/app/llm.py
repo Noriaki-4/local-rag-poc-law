@@ -4,8 +4,8 @@ from dataclasses import dataclass, replace
 from time import perf_counter
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
 import requests
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .config import settings
 from .legal_issue_planner import (
@@ -15,6 +15,13 @@ from .legal_issue_planner import (
     fallback_issue_plan,
     issue_plan_json_schema,
     parse_issue_plan,
+)
+from .llm_directed_research import (
+    EvidenceCatalog,
+    ResearchTurn,
+    build_research_turn_prompt,
+    parse_research_turn,
+    research_turn_json_schema,
 )
 from .models import AnswerRequest, Citation
 
@@ -83,6 +90,34 @@ class EvidenceEvaluationResult:
     validationError: str | None = None
     stopReason: str | None = None
     retryCount: int = 0
+
+
+@dataclass
+class ResearchTurnResult:
+    """LLM主導調査の1ターン分の判断と呼び出しメタデータ。"""
+
+    turn: ResearchTurn | None
+    provider: str
+    model: str
+    latencyMs: int
+    inputTokens: int | None
+    outputTokens: int | None
+    validationError: str | None = None
+    stopReason: str | None = None
+    retryCount: int = 0
+
+    def as_trace(self) -> dict[str, Any]:
+        return {
+            "provider": self.provider,
+            "model": self.model,
+            "latencyMs": self.latencyMs,
+            "inputTokens": self.inputTokens,
+            "outputTokens": self.outputTokens,
+            "validationError": self.validationError,
+            "stopReason": self.stopReason,
+            "retryCount": self.retryCount,
+            "decision": self.turn.model_dump() if self.turn is not None else None,
+        }
 
 
 class LLMChoiceAssessment(BaseModel):
@@ -182,6 +217,7 @@ class LLMClient:
         timeout_sec: int | None = None,
         evidence_by_choice: dict[str, list[str]] | None = None,
         answer_scope: dict[str, Any] | None = None,
+        research_context: dict[str, Any] | None = None,
     ) -> LLMResult | None:
         prompt = build_answer_prompt(
             request,
@@ -189,6 +225,7 @@ class LLMClient:
             citations,
             evidence_by_choice,
             answer_scope=answer_scope,
+            research_context=research_context,
         )
         timeout = timeout_sec or settings.llm_timeout_sec
         max_tokens = settings.anthropic_max_tokens
@@ -343,6 +380,92 @@ class LLMClient:
             validationError=validation_error,
             stopReason=stop_reason,
             retryCount=retry_count,
+        )
+
+    def decide_legal_research_turn(
+        self,
+        request: AnswerRequest,
+        catalog: EvidenceCatalog,
+        tool_history: list[dict[str, Any]] | None = None,
+        timeout_sec: int | None = None,
+        *,
+        remaining_turns: int | None = None,
+        remaining_tool_calls: int | None = None,
+        finalize_only: bool = False,
+        preferred_content_ids: tuple[str, ...] | list[str] = (),
+    ) -> ResearchTurnResult:
+        """調査手順を固定せず、次の操作または回答可能性をLLMへ判断させる。"""
+        max_actions = (
+            0
+            if finalize_only
+            else min(
+                settings.llm_research_max_actions_per_turn,
+                max(
+                    0,
+                    remaining_tool_calls
+                    if remaining_tool_calls is not None
+                    else settings.llm_research_max_tool_calls,
+                ),
+            )
+        )
+        prompt = build_research_turn_prompt(
+            question=request.question,
+            choices=request.choices,
+            catalog=catalog,
+            tool_history=tool_history,
+            max_actions=max_actions,
+            max_evidence_items=(
+                min(settings.llm_research_max_evidence_items, 32)
+                if finalize_only
+                else settings.llm_research_max_evidence_items
+            ),
+            evidence_chars=(
+                min(settings.llm_research_evidence_chars, 12000)
+                if finalize_only
+                else settings.llm_research_evidence_chars
+            ),
+            remaining_turns=remaining_turns,
+            remaining_tool_calls=remaining_tool_calls,
+            finalize_only=finalize_only,
+            max_selected_evidence=settings.llm_research_max_selected_evidence,
+            preferred_content_ids=preferred_content_ids,
+        )
+        schema = research_turn_json_schema(
+            max_actions=max_actions,
+            max_selected_evidence=settings.llm_research_max_selected_evidence,
+            finalize_only=finalize_only,
+        )
+        timeout = timeout_sec or settings.llm_research_timeout_sec
+        # 同じpromptを内部で即再試行すると、調査loopの共有予算を見えない形で消費する。
+        # ここは1回だけ呼び、形式エラーはloopの次ターンで明示的に自己修正させる。
+        (
+            raw_text,
+            latency_ms,
+            input_tokens,
+            output_tokens,
+            stop_reason,
+        ) = self._json_transport(
+            prompt,
+            schema,
+            settings.llm_research_model,
+            settings.llm_research_max_tokens,
+            timeout,
+        )
+        turn, validation_error = parse_research_turn(
+            raw_text,
+            max_actions=max_actions,
+            max_selected_evidence=settings.llm_research_max_selected_evidence,
+        )
+        return ResearchTurnResult(
+            turn=turn,
+            provider=self.provider,
+            model=settings.llm_research_model,
+            latencyMs=latency_ms,
+            inputTokens=input_tokens,
+            outputTokens=output_tokens,
+            validationError=validation_error,
+            stopReason=stop_reason,
+            retryCount=0,
         )
 
     def evaluate_evidence(
@@ -592,6 +715,7 @@ def build_answer_prompt(
     evidence_by_choice: dict[str, list[str]] | None = None,
     *,
     answer_scope: dict[str, Any] | None = None,
+    research_context: dict[str, Any] | None = None,
 ) -> str:
     citation_block = _format_citations_with_budget(citations, settings.llm_max_context_chars)
 
@@ -610,6 +734,7 @@ def build_answer_prompt(
         else "選択肢がない場合、questionPolarityとchoiceAssessmentsはnullにしてください。"
     )
     scope_rule = _answer_scope_rule(answer_scope)
+    research_rule = _research_answer_rule(research_context)
 
     return f"""あなたはローカル検証環境の法務RAG回答生成器です。
 外部APIや外部検索は使わず、下の引用候補を最優先の根拠として日本語で簡潔に回答してください。
@@ -620,6 +745,7 @@ contentUnitIdは下の引用候補に書かれた文字列をそのまま書き�
 answer には正解ラベルだけでなく、引用候補に基づく短い根拠説明を含めてください。
 {choice_commitment_rule}
 {scope_rule}
+{research_rule}
 
 検索ルート: {" -> ".join(route)}
     質問: {request.question}{choices_block}
@@ -628,6 +754,26 @@ answer には正解ラベルだけでなく、引用候補に基づく短い根�
 {citation_block}
 
 JSON:"""
+
+
+def _research_answer_rule(research_context: dict[str, Any] | None) -> str:
+    if not research_context:
+        return ""
+    status = str(research_context.get("status") or "unknown")
+    missing = research_context.get("missingEvidence") or []
+    return "\n".join(
+        [
+            "この引用候補は、法令調査LLMが検索・本文確認を経て選択したものです。",
+            "あなたが最終判断主体として本文を読み、質問への法的結論と各根拠の対応を確認してください。",
+            "質問文が求める事項を回答前に分け、比較対象・要件・例外・期間・効果など、"
+            "実際に質問された各事項へ一つずつ答えてください。",
+            "各事項は対応する引用候補で確認し、根拠を確認できない事項は推測せず未確認と明示してください。",
+            "引用候補に無い法令知識で結論を補完せず、根拠が不足する部分は明示してください。",
+            "ガイドは法令本文と区別し、法的結論の直接根拠にしないでください。",
+            f"調査状態: {status}",
+            f"未確認の根拠: {json.dumps(missing, ensure_ascii=False)}",
+        ]
+    )
 
 
 def _answer_scope_rule(answer_scope: dict[str, Any] | None) -> str:

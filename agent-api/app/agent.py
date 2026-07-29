@@ -1,24 +1,34 @@
-from collections.abc import Iterable
 import re
+from collections.abc import Iterable
 from time import perf_counter
 from typing import Any
+
+import requests
 
 from .config import settings
 from .evidence_selector import (
     AspectEvidence,
     AspectEvidenceMatrix,
-    article_id as evidence_article_id,
     aspect_queries_by_article,
-    content_id as evidence_content_id,
     select_issue_covered_context,
+)
+from .evidence_selector import (
+    article_id as evidence_article_id,
+)
+from .evidence_selector import (
+    content_id as evidence_content_id,
 )
 from .graph_client import GraphClient
 from .layered_shadow import run_layered_retrieval
 from .llm import LLMClient, citation_context_stats
+from .llm_research_loop import (
+    run_llm_directed_research,
+    run_llm_directed_research_shadow,
+)
 from .models import AnswerRequest, AnswerResponse, Citation
+from .opensearch_client import OpenSearchClient
 from .reranker import RerankerClient
 from .seed import _japanese_number_to_int
-from .opensearch_client import OpenSearchClient
 
 REFERENCE_CUES = (
     "前条",
@@ -139,6 +149,14 @@ class AgentService:
                 "issueCoverageShadow": settings.agent_issue_coverage_shadow,
             },
         }
+        if settings.agent_llm_directed_retrieval:
+            return self._answer_with_llm_directed_research(
+                request,
+                started,
+                deadline,
+                route,
+                trace,
+            )
         evidence: dict[str, dict[str, Any]] = {}
         graph_paths: list[dict[str, Any]] = []
         inherited_aspects_by_content_id: dict[str, set[str]] = {}
@@ -452,6 +470,11 @@ class AgentService:
             trace,
             route,
         )
+        self._apply_llm_directed_retrieval_shadow(
+            request,
+            deadline,
+            trace,
+        )
         answer_candidates = _citations_from_items(final_ranked)
         structural_citation_ids = _graph_closure_citations_for_request(
             request,
@@ -505,6 +528,8 @@ class AgentService:
                 trace.get("layeredLegalRetrieval", {}).get("issuePlanner", {})
             ).get("attemptCount")
             or 0
+        ) + int(
+            trace.get("llmDirectedLegalRetrieval", {}).get("llmCallCount") or 0
         )
 
         return AnswerResponse(
@@ -515,6 +540,146 @@ class AgentService:
             choiceJudgements=judgements,
             citations=citations,
             graphPaths=graph_paths,
+            trace=trace,
+        )
+
+    def _answer_with_llm_directed_research(
+        self,
+        request: AnswerRequest,
+        started: float,
+        deadline: float,
+        route: list[str],
+        trace: dict[str, Any],
+    ) -> AnswerResponse:
+        """検索・取得以外の法的判断をLLMへ集約する単独回答経路。"""
+        _append_route(route, "llm_directed_legal_research")
+        try:
+            outcome = run_llm_directed_research(
+                request=request,
+                os_client=self.os_client,
+                graph_client=self.graph_client,
+                llm_client=self.llm_client,
+                deadline=deadline,
+            )
+        except Exception as exc:  # noqa: BLE001 - 旧方式へ黙って切り替えない
+            trace["llmDirectedLegalRetrieval"] = {
+                "enabled": True,
+                "mode": "active",
+                "connectedToAnswer": True,
+                "status": "internal_error",
+                "stopReason": "active_internal_error",
+                "incomplete": True,
+                "error": f"{type(exc).__name__}: {exc}",
+                "llmCallCount": 0,
+                "toolCallCount": 0,
+            }
+            trace["elapsedMs"] = int((perf_counter() - started) * 1000)
+            return AnswerResponse(
+                pattern=request.pattern,
+                route=route,
+                answer="法令調査処理で内部エラーが発生したため、根拠付きで回答できません。",
+                predictedAnswer=None,
+                choiceJudgements=None,
+                citations=[],
+                graphPaths=[],
+                trace=trace,
+            )
+
+        research_trace = outcome.trace
+        trace["llmDirectedLegalRetrieval"] = research_trace
+        trace["retrievedContentUnitIds"] = research_trace.get(
+            "availableEvidenceContentUnitIds", []
+        )
+        answer_candidates = _citations_from_items(
+            [
+                {
+                    "document": item,
+                    "evidenceLane": (
+                        "law" if item.get("docType") == "law" else "guidance"
+                    ),
+                }
+                for item in outcome.selected_evidence
+            ]
+        )
+        if not answer_candidates:
+            status = str(research_trace.get("status") or "")
+            if status == "timeout":
+                answer = (
+                    "法令調査LLMがタイムアウトしたため、必要な根拠を確認できず回答を中止しました。"
+                )
+            elif status == "transport_error":
+                answer = (
+                    "法令調査LLMへの接続に失敗したため、必要な根拠を確認できず回答を中止しました。"
+                )
+            elif status == "not_started":
+                answer = (
+                    "回答生成時間を確保すると法令調査の時間が残らないため、根拠付きで回答できません。"
+                )
+            else:
+                answer = (
+                    "投入済みデータから回答に必要な法令本文を確認できなかったため、"
+                    "根拠付きで回答できません。"
+                )
+            trace["toolCallCount"] = int(research_trace.get("toolCallCount") or 0)
+            trace["llmCallCount"] = int(research_trace.get("llmCallCount") or 0)
+            trace["stopReason"] = research_trace.get("stopReason")
+            trace["elapsedMs"] = int((perf_counter() - started) * 1000)
+            return AnswerResponse(
+                pattern=request.pattern,
+                route=route,
+                answer=answer,
+                predictedAnswer=None,
+                choiceJudgements=None,
+                citations=[],
+                graphPaths=[],
+                trace=trace,
+            )
+
+        last_decision = next(
+            (
+                turn.get("decision") or {}
+                for turn in reversed(research_trace.get("turns") or [])
+                if turn.get("decision")
+            ),
+            {},
+        )
+        research_context = {
+            "status": research_trace.get("status"),
+            "stopReason": research_trace.get("stopReason"),
+            "missingEvidence": last_decision.get("missingEvidence") or [],
+            "selectedEvidence": last_decision.get("selectedEvidence") or [],
+        }
+        _append_route(route, "answer_composer")
+        answer_text, predicted_answer, judgements, _ = self._compose_answer(
+            request,
+            route,
+            answer_candidates,
+            trace,
+            deadline,
+            None,
+            research_context=research_context,
+        )
+        # 根拠候補の採否は調査LLMが既に判断済み。旧方式の固定枠・多様化・
+        # Requirement充足判定で再選抜しない。
+        citations = answer_candidates
+        trace["rerankedContentUnitIds"] = [
+            citation.contentUnitId for citation in citations if citation.contentUnitId
+        ]
+        trace["toolCallCount"] = int(research_trace.get("toolCallCount") or 0)
+        trace["llmCallCount"] = (
+            int(research_trace.get("llmCallCount") or 0)
+            + int(trace.get("llm", {}).get("attemptCount") or 0)
+        )
+        trace["stopReason"] = research_trace.get("stopReason")
+        trace["elapsedMs"] = int((perf_counter() - started) * 1000)
+        return AnswerResponse(
+            pattern=request.pattern,
+            route=route,
+            answer=answer_text,
+            predictedAnswer=predicted_answer,
+            choiceJudgements=judgements,
+            citations=citations,
+            graphPaths=[],
             trace=trace,
         )
 
@@ -616,6 +781,37 @@ class AgentService:
             # legacyへfallbackし、ここでは空コンテキストとanswerStatusを回答制御へ渡す。
             return []
         return outcome.assembly.items
+
+    def _apply_llm_directed_retrieval_shadow(
+        self,
+        request: AnswerRequest,
+        deadline: float,
+        trace: dict[str, Any],
+    ) -> None:
+        """LLM主導探索を回答非接続で実行し、失敗を現行経路から隔離する。"""
+        if not settings.agent_llm_directed_retrieval_shadow:
+            return
+        try:
+            outcome = run_llm_directed_research_shadow(
+                request=request,
+                os_client=self.os_client,
+                graph_client=self.graph_client,
+                llm_client=self.llm_client,
+                deadline=deadline,
+            )
+            trace["llmDirectedLegalRetrieval"] = outcome.trace
+        except Exception as exc:  # noqa: BLE001 - shadow障害で現行回答を止めない
+            trace["llmDirectedLegalRetrieval"] = {
+                "enabled": True,
+                "mode": "shadow",
+                "connectedToAnswer": False,
+                "status": "internal_error",
+                "stopReason": "shadow_internal_error",
+                "incomplete": True,
+                "error": f"{type(exc).__name__}: {exc}",
+                "llmCallCount": 0,
+                "toolCallCount": 0,
+            }
 
     def _apply_issue_coverage_selection(
         self,
@@ -1640,6 +1836,7 @@ class AgentService:
         trace: dict[str, Any],
         deadline: float,
         evidence_by_choice: dict[str, list[str]] | None,
+        research_context: dict[str, Any] | None = None,
     ) -> tuple[str, str | None, dict[str, str] | None, list[str]]:
         layered_control = _layered_answer_control(trace)
         if (
@@ -1668,14 +1865,30 @@ class AgentService:
                 trace["llm"] = {"provider": self.llm_client.provider, "used": False, "error": "time_budget_exhausted"}
             else:
                 try:
+                    answer_kwargs: dict[str, Any] = {
+                        "timeout_sec": max(
+                            1, min(settings.llm_timeout_sec, remaining)
+                        ),
+                        "evidence_by_choice": evidence_by_choice,
+                        "answer_scope": layered_control,
+                    }
+                    if research_context is not None:
+                        answer_kwargs["research_context"] = research_context
                     llm_result = self.llm_client.generate_answer(
                         request,
                         route,
                         citations,
-                        timeout_sec=max(1, min(settings.llm_timeout_sec, remaining)),
-                        evidence_by_choice=evidence_by_choice,
-                        answer_scope=layered_control,
+                        **answer_kwargs,
                     )
+                except requests.Timeout as exc:
+                    trace["llm"] = {
+                        "provider": self.llm_client.provider,
+                        "used": False,
+                        "error": f"{type(exc).__name__}: {exc}",
+                        "timeout": True,
+                        "attemptCount": 1,
+                        "fallback": "no_choice_judgement",
+                    }
                 except Exception as exc:
                     trace["llm"] = {
                         "provider": self.llm_client.provider,

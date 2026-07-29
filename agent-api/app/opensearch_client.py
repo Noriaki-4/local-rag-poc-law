@@ -124,7 +124,7 @@ def _articles_from_hits(
             -candidate["score"],
         )
     )
-    return ordered
+    return ordered[: spec.top_k]
 
 
 def _chunks_from_hits(
@@ -144,7 +144,7 @@ def _chunks_from_hits(
             "source": hit.get("_source") or {},
         }
         for hit in hits
-    ]
+    ][: spec.top_k]
 
 
 def _merge_requirement_hits(
@@ -501,8 +501,11 @@ class OpenSearchClient:
         user_clearance_level: int,
     ) -> dict[str, Any]:
         filters = self._requirement_filters(spec, user_clearance_level)
+        # 出口はArticle単位のtop_k。項・号chunkが上位を占めても必要なArticleを
+        # 集約前に落とさないよう、chunk取得段階だけを過取得する。
+        chunk_top_k = min(100, max(spec.top_k, spec.top_k * 3))
         return {
-            "size": spec.top_k,
+            "size": chunk_top_k,
             "query": {
                 "bool": {
                     "filter": filters,
@@ -526,13 +529,14 @@ class OpenSearchClient:
         user_clearance_level: int,
     ) -> dict[str, Any]:
         filters = self._requirement_filters(spec, user_clearance_level)
+        chunk_top_k = min(100, max(spec.top_k, spec.top_k * 3))
         return {
-            "size": spec.top_k,
+            "size": chunk_top_k,
             "query": {
                 "knn": {
                     "embedding": {
                         "vector": vector,
-                        "k": max(spec.top_k, 1),
+                        "k": max(chunk_top_k, 1),
                         "filter": {"bool": {"filter": filters}},
                     }
                 }

@@ -82,7 +82,10 @@ GUIDANCE_EXPLAINS_REFERENCE_SOURCES = (
 
 def seed_all(os_client: OpenSearchClient, graph_client: GraphClient) -> dict[str, Any]:
     samples_dir = settings.samples_dir
-    mapping = _read_json(samples_dir / "metadata" / "opensearch_index_mapping.sample.json")
+    mapping_path = settings.opensearch_index_mapping
+    if not mapping_path.is_absolute():
+        mapping_path = samples_dir / mapping_path
+    mapping = _read_json(mapping_path)
     os_client.recreate_index(mapping)
 
     external_guidance_sources = _external_guidance_sources()

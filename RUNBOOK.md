@@ -199,6 +199,40 @@ curl -s -X POST http://localhost:8000/admin/seed | jq .
 
 `/admin/seed` は OpenSearch index と Neo4j graph を作り直す。検証環境の再投入用であり、本番運用向けの差分投入ではない。
 
+### 日本語Analyzerの比較索引
+
+既存`legal-rag-content`を削除せず、Kuromoji＋NFKCとbigramのmulti-fieldを持つ
+`legal-rag-content-ja-v2`を作る。Analyzer pluginを追加するため、最初にOpenSearchをbuildする。
+
+```bash
+docker compose build opensearch
+docker compose up -d opensearch
+python3 scripts/create_japanese_search_index.py
+```
+
+再索引は既存のembeddingをコピーするため、全件の埋め込みを再生成しない。target索引が既に
+存在する場合、スクリプトは削除・上書きせず終了する。作り直す場合は対象名と用途を確認してから
+明示的に別名を指定する。
+
+比較索引をAgent APIで使う場合:
+
+```bash
+OPENSEARCH_INDEX=legal-rag-content-ja-v2 \
+OPENSEARCH_INDEX_MAPPING=metadata/opensearch_index_mapping.japanese.sample.json \
+docker compose up -d --build agent-api
+```
+
+元へ戻す場合:
+
+```bash
+OPENSEARCH_INDEX=legal-rag-content \
+OPENSEARCH_INDEX_MAPPING=metadata/opensearch_index_mapping.sample.json \
+docker compose up -d agent-api
+```
+
+この段階では検索スコア、候補上限、探索ループは変更しない。`heading`、`text`、
+`sectionPath`等の既存検索fieldが日本語Analyzerで解析される差だけを比較する。
+
 ### seed中の挙動（ハングではない）
 
 `SEED_LAWQA_EGOV=true` 込みの seed は、e-Gov法令の取得と**全チャンク（約1.6万件）の埋め込み
@@ -321,6 +355,59 @@ curl -s http://localhost:8000/answer -H 'content-type: application/json' \
 ガイドは法令mandatory枠を満たさず、主論点groupを完全被覆できたときにだけ補助枠
 (既定2件)へ入り、引用には `evidenceLane: "guidance"` と「行政解釈・実務上の取扱い」が付く。
 切替はPhase 6の評価(自然言語20問・lawqa_jp 140問)の合格後に行う。
+
+### LLM主導の法令調査
+
+LLMへ検索語・探索順序・根拠選択の裁量を持たせる新経路の判断契約を実装している。
+法令とガイドの取得元は既存のOpenSearch / Neo4jに限定し、未取得のArticle IDや
+contentUnitIdはコード側で拒否する。
+
+`AGENT_LLM_DIRECTED_RETRIEVAL=true`にすると、旧planner、レイヤー別Requirement生成、
+プログラム側の充足判定・根拠枠選抜を通らず、LLM主導調査だけで回答する。プログラムは
+検索・本文取得・ID検証・時間上限を担当し、LLMが候補比較、追加調査、根拠選択を行う。
+タイムアウトや根拠不足で終了した場合、旧方式へ黙って戻さず利用者向け回答とtraceへ明示する。
+
+最終ターンは追加検索を行わず、`ready`または`insufficient`と回答根拠を確定する。
+検索結果はArticleごとの代表chunkを提示し、必要なArticleだけを後続の`fetch_articles`で
+展開する。最終判断が形式不正や時間切れでも、直前に検証済みの根拠選択があれば
+`partial`として限定回答へ利用する。直前に直接取得したArticle本文も次ターンで優先表示し、
+最終判断が時間切れになった場合は限定回答の候補として保持する。
+Article直接取得時は、検証済みのGraph関係だけを1hop自動取得して関係先Article IDを
+次ターンへ提示する。関係先の本文取得と最終採否はLLMが判断する。
+最終ターンは操作履歴を要約し、本文を最大32件・12,000文字に抑える。
+documentId確定後の法令内検索は30 Article、未確定の横断検索は8 Articleとする。
+複数文書の候補は文書単位のラウンドロビンでLLMへ提示する。
+
+`AGENT_LLM_DIRECTED_RETRIEVAL_SHADOW=true`は回答非接続の比較用であり、activeと同時に
+有効にしてもactive経路が優先される。
+
+```bash
+curl -s http://localhost:8000/health | jq '.llmDirectedLegalRetrieval'
+```
+
+主な設定:
+
+```text
+AGENT_LLM_DIRECTED_RETRIEVAL=false
+AGENT_LLM_DIRECTED_RETRIEVAL_SHADOW=false
+LLM_RESEARCH_MODEL=
+LLM_RESEARCH_MAX_TOKENS=4096
+LLM_RESEARCH_TIMEOUT_SEC=45
+LLM_RESEARCH_MAX_TURNS=3
+LLM_RESEARCH_MAX_ACTIONS_PER_TURN=4
+LLM_RESEARCH_MAX_TOOL_CALLS=8
+LLM_RESEARCH_SEARCH_TOP_K=8
+LLM_RESEARCH_DOCUMENT_SEARCH_TOP_K=30
+LLM_RESEARCH_ACTIVE_BUDGET_SEC=90
+LLM_RESEARCH_SHADOW_BUDGET_SEC=60
+LLM_RESEARCH_MAX_EVIDENCE_ITEMS=60
+LLM_RESEARCH_MAX_SELECTED_EVIDENCE=16
+LLM_RESEARCH_EVIDENCE_CHARS=30000
+```
+
+設計と次の実装手順は
+[llm_directed_legal_retrieval.md](docs/requirements/docs/llm_directed_legal_retrieval.md)
+を参照する。
 
 ### Graph棚卸し (Phase 0)
 

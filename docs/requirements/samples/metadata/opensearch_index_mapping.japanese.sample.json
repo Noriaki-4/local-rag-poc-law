@@ -1,0 +1,240 @@
+{
+  "settings": {
+    "index": {
+      "knn": true
+    },
+    "analysis": {
+      "char_filter": {
+        "ja_nfkc": {
+          "type": "icu_normalizer",
+          "name": "nfkc",
+          "mode": "compose"
+        }
+      },
+      "tokenizer": {
+        "ja_kuromoji_keep_compound": {
+          "type": "kuromoji_tokenizer",
+          "mode": "search",
+          "discard_compound_token": false
+        },
+        "ja_kuromoji_phrase": {
+          "type": "kuromoji_tokenizer",
+          "mode": "search",
+          "discard_compound_token": true
+        },
+        "ja_bigram_tokenizer": {
+          "type": "ngram",
+          "min_gram": 2,
+          "max_gram": 2,
+          "token_chars": [
+            "letter",
+            "digit"
+          ]
+        }
+      },
+      "analyzer": {
+        "ja_morph": {
+          "type": "custom",
+          "char_filter": [
+            "ja_nfkc"
+          ],
+          "tokenizer": "ja_kuromoji_keep_compound",
+          "filter": [
+            "kuromoji_baseform",
+            "cjk_width",
+            "lowercase"
+          ]
+        },
+        "ja_phrase": {
+          "type": "custom",
+          "char_filter": [
+            "ja_nfkc"
+          ],
+          "tokenizer": "ja_kuromoji_phrase",
+          "filter": [
+            "kuromoji_baseform",
+            "cjk_width",
+            "lowercase"
+          ]
+        },
+        "ja_bigram": {
+          "type": "custom",
+          "char_filter": [
+            "ja_nfkc"
+          ],
+          "tokenizer": "ja_bigram_tokenizer",
+          "filter": [
+            "lowercase"
+          ]
+        }
+      }
+    }
+  },
+  "mappings": {
+    "_meta": {
+      "analyzerVersion": "ja-kuromoji-bigram-v1",
+      "sourceMapping": "opensearch_index_mapping.sample.json",
+      "note": "日本語Analyzerの比較用。現行索引を置換せず別索引へ投入する。"
+    },
+    "properties": {
+      "documentId": {
+        "type": "keyword"
+      },
+      "contentUnitId": {
+        "type": "keyword"
+      },
+      "parentContentUnitId": {
+        "type": "keyword"
+      },
+      "articleContentUnitId": {
+        "type": "keyword"
+      },
+      "chunkId": {
+        "type": "keyword"
+      },
+      "deptCode": {
+        "type": "keyword"
+      },
+      "docType": {
+        "type": "keyword"
+      },
+      "authorityType": {
+        "type": "keyword"
+      },
+      "authoritySource": {
+        "type": "keyword"
+      },
+      "contentDomain": {
+        "type": "keyword"
+      },
+      "title": {
+        "type": "text",
+        "analyzer": "ja_morph",
+        "fields": {
+          "keyword": {
+            "type": "keyword"
+          },
+          "phrase": {
+            "type": "text",
+            "analyzer": "ja_phrase"
+          },
+          "ngram": {
+            "type": "text",
+            "analyzer": "ja_bigram"
+          }
+        }
+      },
+      "heading": {
+        "type": "text",
+        "analyzer": "ja_morph",
+        "fields": {
+          "keyword": {
+            "type": "keyword"
+          },
+          "phrase": {
+            "type": "text",
+            "analyzer": "ja_phrase"
+          },
+          "ngram": {
+            "type": "text",
+            "analyzer": "ja_bigram"
+          }
+        }
+      },
+      "sectionPath": {
+        "type": "text",
+        "analyzer": "ja_morph",
+        "fields": {
+          "phrase": {
+            "type": "text",
+            "analyzer": "ja_phrase"
+          },
+          "ngram": {
+            "type": "text",
+            "analyzer": "ja_bigram"
+          }
+        }
+      },
+      "sectionKey": {
+        "type": "keyword"
+      },
+      "provisionType": {
+        "type": "keyword"
+      },
+      "lawNum": {
+        "type": "text",
+        "analyzer": "ja_morph",
+        "fields": {
+          "keyword": {
+            "type": "keyword"
+          }
+        }
+      },
+      "articleNumber": {
+        "type": "integer"
+      },
+      "paragraphNumber": {
+        "type": "integer"
+      },
+      "itemNumber": {
+        "type": "integer"
+      },
+      "text": {
+        "type": "text",
+        "analyzer": "ja_morph",
+        "fields": {
+          "phrase": {
+            "type": "text",
+            "analyzer": "ja_phrase"
+          },
+          "ngram": {
+            "type": "text",
+            "analyzer": "ja_bigram"
+          }
+        }
+      },
+      "embedding": {
+        "type": "knn_vector",
+        "dimension": 1024,
+        "method": {
+          "name": "hnsw",
+          "space_type": "cosinesimil",
+          "engine": "lucene"
+        }
+      },
+      "publishStatus": {
+        "type": "keyword"
+      },
+      "isLatest": {
+        "type": "boolean"
+      },
+      "confidentiality": {
+        "type": "keyword"
+      },
+      "clearanceLevel": {
+        "type": "integer"
+      },
+      "sourceObjectUri": {
+        "type": "keyword"
+      },
+      "processedObjectUri": {
+        "type": "keyword"
+      },
+      "sourcePage": {
+        "type": "integer"
+      },
+      "parserType": {
+        "type": "keyword"
+      },
+      "chunkStrategy": {
+        "type": "keyword"
+      },
+      "relatedArticleContentUnitIds": {
+        "type": "keyword"
+      },
+      "articleReferenceSource": {
+        "type": "keyword"
+      }
+    }
+  }
+}

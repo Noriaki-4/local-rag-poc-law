@@ -17,7 +17,8 @@ services:
       retries: 30
 
   opensearch:
-    image: opensearchproject/opensearch:2.19.1
+    build:
+      context: ./opensearch
     environment:
       discovery.type: single-node
       plugins.security.disabled: "true"
@@ -86,7 +87,8 @@ services:
     build: ./agent-api
     environment:
       OPENSEARCH_URL: http://opensearch:9200
-      OPENSEARCH_INDEX: legal-rag-content
+      OPENSEARCH_INDEX: ${OPENSEARCH_INDEX:-legal-rag-content}
+      OPENSEARCH_INDEX_MAPPING: ${OPENSEARCH_INDEX_MAPPING:-metadata/opensearch_index_mapping.sample.json}
       NEO4J_URI: bolt://neo4j:7687
       NEO4J_USER: neo4j
       NEO4J_PASSWORD: password
@@ -150,6 +152,22 @@ services:
       JUDGE_MODEL: ${JUDGE_MODEL:-none}
       LLM_TIMEOUT_SEC: ${LLM_TIMEOUT_SEC:-90}
       LLM_MAX_CONTEXT_CHARS: ${LLM_MAX_CONTEXT_CHARS:-12000}
+      # LLM主導の法令調査。activeは旧planner/layered選抜を通らない単独回答経路。
+      AGENT_LLM_DIRECTED_RETRIEVAL: ${AGENT_LLM_DIRECTED_RETRIEVAL:-false}
+      AGENT_LLM_DIRECTED_RETRIEVAL_SHADOW: ${AGENT_LLM_DIRECTED_RETRIEVAL_SHADOW:-false}
+      LLM_RESEARCH_MODEL: ${LLM_RESEARCH_MODEL:-}
+      LLM_RESEARCH_MAX_TOKENS: ${LLM_RESEARCH_MAX_TOKENS:-4096}
+      LLM_RESEARCH_TIMEOUT_SEC: ${LLM_RESEARCH_TIMEOUT_SEC:-45}
+      LLM_RESEARCH_MAX_TURNS: ${LLM_RESEARCH_MAX_TURNS:-3}
+      LLM_RESEARCH_MAX_ACTIONS_PER_TURN: ${LLM_RESEARCH_MAX_ACTIONS_PER_TURN:-4}
+      LLM_RESEARCH_MAX_TOOL_CALLS: ${LLM_RESEARCH_MAX_TOOL_CALLS:-8}
+      LLM_RESEARCH_SEARCH_TOP_K: ${LLM_RESEARCH_SEARCH_TOP_K:-8}
+      LLM_RESEARCH_DOCUMENT_SEARCH_TOP_K: ${LLM_RESEARCH_DOCUMENT_SEARCH_TOP_K:-30}
+      LLM_RESEARCH_ACTIVE_BUDGET_SEC: ${LLM_RESEARCH_ACTIVE_BUDGET_SEC:-90}
+      LLM_RESEARCH_SHADOW_BUDGET_SEC: ${LLM_RESEARCH_SHADOW_BUDGET_SEC:-60}
+      LLM_RESEARCH_MAX_EVIDENCE_ITEMS: ${LLM_RESEARCH_MAX_EVIDENCE_ITEMS:-60}
+      LLM_RESEARCH_MAX_SELECTED_EVIDENCE: ${LLM_RESEARCH_MAX_SELECTED_EVIDENCE:-16}
+      LLM_RESEARCH_EVIDENCE_CHARS: ${LLM_RESEARCH_EVIDENCE_CHARS:-30000}
       # 法令レイヤー別探索 vNext (docs/requirements/docs/layered_legal_evidence_retrieval_plan.md)
       AGENT_TIME_PROFILE_NAME: ${AGENT_TIME_PROFILE_NAME:-}
       AGENT_LAYERED_LEGAL_RETRIEVAL: ${AGENT_LAYERED_LEGAL_RETRIEVAL:-false}

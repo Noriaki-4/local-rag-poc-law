@@ -5,6 +5,12 @@ from pathlib import Path
 class Settings:
     opensearch_url = os.getenv("OPENSEARCH_URL", "http://localhost:9200")
     opensearch_index = os.getenv("OPENSEARCH_INDEX", "legal-rag-content")
+    opensearch_index_mapping = Path(
+        os.getenv(
+            "OPENSEARCH_INDEX_MAPPING",
+            "metadata/opensearch_index_mapping.sample.json",
+        )
+    )
     neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
     neo4j_user = os.getenv("NEO4J_USER", "neo4j")
     neo4j_password = os.getenv("NEO4J_PASSWORD", "password")
@@ -85,6 +91,60 @@ class Settings:
     judge_model = os.getenv("JUDGE_MODEL", "none")
     llm_timeout_sec = int(os.getenv("LLM_TIMEOUT_SEC", "90"))
     llm_max_context_chars = int(os.getenv("LLM_MAX_CONTEXT_CHARS", "12000"))
+
+    # ------------------------------------------------------------------------------
+    # LLM主導の法令調査
+    # activeでは旧planner/layered selectorを通さず、LLMが選んだ証拠を回答へ接続する。
+    # ------------------------------------------------------------------------------
+    agent_llm_directed_retrieval = os.getenv(
+        "AGENT_LLM_DIRECTED_RETRIEVAL", "false"
+    ).lower() in {"1", "true", "yes", "on"}
+    agent_llm_directed_retrieval_shadow = os.getenv(
+        "AGENT_LLM_DIRECTED_RETRIEVAL_SHADOW", "false"
+    ).lower() in {"1", "true", "yes", "on"}
+    llm_research_model = os.getenv("LLM_RESEARCH_MODEL") or answer_model
+    llm_research_max_tokens = max(
+        256, min(int(os.getenv("LLM_RESEARCH_MAX_TOKENS", "4096")), 16384)
+    )
+    llm_research_timeout_sec = max(
+        1, min(int(os.getenv("LLM_RESEARCH_TIMEOUT_SEC", "45")), 180)
+    )
+    llm_research_max_turns = max(
+        1, min(int(os.getenv("LLM_RESEARCH_MAX_TURNS", "3")), 8)
+    )
+    llm_research_max_actions_per_turn = max(
+        1, min(int(os.getenv("LLM_RESEARCH_MAX_ACTIONS_PER_TURN", "4")), 8)
+    )
+    llm_research_max_tool_calls = max(
+        1, min(int(os.getenv("LLM_RESEARCH_MAX_TOOL_CALLS", "8")), 24)
+    )
+    llm_research_search_top_k = max(
+        1, min(int(os.getenv("LLM_RESEARCH_SEARCH_TOP_K", "8")), 30)
+    )
+    # 文書が未確定の横断検索はノイズを抑え、documentId確定後の法令内検索は
+    # Article再現率を優先する。取得するのはArticleごとの代表chunkだけ。
+    llm_research_document_search_top_k = max(
+        1,
+        min(
+            int(os.getenv("LLM_RESEARCH_DOCUMENT_SEARCH_TOP_K", "30")),
+            60,
+        ),
+    )
+    llm_research_shadow_budget_sec = max(
+        1, min(int(os.getenv("LLM_RESEARCH_SHADOW_BUDGET_SEC", "60")), 180)
+    )
+    llm_research_active_budget_sec = max(
+        1, min(int(os.getenv("LLM_RESEARCH_ACTIVE_BUDGET_SEC", "90")), 180)
+    )
+    llm_research_max_evidence_items = max(
+        1, min(int(os.getenv("LLM_RESEARCH_MAX_EVIDENCE_ITEMS", "60")), 100)
+    )
+    llm_research_max_selected_evidence = max(
+        1, min(int(os.getenv("LLM_RESEARCH_MAX_SELECTED_EVIDENCE", "16")), 24)
+    )
+    llm_research_evidence_chars = max(
+        1000, min(int(os.getenv("LLM_RESEARCH_EVIDENCE_CHARS", "30000")), 50000)
+    )
 
     # ------------------------------------------------------------------------------
     # 法令レイヤー別探索 vNext (docs/requirements/docs/layered_legal_evidence_retrieval_plan.md)

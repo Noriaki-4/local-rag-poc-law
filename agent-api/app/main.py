@@ -55,6 +55,20 @@ def health() -> dict[str, Any]:
             "shadow": settings.agent_layered_legal_retrieval_shadow,
             "graphSchemaVersion": GRAPH_SCHEMA_VERSION,
         },
+        "llmDirectedLegalRetrieval": {
+            "available": True,
+            "active": settings.agent_llm_directed_retrieval,
+            "connectedToAnswer": settings.agent_llm_directed_retrieval,
+            "shadow": settings.agent_llm_directed_retrieval_shadow,
+            "model": settings.llm_research_model,
+            "maxTurns": settings.llm_research_max_turns,
+            "maxActionsPerTurn": settings.llm_research_max_actions_per_turn,
+            "maxToolCalls": settings.llm_research_max_tool_calls,
+            "globalSearchTopK": settings.llm_research_search_top_k,
+            "documentSearchTopK": settings.llm_research_document_search_top_k,
+            "activeBudgetSec": settings.llm_research_active_budget_sec,
+            "shadowBudgetSec": settings.llm_research_shadow_budget_sec,
+        },
     }
 
 
