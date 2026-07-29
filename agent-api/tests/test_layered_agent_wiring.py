@@ -223,6 +223,37 @@ class TestLLMDirectedRetrievalActive:
         assert response.citations[0].contentUnitId == "law-test-article-2"
         assert "planner" not in response.trace
 
+    def test_active_reports_provider_credit_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            agent_module.settings, "agent_llm_directed_retrieval", True
+        )
+        monkeypatch.setattr(
+            agent_module,
+            "run_llm_directed_research",
+            lambda **kwargs: SimpleNamespace(
+                selected_evidence=(),
+                trace={
+                    "mode": "active",
+                    "connectedToAnswer": True,
+                    "status": "provider_quota_error",
+                    "stopReason": "llm_provider_quota_error",
+                    "llmCallCount": 1,
+                    "toolCallCount": 0,
+                    "providerError": {
+                        "component": "llm_research_integrate",
+                    },
+                },
+            ),
+        )
+
+        response = _service().answer(_request())
+
+        assert "クレジットまたは利用枠が不足" in response.answer
+        assert "検索結果不足ではありません" in response.answer
+        assert response.citations == []
+
 class TestActiveFeatureFlag:
     def test_active_uses_new_context_when_primary_groups_are_covered(
         self, monkeypatch: pytest.MonkeyPatch

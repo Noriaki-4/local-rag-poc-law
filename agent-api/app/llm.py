@@ -18,9 +18,14 @@ from .legal_issue_planner import (
 )
 from .llm_directed_research import (
     EvidenceCatalog,
+    ResearchCheckpoint,
     ResearchTurn,
+    build_research_checkpoint_prompt,
     build_research_turn_prompt,
+    checkpoint_integration_prompt_content_ids,
+    parse_research_checkpoint,
     parse_research_turn,
+    research_checkpoint_json_schema,
     research_turn_json_schema,
 )
 from .models import AnswerRequest, Citation
@@ -120,6 +125,36 @@ class ResearchTurnResult:
         }
 
 
+@dataclass
+class ResearchCheckpointResult:
+    checkpoint: ResearchCheckpoint | None
+    provider: str
+    model: str
+    latencyMs: int
+    inputTokens: int | None
+    outputTokens: int | None
+    validationError: str | None = None
+    stopReason: str | None = None
+    promptContentUnitIds: tuple[str, ...] = ()
+
+    def as_trace(self) -> dict[str, Any]:
+        return {
+            "provider": self.provider,
+            "model": self.model,
+            "latencyMs": self.latencyMs,
+            "inputTokens": self.inputTokens,
+            "outputTokens": self.outputTokens,
+            "validationError": self.validationError,
+            "stopReason": self.stopReason,
+            "promptContentUnitIds": list(self.promptContentUnitIds),
+            "checkpoint": (
+                self.checkpoint.model_dump()
+                if self.checkpoint is not None
+                else None
+            ),
+        }
+
+
 class LLMChoiceAssessment(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -155,6 +190,8 @@ class EvidenceEvaluationPayload(BaseModel):
 
 
 class LLMClient:
+    supports_iterative_research = True
+
     def __init__(self) -> None:
         self.provider = settings.llm_provider.lower()
 
@@ -393,6 +430,10 @@ class LLMClient:
         remaining_tool_calls: int | None = None,
         finalize_only: bool = False,
         preferred_content_ids: tuple[str, ...] | list[str] = (),
+        phase: str | None = None,
+        cycle_index: int | None = None,
+        cycle_count: int | None = None,
+        checkpoint: ResearchCheckpoint | None = None,
     ) -> ResearchTurnResult:
         """調査手順を固定せず、次の操作または回答可能性をLLMへ判断させる。"""
         max_actions = (
@@ -416,19 +457,34 @@ class LLMClient:
             max_actions=max_actions,
             max_evidence_items=(
                 min(settings.llm_research_max_evidence_items, 32)
-                if finalize_only
-                else settings.llm_research_max_evidence_items
+                if finalize_only or phase == "deepen"
+                else (
+                    min(settings.llm_research_max_evidence_items, 20)
+                    if phase == "explore"
+                    else settings.llm_research_max_evidence_items
+                )
             ),
             evidence_chars=(
                 min(settings.llm_research_evidence_chars, 12000)
                 if finalize_only
-                else settings.llm_research_evidence_chars
+                else (
+                    min(
+                        settings.llm_research_evidence_chars,
+                        8000 if phase == "explore" else 12000,
+                    )
+                    if phase in {"explore", "deepen"}
+                    else settings.llm_research_evidence_chars
+                )
             ),
             remaining_turns=remaining_turns,
             remaining_tool_calls=remaining_tool_calls,
             finalize_only=finalize_only,
             max_selected_evidence=settings.llm_research_max_selected_evidence,
             preferred_content_ids=preferred_content_ids,
+            phase=phase,
+            cycle_index=cycle_index,
+            cycle_count=cycle_count,
+            checkpoint=checkpoint,
         )
         schema = research_turn_json_schema(
             max_actions=max_actions,
@@ -466,6 +522,77 @@ class LLMClient:
             validationError=validation_error,
             stopReason=stop_reason,
             retryCount=0,
+        )
+
+    def integrate_legal_research_cycle(
+        self,
+        request: AnswerRequest,
+        catalog: EvidenceCatalog,
+        checkpoint: ResearchCheckpoint,
+        *,
+        cycle_index: int,
+        cycle_count: int,
+        cycle_new_content_ids: tuple[str, ...] | list[str],
+        tool_history: list[dict[str, Any]] | None,
+        timeout_sec: int,
+    ) -> ResearchCheckpointResult:
+        prompt_content_unit_ids = checkpoint_integration_prompt_content_ids(
+            catalog=catalog,
+            checkpoint=checkpoint,
+            cycle_new_content_ids=cycle_new_content_ids,
+            tool_history=tool_history,
+            max_selected_evidence=(
+                settings.llm_research_max_selected_evidence
+            ),
+        )
+        prompt = build_research_checkpoint_prompt(
+            question=request.question,
+            choices=request.choices,
+            catalog=catalog,
+            checkpoint=checkpoint,
+            cycle_index=cycle_index,
+            cycle_count=cycle_count,
+            cycle_new_content_ids=cycle_new_content_ids,
+            tool_history=tool_history,
+            max_selected_evidence=(
+                settings.llm_research_max_selected_evidence
+            ),
+        )
+        schema = research_checkpoint_json_schema(
+            max_selected_evidence=(
+                settings.llm_research_max_selected_evidence
+            )
+        )
+        (
+            raw_text,
+            latency_ms,
+            input_tokens,
+            output_tokens,
+            stop_reason,
+        ) = self._json_transport(
+            prompt,
+            schema,
+            settings.llm_research_model,
+            settings.llm_research_integration_max_tokens,
+            timeout_sec,
+            effort=settings.llm_research_integration_effort,
+        )
+        parsed, validation_error = parse_research_checkpoint(
+            raw_text,
+            max_selected_evidence=(
+                settings.llm_research_max_selected_evidence
+            ),
+        )
+        return ResearchCheckpointResult(
+            checkpoint=parsed,
+            provider=self.provider,
+            model=settings.llm_research_model,
+            latencyMs=latency_ms,
+            inputTokens=input_tokens,
+            outputTokens=output_tokens,
+            validationError=validation_error,
+            stopReason=stop_reason,
+            promptContentUnitIds=prompt_content_unit_ids,
         )
 
     def evaluate_evidence(
@@ -624,12 +751,20 @@ class LLMClient:
         model: str,
         max_tokens: int,
         timeout_sec: int,
+        effort: str | None = None,
     ) -> tuple[str, int, int | None, int | None, str | None]:
         """provider共通のJSON生成トランスポート。(raw_text, latencyMs, inTokens, outTokens, stopReason)を返す。"""
         if self.provider == "ollama":
             return self._ollama_json(prompt, schema, model, timeout_sec)
         if self.provider == "anthropic":
-            return self._anthropic_json(prompt, schema, model, max_tokens, timeout_sec)
+            return self._anthropic_json(
+                prompt,
+                schema,
+                model,
+                max_tokens,
+                timeout_sec,
+                effort=effort,
+            )
         raise ValueError(f"Unsupported LLM_PROVIDER: {self.provider}")
 
     def _ollama_json(
@@ -668,10 +803,20 @@ class LLMClient:
         model: str,
         max_tokens: int,
         timeout_sec: int,
+        *,
+        effort: str | None = None,
     ) -> tuple[str, int, int | None, int | None, str | None]:
         if not settings.anthropic_api_key:
             raise ValueError("ANTHROPIC_API_KEY is required when LLM_PROVIDER=anthropic")
         started = perf_counter()
+        output_config: dict[str, Any] = {
+            "format": {
+                "type": "json_schema",
+                "schema": _to_anthropic_schema(schema),
+            }
+        }
+        if effort:
+            output_config["effort"] = effort
         response = requests.post(
             f"{settings.anthropic_base_url.rstrip('/')}/v1/messages",
             headers={
@@ -683,7 +828,7 @@ class LLMClient:
                 "model": model,
                 "max_tokens": max_tokens,
                 "messages": [{"role": "user", "content": prompt}],
-                "output_config": {"format": {"type": "json_schema", "schema": _to_anthropic_schema(schema)}},
+                "output_config": output_config,
             },
             timeout=timeout_sec,
         )
@@ -761,6 +906,10 @@ def _research_answer_rule(research_context: dict[str, Any] | None) -> str:
         return ""
     status = str(research_context.get("status") or "unknown")
     missing = research_context.get("missingEvidence") or []
+    research_conclusion = str(
+        research_context.get("researchConclusion") or ""
+    )
+    logical_structure = research_context.get("logicalStructure") or {}
     return "\n".join(
         [
             "この引用候補は、法令調査LLMが検索・本文確認を経て選択したものです。",
@@ -770,6 +919,10 @@ def _research_answer_rule(research_context: dict[str, Any] | None) -> str:
             "各事項は対応する引用候補で確認し、根拠を確認できない事項は推測せず未確認と明示してください。",
             "引用候補に無い法令知識で結論を補完せず、根拠が不足する部分は明示してください。",
             "ガイドは法令本文と区別し、法的結論の直接根拠にしないでください。",
+            f"反復調査の結論（根拠ではなく整理用）: {research_conclusion}",
+            "反復調査の法的論理構造（論点・結論・根拠関係の整理用。"
+            "法的根拠は必ず引用候補本文で再確認すること）: "
+            f"{json.dumps(logical_structure, ensure_ascii=False)}",
             f"調査状態: {status}",
             f"未確認の根拠: {json.dumps(missing, ensure_ascii=False)}",
         ]

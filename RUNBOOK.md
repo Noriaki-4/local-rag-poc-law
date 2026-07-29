@@ -366,15 +366,49 @@ contentUnitIdはコード側で拒否する。
 プログラム側の充足判定・根拠枠選抜を通らず、LLM主導調査だけで回答する。プログラムは
 検索・本文取得・ID検証・時間上限を担当し、LLMが候補比較、追加調査、根拠選択を行う。
 タイムアウトや根拠不足で終了した場合、旧方式へ黙って戻さず利用者向け回答とtraceへ明示する。
+Anthropic等のクレジット・利用枠不足は`provider_quota_error`として、投入資料の根拠不足や
+内部エラーと区別して表示する。
 
-最終ターンは追加検索を行わず、`ready`または`insufficient`と回答根拠を確定する。
-検索結果はArticleごとの代表chunkを提示し、必要なArticleだけを後続の`fetch_articles`で
-展開する。最終判断が形式不正や時間切れでも、直前に検証済みの根拠選択があれば
-`partial`として限定回答へ利用する。直前に直接取得したArticle本文も次ターンで優先表示し、
-最終判断が時間切れになった場合は限定回答の候補として保持する。
+3回の各調査サイクルで`explore → deepen → integrate`を実行する。サイクル間では生の
+検索履歴を引き継がず、原文ID付きの調査チェックポイントだけを継承する。全取得本文は
+証拠カタログへ保持するが、次サイクルへ自動提示するのはチェックポイントの
+`evidenceIds`、判断継続中の`openEvidenceIds`、未解決Article、およびそれらを結ぶ
+確認済みGraph関係だけとする。
+前サイクルで取得した未採用候補は、LLMの次サイクル入力へ再注入しない。必要になった場合は
+Article ID直接取得または再検索で明示的に読み直す。形式不正や時間切れでも、
+最後に検証済みのチェックポイントがあれば`partial`として限定回答へ利用する。
+チェックポイントは`status / conclusion / evidenceIds / openEvidenceIds /
+nextQuestions / nextArticleIds`に加え、
+`logicalStructure`へIssue単位の共有根拠DAGを保持する。各Issueが`authorityNodes`を
+一度だけ所有し、複数のClaimは`authorityNodeIds`で同じ根拠を共有参照する。
+`authorityNodes`は`parentNodeId`と`relationFromParent`で直接根拠から委任先・定義・例外・
+手続具体化・ガイドへのつながりを表す。親IDは同じIssue内だけを参照するため、
+正しい法令関係をClaimごとに複製せず圧縮できる。生の検索履歴や長い根拠選択理由は
+持ち越さない。
 Article直接取得時は、検証済みのGraph関係だけを1hop自動取得して関係先Article IDを
-次ターンへ提示する。関係先の本文取得と最終採否はLLMが判断する。
-最終ターンは操作履歴を要約し、本文を最大32件・12,000文字に抑える。
+提示する。Graph取得上限は起点Articleごとに適用し、複数起点の一つが候補を独占しない。
+取得済みGraph関係はバックエンドのカタログへ保持するが、同一サイクルでは新規関係を
+専用欄へ一度だけ提示し、ツール履歴には件数だけを残す。次サイクルではチェックポイントに
+残したArticle同士を結ぶ関係だけを提示する。提示時も起点Articleごとのラウンドロビンとする。
+起点Article、関係種別、到達先Article、
+法令名・条見出しを一組で渡し、関係先の本文取得と最終採否はLLMが判断する。
+各サイクルは残り時間を残サイクル数で配分し、統合LLM用の時間を先に予約する。
+統合失敗時に段階判断だけで`ready`へ昇格させず、`continue`の限定状態として扱う。
+統合JSONに未確認のArticle ID等が混じった場合は、IDを推測で補正せず、その項目だけを
+除外して検証済み部分を`continue`状態で次サイクルへ渡す。1項目の不正だけで、
+同じJSONにある確認済みArticleや未解決事項を全て失わない。
+中間サイクルの統合LLMがタイムアウトした場合も、`recoverableTimeouts`へ明示したうえで、
+直接取得本文を最大20件、直接取得前なら一般検索候補の文書別圧縮一覧を最大18件だけ
+1サイクルの回復バッファとして次回へ渡す。正常な統合では一般検索の未採用本文を
+統合入力へ含めず、直接取得本文・段階選択本文・確定根拠・判断中根拠を優先する。
+統合JSONの不正IDを除去した結果チェックポイントが空になった場合も、正常な統合として
+回復バッファを消さず、次サイクルの段階判断と統合判断へ再提示する。
+最終サイクルの統合まで
+タイムアウトした場合は従来どおり`timeout`または`partial`として利用者へ明示する。
+一度取得済みのArticleをLLMが再取得した場合も、カタログ差分が0件であっても今回返した
+本文を次段階で優先表示する。
+複数Articleの直接取得はArticleごとに最大100chunksを取得し、長い1条だけが他Articleを
+押し出さないようにする。LLMへの提示はArticle単位で分散するが、未提示本文は削除しない。
 documentId確定後の法令内検索は30 Article、未確定の横断検索は8 Articleとする。
 複数文書の候補は文書単位のラウンドロビンでLLMへ提示する。
 
@@ -392,14 +426,17 @@ AGENT_LLM_DIRECTED_RETRIEVAL=false
 AGENT_LLM_DIRECTED_RETRIEVAL_SHADOW=false
 LLM_RESEARCH_MODEL=
 LLM_RESEARCH_MAX_TOKENS=4096
-LLM_RESEARCH_TIMEOUT_SEC=45
+LLM_RESEARCH_INTEGRATION_MAX_TOKENS=8192
+LLM_RESEARCH_INTEGRATION_EFFORT=low
+LLM_RESEARCH_TIMEOUT_SEC=90
 LLM_RESEARCH_MAX_TURNS=3
 LLM_RESEARCH_MAX_ACTIONS_PER_TURN=4
-LLM_RESEARCH_MAX_TOOL_CALLS=8
+LLM_RESEARCH_MAX_TOOL_CALLS=18
 LLM_RESEARCH_SEARCH_TOP_K=8
 LLM_RESEARCH_DOCUMENT_SEARCH_TOP_K=30
-LLM_RESEARCH_ACTIVE_BUDGET_SEC=90
-LLM_RESEARCH_SHADOW_BUDGET_SEC=60
+LLM_RESEARCH_MAX_CHUNKS_PER_ARTICLE=100
+LLM_RESEARCH_ACTIVE_BUDGET_SEC=360
+LLM_RESEARCH_SHADOW_BUDGET_SEC=180
 LLM_RESEARCH_MAX_EVIDENCE_ITEMS=60
 LLM_RESEARCH_MAX_SELECTED_EVIDENCE=16
 LLM_RESEARCH_EVIDENCE_CHARS=30000

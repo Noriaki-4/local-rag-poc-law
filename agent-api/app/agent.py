@@ -611,6 +611,11 @@ class AgentService:
                 answer = (
                     "法令調査LLMへの接続に失敗したため、必要な根拠を確認できず回答を中止しました。"
                 )
+            elif status == "provider_quota_error":
+                answer = (
+                    "法令調査LLMのクレジットまたは利用枠が不足しているため、"
+                    "調査を完了できませんでした。検索結果不足ではありません。"
+                )
             elif status == "not_started":
                 answer = (
                     "回答生成時間を確保すると法令調査の時間が残らないため、根拠付きで回答できません。"
@@ -646,8 +651,30 @@ class AgentService:
         research_context = {
             "status": research_trace.get("status"),
             "stopReason": research_trace.get("stopReason"),
-            "missingEvidence": last_decision.get("missingEvidence") or [],
-            "selectedEvidence": last_decision.get("selectedEvidence") or [],
+            "missingEvidence": (
+                (research_trace.get("checkpoint") or {}).get(
+                    "nextQuestions"
+                )
+                or last_decision.get("missingEvidence")
+                or []
+            ),
+            "selectedEvidence": (
+                (research_trace.get("checkpoint") or {}).get(
+                    "evidenceIds"
+                )
+                or last_decision.get("selectedEvidence")
+                or []
+            ),
+            "researchConclusion": (
+                (research_trace.get("checkpoint") or {}).get("conclusion")
+                or ""
+            ),
+            "logicalStructure": (
+                (research_trace.get("checkpoint") or {}).get(
+                    "logicalStructure"
+                )
+                or {}
+            ),
         }
         _append_route(route, "answer_composer")
         answer_text, predicted_answer, judgements, _ = self._compose_answer(

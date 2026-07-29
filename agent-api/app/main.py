@@ -57,15 +57,26 @@ def health() -> dict[str, Any]:
         },
         "llmDirectedLegalRetrieval": {
             "available": True,
+            "algorithm": "iterative_cycles_v5_state_compression",
             "active": settings.agent_llm_directed_retrieval,
             "connectedToAnswer": settings.agent_llm_directed_retrieval,
             "shadow": settings.agent_llm_directed_retrieval_shadow,
             "model": settings.llm_research_model,
+            "stageMaxTokens": settings.llm_research_max_tokens,
+            "integrationMaxTokens": (
+                settings.llm_research_integration_max_tokens
+            ),
+            "integrationEffort": (
+                settings.llm_research_integration_effort
+            ),
             "maxTurns": settings.llm_research_max_turns,
             "maxActionsPerTurn": settings.llm_research_max_actions_per_turn,
             "maxToolCalls": settings.llm_research_max_tool_calls,
             "globalSearchTopK": settings.llm_research_search_top_k,
             "documentSearchTopK": settings.llm_research_document_search_top_k,
+            "maxChunksPerArticle": (
+                settings.llm_research_max_chunks_per_article
+            ),
             "activeBudgetSec": settings.llm_research_active_budget_sec,
             "shadowBudgetSec": settings.llm_research_shadow_budget_sec,
         },

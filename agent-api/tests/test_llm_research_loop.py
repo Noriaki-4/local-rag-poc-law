@@ -5,7 +5,7 @@ from time import perf_counter
 import requests
 
 from app.config import settings
-from app.llm import ResearchTurnResult
+from app.llm import ResearchCheckpointResult, ResearchTurnResult
 from app.llm_directed_research import (
     RESEARCH_STATUS_CONTINUE,
     RESEARCH_STATUS_INSUFFICIENT,
@@ -15,10 +15,16 @@ from app.llm_directed_research import (
     TOOL_SEARCH_CORPUS,
     EvidenceCatalog,
     ResearchAction,
+    ResearchAuthorityNode,
+    ResearchClaimStructure,
+    ResearchCheckpoint,
     ResearchEvidenceSelection,
+    ResearchIssueStructure,
+    ResearchLogicalStructure,
     ResearchTurn,
 )
 from app.llm_research_loop import (
+    _checkpoint_from_stage_selection,
     run_llm_directed_research,
     run_llm_directed_research_shadow,
 )
@@ -176,6 +182,335 @@ def test_loop_searches_then_selects_only_retrieved_evidence(monkeypatch) -> None
     assert outcome.selected_evidence[0]["text"] == "許可を受けなければならない。"
 
 
+def test_iterative_loop_runs_three_complete_cycles_and_carries_checkpoint(
+    monkeypatch,
+) -> None:
+    class IterativeLLM:
+        supports_iterative_research = True
+
+        def __init__(self) -> None:
+            self.stage_calls: list[dict] = []
+            self.integration_calls: list[dict] = []
+
+        def decide_legal_research_turn(
+            self,
+            request,
+            catalog,
+            history,
+            timeout_sec,
+            *,
+            phase=None,
+            cycle_index=None,
+            checkpoint=None,
+            **kwargs,
+        ):
+            self.stage_calls.append(
+                {
+                    "phase": phase,
+                    "cycleIndex": cycle_index,
+                    "checkpointConclusion": checkpoint.conclusion,
+                    "checkpointNextArticleIds": tuple(
+                        checkpoint.nextArticleIds
+                    ),
+                    "checkpointIssueIds": tuple(
+                        issue.issueId
+                        for issue in checkpoint.logicalStructure.issues
+                    ),
+                    "historyLength": len(history),
+                }
+            )
+            if phase == "explore" and cycle_index == 0:
+                return _result(
+                    ResearchTurn(
+                        status=RESEARCH_STATUS_CONTINUE,
+                        actions=[
+                            ResearchAction(
+                                tool=TOOL_SEARCH_CORPUS,
+                                query="許可",
+                                docTypes=["law"],
+                            )
+                        ],
+                    )
+                )
+            return _result(
+                ResearchTurn(
+                    status=RESEARCH_STATUS_READY,
+                    selectedEvidence=[
+                        ResearchEvidenceSelection(
+                            contentUnitId=(
+                                "law-a-article-12-paragraph-1"
+                            )
+                        )
+                    ],
+                )
+            )
+
+        def integrate_legal_research_cycle(
+            self,
+            request,
+            catalog,
+            checkpoint,
+            *,
+            cycle_index,
+            cycle_count,
+            cycle_new_content_ids,
+            tool_history,
+            timeout_sec,
+        ):
+            self.integration_calls.append(
+                {
+                    "cycleIndex": cycle_index,
+                    "previousConclusion": checkpoint.conclusion,
+                    "newIds": tuple(cycle_new_content_ids),
+                }
+            )
+            integrated = ResearchCheckpoint(
+                status=RESEARCH_STATUS_READY,
+                conclusion=f"cycle-{cycle_index + 1}",
+                evidenceIds=["law-a-article-12-paragraph-1"],
+                nextQuestions=[],
+                nextArticleIds=["law-a-article-12"],
+                logicalStructure=ResearchLogicalStructure(
+                    issues=[
+                        ResearchIssueStructure(
+                            issueId="permit",
+                            question="許可義務",
+                            status="verified",
+                            authorityNodes=[
+                                ResearchAuthorityNode(
+                                    nodeId="act-12",
+                                    articleId="law-a-article-12",
+                                    title="テスト法第十二条",
+                                    legalRole="直接根拠",
+                                    verificationStatus="text_verified",
+                                    evidenceIds=[
+                                        "law-a-article-12-paragraph-1"
+                                    ],
+                                )
+                            ],
+                            claims=[
+                                ResearchClaimStructure(
+                                    claimId="permit-required",
+                                    conclusion="許可が必要",
+                                    status="verified",
+                                    authorityNodeIds=["act-12"],
+                                )
+                            ],
+                        )
+                    ]
+                ),
+            )
+            return ResearchCheckpointResult(
+                checkpoint=integrated,
+                provider="test",
+                model="test",
+                latencyMs=1,
+                inputTokens=1,
+                outputTokens=1,
+            )
+
+    monkeypatch.setattr(settings, "llm_timeout_sec", 10)
+    monkeypatch.setattr(settings, "agent_answer_reserve_sec", 10)
+    monkeypatch.setattr(settings, "llm_research_active_budget_sec", 120)
+    monkeypatch.setattr(settings, "llm_research_max_turns", 3)
+    monkeypatch.setattr(settings, "llm_research_max_tool_calls", 18)
+    llm = IterativeLLM()
+
+    outcome = run_llm_directed_research(
+        request=AnswerRequest(question="許可の根拠は何ですか"),
+        os_client=FakeOpenSearch(),
+        graph_client=FakeGraph(),
+        llm_client=llm,
+        deadline=perf_counter() + 150,
+    )
+
+    assert (
+        outcome.trace["algorithm"]
+        == "iterative_cycles_v5_state_compression"
+    )
+    assert outcome.trace["cycleCount"] == 3
+    assert outcome.trace["llmCallCount"] == 9
+    assert [call["phase"] for call in llm.stage_calls] == [
+        "explore",
+        "deepen",
+        "explore",
+        "deepen",
+        "explore",
+        "deepen",
+    ]
+    assert [
+        call["checkpointConclusion"]
+        for call in llm.stage_calls
+        if call["phase"] == "explore"
+    ] == ["", "cycle-1", "cycle-2"]
+    assert [
+        call["historyLength"]
+        for call in llm.stage_calls
+        if call["phase"] == "explore"
+    ] == [0, 0, 0]
+    assert [
+        call["checkpointNextArticleIds"]
+        for call in llm.stage_calls
+        if call["phase"] == "explore"
+    ] == [
+        (),
+        ("law-a-article-12",),
+        ("law-a-article-12",),
+    ]
+    assert [
+        call["checkpointIssueIds"]
+        for call in llm.stage_calls
+        if call["phase"] == "explore"
+    ] == [(), ("permit",), ("permit",)]
+    assert llm.integration_calls[0]["newIds"] == ()
+    assert outcome.trace["status"] == RESEARCH_STATUS_READY
+    assert outcome.selected_content_unit_ids == (
+        "law-a-article-12-paragraph-1",
+    )
+
+
+def test_integration_failure_keeps_last_stage_evidence_selection() -> None:
+    catalog = EvidenceCatalog()
+    catalog.add_results([_law_source()])
+    checkpoint = ResearchCheckpoint(
+        status=RESEARCH_STATUS_CONTINUE,
+        conclusion="前回の状態",
+    )
+    stage_turn = ResearchTurn(
+        status=RESEARCH_STATUS_READY,
+        selectedEvidence=[
+            ResearchEvidenceSelection(
+                contentUnitId="law-a-article-12-paragraph-1",
+                reason="直前に確認した根拠",
+            )
+        ],
+    )
+
+    recovered = _checkpoint_from_stage_selection(
+        checkpoint,
+        stage_turn,
+        catalog,
+    )
+
+    assert recovered.status == RESEARCH_STATUS_CONTINUE
+    assert recovered.conclusion == "前回の状態"
+    assert recovered.evidenceIds == [
+        "law-a-article-12-paragraph-1"
+    ]
+
+
+def test_intermediate_integration_timeout_continues_to_next_cycle(
+    monkeypatch,
+) -> None:
+    class RecoveringIntegrationLLM:
+        supports_iterative_research = True
+
+        def __init__(self) -> None:
+            self.preferred_by_cycle: list[tuple[int | None, tuple[str, ...]]] = []
+            self.integration_ids_by_cycle: list[
+                tuple[int, tuple[str, ...]]
+            ] = []
+
+        def decide_legal_research_turn(
+            self, request, catalog, history, timeout_sec, **kwargs
+        ):
+            self.preferred_by_cycle.append(
+                (
+                    kwargs.get("cycle_index"),
+                    tuple(kwargs.get("preferred_content_ids") or ()),
+                )
+            )
+            if kwargs.get("cycle_index") == 0:
+                return _result(
+                    ResearchTurn(
+                        status=RESEARCH_STATUS_CONTINUE,
+                        actions=[
+                            ResearchAction(
+                                tool=TOOL_SEARCH_CORPUS,
+                                query="許可",
+                                docTypes=["law"],
+                            )
+                        ],
+                    )
+                )
+            return _result(
+                ResearchTurn(
+                    status=RESEARCH_STATUS_READY,
+                    selectedEvidence=[
+                        ResearchEvidenceSelection(
+                            contentUnitId=(
+                                "law-a-article-12-paragraph-1"
+                            )
+                        )
+                    ],
+                )
+            )
+
+        def integrate_legal_research_cycle(
+            self,
+            request,
+            catalog,
+            checkpoint,
+            *,
+            cycle_index,
+            **kwargs,
+        ):
+            self.integration_ids_by_cycle.append(
+                (
+                    cycle_index,
+                    tuple(kwargs.get("cycle_new_content_ids") or ()),
+                )
+            )
+            if cycle_index == 0:
+                raise requests.ReadTimeout("temporary integration timeout")
+            return ResearchCheckpointResult(
+                checkpoint=ResearchCheckpoint(
+                    status=RESEARCH_STATUS_READY,
+                    conclusion="許可が必要",
+                    evidenceIds=[
+                        "law-a-article-12-paragraph-1"
+                    ],
+                ),
+                provider="test",
+                model="test",
+                latencyMs=1,
+                inputTokens=1,
+                outputTokens=1,
+            )
+
+    monkeypatch.setattr(settings, "llm_timeout_sec", 10)
+    monkeypatch.setattr(settings, "agent_answer_reserve_sec", 10)
+    monkeypatch.setattr(settings, "llm_research_active_budget_sec", 120)
+    monkeypatch.setattr(settings, "llm_research_max_turns", 3)
+
+    llm = RecoveringIntegrationLLM()
+    outcome = run_llm_directed_research(
+        request=AnswerRequest(question="許可の根拠は何ですか"),
+        os_client=FakeOpenSearch(),
+        graph_client=FakeGraph(),
+        llm_client=llm,
+        deadline=perf_counter() + 150,
+    )
+
+    assert outcome.trace["status"] == RESEARCH_STATUS_READY
+    assert outcome.trace["cycleCount"] == 3
+    assert outcome.trace["recoverableTimeouts"][0]["cycleIndex"] == 0
+    assert "timeout" not in outcome.trace
+    assert outcome.selected_content_unit_ids == (
+        "law-a-article-12-paragraph-1",
+    )
+    assert any(
+        cycle_index == 1
+        and "law-a-article-12-paragraph-1" in preferred
+        for cycle_index, preferred in llm.preferred_by_cycle
+    )
+    assert any(
+        cycle_index == 1
+        and "law-a-article-12-paragraph-1" in content_ids
+        for cycle_index, content_ids in llm.integration_ids_by_cycle
+    )
+
+
 def test_active_loop_connects_llm_selection_to_answer_evidence(monkeypatch) -> None:
     monkeypatch.setattr(settings, "llm_timeout_sec", 60)
     monkeypatch.setattr(settings, "agent_answer_reserve_sec", 30)
@@ -331,6 +666,36 @@ def test_llm_connection_error_is_distinct_from_timeout(monkeypatch) -> None:
     )
 
 
+def test_provider_credit_error_is_distinct_from_missing_evidence(
+    monkeypatch,
+) -> None:
+    class CreditFailureLLM:
+        supports_iterative_research = True
+
+        def decide_legal_research_turn(self, *args, **kwargs):
+            raise ValueError(
+                "400: Your credit balance is too low. "
+                "Please go to Plans & Billing to purchase credits."
+            )
+
+    monkeypatch.setattr(settings, "llm_timeout_sec", 10)
+    monkeypatch.setattr(settings, "agent_answer_reserve_sec", 10)
+
+    outcome = run_llm_directed_research_shadow(
+        request=AnswerRequest(question="根拠は何ですか"),
+        os_client=FakeOpenSearch(),
+        graph_client=FakeGraph(),
+        llm_client=CreditFailureLLM(),
+        deadline=perf_counter() + 100,
+    )
+
+    assert outcome.trace["status"] == "provider_quota_error"
+    assert outcome.trace["stopReason"] == "llm_provider_quota_error"
+    assert outcome.trace["providerError"]["component"] == (
+        "llm_research_explore"
+    )
+
+
 def test_gateway_fetch_and_graph_accept_only_cataloged_article() -> None:
     catalog = EvidenceCatalog()
     catalog.add_results([_law_source()])
@@ -366,10 +731,53 @@ def test_gateway_fetch_and_graph_accept_only_cataloged_article() -> None:
     assert fetch.as_trace(fetch_action)["autoGraphArticleIds"] == [
         "law-b-article-3"
     ]
+    assert fetch.as_trace(fetch_action)["graphRelations"] == [
+        {
+            "fromArticleId": "law-a-article-12",
+            "fromDocumentId": "",
+            "fromTitle": "",
+            "fromHeading": "",
+            "edgeType": "IMPLEMENTS",
+            "toArticleId": "law-b-article-3",
+            "toDocumentId": "",
+            "toTitle": "",
+            "toHeading": "",
+            "relationSource": "subordinate_law_parent_reference",
+            "relationConfidence": 0.98,
+        }
+    ]
     assert "law-b-article-3" in catalog.known_article_ids
     assert len(graph_client.calls) == 2
     assert all(call["max_depth"] == 1 for call in graph_client.calls)
-    assert os_client.fetch_max_chunks == [settings.llm_research_search_top_k]
+    assert os_client.fetch_max_chunks == [
+        settings.llm_research_max_chunks_per_article
+    ]
+
+
+def test_gateway_returns_existing_fetched_content_for_next_prompt() -> None:
+    catalog = EvidenceCatalog()
+    catalog.add_results([_law_source()])
+    gateway = LegalResearchToolGateway(FakeOpenSearch(), FakeGraph())
+    action = ResearchAction(
+        tool=TOOL_FETCH_ARTICLES,
+        articleIds=["law-a-article-12"],
+    )
+
+    result = gateway.execute(
+        action,
+        catalog,
+        user_clearance_level=2,
+        timeout_sec=5,
+    )
+
+    assert result.new_evidence_count == 0
+    assert result.new_content_unit_ids == ()
+    assert result.returned_content_unit_ids == (
+        "law-a-article-12-paragraph-1",
+    )
+    assert result.as_trace(action)["returnedContentUnitIds"] == [
+        "law-a-article-12-paragraph-1"
+    ]
 
 
 def test_gateway_allocates_enough_chunks_for_multiple_fetched_articles() -> None:
@@ -392,8 +800,13 @@ def test_gateway_allocates_enough_chunks_for_multiple_fetched_articles() -> None
     )
 
     assert result.error is None
+    assert os_client.fetch_calls == [
+        ["law-a-article-12"],
+        ["law-b-article-3"],
+    ]
     assert os_client.fetch_max_chunks == [
-        settings.llm_research_search_top_k * 2
+        settings.llm_research_max_chunks_per_article,
+        settings.llm_research_max_chunks_per_article,
     ]
 
 

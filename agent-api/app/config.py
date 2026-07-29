@@ -43,7 +43,10 @@ class Settings:
     agent_max_total_tool_calls = max(1, min(int(os.getenv("AGENT_MAX_TOTAL_TOOL_CALLS", "8")), 16))
     agent_max_graph_hop = max(1, min(int(os.getenv("AGENT_MAX_GRAPH_HOP", "1")), 3))
     agent_max_graph_paths = max(1, min(int(os.getenv("AGENT_MAX_GRAPH_PATHS", "10")), 50))
-    agent_max_wall_time_sec = max(10, min(int(os.getenv("AGENT_MAX_WALL_TIME_SEC", "110")), 300))
+    agent_max_wall_time_sec = max(
+        10,
+        min(int(os.getenv("AGENT_MAX_WALL_TIME_SEC", "110")), 600),
+    )
     agent_answer_reserve_sec = max(
         1,
         min(
@@ -106,8 +109,31 @@ class Settings:
     llm_research_max_tokens = max(
         256, min(int(os.getenv("LLM_RESEARCH_MAX_TOKENS", "4096")), 16384)
     )
+    llm_research_integration_max_tokens = max(
+        512,
+        min(
+            int(
+                os.getenv(
+                    "LLM_RESEARCH_INTEGRATION_MAX_TOKENS",
+                    "8192",
+                )
+            ),
+            16384,
+        ),
+    )
+    llm_research_integration_effort = os.getenv(
+        "LLM_RESEARCH_INTEGRATION_EFFORT",
+        "low",
+    ).lower()
+    if llm_research_integration_effort not in {
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+    }:
+        llm_research_integration_effort = "low"
     llm_research_timeout_sec = max(
-        1, min(int(os.getenv("LLM_RESEARCH_TIMEOUT_SEC", "45")), 180)
+        1, min(int(os.getenv("LLM_RESEARCH_TIMEOUT_SEC", "90")), 180)
     )
     llm_research_max_turns = max(
         1, min(int(os.getenv("LLM_RESEARCH_MAX_TURNS", "3")), 8)
@@ -116,7 +142,7 @@ class Settings:
         1, min(int(os.getenv("LLM_RESEARCH_MAX_ACTIONS_PER_TURN", "4")), 8)
     )
     llm_research_max_tool_calls = max(
-        1, min(int(os.getenv("LLM_RESEARCH_MAX_TOOL_CALLS", "8")), 24)
+        1, min(int(os.getenv("LLM_RESEARCH_MAX_TOOL_CALLS", "18")), 36)
     )
     llm_research_search_top_k = max(
         1, min(int(os.getenv("LLM_RESEARCH_SEARCH_TOP_K", "8")), 30)
@@ -130,11 +156,23 @@ class Settings:
             60,
         ),
     )
+    llm_research_max_chunks_per_article = max(
+        1,
+        min(
+            int(
+                os.getenv(
+                    "LLM_RESEARCH_MAX_CHUNKS_PER_ARTICLE",
+                    "100",
+                )
+            ),
+            200,
+        ),
+    )
     llm_research_shadow_budget_sec = max(
-        1, min(int(os.getenv("LLM_RESEARCH_SHADOW_BUDGET_SEC", "60")), 180)
+        1, min(int(os.getenv("LLM_RESEARCH_SHADOW_BUDGET_SEC", "180")), 300)
     )
     llm_research_active_budget_sec = max(
-        1, min(int(os.getenv("LLM_RESEARCH_ACTIVE_BUDGET_SEC", "90")), 180)
+        1, min(int(os.getenv("LLM_RESEARCH_ACTIVE_BUDGET_SEC", "360")), 450)
     )
     llm_research_max_evidence_items = max(
         1, min(int(os.getenv("LLM_RESEARCH_MAX_EVIDENCE_ITEMS", "60")), 100)

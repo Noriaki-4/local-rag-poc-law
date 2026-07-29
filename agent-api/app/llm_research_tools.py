@@ -13,10 +13,13 @@ from .llm_directed_research import (
     TOOL_SEARCH_CORPUS,
     EvidenceCatalog,
     ResearchAction,
+    compact_graph_relations,
 )
 from .opensearch_client import OpenSearchClient, RequirementSearchSpec
 
 AUTO_GRAPH_TIMEOUT_SEC = 5.0
+GRAPH_PATHS_PER_ARTICLE = 50
+GRAPH_RELATIONS_PER_TOOL_RESULT = 50
 
 
 @dataclass(frozen=True)
@@ -28,9 +31,11 @@ class ResearchToolExecution:
     elapsed_ms: int
     error: str | None = None
     new_content_unit_ids: tuple[str, ...] = ()
+    returned_content_unit_ids: tuple[str, ...] = ()
     new_article_ids: tuple[str, ...] = ()
     auto_graph_path_count: int = 0
     auto_graph_article_ids: tuple[str, ...] = ()
+    graph_relations: tuple[dict[str, Any], ...] = ()
     auto_graph_error: str | None = None
 
     def as_trace(self, action: ResearchAction) -> dict[str, Any]:
@@ -54,9 +59,14 @@ class ResearchToolExecution:
             trace["newArticleIds"] = list(self.new_article_ids)
         if self.tool == TOOL_FETCH_ARTICLES:
             trace["newContentUnitIds"] = list(self.new_content_unit_ids)
+            trace["returnedContentUnitIds"] = list(
+                self.returned_content_unit_ids
+            )
             trace["autoGraphPathCount"] = self.auto_graph_path_count
             trace["autoGraphArticleIds"] = list(self.auto_graph_article_ids)
             trace["autoGraphError"] = self.auto_graph_error
+        if self.tool in {TOOL_FETCH_ARTICLES, TOOL_EXPAND_GRAPH}:
+            trace["graphRelations"] = list(self.graph_relations)
         return trace
 
 
@@ -88,6 +98,8 @@ class LegalResearchToolGateway:
         articles_before = set(catalog.known_article_ids)
         auto_graph_path_count = 0
         auto_graph_article_ids: tuple[str, ...] = ()
+        returned_content_unit_ids: tuple[str, ...] = ()
+        graph_relations: tuple[dict[str, Any], ...] = ()
         auto_graph_error: str | None = None
         try:
             unknown_documents = sorted(
@@ -112,27 +124,39 @@ class LegalResearchToolGateway:
                     timeout_sec=timeout_sec,
                 )
             elif action.tool == TOOL_FETCH_ARTICLES:
-                results = self.os_client.get_by_article_ids(
-                    action.articleIds,
-                    user_clearance_level,
-                    max_chunks=max(
-                        settings.llm_research_search_top_k,
-                        len(action.articleIds)
-                        * settings.llm_research_search_top_k,
-                    ),
-                )
+                # 複数Articleを1つのglobal sizeで取得すると、項号の多い最初の条が
+                # 枠を独占する。Articleごとに独立した取得上限を適用し、全Articleを
+                # 証拠カタログへ保存する。LLMへの提示量は別の文字予算で制御する。
+                results: list[dict[str, Any]] = []
+                for article_id in dict.fromkeys(action.articleIds):
+                    results.extend(
+                        self.os_client.get_by_article_ids(
+                            [article_id],
+                            user_clearance_level,
+                            max_chunks=(
+                                settings.llm_research_max_chunks_per_article
+                            ),
+                        )
+                    )
                 result_count = len(results)
                 catalog.add_results(results)
+                returned_content_unit_ids = tuple(
+                    dict.fromkeys(
+                        content_unit_id
+                        for item in results
+                        if (
+                            content_unit_id := _content_unit_id(item)
+                        )
+                    )
+                )
                 # LLMがArticleを選んだ時点で、seed時に本文根拠を検証済みの
                 # 委任・準用・参照関係だけを1hop取得する。関係先を採用するか、
                 # さらに本文を取得するかは次ターンのLLM判断へ委ねる。
                 graph_articles_before = set(catalog.known_article_ids)
                 try:
-                    paths = self.graph_client.paths_from_many(
+                    paths = self._graph_paths_per_article(
                         action.articleIds,
                         edge_types=list(expandable_edge_types()),
-                        max_depth=1,
-                        limit=settings.agent_max_graph_paths,
                         user_clearance_level=user_clearance_level,
                         timeout_sec=max(
                             0.1,
@@ -145,6 +169,12 @@ class LegalResearchToolGateway:
                     trusted_paths = _trusted_graph_paths(paths)
                     auto_graph_path_count = len(trusted_paths)
                     catalog.add_graph_paths(trusted_paths)
+                    graph_relations = tuple(
+                        _diversify_graph_relations(
+                            compact_graph_relations(trusted_paths),
+                            max_items=GRAPH_RELATIONS_PER_TOOL_RESULT,
+                        )
+                    )
                     auto_graph_article_ids = tuple(
                         article_id
                         for article_id in catalog.known_article_ids
@@ -153,17 +183,21 @@ class LegalResearchToolGateway:
                 except Exception as exc:  # noqa: BLE001 - 本文取得は成功扱いのまま残す
                     auto_graph_error = f"{type(exc).__name__}: {exc}"
             elif action.tool == TOOL_EXPAND_GRAPH:
-                paths = self.graph_client.paths_from_many(
+                paths = self._graph_paths_per_article(
                     action.articleIds,
                     edge_types=action.edgeTypes or None,
-                    max_depth=1,
-                    limit=settings.agent_max_graph_paths,
                     user_clearance_level=user_clearance_level,
                     timeout_sec=max(0.1, timeout_sec),
                 )
                 trusted_paths = _trusted_graph_paths(paths)
                 result_count = len(trusted_paths)
                 catalog.add_graph_paths(trusted_paths)
+                graph_relations = tuple(
+                    _diversify_graph_relations(
+                        compact_graph_relations(trusted_paths),
+                        max_items=GRAPH_RELATIONS_PER_TOOL_RESULT,
+                    )
+                )
             else:  # ResearchActionのschemaで通常は到達しない
                 raise ValueError(f"unsupported research tool: {action.tool}")
             error = None
@@ -182,6 +216,7 @@ class LegalResearchToolGateway:
                 for content_unit_id in catalog.content_unit_ids
                 if content_unit_id not in evidence_before
             ),
+            returned_content_unit_ids=returned_content_unit_ids,
             new_article_ids=tuple(
                 article_id
                 for article_id in catalog.known_article_ids
@@ -189,8 +224,36 @@ class LegalResearchToolGateway:
             ),
             auto_graph_path_count=auto_graph_path_count,
             auto_graph_article_ids=auto_graph_article_ids,
+            graph_relations=graph_relations,
             auto_graph_error=auto_graph_error,
         )
+
+    def _graph_paths_per_article(
+        self,
+        article_ids: list[str],
+        *,
+        edge_types: list[str] | None,
+        user_clearance_level: int,
+        timeout_sec: float,
+    ) -> list[dict[str, Any]]:
+        """起点ごとの上限を分け、一つのArticleがGraph候補を独占しないようにする。"""
+        started = perf_counter()
+        paths: list[dict[str, Any]] = []
+        for article_id in dict.fromkeys(article_ids):
+            remaining = timeout_sec - (perf_counter() - started)
+            if remaining <= 0.1:
+                break
+            paths.extend(
+                self.graph_client.paths_from_many(
+                    [article_id],
+                    edge_types=edge_types,
+                    max_depth=1,
+                    limit=GRAPH_PATHS_PER_ARTICLE,
+                    user_clearance_level=user_clearance_level,
+                    timeout_sec=max(0.1, remaining),
+                )
+            )
+        return paths
 
     def _search(
         self,
@@ -266,3 +329,38 @@ def _trusted_graph_paths(paths: list[dict[str, Any]]) -> list[dict[str, Any]]:
             for edge in path.get("edges") or []
         )
     ]
+
+
+def _diversify_graph_relations(
+    relations: list[dict[str, Any]],
+    *,
+    max_items: int,
+) -> list[dict[str, Any]]:
+    """Graph関係を起点Articleごとのラウンドロビンで圧縮する。"""
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for relation in relations:
+        key = str(relation.get("fromArticleId") or "__unknown__")
+        groups.setdefault(key, []).append(relation)
+    output: list[dict[str, Any]] = []
+    offsets = {key: 0 for key in groups}
+    while len(output) < max(0, max_items):
+        added = False
+        for key, items in groups.items():
+            offset = offsets[key]
+            if offset >= len(items):
+                continue
+            output.append(items[offset])
+            offsets[key] = offset + 1
+            added = True
+            if len(output) >= max_items:
+                break
+        if not added:
+            break
+    return output
+
+
+def _content_unit_id(item: dict[str, Any]) -> str:
+    source = item.get("document") or item.get("source") or item
+    if not isinstance(source, dict):
+        return ""
+    return str(source.get("contentUnitId") or "")
