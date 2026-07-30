@@ -265,18 +265,20 @@ class ExampleEvaluationTest(unittest.TestCase):
             for item in EXAMPLE_QUESTIONS
             if item.title == "少人数への株式の勧誘（少人数私募）"
         )
-        answer = (
-            "50名未満で、過去3ヶ月の勧誘人数と合算します。"
-            "転売制限を設け、未届出であることを告知して書面を交付します。"
+        answers = (
+            "50名未満で、過去3ヶ月の勧誘人数と合算します。",
+            "発行日以前3か月以内の勧誘人数と合計し、3か月通算で判定します。",
+            "発行日前3月以内の勧誘人数と合計して判定します。",
         )
 
-        evaluation = evaluate_example(example, [], answer)
-
-        assert next(
-            item
-            for item in evaluation.answer_point_statuses
-            if item.name == "過去3か月の勧誘人数との合算"
-        ).reached
+        for answer in answers:
+            with self.subTest(answer=answer):
+                evaluation = evaluate_example(example, [], answer)
+                assert next(
+                    item
+                    for item in evaluation.answer_point_statuses
+                    if item.name == "過去3か月の勧誘人数との合算"
+                ).reached
 
     def test_answer_point_accepts_plain_language_for_normal_wear(self):
         from example_questions import evaluate_example
