@@ -93,6 +93,7 @@ OpenSearch投入サンプルは非ゼロのダミーベクトルを含むが、�
 - `docs/layered_legal_evidence_retrieval_plan.md`: 法令レイヤー・法的役割別の根拠探索vNext設計・実装計画
 - `docs/graph_edge_construction.md`: Graphエッジ構築方式
 - `docs/llm_and_cost_config.md`: LLM選定・固定変数・コスト前提
+- `docs/legal_rag_project_checklist.md`: 類似法令RAG案件で再利用する設計・評価チェックリスト
 - `samples/`: JSONL / YAML / docker-compose サンプル
 
 ## Step2 の実現イメージ
