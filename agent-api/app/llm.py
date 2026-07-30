@@ -485,6 +485,7 @@ class LLMClient:
             cycle_index=cycle_index,
             cycle_count=cycle_count,
             checkpoint=checkpoint,
+            output_token_limit=settings.llm_research_max_tokens,
         )
         schema = research_turn_json_schema(
             max_actions=max_actions,

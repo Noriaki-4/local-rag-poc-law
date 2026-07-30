@@ -16,6 +16,9 @@ RESEARCH_STATUS_CONTINUE = "continue"
 RESEARCH_STATUS_READY = "ready"
 RESEARCH_STATUS_INSUFFICIENT = "insufficient"
 
+AUTHORITY_NODE_EVIDENCE_MAX = 20
+CHECKPOINT_NEXT_ARTICLE_MAX = 10
+
 TOOL_SEARCH_CORPUS = "search_corpus"
 TOOL_FETCH_ARTICLES = "fetch_articles"
 TOOL_EXPAND_GRAPH = "expand_graph"
@@ -93,7 +96,10 @@ class ResearchAuthorityNode(BaseModel):
     title: str = Field(default="", max_length=120)
     legalRole: str = Field(default="", max_length=120)
     verificationStatus: ResearchVerificationStatus
-    evidenceIds: list[str] = Field(default_factory=list, max_length=10)
+    evidenceIds: list[str] = Field(
+        default_factory=list,
+        max_length=AUTHORITY_NODE_EVIDENCE_MAX,
+    )
     parentNodeId: str | None = Field(default=None, max_length=80)
     relationFromParent: str | None = Field(default=None, max_length=60)
     purpose: str = Field(default="", max_length=160)
@@ -191,7 +197,10 @@ class ResearchCheckpoint(BaseModel):
         max_length=20,
     )
     nextQuestions: list[str] = Field(default_factory=list, max_length=3)
-    nextArticleIds: list[str] = Field(default_factory=list, max_length=6)
+    nextArticleIds: list[str] = Field(
+        default_factory=list,
+        max_length=CHECKPOINT_NEXT_ARTICLE_MAX,
+    )
     logicalStructure: ResearchLogicalStructure = Field(
         default_factory=ResearchLogicalStructure
     )
@@ -917,6 +926,7 @@ def build_research_turn_prompt(
     cycle_index: int | None = None,
     cycle_count: int | None = None,
     checkpoint: ResearchCheckpoint | None = None,
+    output_token_limit: int = 4096,
 ) -> str:
     """探索手順を細かく規定せず、目的・利用可能ツール・証拠境界だけを伝える。"""
     choices_block = ""
@@ -989,6 +999,24 @@ def build_research_turn_prompt(
             else "",
         ]
     ).strip()
+    output_reserve_tokens = max(64, output_token_limit // 4)
+    target_output_tokens = max(
+        128,
+        min(2500, output_token_limit - output_reserve_tokens),
+    )
+    output_budget_notice = f"""
+出力上限は{output_token_limit:,}トークンです。
+JSON全体を{target_output_tokens:,}トークン以内に収めることを目標にしてください。
+
+情報が多い場合は、status、実行すべきactionsとArticle ID、
+selectedEvidenceのcontentUnitId、未確認事項、各項目の理由、全体のreasonの順に
+優先してください。
+法的結論を支える確認済みの根拠IDと、結論に必要だが未確認のArticle IDを
+最優先で保持してください。
+理由や説明は、上限へ近づくほど要約してください。条文本文や調査経緯を繰り返さず、
+法令名・条番号・確認目的だけを残してください。IDを削る前に理由を短縮してください。
+JSONを完全に閉じることを、説明の詳しさより優先してください。
+"""
     finalization_notice = ""
     if finalize_only:
         finalization_notice = """
@@ -1053,6 +1081,14 @@ selectedEvidenceへ指定してください。中心部分の根拠が足りな�
 - 質問の中心的な結論を取得済み法令で説明できればreadyとする。考え得る全ての例外、
   周辺制度、質問が求めていない手続まで網羅する必要はない
 - 未確認事項が中心的な結論を変えず、回答上の留保として明示できる場合はreadyとする
+- readyを返す直前に、結論を支える法令本文を確認してselectedEvidenceへ選択したか、
+  自分が本文確認を必要と判断してnextArticleIdsまたは未確認事項へ残したArticleが
+  未取得のままではないかを見直す
+- そのArticleを残りの操作・時間で取得できるなら、readyにせずfetch_articlesで確認する。
+  これは質問された全事項や考え得る全論点の網羅を要求するものではなく、自分が回答前に
+  必要と判断した本文の取得漏れを防ぐための最終チェックである
+- 取得できない場合は探索を無期限に続けない。中心的結論へ影響するならinsufficient、
+  影響しないなら未確認事項と回答への影響をmissingEvidenceへ明示してreadyとする
 - search_corpusはArticleの代表本文を返す。候補Articleの他の項・号を確認する場合は、
   類似した検索を繰り返さずfetch_articlesを使う
 - 根拠が十分ならready、不足を具体化して追加調査できるならcontinue、
@@ -1061,6 +1097,7 @@ selectedEvidenceへ指定してください。中心部分の根拠が足りな�
 - 1ターンのactionsは最大{max_actions}件とする
 - 必ずJSONだけを返す
 
+{output_budget_notice}
 {budget_notice}
 {finalization_notice}
 {phase_notice}
@@ -1190,7 +1227,7 @@ def build_research_checkpoint_prompt(
   最大20件指定する。evidenceIdsと重複させない
 - nextQuestionsには、質問への回答に必要だが未確認の事項だけを最大3件指定する
 - nextArticleIdsには、Graphまたは検索で存在を確認済みだが本文未取得で、
-  次回読むべきArticle IDだけを最大6件指定する
+  次回読むべきArticle IDだけを最大10件指定する
 - 今回の「直接取得・段階選択した原文」にある各IDは、evidenceIds、
   openEvidenceIds、不要のいずれかへ分類する。不要と判断したIDはどちらにも残さない
 - logicalStructureは次の共有DAG規約に従う
@@ -1200,6 +1237,7 @@ def build_research_checkpoint_prompt(
   4. authorityNodeのparentNodeIdは同じIssueのauthorityNodes内だけを参照する
   5. 直接根拠を根とし、委任先・定義・例外・手続具体化・ガイド等を子として
      接続する。子にはrelationFromParentとpurposeを必ず書く
+  6. 各authorityNodeのevidenceIdsは、そのArticleの確認済み原文IDだけを最大20件指定する
 - 形は issue={{issueId, question, status, authorityNodes:[...],
   claims:[{{claimId, question, conclusion, status, authorityNodeIds:[...]}}]}}
   であり、Claimの中へauthorityNodesを入れない
@@ -1216,6 +1254,13 @@ def build_research_checkpoint_prompt(
 - unresolvedには、どのissue・claimの何が不足し、中心的結論へ影響するかを記録する
 - nextQuestionsとnextArticleIdsはlogicalStructure.unresolvedと整合させる
 - status=readyにする場合、中心的結論へ影響するunresolvedを残さない
+- status=readyを確定する直前に、結論を支える法令本文をevidenceIdsへ選択したか、
+  自分が本文確認を必要と判断してnextArticleIdsまたはunresolvedへ残したArticleが
+  未取得のままではないかを見直す。後続サイクルで取得可能ならstatus=continueとし、
+  nextArticleIdsへ残す
+- これは質問された全事項の完全調査を要求するものではない。取得不能または最終サイクル
+  では無期限に継続せず、中心的結論への影響があればinsufficient、影響がなければ
+  未確認事項と影響を残したうえでreadyとする
 - conclusion、nextQuestions、nextArticleIdsで同じ説明を繰り返さない
 - statusは、中心的な結論を原文で説明できればready、次回で補えるならcontinue、
   投入済み資料では確認できないならinsufficientとする
@@ -1630,7 +1675,7 @@ def research_checkpoint_json_schema(
             "evidenceIds": {
                 "type": "array",
                 "items": {"type": "string"},
-                "maxItems": 10,
+                "maxItems": AUTHORITY_NODE_EVIDENCE_MAX,
             },
             "parentNodeId": {"type": ["string", "null"]},
             "relationFromParent": {"type": ["string", "null"]},
@@ -1778,7 +1823,7 @@ def research_checkpoint_json_schema(
             "nextArticleIds": {
                 "type": "array",
                 "items": {"type": "string"},
-                "maxItems": 6,
+                "maxItems": CHECKPOINT_NEXT_ARTICLE_MAX,
             },
             "logicalStructure": logical_structure_schema,
         },

@@ -374,6 +374,14 @@ Anthropic等のクレジット・利用枠不足は`provider_quota_error`とし�
 証拠カタログへ保持するが、次サイクルへ自動提示するのはチェックポイントの
 `evidenceIds`、判断継続中の`openEvidenceIds`、未解決Article、およびそれらを結ぶ
 確認済みGraph関係だけとする。
+探索・掘り下げJSONは4,096トークンの物理上限に対して2,500トークン以内を目標とし、
+根拠IDと未確認Article IDを説明文より優先する。上限へ近づく場合は理由・調査経緯を
+要約し、JSONを途中で切らず完結させる。
+各判断とサイクル統合では、`ready`の直前に、結論を支える法令本文を選択済みか、
+LLM自身が本文確認を必要と判断して`nextArticleIds`または未確認事項へ残したArticleが
+未取得でないかを見直す。残り予算で取得できる場合は`fetch_articles`を優先する。
+これは質問された全事項の完全調査を要求するものではない。取得不能時は探索を無期限に
+継続せず、中心的結論への影響に応じて`insufficient`または留保付き`ready`とする。
 前サイクルで取得した未採用候補は、LLMの次サイクル入力へ再注入しない。必要になった場合は
 Article ID直接取得または再検索で明示的に読み直す。形式不正や時間切れでも、
 最後に検証済みのチェックポイントがあれば`partial`として限定回答へ利用する。
@@ -381,6 +389,7 @@ Article ID直接取得または再検索で明示的に読み直す。形式不�
 nextQuestions / nextArticleIds`に加え、
 `logicalStructure`へIssue単位の共有根拠DAGを保持する。各Issueが`authorityNodes`を
 一度だけ所有し、複数のClaimは`authorityNodeIds`で同じ根拠を共有参照する。
+`nextArticleIds`は最大10件、各`authorityNode`が保持する`evidenceIds`は最大20件とする。
 `authorityNodes`は`parentNodeId`と`relationFromParent`で直接根拠から委任先・定義・例外・
 手続具体化・ガイドへのつながりを表す。親IDは同じIssue内だけを参照するため、
 正しい法令関係をClaimごとに複製せず圧縮できる。生の検索履歴や長い根拠選択理由は

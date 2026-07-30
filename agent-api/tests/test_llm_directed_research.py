@@ -314,6 +314,15 @@ def test_prompt_leaves_search_strategy_to_llm() -> None:
 
     assert "調査方法、検索語、探索順序はあなたが判断してください" in prompt
     assert "selectedEvidenceには" in prompt
+    assert "出力上限は4,096トークンです" in prompt
+    assert "JSON全体を2,500トークン以内" in prompt
+    assert "法的結論を支える確認済みの根拠ID" in prompt
+    assert "IDを削る前に理由を短縮してください" in prompt
+    assert "JSONを完全に閉じること" in prompt
+    assert "readyを返す直前に" in prompt
+    assert "自分が本文確認を必要と判断" in prompt
+    assert "質問された全事項や考え得る全論点の網羅を要求するものではなく" in prompt
+    assert "探索を無期限に続けない" in prompt
     assert '"documentId": "law-a"' in prompt
     assert "law-a-article-12-paragraph-1" in prompt
 
@@ -451,6 +460,10 @@ def test_checkpoint_prompt_carries_state_and_reloads_exact_text() -> None:
     assert "law-a-article-12-paragraph-1" in prompt
     assert "許可を受けなければならない" in prompt
     assert "生の検索履歴は引き継がない" not in prompt
+    assert "status=readyを確定する直前に" in prompt
+    assert "自分が本文確認を必要と判断" in prompt
+    assert "質問された全事項の完全調査を要求するものではない" in prompt
+    assert "無期限に継続せず" in prompt
     assert schema["required"] == [
         "status",
         "conclusion",
@@ -462,7 +475,68 @@ def test_checkpoint_prompt_carries_state_and_reloads_exact_text() -> None:
     ]
     assert "findings" not in schema["properties"]
     assert schema["properties"]["evidenceIds"]["maxItems"] == 10
+    assert schema["properties"]["nextArticleIds"]["maxItems"] == 10
+    authority_node_schema = (
+        schema["properties"]["logicalStructure"]["properties"]["issues"]
+        ["items"]["properties"]["authorityNodes"]["items"]
+    )
+    assert authority_node_schema["properties"]["evidenceIds"]["maxItems"] == 20
     assert "issues" in schema["properties"]["logicalStructure"]["properties"]
+
+
+def test_checkpoint_accepts_expanded_pending_articles_and_node_evidence() -> None:
+    checkpoint = ResearchCheckpoint(
+        status=RESEARCH_STATUS_CONTINUE,
+        nextArticleIds=[
+            f"law-a-article-{index}"
+            for index in range(10)
+        ],
+        logicalStructure=ResearchLogicalStructure(
+            issues=[
+                ResearchIssueStructure(
+                    issueId="many-evidence",
+                    status="partial",
+                    authorityNodes=[
+                        ResearchAuthorityNode(
+                            nodeId="node",
+                            verificationStatus="text_verified",
+                            evidenceIds=[
+                                f"law-a-article-1-paragraph-{index}"
+                                for index in range(20)
+                            ],
+                        )
+                    ],
+                )
+            ]
+        ),
+    )
+
+    assert len(checkpoint.nextArticleIds) == 10
+    assert (
+        len(
+            checkpoint.logicalStructure.issues[0]
+            .authorityNodes[0]
+            .evidenceIds
+        )
+        == 20
+    )
+    with pytest.raises(ValidationError):
+        ResearchCheckpoint(
+            status=RESEARCH_STATUS_CONTINUE,
+            nextArticleIds=[
+                f"law-a-article-{index}"
+                for index in range(11)
+            ],
+        )
+    with pytest.raises(ValidationError):
+        ResearchAuthorityNode(
+            nodeId="too-many",
+            verificationStatus="text_verified",
+            evidenceIds=[
+                f"law-a-article-1-paragraph-{index}"
+                for index in range(21)
+            ],
+        )
 
 
 def test_checkpoint_keeps_hierarchical_legal_structure() -> None:
