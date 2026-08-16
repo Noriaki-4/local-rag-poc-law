@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 import pytest
+import requests
 
 from app import main
 from app.adapters.models import StructuredJSONModelAdapter
@@ -257,7 +258,7 @@ def test_framework_reviewer_setting_defaults_to_false() -> None:
 
 def test_all_solver_stages_include_shared_legal_research_rules() -> None:
     profile = legal_profiles.legal_agent_profile()
-    assert profile.version == "38"
+    assert profile.version == "39"
     prompts = (
         profile.solver_research.system_prompt,
         profile.solver_integration.system_prompt,
@@ -268,13 +269,10 @@ def test_all_solver_stages_include_shared_legal_research_rules() -> None:
         assert "各サイクルで元の質問へ戻り" in prompt
         assert "別法令との関係や条文番号を推測して作業へ加えません" in prompt
         assert "委任先本文を未確認のまま当該観点をsupportedまたはresolvedにしません" in prompt
-        assert "required_graph_review_request_idsが空でなければ" in prompt
         assert "material_included=falseのEvidenceは本文未提示" in prompt
-        assert "graph_candidate_catalogには、Neo4jから取得済みのGraph候補" in prompt
-        assert "articlesはGraphの両端ArticleをArticle IDごと" in prompt
-        assert "linksはseed_article_idからcandidate_article_id" in prompt
-        assert "content_statusはプログラムが管理する本文取得状態" in prompt
-        assert "表示順や末尾にあることを理由に候補を無視せず" in prompt
+        assert "graph_review_batchは今回判断が必要な新規・再採用・新Link差分" in prompt
+        assert "graph_review_ledgerは過去の全評価済みfrontier" in prompt
+        assert "content_statusのnot_requested/pending/succeeded/failed/timeout" in prompt
         assert "本文中の条番号、法令番号、documentIdを組み合わせ" in prompt
         assert "各fetch_articles.arguments.article_idsをfetchable_article_ids" in prompt
         assert "その判断はfinalizeと矛盾する" in prompt
@@ -291,12 +289,12 @@ def test_all_solver_stages_include_shared_legal_research_rules() -> None:
         assert "いずれのstatusも正式関係への昇格を意味せず" in prompt
         assert "parent_law_referenceが下位法令本文から親法律・親政令への明示参照" in prompt
         assert "生成元・監査用の来歴はCaseStateに保持" in prompt
-        assert "回答に影響し得ると判断した隣接Article" in prompt
         assert "GraphをToolRequestへ指定しません" in prompt
-        assert "search_navigationの検索結果は、次のlegal_searchまたはfetch_articles" in prompt
+        assert "evidenceRole=search_navigationの検索結果は、次のlegal_searchまたはfetch_articles" in prompt
         assert "その本文抜粋をHypothesisのjudgment" in prompt
         assert "1つのHypothesisは、取得本文で独立に検証できる1つの命題" in prompt
         assert "特定条文の内容を説明する場合" in prompt
+        assert "cycle_step_timeoutはCycle用の時間切れ" in prompt
     assert "初回判断では" in profile.solver_research.system_prompt
     assert "WorkItem数を減らすために" in profile.solver_research.system_prompt
     assert "直前の全ToolResultとmaterial_evidenceを読み" in (
@@ -330,10 +328,12 @@ def test_all_solver_stages_include_shared_legal_research_rules() -> None:
     assert profile.tool_list_argument_limits[0].max_items == 4
     assert profile.graph_review_fetch_tool_name == "fetch_articles"
     assert profile.solver_graph_review is not None
-    assert "Graph候補選別モード" in profile.solver_graph_review.system_prompt
-    assert "selected_article_ids" in profile.solver_graph_review.system_prompt
-    assert "relevant_article_ids" in profile.solver_graph_review.system_prompt
-    assert "法的関連性はあなたが判断" in profile.solver_graph_review.system_prompt
+    graph_prompt = profile.solver_graph_review.system_prompt
+    assert "Graph Reviewモード" in graph_prompt
+    assert "batchの全frontier_item_idへ判断を1件ずつ返します" in graph_prompt
+    assert "select、関係するが今回の取得枠外ならdefer" in graph_prompt
+    assert "reviewed_link_idsにはbatch内の全link_id" in graph_prompt
+    assert "start_next_cycle=false" in graph_prompt
 
 
 def test_contract_repair_prompt_handles_unknown_article_ids() -> None:
@@ -478,3 +478,26 @@ def test_model_adapter_repairs_transport_json_once() -> None:
     assert result.decision.answer.text == "修復済み"
     assert result.attempt_count == 2
     assert client.calls == 2
+
+
+def test_model_adapter_normalizes_provider_timeout() -> None:
+    class TimeoutClient:
+        def generate_structured_json(self, **kwargs: Any) -> StructuredJSONResult:
+            del kwargs
+            raise requests.ReadTimeout("provider did not respond")
+
+    context = build_solver_context(
+        CaseState(case_id="case-1", question="質問"),
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+    )
+
+    with pytest.raises(TimeoutError, match="model provider request timed out"):
+        StructuredJSONModelAdapter(TimeoutClient()).solve(
+            context,
+            ModelCallProfile(
+                model="fake-model",
+                system_prompt="prompt",
+            ),
+        )

@@ -6,6 +6,7 @@ import json
 from time import monotonic
 from typing import Any
 
+import requests
 from pydantic import ValidationError
 
 from app.agent_framework.context import ContextCapacityExceeded, SolverContext
@@ -44,13 +45,16 @@ class StructuredJSONModelAdapter:
             remaining_timeout = profile.timeout_sec - (monotonic() - started_at)
             if remaining_timeout <= 1:
                 raise TimeoutError("solver contract repair time exhausted")
-            result = self._client.generate_structured_json(
-                prompt=prompt,
-                schema=_solver_transport_schema(context),
-                model=profile.model,
-                max_tokens=profile.max_output_tokens,
-                timeout_sec=max(1, round(remaining_timeout)),
-            )
+            try:
+                result = self._client.generate_structured_json(
+                    prompt=prompt,
+                    schema=_solver_transport_schema(context),
+                    model=profile.model,
+                    max_tokens=profile.max_output_tokens,
+                    timeout_sec=max(1, round(remaining_timeout)),
+                )
+            except requests.Timeout as exc:
+                raise TimeoutError("model provider request timed out") from exc
             attempt_count += 1 + result.retryCount
             if result.inputTokens is None:
                 input_tokens_known = False
@@ -99,13 +103,16 @@ class StructuredJSONModelAdapter:
         profile: ReviewerProfile,
     ) -> ReviewCallResult:
         prompt = _review_prompt(context, profile.system_prompt)
-        result = self._client.generate_structured_json(
-            prompt=prompt,
-            schema=ReviewResult.model_json_schema(),
-            model=profile.model,
-            max_tokens=profile.max_output_tokens,
-            timeout_sec=max(1, round(profile.timeout_sec)),
-        )
+        try:
+            result = self._client.generate_structured_json(
+                prompt=prompt,
+                schema=ReviewResult.model_json_schema(),
+                model=profile.model,
+                max_tokens=profile.max_output_tokens,
+                timeout_sec=max(1, round(profile.timeout_sec)),
+            )
+        except requests.Timeout as exc:
+            raise TimeoutError("model provider request timed out") from exc
         if result.validationError or result.payload is None:
             raise ModelProtocolError(
                 f"review structured output invalid: {result.validationError or 'empty'}"
