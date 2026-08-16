@@ -76,6 +76,27 @@ class ExampleQuestionsTest(unittest.TestCase):
                     )
                 )
 
+    def test_restricted_stock_example_uses_item_one_child_company_rule(self):
+        example = next(
+            item
+            for item in EXAMPLE_QUESTIONS
+            if item.title == "役職員への譲渡制限付株式の交付"
+        )
+        prefixes = {
+            prefix
+            for requirement in example.required_evidence
+            for prefix in requirement.content_unit_prefixes
+        }
+
+        self.assertIn(
+            "law-348M50000040005-article-2-paragraph-1",
+            prefixes,
+        )
+        self.assertNotIn(
+            "law-348M50000040005-article-2-paragraph-2",
+            prefixes,
+        )
+
 
 
 class ExpectedSourceMatchTest(unittest.TestCase):

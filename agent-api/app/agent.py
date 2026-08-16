@@ -21,13 +21,20 @@ from .evidence_selector import (
 from .graph_client import GraphClient
 from .layered_shadow import run_layered_retrieval
 from .llm import LLMClient, citation_context_stats
+from .llm_directed_research import (
+    TOOL_SEARCH_CORPUS,
+    EvidenceCatalog,
+    ResearchAction,
+)
 from .llm_research_loop import (
     run_llm_directed_research,
     run_llm_directed_research_shadow,
 )
+from .llm_research_tools import LegalResearchToolGateway
 from .models import AnswerRequest, AnswerResponse, Citation
 from .opensearch_client import OpenSearchClient
 from .reranker import RerankerClient
+from .research_case_store import InMemoryCaseStore
 from .seed import _japanese_number_to_int
 
 REFERENCE_CUES = (
@@ -92,6 +99,9 @@ ASPECT_COVERAGE_PER_QUERY = 3
 ASPECT_COVERAGE_MAX_QUERY_RANK = 20
 FOLLOW_UP_ASPECT_COVERAGE_MAX_ITEMS = 2
 FINAL_RERANK_MAX_ADDITIONS = 2
+# Reviewerが選んだ修正・追加調査を実行できる上限。意味上の終了判断は
+# Reviewerが行い、プログラムはこの回数・時間境界だけを強制する。
+GROUNDING_REMEDIATION_MAX_ROUNDS = 2
 
 # 利用者やプランナーが使いやすい略称を、seed済みの正式名称へ対応付ける。
 # 検索結果の固定には使わず、法令内の補助検索を追加するためだけに使う。
@@ -130,20 +140,52 @@ class AgentService:
             min(request.rerankTopK or settings.agent_rerank_top_k, candidate_top_k),
         )
         route: list[str] = []
+        max_research_llm_calls = settings.llm_research_max_turns * 3
+        max_answer_llm_calls = (
+            2 * (1 + GROUNDING_REMEDIATION_MAX_ROUNDS)
+            if settings.agent_llm_directed_retrieval and not request.choices
+            else 2
+        )
+        max_grounding_review_llm_calls = (
+            2 * (1 + GROUNDING_REMEDIATION_MAX_ROUNDS)
+            if settings.agent_llm_directed_retrieval and not request.choices
+            else 0
+        )
+        max_llm_calls = (
+            max_research_llm_calls
+            + max_answer_llm_calls
+            + max_grounding_review_llm_calls
+            if settings.agent_llm_directed_retrieval
+            else settings.agent_max_llm_calls
+        )
+        max_total_tool_calls = (
+            settings.llm_research_max_tool_calls
+            if settings.agent_llm_directed_retrieval
+            else settings.agent_max_total_tool_calls
+        )
         trace: dict[str, Any] = {
             "rounds": [],
             "inputType": self._input_type(request),
             "limits": {
                 "maxQueries": settings.agent_max_queries,
                 "maxRetryRounds": settings.agent_max_retry_rounds,
-                "maxTotalToolCalls": settings.agent_max_total_tool_calls,
+                "maxTotalToolCalls": max_total_tool_calls,
                 "maxGraphHop": settings.agent_max_graph_hop,
                 "maxGraphPaths": settings.agent_max_graph_paths,
                 "maxWallTimeSec": settings.agent_max_wall_time_sec,
                 "candidateTopK": candidate_top_k,
                 "rerankTopK": rerank_top_k,
                 "citationTopK": request.topK,
-                "maxLlmCalls": settings.agent_max_llm_calls,
+                "maxLlmCalls": max_llm_calls,
+                "maxResearchLlmCalls": (
+                    max_research_llm_calls
+                    if settings.agent_llm_directed_retrieval
+                    else 0
+                ),
+                "maxAnswerLlmCalls": max_answer_llm_calls,
+                "maxGroundingReviewLlmCalls": (
+                    max_grounding_review_llm_calls
+                ),
                 "answerReserveSec": settings.agent_answer_reserve_sec,
                 "issueCoverageSelection": settings.agent_issue_coverage_selection,
                 "issueCoverageShadow": settings.agent_issue_coverage_shadow,
@@ -426,7 +468,9 @@ class AgentService:
                 "provider": rerank_result.provider,
                 "model": rerank_result.model,
                 "latencyMs": rerank_result.latency_ms,
-                "error": rerank_result.error,
+                "errorCode": (
+                    "reranker_error" if rerank_result.error else None
+                ),
                 "fallback": None if rerank_result.used else "fusion_ranking",
                 "candidateCount": len(rerank_candidates),
                 "scores": rerank_result.scores,
@@ -561,7 +605,7 @@ class AgentService:
                 llm_client=self.llm_client,
                 deadline=deadline,
             )
-        except Exception as exc:  # noqa: BLE001 - 旧方式へ黙って切り替えない
+        except Exception:  # noqa: BLE001 - 旧方式へ黙って切り替えない
             trace["llmDirectedLegalRetrieval"] = {
                 "enabled": True,
                 "mode": "active",
@@ -569,7 +613,7 @@ class AgentService:
                 "status": "internal_error",
                 "stopReason": "active_internal_error",
                 "incomplete": True,
-                "error": f"{type(exc).__name__}: {exc}",
+                "errorCode": "active_internal_error",
                 "llmCallCount": 0,
                 "toolCallCount": 0,
             }
@@ -590,6 +634,10 @@ class AgentService:
         trace["retrievedContentUnitIds"] = research_trace.get(
             "availableEvidenceContentUnitIds", []
         )
+        # ProjectorはCheckpointでLLMが選んだID順を決定的に展開するだけで、
+        # 法的関連性による採否や並べ替えを行わない。最終的に使う根拠は
+        # Main LLMが回答と同じ構造化判断で選ぶ。
+        projected_answer_evidence = list(outcome.selected_evidence)
         answer_candidates = _citations_from_items(
             [
                 {
@@ -598,9 +646,14 @@ class AgentService:
                         "law" if item.get("docType") == "law" else "guidance"
                     ),
                 }
-                for item in outcome.selected_evidence
+                for item in projected_answer_evidence
             ]
         )
+        trace["answerCandidateContentUnitIds"] = [
+            citation.contentUnitId
+            for citation in answer_candidates
+            if citation.contentUnitId
+        ]
         if not answer_candidates:
             status = str(research_trace.get("status") or "")
             if status == "timeout":
@@ -640,44 +693,41 @@ class AgentService:
                 trace=trace,
             )
 
-        last_decision = next(
-            (
-                turn.get("decision") or {}
-                for turn in reversed(research_trace.get("turns") or [])
-                if turn.get("decision")
-            ),
-            {},
-        )
+        checkpoint = research_trace.get("checkpoint") or {}
+        logical_structure = checkpoint.get("logicalStructure") or {}
+        answer_contract_issues = [
+            {
+                "issueId": str(issue.get("issueId") or ""),
+                "question": str(issue.get("question") or ""),
+            }
+            for issue in logical_structure.get("issues") or []
+            if isinstance(issue, dict) and issue.get("issueId")
+        ]
+        if not answer_contract_issues:
+            answer_contract_issues = [
+                {"issueId": "overall", "question": request.question}
+            ]
         research_context = {
-            "status": research_trace.get("status"),
             "stopReason": research_trace.get("stopReason"),
-            "missingEvidence": (
-                (research_trace.get("checkpoint") or {}).get(
-                    "nextQuestions"
-                )
-                or last_decision.get("missingEvidence")
-                or []
-            ),
-            "selectedEvidence": (
-                (research_trace.get("checkpoint") or {}).get(
-                    "evidenceIds"
-                )
-                or last_decision.get("selectedEvidence")
-                or []
-            ),
-            "researchConclusion": (
-                (research_trace.get("checkpoint") or {}).get("conclusion")
-                or ""
-            ),
-            "logicalStructure": (
-                (research_trace.get("checkpoint") or {}).get(
-                    "logicalStructure"
-                )
-                or {}
-            ),
+            "incomplete": bool(research_trace.get("incomplete")),
+            "answerContract": {
+                "version": "issue-grounding-v1",
+                "issues": answer_contract_issues,
+                "availableCitationIds": [
+                    citation.contentUnitId
+                    for citation in answer_candidates
+                    if citation.contentUnitId
+                ],
+                "maxSelectedCitations": request.topK,
+            },
         }
         _append_route(route, "answer_composer")
-        answer_text, predicted_answer, judgements, _ = self._compose_answer(
+        (
+            answer_text,
+            predicted_answer,
+            judgements,
+            reviewed_citation_ids,
+        ) = self._compose_answer(
             request,
             route,
             answer_candidates,
@@ -686,9 +736,16 @@ class AgentService:
             None,
             research_context=research_context,
         )
-        # 根拠候補の採否は調査LLMが既に判断済み。旧方式の固定枠・多様化・
-        # Requirement充足判定で再選抜しない。
-        citations = answer_candidates
+        citations = _select_final_citations(
+            answer_candidates,
+            reviewed_citation_ids,
+            request.topK,
+            answer_text=answer_text,
+            expand_answer_citations=False,
+            # active経路の最終引用はMain LLMが構造化citationIdsで選ぶ。
+            # 回答契約やReviewer検証に失敗した際、候補を自動補充しない。
+            fill_remaining=False,
+        )
         trace["rerankedContentUnitIds"] = [
             citation.contentUnitId for citation in citations if citation.contentUnitId
         ]
@@ -696,6 +753,7 @@ class AgentService:
         trace["llmCallCount"] = (
             int(research_trace.get("llmCallCount") or 0)
             + int(trace.get("llm", {}).get("attemptCount") or 0)
+            + int(trace.get("groundingReview", {}).get("attemptCount") or 0)
         )
         trace["stopReason"] = research_trace.get("stopReason")
         trace["elapsedMs"] = int((perf_counter() - started) * 1000)
@@ -771,11 +829,11 @@ class AgentService:
                     settings.agent_use_llm_planner and settings.agent_max_llm_calls >= 4
                 ),
             )
-        except Exception as exc:  # noqa: BLE001 - 新方式の障害で現行回答を止めない
+        except Exception:  # noqa: BLE001 - 新方式の障害で現行回答を止めない
             trace["layeredLegalRetrieval"] = {
                 "enabled": True,
                 "mode": "active" if active else "shadow",
-                "error": str(exc),
+                "errorCode": "layered_retrieval_error",
                 "fallback": "legacy_retrieval",
             }
             return final_ranked
@@ -827,7 +885,7 @@ class AgentService:
                 deadline=deadline,
             )
             trace["llmDirectedLegalRetrieval"] = outcome.trace
-        except Exception as exc:  # noqa: BLE001 - shadow障害で現行回答を止めない
+        except Exception:  # noqa: BLE001 - shadow障害で現行回答を止めない
             trace["llmDirectedLegalRetrieval"] = {
                 "enabled": True,
                 "mode": "shadow",
@@ -835,7 +893,7 @@ class AgentService:
                 "status": "internal_error",
                 "stopReason": "shadow_internal_error",
                 "incomplete": True,
-                "error": f"{type(exc).__name__}: {exc}",
+                "errorCode": "shadow_internal_error",
                 "llmCallCount": 0,
                 "toolCallCount": 0,
             }
@@ -1061,7 +1119,9 @@ class AgentService:
                     "query": query,
                     "candidateCount": len(candidates),
                     "used": aspect.used,
-                    "error": aspect.error,
+                    "errorCode": (
+                        "aspect_reranker_error" if aspect.error else None
+                    ),
                     "skippedReason": aspect.skipped_reason,
                     "inheritedContentUnitIds": sorted(inherited_ids),
                     "topContentUnitIds": aspect.ordered_content_ids[:3],
@@ -1138,7 +1198,9 @@ class AgentService:
                     "query": query,
                     "candidateCount": len(candidates),
                     "used": used,
-                    "error": error,
+                    "errorCode": (
+                        "aspect_reranker_error" if error else None
+                    ),
                     "skippedReason": skipped_reason,
                     "topContentUnitIds": ordered_ids[:3],
                     "scores": scores,
@@ -1239,11 +1301,11 @@ class AgentService:
                 focused_query_limit,
                 timeout_sec=max(1, min(settings.planner_timeout_sec, remaining)),
             )
-        except Exception as exc:
+        except Exception:
             queries = _rule_based_decomposition(request, settings.agent_max_queries)
             trace["planner"] = {
                 "used": False,
-                "error": str(exc),
+                "errorCode": "planner_error",
                 "attemptCount": 1,
                 "fallback": "rule_based_decomposition",
                 "queries": queries,
@@ -1349,12 +1411,12 @@ class AgentService:
                         max_chunks=max(100, len(article_ids) * 30),
                     )
                 )
-        except Exception as exc:
+        except Exception:
             trace["rounds"].append(
                 {
                     "round": round_number,
                     "tool": "article_direct_lookup",
-                    "error": str(exc),
+                    "errorCode": "article_direct_lookup_error",
                 }
             )
             return None
@@ -1436,8 +1498,14 @@ class AgentService:
                 limit=settings.agent_max_graph_paths,
                 user_clearance_level=request.userClearanceLevel,
             )
-        except Exception as exc:
-            trace["rounds"].append({"round": 0, "tool": "guidance_explains_lookup", "error": str(exc)})
+        except Exception:
+            trace["rounds"].append(
+                {
+                    "round": 0,
+                    "tool": "guidance_explains_lookup",
+                    "errorCode": "graph_lookup_error",
+                }
+            )
             return None
         article_ids = _explains_target_article_ids(paths, GUIDANCE_EXPLAINS_MAX_ARTICLES)
         if not article_ids:
@@ -1448,8 +1516,14 @@ class AgentService:
                 request.userClearanceLevel,
                 max_chunks=max(30, len(article_ids) * 30),
             )
-        except Exception as exc:
-            trace["rounds"].append({"round": 0, "tool": "guidance_explains_lookup", "error": str(exc)})
+        except Exception:
+            trace["rounds"].append(
+                {
+                    "round": 0,
+                    "tool": "guidance_explains_lookup",
+                    "errorCode": "article_lookup_error",
+                }
+            )
             return None
         selected_documents = _select_direct_documents(request, documents, DIRECT_CHUNKS_PER_ARTICLE)
         new_count = _merge_direct_documents_into_evidence(evidence, selected_documents, "guidance_explains")
@@ -1517,11 +1591,11 @@ class AgentService:
                 max_queries=min(settings.agent_max_retry_rounds, 2),
                 timeout_sec=max(1, min(settings.evaluator_timeout_sec, remaining)),
             )
-        except Exception as exc:
+        except Exception:
             trace["evaluator"] = {
                 "provider": self.llm_client.provider,
                 "used": False,
-                "error": str(exc),
+                "errorCode": "evaluator_error",
                 "attemptCount": 1,
                 "fallback": "rule_based_evaluator",
             }
@@ -1852,6 +1926,91 @@ class AgentService:
                 break
         return paths[: settings.agent_max_graph_paths]
 
+    def _execute_reviewer_research_queries(
+        self,
+        request: AnswerRequest,
+        queries: list[str],
+        existing_citations: list[Citation],
+        deadline: float,
+    ) -> tuple[list[Citation], dict[str, Any]]:
+        """Reviewerが決めた検索語だけを実行し、未選別の本文候補を返す。"""
+        catalog = EvidenceCatalog()
+        document_catalog_error = False
+        try:
+            catalog.add_documents(self.os_client.law_titles())
+        except Exception:  # noqa: BLE001 - 全文書検索は一覧なしでも実行可能
+            document_catalog_error = True
+        catalog.add_results(
+            [citation.model_dump() for citation in existing_citations]
+        )
+        existing_ids = set(catalog.content_unit_ids)
+        gateway = LegalResearchToolGateway(self.os_client, self.graph_client)
+        research_case = InMemoryCaseStore().create_case(request.question)
+        executions: list[dict[str, Any]] = []
+        unique_queries = list(dict.fromkeys(queries))[:2]
+        for query in unique_queries:
+            remaining = deadline - perf_counter()
+            if remaining <= 1:
+                executions.append(
+                    {
+                        "tool": TOOL_SEARCH_CORPUS,
+                        "query": query,
+                        "error": "deadline_exhausted",
+                    }
+                )
+                break
+            action = ResearchAction(
+                tool=TOOL_SEARCH_CORPUS,
+                query=query,
+                reason="grounding_reviewer_requested_follow_up",
+            )
+            task = research_case.register_action(
+                action,
+                phase="grounding_review",
+            )
+            research_case.start_task(task.task_ref)
+            execution = gateway.execute(
+                action,
+                catalog,
+                user_clearance_level=request.userClearanceLevel,
+                timeout_sec=max(0.1, remaining),
+            )
+            research_case.complete_tool_task(
+                task_ref=task.task_ref,
+                action=action,
+                execution=execution,
+                catalog=catalog,
+            )
+            executions.append(execution.as_trace(action))
+
+        new_ids = tuple(
+            content_unit_id
+            for content_unit_id in catalog.content_unit_ids
+            if content_unit_id not in existing_ids
+        )
+        # 検索順位を法的関連性の判定には使わない。返却候補はMainが本文を
+        # 読んでcitationIdsに選ぶための材料にすぎない。
+        items = catalog.items_by_ids(new_ids)
+        follow_up_citations = _citations_from_items(
+            [
+                {
+                    "document": item,
+                    "evidenceLane": (
+                        "law" if item.get("docType") == "law" else "guidance"
+                    ),
+                }
+                for item in items
+            ]
+        )
+        return follow_up_citations, {
+            "requestedQueries": unique_queries,
+            "executions": executions,
+            "newContentUnitIds": list(new_ids),
+            "semanticSelection": "main_llm",
+            "documentCatalogError": document_catalog_error,
+            "caseStore": research_case.trace(),
+        }
+
     def _input_type(self, request: AnswerRequest) -> str:
         return "multiple_choice_legal_qa" if request.choices else "legal_qa"
 
@@ -1887,88 +2046,352 @@ class AgentService:
                 [],
             )
         if citations:
-            remaining = int(deadline - perf_counter())
-            if remaining <= 1:
-                trace["llm"] = {"provider": self.llm_client.provider, "used": False, "error": "time_budget_exhausted"}
-            else:
-                try:
-                    answer_kwargs: dict[str, Any] = {
-                        "timeout_sec": max(
-                            1, min(settings.llm_timeout_sec, remaining)
-                        ),
-                        "evidence_by_choice": evidence_by_choice,
-                        "answer_scope": layered_control,
-                    }
-                    if research_context is not None:
-                        answer_kwargs["research_context"] = research_context
-                    llm_result = self.llm_client.generate_answer(
-                        request,
-                        route,
-                        citations,
-                        **answer_kwargs,
+            # Reviewerの追加調査で得た候補も同じ最終化処理へ渡す。候補の
+            # 意味上の採否はMain LLMのcitationIdsに委ねる。
+            working_citations = list(citations)
+            main_attempts: list[dict[str, Any]] = []
+            review_attempts: list[dict[str, Any]] = []
+            current_research_context = (
+                dict(research_context) if research_context is not None else None
+            )
+
+            def call_main(
+                *, reviewer_result=None, previous_result=None
+            ):
+                remaining = int(deadline - perf_counter())
+                if remaining <= 1:
+                    return None, "answer_model_time_exhausted"
+                answer_kwargs: dict[str, Any] = {
+                    "timeout_sec": max(1, min(settings.llm_timeout_sec, remaining)),
+                    "evidence_by_choice": evidence_by_choice,
+                    "answer_scope": layered_control,
+                }
+                if reviewer_result is not None and previous_result is not None:
+                    answer_kwargs["review_feedback"] = list(
+                        reviewer_result.issues
                     )
-                except requests.Timeout as exc:
-                    trace["llm"] = {
-                        "provider": self.llm_client.provider,
-                        "used": False,
-                        "error": f"{type(exc).__name__}: {exc}",
-                        "timeout": True,
-                        "attemptCount": 1,
-                        "fallback": "no_choice_judgement",
+                    answer_kwargs["review_verdict"] = reviewer_result.verdict
+                    answer_kwargs["previous_answer"] = previous_result.text
+                    answer_kwargs["previous_answer_status"] = (
+                        previous_result.answerStatus
+                    )
+                    answer_kwargs["previous_citation_ids"] = list(
+                        previous_result.answerCitationIds or []
+                    )
+                    answer_kwargs["previous_missing"] = list(
+                        previous_result.missing or []
+                    )
+                    answer_kwargs["previous_issue_decisions"] = list(
+                        previous_result.answerIssueDecisions or []
+                    )
+                    answer_kwargs["review_findings"] = list(
+                        reviewer_result.issueFindings or []
+                    )
+                if current_research_context is not None:
+                    answer_kwargs["research_context"] = current_research_context
+                try:
+                    result = self.llm_client.generate_answer(
+                        request, route, working_citations, **answer_kwargs
+                    )
+                except requests.Timeout:
+                    return None, "answer_model_timeout"
+                except Exception:  # noqa: BLE001
+                    return None, "answer_model_error"
+                if result is None:
+                    return None, "answer_model_unavailable"
+                main_attempts.append(
+                    {
+                        "model": result.model,
+                        "latencyMs": result.latencyMs,
+                        "inputTokens": result.inputTokens,
+                        "outputTokens": result.outputTokens,
+                        "validationError": result.validationError,
+                        "stopReason": result.stopReason,
+                        "retryCount": result.retryCount,
+                        "answerStatus": result.answerStatus,
+                        "citationIds": result.answerCitationIds,
+                        "missing": result.missing,
+                        "issueDecisions": result.answerIssueDecisions,
                     }
-                except Exception as exc:
-                    trace["llm"] = {
-                        "provider": self.llm_client.provider,
-                        "used": False,
-                        "error": str(exc),
-                        "attemptCount": 1,
-                        "fallback": "no_choice_judgement",
+                )
+                if result.validationError:
+                    return None, "answer_contract_invalid"
+                return result, None
+
+            def call_reviewer(result):
+                review = getattr(self.llm_client, "review_answer_grounding", None)
+                remaining = int(deadline - perf_counter())
+                if not callable(review):
+                    return None, "grounding_review_unavailable"
+                if remaining <= 1:
+                    return None, "grounding_review_time_exhausted"
+                citations_by_id = {
+                    citation.contentUnitId: citation
+                    for citation in working_citations
+                    if citation.contentUnitId
+                }
+                selected_citations = [
+                    citations_by_id[content_unit_id]
+                    for content_unit_id in (result.answerCitationIds or [])
+                    if content_unit_id in citations_by_id
+                ]
+                try:
+                    reviewed = review(
+                        request,
+                        result.text,
+                        selected_citations,
+                        timeout_sec=max(1, min(settings.llm_timeout_sec, remaining)),
+                        research_context=current_research_context,
+                        answer_status=result.answerStatus,
+                        citation_ids=result.answerCitationIds,
+                        missing=result.missing,
+                        issue_decisions=result.answerIssueDecisions,
+                        available_citations=working_citations,
+                    )
+                except requests.Timeout:
+                    return None, "grounding_review_timeout"
+                except Exception:  # noqa: BLE001
+                    return None, "grounding_review_error"
+                review_attempts.append(
+                    {
+                        "model": reviewed.model,
+                        "verdict": reviewed.verdict,
+                        "issues": reviewed.issues,
+                        "findings": reviewed.issueFindings,
+                        "researchQueries": reviewed.researchQueries,
+                        "latencyMs": reviewed.latencyMs,
+                        "inputTokens": reviewed.inputTokens,
+                        "outputTokens": reviewed.outputTokens,
+                        "validationErrorCode": reviewed.validationError,
+                        "stopReason": reviewed.stopReason,
+                        "retryCount": reviewed.retryCount,
                     }
-                else:
-                    if llm_result:
-                        trace["llm"] = {
-                            "provider": llm_result.provider,
-                            "model": llm_result.model,
-                            "used": True,
-                            "latencyMs": llm_result.latencyMs,
-                            "inputTokens": llm_result.inputTokens,
-                            "outputTokens": llm_result.outputTokens,
-                            "estimatedCost": llm_result.estimatedCost,
-                            "validationError": llm_result.validationError,
-                            "stopReason": llm_result.stopReason,
-                            "contentBlockTypes": llm_result.contentBlockTypes,
-                            "outputChars": llm_result.outputChars,
-                            "retryCount": llm_result.retryCount,
-                            "attemptCount": 1 + llm_result.retryCount,
-                            "questionPolarity": llm_result.questionPolarity,
-                            "choiceAssessments": llm_result.choiceAssessments,
+                )
+                if reviewed.validationError:
+                    return None, "grounding_review_contract_invalid"
+                return reviewed, None
+
+            llm_result, main_error = call_main()
+            if llm_result is None:
+                trace["llm"] = {
+                    "provider": self.llm_client.provider,
+                    "used": bool(main_attempts),
+                    "errorCode": main_error,
+                    "attemptCount": sum(
+                        1 + int(item.get("retryCount") or 0) for item in main_attempts
+                    ),
+                    "attempts": main_attempts,
+                }
+                if request.choices:
+                    return (
+                        "Main Agentの構造化回答を検証できなかったため、"
+                        "選択肢判定を行いません。",
+                        None,
+                        None,
+                        [],
+                    )
+                return (
+                    "Main Agentの構造化最終判断を検証できなかったため、"
+                    "断定回答を行いません。",
+                    None,
+                    None,
+                    [],
+                )
+            else:
+                final_result = llm_result
+                if not request.choices and research_context is not None:
+                    reviewed, review_error = call_reviewer(final_result)
+                    remediation_rounds: list[dict[str, Any]] = []
+                    grounding_research_rounds: list[dict[str, Any]] = []
+                    for remediation_index in range(
+                        GROUNDING_REMEDIATION_MAX_ROUNDS
+                    ):
+                        if reviewed is None or reviewed.verdict in {
+                            "supported",
+                            "insufficient",
+                        }:
+                            break
+                        remediation_trace: dict[str, Any] = {
+                            "roundIndex": remediation_index,
+                            "reviewerVerdict": reviewed.verdict,
+                            "issues": list(reviewed.issues),
                         }
-                        answer_text = llm_result.text or "十分な引用根拠を取得できなかったため、断定回答は行いません。"
-                        if (
-                            layered_control
-                            and layered_control.get("answerStatus")
-                            == "partial_primary_evidence"
-                        ):
-                            omitted = "、".join(
-                                layered_control.get("omittedPrimaryIssueLabels")
-                                or ["一部の主論点"]
+                        if reviewed.verdict == "needs_research":
+                            follow_up_citations, follow_up_trace = (
+                                self._execute_reviewer_research_queries(
+                                    request,
+                                    reviewed.researchQueries,
+                                    working_citations,
+                                    deadline,
+                                )
                             )
-                            answer_text = (
-                                f"一部の主論点（{omitted}）は根拠不足のため回答できません。"
-                                f"{answer_text}"
+                            follow_up_trace["roundIndex"] = remediation_index
+                            grounding_research_rounds.append(follow_up_trace)
+                            trace["groundingResearch"] = {
+                                **follow_up_trace,
+                                "rounds": list(grounding_research_rounds),
+                            }
+                            remediation_trace["researchQueries"] = list(
+                                reviewed.researchQueries
                             )
-                        assessment_ids = _assessment_citation_ids(
-                            llm_result.choiceAssessments,
-                            llm_result.predictedAnswer,
+                            remediation_trace["newEvidenceCount"] = len(
+                                follow_up_citations
+                            )
+                            if not follow_up_citations:
+                                review_error = "grounding_research_no_evidence"
+                                remediation_trace["result"] = "no_evidence"
+                                remediation_rounds.append(remediation_trace)
+                                break
+                            working_citations[:] = _dedupe_citations(
+                                [*follow_up_citations, *working_citations]
+                            )
+                            if current_research_context is not None:
+                                current_answer_contract = dict(
+                                    current_research_context.get("answerContract")
+                                    or {}
+                                )
+                                current_answer_contract["availableCitationIds"] = [
+                                    citation.contentUnitId
+                                    for citation in working_citations
+                                    if citation.contentUnitId
+                                ]
+                                current_research_context = {
+                                    **current_research_context,
+                                    "answerContract": current_answer_contract,
+                                    "reviewerFollowUp": {
+                                        "performed": True,
+                                        "queries": list(
+                                            reviewed.researchQueries
+                                        ),
+                                        "newEvidenceContentUnitIds": [
+                                            citation.contentUnitId
+                                            for citation in follow_up_citations
+                                            if citation.contentUnitId
+                                        ],
+                                    },
+                                }
+                            # 呼び出し元はこのリストから最終citationIdsを展開する。
+                            citations[:] = working_citations
+
+                        revised, revision_error = call_main(
+                            reviewer_result=reviewed,
+                            previous_result=final_result,
                         )
-                        predicted = (
-                            None
-                            if layered_control
-                            and layered_control.get("answerStatus")
-                            == "partial_primary_evidence"
-                            else llm_result.predictedAnswer
+                        if revised is None:
+                            main_error = revision_error
+                            reviewed = None
+                            review_error = (
+                                "main_after_research_failed"
+                                if remediation_trace["reviewerVerdict"]
+                                == "needs_research"
+                                else "main_revision_failed"
+                            )
+                            remediation_trace["result"] = review_error
+                            remediation_rounds.append(remediation_trace)
+                            break
+                        final_result = revised
+                        remediation_trace["result"] = "main_reconsidered"
+                        remediation_rounds.append(remediation_trace)
+                        reviewed, review_error = call_reviewer(final_result)
+                    if (
+                        reviewed is not None
+                        and reviewed.verdict not in {"supported", "insufficient"}
+                        and not review_error
+                    ):
+                        review_error = "grounding_remediation_limit_reached"
+                    trace["groundingReview"] = {
+                        "provider": self.llm_client.provider,
+                        "used": bool(review_attempts),
+                        "verdict": reviewed.verdict if reviewed else "insufficient",
+                        "issues": reviewed.issues if reviewed else [],
+                        "findings": (
+                            reviewed.issueFindings if reviewed else []
+                        ),
+                        "researchQueries": (
+                            reviewed.researchQueries if reviewed else []
+                        ),
+                        "errorCode": review_error,
+                        "attemptCount": sum(
+                            1 + int(item.get("retryCount") or 0)
+                            for item in review_attempts
+                        ),
+                        "remediationRoundLimit": (
+                            GROUNDING_REMEDIATION_MAX_ROUNDS
+                        ),
+                        "remediationRounds": remediation_rounds,
+                        "attempts": review_attempts,
+                    }
+                    if reviewed is None or reviewed.verdict != "supported":
+                        issues = (
+                            reviewed.issues
+                            if reviewed is not None
+                            else (review_attempts[-1].get("issues") if review_attempts else [])
                         )
-                        return answer_text, predicted, llm_result.choiceJudgements, assessment_ids
+                        issue_lines = "\n".join(f"- {issue}" for issue in issues)
+                        answer = (
+                            "【根拠不十分】Main AgentとReviewerの検証で未解決の問題が残ったため、"
+                            "断定回答を行いません。"
+                        )
+                        if issue_lines:
+                            answer += f"\n確認が必要な点:\n{issue_lines}"
+                        answer += "\n個別事情に応じて専門家へ確認してください。"
+                        trace["groundingReview"]["answerSuppressed"] = True
+                        trace["llm"] = _answer_trace(final_result, main_attempts)
+                        return answer, None, None, []
+
+                trace["llm"] = _answer_trace(final_result, main_attempts)
+                answer_text = final_result.text or (
+                    "十分な引用根拠を取得できなかったため、断定回答は行いません。"
+                )
+                assessment_ids = _assessment_citation_ids(
+                    final_result.choiceAssessments,
+                    final_result.predictedAnswer,
+                )
+                if not request.choices:
+                    assessment_ids = list(final_result.answerCitationIds or [])
+                    if final_result.answerStatus in {"partial", "insufficient"}:
+                        label = (
+                            "【一部のみ回答】"
+                            if final_result.answerStatus == "partial"
+                            else "【根拠不十分】"
+                        )
+                        if not answer_text.startswith(label):
+                            answer_text = f"{label}{answer_text}"
+                if research_context and research_context.get("incomplete"):
+                    stop_reason = str(research_context.get("stopReason") or "unknown")
+                    answer_text = (
+                        "【調査未完了】反復上限までに十分性を確認できて"
+                        f"いません（停止理由: {stop_reason}）。\n{answer_text}"
+                    )
+                    trace["partialAnswer"] = {
+                        "incomplete": True,
+                        "stopReason": stop_reason,
+                    }
+                if (
+                    layered_control
+                    and layered_control.get("answerStatus") == "partial_primary_evidence"
+                ):
+                    omitted = "、".join(
+                        layered_control.get("omittedPrimaryIssueLabels")
+                        or ["一部の主論点"]
+                    )
+                    answer_text = (
+                        f"一部の主論点（{omitted}）は根拠不足のため回答できません。"
+                        f"{answer_text}"
+                    )
+                predicted = (
+                    None
+                    if layered_control
+                    and layered_control.get("answerStatus")
+                    == "partial_primary_evidence"
+                    else final_result.predictedAnswer
+                )
+                return (
+                    answer_text,
+                    predicted,
+                    final_result.choiceJudgements,
+                    assessment_ids,
+                )
 
         if request.choices:
             return (
@@ -1985,6 +2408,48 @@ class AgentService:
                 [],
             )
         return "十分な引用根拠を取得できなかったため、断定回答は行いません。", None, None, []
+
+
+def _answer_trace(result: Any, attempts: list[dict[str, Any]]) -> dict[str, Any]:
+    """Main LLMの初回判断とReviewer後の再判断を同じtrace契約へまとめる。"""
+    return {
+        "provider": result.provider,
+        "model": result.model,
+        "used": True,
+        "latencyMs": sum(int(item.get("latencyMs") or 0) for item in attempts),
+        "inputTokens": sum(int(item.get("inputTokens") or 0) for item in attempts),
+        "outputTokens": sum(int(item.get("outputTokens") or 0) for item in attempts),
+        "estimatedCost": result.estimatedCost,
+        "validationError": result.validationError,
+        "stopReason": result.stopReason,
+        "contentBlockTypes": result.contentBlockTypes,
+        "outputChars": result.outputChars,
+        "retryCount": sum(int(item.get("retryCount") or 0) for item in attempts),
+        "attemptCount": sum(
+            1 + int(item.get("retryCount") or 0) for item in attempts
+        ),
+        "questionPolarity": result.questionPolarity,
+        "choiceAssessments": result.choiceAssessments,
+        "answerStatus": result.answerStatus,
+        "citationIds": result.answerCitationIds,
+        "missing": result.missing,
+        "issueDecisions": result.answerIssueDecisions,
+        "attempts": attempts,
+    }
+
+
+def _dedupe_citations(citations: list[Citation]) -> list[Citation]:
+    """contentUnitIdの一致だけで重複を除き、LLMが受け取る順序を保つ。"""
+    output: list[Citation] = []
+    seen: set[str] = set()
+    for citation in citations:
+        key = citation.contentUnitId or ""
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        output.append(citation)
+    return output
 
 
 def _merge_direct_documents_into_evidence(
@@ -2605,7 +3070,9 @@ def _aspect_matrix_trace(matrix: AspectEvidenceMatrix) -> dict[str, dict[str, An
             "scores": dict(aspect.scores),
             "inheritedContentUnitIds": sorted(aspect.inherited_content_ids),
             "used": aspect.used,
-            "error": aspect.error,
+            "errorCode": (
+                "aspect_reranker_error" if aspect.error else None
+            ),
             "skippedReason": aspect.skipped_reason,
         }
         for aspect in matrix.aspects
@@ -3058,6 +3525,7 @@ def _select_final_citations(
     answer_text: str | None = None,
     expand_answer_citations: bool = True,
     structural_citation_ids: list[str] | None = None,
+    fill_remaining: bool = True,
 ) -> list[Citation]:
     """回答の根拠として返す引用を選ぶ。
 
@@ -3085,6 +3553,8 @@ def _select_final_citations(
     selected = [by_id[content_unit_id] for content_unit_id in prioritized_ids if content_unit_id in by_id]
     selected_ids = {citation.contentUnitId for citation in selected}
     remaining = [citation for citation in candidates if citation.contentUnitId not in selected_ids]
+    if not fill_remaining:
+        return selected[:citation_top_k]
     if not expand_answer_citations:
         return (selected + remaining)[:citation_top_k]
     return selected + remaining[: max(0, citation_top_k - len(selected))]

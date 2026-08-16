@@ -210,7 +210,12 @@ class TestLLMDirectedRetrievalActive:
         monkeypatch.setattr(
             service,
             "_compose_answer",
-            lambda *args, **kwargs: ("根拠付き回答", None, None, []),
+            lambda *args, **kwargs: (
+                "根拠付き回答",
+                None,
+                None,
+                ["law-test-article-2"],
+            ),
         )
 
         response = service.answer(_request())
@@ -221,6 +226,9 @@ class TestLLMDirectedRetrievalActive:
         ]
         assert response.answer == "根拠付き回答"
         assert response.citations[0].contentUnitId == "law-test-article-2"
+        assert response.trace["limits"]["maxTotalToolCalls"] == (
+            agent_module.settings.llm_research_max_tool_calls
+        )
         assert "planner" not in response.trace
 
     def test_active_reports_provider_credit_error(

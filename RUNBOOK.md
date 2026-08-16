@@ -53,6 +53,10 @@ ANTHROPIC_API_KEY=sk-ant-...
 ANTHROPIC_VERSION=2023-06-01
 ANTHROPIC_MAX_TOKENS=4096
 ANSWER_MODEL=claude-haiku-4-5-20251001
+REVIEWER_MODEL=claude-haiku-4-5-20251001
+REVIEWER_MAX_TOKENS=8192
+LLM_RESEARCH_STAGE_MODEL=claude-haiku-4-5-20251001
+LLM_RESEARCH_INTEGRATION_MODEL=claude-sonnet-5
 PLANNER_MODEL=claude-haiku-4-5-20251001
 PLANNER_MAX_TOKENS=1024
 PLANNER_TIMEOUT_SEC=30
@@ -84,7 +88,8 @@ EMBEDDING_DIMENSION=1024
 EMBEDDING_MAX_CHARS=1000
 ```
 
-利用可能なモデルIDはAPIキーの契約プランに依存するため、`ANSWER_MODEL` を決める前に直接確認する。
+利用可能なモデルIDはAPIキーの契約プランに依存するため、`ANSWER_MODEL`、
+`REVIEWER_MODEL`、調査の役割別modelを決める前に直接確認する。
 
 ```bash
 curl -s https://api.anthropic.com/v1/messages \
@@ -183,12 +188,12 @@ curl -s -X POST http://localhost:8000/admin/seed | jq .
 
 投入内容:
 
-- OpenSearch index: `legal-rag-content`
+- OpenSearch index: `legal-rag-content-ja-v2`（Kuromoji＋NFKC＋bigram）
 - Graph nodes/edges: `docs/requirements/samples/metadata/*.jsonl`
 - e-Gov法令投入時のGraph edges: `HAS_CONTENT_UNIT`、同一法令内の明示的な条文参照から
   生成した `REFERENCES`、下位法令の「法第N条」参照を親法律へ、府省令等の
-  「令第N条」参照を同じ法令系統の施行令へ結ぶ `REFERENCES` と、その逆向きに
-  親法律・施行令側から具体化条文を引く `IMPLEMENTS`、
+  「令第N条」参照を同じ法令系統の施行令へ結ぶ `REFERENCES` と、その逆向きの
+  未確認`IMPLEMENTS`候補を表す`RelationAssertion`、
   準用先の規定から準用元を逆引きする `APPLIED_BY`
 - e-Gov法令は本則・附則を分けて投入する。本則は `law-<法令番号>-article-<条番号>`、附則は `law-<法令番号>-suppl-<index>-article-<条番号>`（条番号の衝突で本則が消えるのを防ぐ）。各文書に `provisionType` / `sectionKey` を付与。詳細は [id_naming_rules.md](docs/requirements/docs/id_naming_rules.md) 3.1
 - MinIO bucket: `knowledge-root`
@@ -199,10 +204,25 @@ curl -s -X POST http://localhost:8000/admin/seed | jq .
 
 `/admin/seed` は OpenSearch index と Neo4j graph を作り直す。検証環境の再投入用であり、本番運用向けの差分投入ではない。
 
-### 日本語Analyzerの比較索引
+### RelationAssertionの検索時判断
+
+`/admin/seed`は決定的に抽出できる法令参照と、未確認の`RelationAssertion`候補の生成までを行う。
+全候補を索引時にLLM分類するジョブは通常運用では実行しない。
+
+検索時は探索LLMが質問との関連性を判断し、必要な候補だけ両端Article本文を取得する。統合LLMは
+両端本文の意味を比較し、`confirmed / rejected / unverified`を案件内の`relationDecision`として
+CaseStoreへ保存する。プログラムは候補ID・両端Article ID・関係種別の一致、既知の証拠IDであること、
+`confirmed / rejected`に両端本文が含まれることだけを検証し、関係の意味は決めない。
+
+`relationDecision`は正式`IMPLEMENTS`エッジへ昇格させず、他案件へも共有しない。ガイド対応表は
+表全体の直積ではなく同じ行の条文同士だけを候補にする。`scripts/classify_graph_relations.py`は
+索引処理ではなく、検索時方式との比較評価を行う場合だけ使う任意ツールである。
+
+### 日本語Analyzer索引
 
 既存`legal-rag-content`を削除せず、Kuromoji＋NFKCとbigramのmulti-fieldを持つ
-`legal-rag-content-ja-v2`を作る。Analyzer pluginを追加するため、最初にOpenSearchをbuildする。
+`legal-rag-content-ja-v2`を既定で使用する。Analyzer pluginを追加するため、最初に
+OpenSearchをbuildする。
 
 ```bash
 docker compose build opensearch
@@ -214,7 +234,7 @@ python3 scripts/create_japanese_search_index.py
 存在する場合、スクリプトは削除・上書きせず終了する。作り直す場合は対象名と用途を確認してから
 明示的に別名を指定する。
 
-比較索引をAgent APIで使う場合:
+Agent APIの既定値は次の設定である。明示指定する場合も同じ値を使う。
 
 ```bash
 OPENSEARCH_INDEX=legal-rag-content-ja-v2 \
@@ -222,7 +242,7 @@ OPENSEARCH_INDEX_MAPPING=metadata/opensearch_index_mapping.japanese.sample.json 
 docker compose up -d --build agent-api
 ```
 
-元へ戻す場合:
+障害切り分けのため旧Analyzerへ明示的に戻す場合:
 
 ```bash
 OPENSEARCH_INDEX=legal-rag-content \
@@ -230,14 +250,14 @@ OPENSEARCH_INDEX_MAPPING=metadata/opensearch_index_mapping.sample.json \
 docker compose up -d agent-api
 ```
 
-この段階では検索スコア、候補上限、探索ループは変更しない。`heading`、`text`、
-`sectionPath`等の既存検索fieldが日本語Analyzerで解析される差だけを比較する。
+検索スコア、候補上限、探索ループはこの設定では変更しない。`heading`、`text`、
+`sectionPath`等の既存検索fieldを、索引時・検索時とも日本語Analyzerで解析する。
 
 ### seed中の挙動（ハングではない）
 
 `SEED_LAWQA_EGOV=true` 込みの seed は、e-Gov法令の取得と**全チャンク（約1.6万件）の埋め込み
 生成をメモリ上で完了してから** OpenSearch へ一括投入する。そのため投入完了までの数分〜
-十数分間、`GET /legal-rag-content/_count` は **0 のまま**になる。これはハングではない。
+十数分間、対象索引の`_count`は **0 のまま**になる。これはハングではない。
 
 進行中か（=正常）を確かめる目安:
 
@@ -361,10 +381,32 @@ curl -s http://localhost:8000/answer -H 'content-type: application/json' \
 LLMへ検索語・探索順序・根拠選択の裁量を持たせる新経路の判断契約を実装している。
 法令とガイドの取得元は既存のOpenSearch / Neo4jに限定し、未取得のArticle IDや
 contentUnitIdはコード側で拒否する。
+探索段階の構造化出力のID欄は、今回のPromptに提示したArticle ID、documentId、
+contentUnitIdだけを選べるenumにする。統合段階は、同じ長いID enumが共有DAGの
+各階層へ反復展開されて入力を膨らませるため、Promptに既知IDを示し、出力直後の
+完全一致検証とsanitizeで未知IDを拒否する。LLMが新たな法令名・条番号を調べたい
+場合は内部IDを組み立てず、`search_corpus`の検索語として要求する。
+
+反復方式は`iterative_cycles_v8_hypothesis_testing`である。1利用者質問につきプロセス内の
+`ResearchCase`を1件作り、LLM Actionを直列`ResearchTask`として実行する。検索・
+Graph・本文取得の確認済み結果はツール終了直後に案件へ記録し、統合LLMが成功した
+場合だけ新しいCheckpointを作る。統合タイムアウト時も最新Checkpoint以降の案件差分と
+未取得Article候補Taskは残る。詳細は
+[llm_research_case_store_implementation_plan.md](docs/requirements/docs/llm_research_case_store_implementation_plan.md)
+を参照する。
+一般検索で発見したArticleも`search_result`候補Taskとして案件へ保存する。候補が
+Prompt上限を超える場合は文書別に分散して表示ページを進め、先頭候補だけを各サイクルで
+繰り返さない。統合LLMへの参照だけでは候補ページを進めず、候補を実行できる探索・
+掘り下げ段階だけで進める。Article本文取得時の自動Graph展開は`IMPLEMENTS`最大12件に限定し、
+参照・準用関係の広い探索はLLMの明示的な`expand_graph`へ分離する。
+Anthropicが一時的な`529 Overloaded`を返した場合だけ、同一LLM呼び出しのtimeout内で
+2秒・4秒・8秒の指数バックオフを行う。入力不正、利用枠不足、その他のHTTPエラーは
+同じ経路では再試行しない。
 
 `AGENT_LLM_DIRECTED_RETRIEVAL=true`にすると、旧planner、レイヤー別Requirement生成、
 プログラム側の充足判定・根拠枠選抜を通らず、LLM主導調査だけで回答する。プログラムは
-検索・本文取得・ID検証・時間上限を担当し、LLMが候補比較、追加調査、根拠選択を行う。
+許可された検索・本文取得の実行、ID検証、Task・Checkpoint状態遷移、時間・件数上限、
+禁止事項の検証を担当し、LLMが候補比較、追加調査、根拠選択を行う。
 タイムアウトや根拠不足で終了した場合、旧方式へ黙って戻さず利用者向け回答とtraceへ明示する。
 Anthropic等のクレジット・利用枠不足は`provider_quota_error`として、投入資料の根拠不足や
 内部エラーと区別して表示する。
@@ -377,6 +419,24 @@ Anthropic等のクレジット・利用枠不足は`provider_quota_error`とし�
 探索・掘り下げJSONは4,096トークンの物理上限に対して2,500トークン以内を目標とし、
 根拠IDと未確認Article IDを説明文より優先する。上限へ近づく場合は理由・調査経緯を
 要約し、JSONを途中で切らず完結させる。
+各サイクルは、質問への暫定結論を`Hypothesis`として作成し、各検索・本文取得Actionを
+`hypothesisIds`で検証対象へ紐づけ、取得本文による支持・反証・根拠不足を記録する。
+探索では質問の重要な特徴を説明する主仮説を立て、有力な別構成がある場合だけ競合仮説を
+残す。掘り下げでは、取得本文が仮説の要件・対象・例外・手続等を実際に定めるか、
+質問の重要な特徴を説明できるか、反証や適用範囲の不一致がないかを比較する。
+合わない仮説は周辺検索を続けず、維持・修正・棄却・追加のいずれかへ更新する。
+CaseStoreは仮説ごとに実行Taskと観測Evidenceを保持し、Checkpointは
+`logicalStructure.hypotheses`へ平坦な配列として保存する。各要素は
+`hypothesisId / statement / status / evidenceIds / missing`だけを持つ。
+`status`は`unverified | partially_supported | supported | rejected`である。
+未検証または一部支持の仮説が中心的結論を変え得る場合は`ready`にせず、中心的結論へ
+影響しない場合だけ未確認範囲と影響を明示して`ready`にできる。旧nested形式は読込時に
+この平坦形式へ変換し、根拠IDと未確認事項を維持する。
+`missing`は未確認点の説明であり、プログラムが条番号・法令種別・見出し類似を解釈して
+Taskを自動生成する命令欄ではない。次に読む既知ArticleはLLMが`fetch_articles`または
+Checkpointの`nextArticleIds`へ明示する。IDが不明なら、法令名・条番号・検証目的を
+`search_corpus`または`unresolved(action=search)`へ明示する。プログラムは法的必要性を
+推測せず、指定IDの実在性、本文取得状態、Task遷移、許可ツール、予算と終了状態だけを検証する。
 各判断とサイクル統合では、`ready`の直前に、結論を支える法令本文を選択済みか、
 LLM自身が本文確認を必要と判断して`nextArticleIds`または未確認事項へ残したArticleが
 未取得でないかを見直す。残り予算で取得できる場合は`fetch_articles`を優先する。
@@ -401,6 +461,10 @@ Article直接取得時は、検証済みのGraph関係だけを1hop自動取得�
 残したArticle同士を結ぶ関係だけを提示する。提示時も起点Articleごとのラウンドロビンとする。
 起点Article、関係種別、到達先Article、
 法令名・条見出しを一組で渡し、関係先の本文取得と最終採否はLLMが判断する。
+明示的な`expand_graph`は、正式Graph経路、索引時に`implements`と分類されたナビゲーション関係、
+未分類または`uncertain`の`RelationAssertion`を区別して扱う。索引時分類済み関係も正式エッジ・
+法的根拠ではない。検索時LLMは質問への関連性と本文取得の要否を判断するが、関係種別を再分類
+しない。結論に使う場合は対象Article本文そのものを取得して根拠にする。
 各サイクルは残り時間を残サイクル数で配分し、統合LLM用の時間を先に予約する。
 統合失敗時に段階判断だけで`ready`へ昇格させず、`continue`の限定状態として扱う。
 統合JSONに未確認のArticle ID等が混じった場合は、IDを推測で補正せず、その項目だけを
@@ -420,6 +484,16 @@ Article直接取得時は、検証済みのGraph関係だけを1hop自動取得�
 押し出さないようにする。LLMへの提示はArticle単位で分散するが、未提示本文は削除しない。
 documentId確定後の法令内検索は30 Article、未確定の横断検索は8 Articleとする。
 複数文書の候補は文書単位のラウンドロビンでLLMへ提示する。
+文字予算で本文を切り詰めた場合は各原文へ`textTruncated`と表示文字数を付ける。
+探索・統合LLMが根拠IDとして返せるのは、今回のPromptへ本文を実際に表示したIDだけとする。
+最終回答とReviewerにも切り詰め・省略IDのmanifestを渡し、省略IDはcitationIds候補から除外する。
+active経路では、Integrationの結論・仮説状態・`verified`判定をMainの判断材料へ流用しない。
+MainとReviewerは`issue-grounding-v1`契約の`issueId / question`と利用可能な既知引用IDを共有し、
+MainはIssue別の`issueDecisions`、Reviewerは同じIssue ID付きの`findings`を返す。
+Reviewerには選択済み引用と未選択候補を分けて表示し、未選択候補は追加検索要否の判別にだけ使う。
+プログラムはIssue ID集合、既知引用ID、件数、状態、トップレベルとの集合整合だけを検証する。
+切り詰め本文は表示部分が直接支える主張には使えるが、未表示末尾に例外がないことや
+列挙の完全性を推測する根拠にはしない。
 
 `AGENT_LLM_DIRECTED_RETRIEVAL_SHADOW=true`は回答非接続の比較用であり、activeと同時に
 有効にしてもactive経路が優先される。
@@ -433,8 +507,13 @@ curl -s http://localhost:8000/health | jq '.llmDirectedLegalRetrieval'
 ```text
 AGENT_LLM_DIRECTED_RETRIEVAL=false
 AGENT_LLM_DIRECTED_RETRIEVAL_SHADOW=false
+# 互換設定。役割別設定が空の場合に探索・統合の両方へ使う。
 LLM_RESEARCH_MODEL=
+LLM_RESEARCH_STAGE_MODEL=
+LLM_RESEARCH_INTEGRATION_MODEL=
+REVIEWER_MODEL=
 LLM_RESEARCH_MAX_TOKENS=4096
+LLM_RESEARCH_STAGE_EFFORT=low
 LLM_RESEARCH_INTEGRATION_MAX_TOKENS=8192
 LLM_RESEARCH_INTEGRATION_EFFORT=low
 LLM_RESEARCH_TIMEOUT_SEC=90
@@ -447,6 +526,7 @@ LLM_RESEARCH_MAX_CHUNKS_PER_ARTICLE=100
 LLM_RESEARCH_ACTIVE_BUDGET_SEC=360
 LLM_RESEARCH_SHADOW_BUDGET_SEC=180
 LLM_RESEARCH_MAX_EVIDENCE_ITEMS=60
+LLM_FINALIZATION_MATERIAL_MAX_ITEMS=24
 LLM_RESEARCH_MAX_SELECTED_EVIDENCE=16
 LLM_RESEARCH_EVIDENCE_CHARS=30000
 ```
@@ -477,6 +557,99 @@ uv run --with neo4j --with requests python scripts/graph_inventory.py
 UI では回答、検索ルート、citations、Graph paths、trace を確認できる。
 
 ## 6. 評価実行
+
+### 新Agent Frameworkの明示検証
+
+`AGENT_FRAMEWORK_ACTIVE=false`のままでも、`/answer/framework`は新Frameworkだけを実行する。
+現行経路との取り違えを避けるため、新Frameworkの移行評価ではこのendpointを使う。
+Reviewerは`AGENT_FRAMEWORK_REVIEWER_ENABLED=true`を明示した場合だけ有効になり、既定値は`false`。
+初回の作業分解とTool選択には`AGENT_FRAMEWORK_RESEARCH_MODEL`、ToolResult取得後の意味評価・
+状態統合・追加調査または終了の判断には`AGENT_FRAMEWORK_INTEGRATION_MODEL`を使う。
+旧`AGENT_FRAMEWORK_FINALIZE_MODEL`も互換設定として読めるが、新規設定ではintegration名を使う。
+両用途のsystem promptには`solver_common.md`を合成し、質問観点の再確認、法令階層・委任先の
+追跡、Evidence利用、完了条件を全サイクルで共通にする。`solver_research.md`は初回の作業分解、
+`solver_integration.md`はToolResult取得後の更新という段階固有の指示だけを追加する。
+
+```bash
+curl -s http://localhost:8000/answer/framework \
+  -H 'content-type: application/json' \
+  -d '{"question":"公開買付けの手続が必要になるのはどのような場合ですか","pattern":"pattern_4_deepsearch","userClearanceLevel":2,"topK":5}' \
+  | jq '{answer, citations, agentFramework: .trace.agentFramework}'
+```
+
+`trace.agentFramework`の`reviewerEnabled`、`researchCycleCount`、`modelCalls`、`toolCalls`、
+`graphCandidateReviews`、`runStatus`を確認する。`runStatus=completed`は実行完了だけを表し、
+回答の法的十分性を意味しない。
+`toolCalls`には本文を含めず、Solverが指定した検索・本文取得と、本文取得に連動して実行された
+1ホップGraph取得の`arguments`と`purpose`を残す。
+Legal ProfileのGraph上限は1ホップである。起点Articleでだけ1ホップを自動取得し、
+Graph候補Articleの本文取得からGraphを再展開しない。その先が必要ならSolverが`legal_search`を選ぶ。
+`fetch_articles`1回のArticle IDは最大4個、1 Cycleの本文取得成功数も重複なしで最大4件とする。
+Graph Reviewから1 stepで選ぶ候補は最大3件とし、残りの関連候補はdeferして後続stepまたは次Cycleへ残す。
+プログラムは超過分を選別せず契約違反として返す。
+`modelCalls[].purpose`は初回が`research`、通常のTool実行後は`integration`になる。新しい1ホップ候補が
+投影された直後は、同一Solverを本文を再掲しない短い専用Promptの`graph_selection`モードで呼ぶ。これは任意の
+Reviewer Agentとは別の処理モードである。Solverは`graph_review_batch`の全候補をselect/defer/rejectし、
+最大3件かつCycle残り枠内の選択Articleを同じ順序の1件の`fetch_articles`で`continue`する。
+プログラムはReviewの存在、既知ID、件数、Requestとの一致だけを
+検証し、候補の関連性を判断しない。Solverが
+`finalize`する際は、全WorkItemを明示的に`resolved`または`dropped`へ閉じる必要がある。
+プログラムは未終了IDの有無だけを検証し、法的な十分性や終了理由はSolverが判断する。
+SolverContextは、根拠・引用に使える正確なIDを`grounding_evidence_ids`、追加本文取得に使える
+Article IDを`fetchable_article_ids`として別々に渡す。LLMは前者をHypothesis・citationへ、後者を
+`fetch_articles`へ使う。プログラムはIDの完全一致だけを検証する。
+Article本文等のEvidence本文は`AGENT_FRAMEWORK_MAX_MATERIAL_EVIDENCE_CHARS`（既定50,000文字）を
+上限とする。全Graph Article・Link・判断履歴はCaseStoreに保持し、Solverへは新規・再採用・新Link差分の
+`graph_review_batch`と、全評価済みfrontierの短い`graph_review_ledger`だけを載せる。同じGraph navigation情報は
+`evidence_manifest`、`recent_tool_results.evidence_ids`、`navigation_evidence_ids`、`omitted_evidence_ids`へ
+再掲載しない。CaseStateのEvidenceとToolResultは監査用の正本として削除しない。
+差分batchは`AGENT_FRAMEWORK_MAX_GRAPH_CANDIDATES_PER_REVIEW_BATCH`（既定20）で機械的にpage分割し、
+未提示候補を関連なしまたは不存在として扱わない。
+差分batchの候補はArticle ID、法令名・見出し、起点、relation、取得状態を失わず、過去候補はledgerから消えない。
+候補の法的関連性はSolverが判断する。Prompt全体が
+`AGENT_FRAMEWORK_MAX_SOLVER_INPUT_CHARS`（既定240,000文字）を超える場合は、
+候補を黙って削らず`context_capacity_exceeded`で停止する。
+下位法令・委任先の未確認事項は、通常のWorkItem、Hypothesis、gapsで管理する。
+`discover_source / assess_source / discover_target / fetch_target`という重複状態はLegal Profileで要求しない。
+取得本文に質問へ関係する委任があれば、Solverは対応するHypothesisを`unresolved`、WorkItemを`open`の
+まま追加調査する。プログラムは法的な要否を決めない。Graph候補自体は根拠にならず、関連するとSolverが
+判断したArticleを`fetch_articles`で取得して初めて根拠候補にできる。
+検索本文中の参照先条文を追加取得する場合も、対応Article IDが
+`fetchable_article_ids`になければIDを組み立てず、法令名・条番号・確認事項で
+`legal_search`を行う。SolverはDecisionを返す前に、`fetch_articles`の全IDを同一覧と完全一致で照合する。
+`retain_evidence_ids`は全取得結果ではなく、Solverが次サイクルにも本文を必要と判断したEvidenceを
+`max_retained_evidence`以内で選ぶ欄である。プログラムは超過分を自動選別しない。
+SolverDecisionの`next`、focus、保持ID、answer、`dependency_decisions`はproviderのstructured-output schemaで直接受け取る。
+複雑な`update`と`tool_requests`だけを個別のJSON文字列として輸送し、Adapterが復元する。
+長い回答本文を二重エンコードせず、provider schemaも過大にしない。その後は同じSolverDecision契約で検証する。
+SolverDecisionが未知ID、上限超過、未終了WorkItem等の構造契約に違反した場合、状態へ適用せず、
+違反理由と直前Decisionを同じ用途のLLMへ1回だけ返す。LLMが意味判断を保って自己修復し、
+2回目も不正なら`protocol_error`で終了する。プログラムによるID補正や超過分の切捨ては行わない。
+
+新FrameworkのLegal Domainは、法令検索の第1位Articleについて取得済み一致chunkを検索順位どおり
+最大5000文字の範囲でまとめてSolverへ返し、他のArticle候補は代表chunkを最大400文字で返す。
+同じArticle見出しが各項号へ付加した共通先頭文は1回だけ残して機械的に圧縮する。これはArticle内の委任・
+例外を先頭chunkだけへ縮約して失うことを避ける機械的な検索投影であり、法的関連性は選別しない。
+法令とガイドを同時検索した場合、法令候補は`top_k`件、ガイド候補は上位2件を返す。
+並列検索のEvidenceは、リクエスト順による文脈上限の偏りを避けるため結果ごとにround-robinで提示する。
+法令・ガイドを問わず
+`legal_search`の結果は`evidenceRole=search_navigation`の発見候補であり、Hypothesisの確定根拠や
+citationにはできない。Solverが関連すると判断した法令Articleは
+`fetch_articles`で全項号を取得し、その結果だけを法令本文の根拠候補として評価する。
+`fetch_articles`の実行時は、プログラムが同じArticle IDを`legal_graph_neighbors`へ機械的に転記し、
+OpenSearchの本文取得とNeo4jの1ホップ取得を同じcycleで実行する。SolverはGraphを直接要求しない。
+同じArticleのGraphは成功後に再取得せず、Graph候補のArticle本文をSolverが取得対象に選ぶと、
+そのArticleが次の1ホップ起点になる。
+
+`legal_graph_neighbors`は既知Articleに接続する入出力両方向の正式Graph関係と
+RelationAssertionを候補として返す。Graph候補は条文取得用のナビゲーション情報であり、
+そのまま引用根拠やHypothesisの確定根拠にはできない。Solverは関係種別と方向を質問に照らし、
+関係し得る範囲の隣接Articleをすべて`fetch_articles`へまとめ、端点本文を読んで採用を判断する。
+`REFERENCES`はciting→cited、`IMPLEMENTS`はparent→child、`APPLIED_BY`はapplied→applyingであり、
+`outgoing`は起点がfrom側、`incoming`は起点がto側を表す。`formal_relation`と
+`relation_assertion`を区別し、後者を確定関係として扱わない。項・号に付いた同一参照、逆向き派生関係、
+RelationAssertionが同じ2つのArticleを結ぶ場合は、Articleペア1候補へ機械的に集約する。
+これは候補枠の重複消費を防ぐ処理であり、どの候補が法的に関連するかは選別しない。
 
 UIの自然言語例題12問は、文書・必要条文・回答要点の3段階で確認する。
 採点用の条文ID・要点はAgent APIへ送信しない。
@@ -639,13 +812,15 @@ version 5以前とは評価項目が異なるため直接比較しない。
 `questionPolarity`、各判定の `verdict` と `confidence` からコードが `predictedAnswer` を決定する。
 判定に使用した `citationIds` を優先して最終引用（既定5件）を構成する。
 
-`IMPLEMENTS` と `APPLIED_BY` はseed時に生成するため、この変更を既存環境へ反映するには
-agent-apiをbuild後、`/admin/seed` を再実行する。特に「令第N条」を施行令へ結ぶ
-委任関係もseed済みGraphの内容なので、再seedせずにコードだけ更新した場合は追加されない。
+`REFERENCES`、未確認`RelationAssertion`、`APPLIED_BY`はseed時に生成するため、この変更を
+既存環境へ反映するにはagent-apiをbuild後、`/admin/seed`を再実行する。特に「法第N条」・
+「令第N条」の親参照候補はseed済みGraphの内容なので、再seedせずにコードだけ更新しても
+反映されない。Graph schema version 7の再seed後は、検索時LLMが必要な候補だけを案件内で判断する。
+親参照候補と案件内判断はいずれも正式`IMPLEMENTS`ではない。
 Graph展開は上位ノードごとに少数ずつ取得した後、質問との語句被覆と接続先法令の多様性で
 経路を選び、一つの条文や一つの法令の参照先だけで `AGENT_MAX_GRAPH_PATHS` を
 使い切らないようにする。
-このうち親法参照・`IMPLEMENTS`・`APPLIED_BY` で機械的に確定した対象だけは、
+このうち明示的`REFERENCES`、信頼済み`IMPLEMENTS`、派生元を持つ`APPLIED_BY`の対象だけは、
 接続先法令を分散させながら最大4 Articleを再ランカー入力に保持する。同一Articleの
 複数項・号は最も質問に近い1チャンクだけを強制対象とし、他のチャンクは候補プールから
 削除しない。
@@ -824,7 +999,8 @@ Phase 0 で以下を固定する。
 
 - `agent-api/app/embeddings.py`: embedding provider を変更する場合に差し替え
 - `agent-api/app/seed.py`: サンプル文書生成から e-Gov 前処理済み文書投入へ変更
-- `.env`: `LLM_PROVIDER`, `ANSWER_MODEL`, provider別APIキーを変更
+- `.env`: `LLM_PROVIDER`, `ANSWER_MODEL`, `REVIEWER_MODEL`,
+  `LLM_RESEARCH_STAGE_MODEL`, `LLM_RESEARCH_INTEGRATION_MODEL`, provider別APIキーを変更
 - `agent-api/app/agent.py`: planner / answer / judge の使い分けを拡張
 - `docs/requirements/samples/eval/`: 実評価分割の JSONL に差し替え
 

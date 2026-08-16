@@ -4,9 +4,16 @@ from typing import Any
 from neo4j import GraphDatabase
 
 from .config import settings
-from .legal_ontology import EDGE_REGISTRY
+from .legal_ontology import (
+    EDGE_REGISTRY,
+    RELATION_STATUS_LLM_IMPLEMENTS,
+    RELATION_STATUS_LLM_UNCERTAIN,
+    RELATION_STATUS_UNVERIFIED,
+    expandable_edge_types,
+)
 
 EDGE_TYPE_PATTERN = re.compile(r"^[A-Z_]+$")
+SEED_BATCH_SIZE = 500
 
 
 class GraphClient:
@@ -29,34 +36,66 @@ class GraphClient:
             session.run("MATCH (n) DETACH DELETE n").consume()
 
     def seed_nodes(self, nodes: list[dict[str, Any]]) -> None:
+        nodes_by_type: dict[str, list[dict[str, Any]]] = {}
+        for node in nodes:
+            node_type = str(node.get("nodeType") or "Unknown")
+            _safe_label(node_type)
+            nodes_by_type.setdefault(node_type, []).append(node)
+
         with self.driver.session() as session:
-            for node in nodes:
-                labels = ["GraphNode", node.get("nodeType", "Unknown")]
-                label_expr = ":".join(_safe_label(label) for label in labels)
-                session.run(
-                    f"MERGE (n:{label_expr} {{graphNodeId: $graphNodeId}}) SET n += $props",
-                    graphNodeId=node["graphNodeId"],
-                    props=node,
-                ).consume()
+            session.run(
+                "CREATE INDEX graph_node_id IF NOT EXISTS "
+                "FOR (n:GraphNode) ON (n.graphNodeId)"
+            ).consume()
+            for node_type, typed_nodes in nodes_by_type.items():
+                label_expr = ":".join(
+                    (_safe_label("GraphNode"), _safe_label(node_type))
+                )
+                for batch in _chunks(typed_nodes, SEED_BATCH_SIZE):
+                    session.run(
+                        f"""
+                        UNWIND $rows AS row
+                        MERGE (n:{label_expr} {{graphNodeId: row.graphNodeId}})
+                        SET n += row.props
+                        """,
+                        rows=[
+                            {
+                                "graphNodeId": node["graphNodeId"],
+                                "props": node,
+                            }
+                            for node in batch
+                        ],
+                    ).consume()
 
     def seed_edges(self, edges: list[dict[str, Any]]) -> None:
+        edges_by_type: dict[str, list[dict[str, Any]]] = {}
+        for edge in edges:
+            edge_type = str(edge["edgeType"])
+            if not EDGE_TYPE_PATTERN.fullmatch(edge_type):
+                raise ValueError(f"Invalid edgeType: {edge_type}")
+            edges_by_type.setdefault(edge_type, []).append(edge)
+
         with self.driver.session() as session:
-            for edge in edges:
-                edge_type = edge["edgeType"]
-                if not EDGE_TYPE_PATTERN.match(edge_type):
-                    raise ValueError(f"Invalid edgeType: {edge_type}")
-                session.run(
-                    f"""
-                    MATCH (from {{graphNodeId: $fromGraphNodeId}})
-                    MATCH (to {{graphNodeId: $toGraphNodeId}})
-                    MERGE (from)-[r:{edge_type} {{graphEdgeId: $graphEdgeId}}]->(to)
-                    SET r += $props
-                    """,
-                    fromGraphNodeId=edge["fromGraphNodeId"],
-                    toGraphNodeId=edge["toGraphNodeId"],
-                    graphEdgeId=edge["graphEdgeId"],
-                    props=edge,
-                ).consume()
+            for edge_type, typed_edges in edges_by_type.items():
+                for batch in _chunks(typed_edges, SEED_BATCH_SIZE):
+                    session.run(
+                        f"""
+                        UNWIND $rows AS row
+                        MATCH (from:GraphNode {{graphNodeId: row.fromGraphNodeId}})
+                        MATCH (to:GraphNode {{graphNodeId: row.toGraphNodeId}})
+                        MERGE (from)-[r:{edge_type} {{graphEdgeId: row.graphEdgeId}}]->(to)
+                        SET r += row.props
+                        """,
+                        rows=[
+                            {
+                                "fromGraphNodeId": edge["fromGraphNodeId"],
+                                "toGraphNodeId": edge["toGraphNodeId"],
+                                "graphEdgeId": edge["graphEdgeId"],
+                                "props": edge,
+                            }
+                            for edge in batch
+                        ],
+                    ).consume()
 
     def paths_from(
         self,
@@ -125,6 +164,7 @@ class GraphClient:
         self,
         from_article_ids: list[str],
         limit: int = 20,
+        user_clearance_level: int = 3,
         timeout_sec: float | None = None,
     ) -> list[dict[str, Any]]:
         """ガイド由来の未確認関係(RelationAssertion)を候補拡張のためだけに取得する。
@@ -137,7 +177,13 @@ class GraphClient:
             return []
         query = """
         MATCH (assertion:RelationAssertion)
+        MATCH (from:Article {graphNodeId: assertion.fromArticleId})
+        MATCH (to:Article {graphNodeId: assertion.toArticleId})
         WHERE assertion.fromArticleId IN $fromArticleIds
+        AND assertion.status IN $visibleStatuses
+        AND coalesce(assertion.clearanceLevel, 3) <= $userClearanceLevel
+        AND coalesce(from.clearanceLevel, 3) <= $userClearanceLevel
+        AND coalesce(to.clearanceLevel, 3) <= $userClearanceLevel
         RETURN properties(assertion) AS assertion
         LIMIT $limit
         """
@@ -145,6 +191,12 @@ class GraphClient:
             parameters = {
                 "fromArticleIds": list(dict.fromkeys(from_article_ids)),
                 "limit": max(1, min(limit, 100)),
+                "userClearanceLevel": user_clearance_level,
+                "visibleStatuses": [
+                    RELATION_STATUS_UNVERIFIED,
+                    RELATION_STATUS_LLM_UNCERTAIN,
+                    RELATION_STATUS_LLM_IMPLEMENTS,
+                ],
             }
             if timeout_sec is None:
                 records = session.run(query, **parameters)
@@ -154,6 +206,201 @@ class GraphClient:
                     dict(record["assertion"])
                     for record in transaction.run(query, **parameters)
                 ]
+
+    def article_relations_touching(
+        self,
+        article_ids: list[str],
+        *,
+        edge_types: list[str] | None = None,
+        user_clearance_level: int = 3,
+        limit: int = 50,
+        timeout_sec: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """指定Articleの入出力に接続する正式Graph関係を候補として取得する。
+
+        下位法令から親法令へのREFERENCESのように、起点Articleから見て
+        入力側にある関係も検索ナビゲーションに必要なため双方向を返す。
+        関係の質問への関連性は呼び出し先LLMが本文で判断する。
+        """
+        if not article_ids:
+            return []
+        if timeout_sec is not None and timeout_sec <= 0:
+            return []
+        allowed_types = [
+            edge_type
+            for edge_type in dict.fromkeys(edge_types or expandable_edge_types())
+            if edge_type in expandable_edge_types()
+        ]
+        if edge_types and len(allowed_types) != len(set(edge_types)):
+            raise ValueError("unregistered or unimplemented graph edge type")
+        query = """
+        MATCH (from:GraphNode)-[relation]->(to:GraphNode)
+        WHERE (
+          any(articleId IN $articleIds WHERE
+            from.graphNodeId = articleId
+            OR from.graphNodeId STARTS WITH articleId + '-'
+          )
+          OR any(articleId IN $articleIds WHERE
+            to.graphNodeId = articleId
+            OR to.graphNodeId STARTS WITH articleId + '-'
+          )
+        )
+        AND type(relation) IN $edgeTypes
+        AND from.nodeType IN ['Article', 'Paragraph', 'Item']
+        AND to.nodeType IN ['Article', 'Paragraph', 'Item']
+        AND coalesce(from.clearanceLevel, 3) <= $userClearanceLevel
+        AND coalesce(to.clearanceLevel, 3) <= $userClearanceLevel
+        OPTIONAL MATCH (fromDocument:GraphNode {graphNodeId: from.documentId})
+        OPTIONAL MATCH (toDocument:GraphNode {graphNodeId: to.documentId})
+        RETURN relation {
+          .*,
+          edgeType: type(relation),
+          fromContentUnitId: from.graphNodeId,
+          fromNodeType: from.nodeType,
+          fromDocumentId: from.documentId,
+          fromTitle: coalesce(from.title, fromDocument.title),
+          fromHeading: from.heading,
+          toContentUnitId: to.graphNodeId,
+          toNodeType: to.nodeType,
+          toDocumentId: to.documentId,
+          toTitle: coalesce(to.title, toDocument.title),
+          toHeading: to.heading
+        } AS relation
+        ORDER BY relation.edgeType, relation.fromContentUnitId, relation.toContentUnitId
+        LIMIT $limit
+        """
+        parameters = {
+            "articleIds": list(dict.fromkeys(article_ids)),
+            "edgeTypes": allowed_types,
+            "userClearanceLevel": user_clearance_level,
+            "limit": max(1, min(limit, 500)),
+        }
+        with self.driver.session() as session:
+            if timeout_sec is None:
+                return [
+                    _with_relation_article_ids(dict(record["relation"]))
+                    for record in session.run(query, **parameters)
+                ]
+            with session.begin_transaction(timeout=float(timeout_sec)) as transaction:
+                return [
+                    _with_relation_article_ids(dict(record["relation"]))
+                    for record in transaction.run(query, **parameters)
+                ]
+
+    def relation_assertions_touching(
+        self,
+        article_ids: list[str],
+        *,
+        suggested_types: list[str] | None = None,
+        user_clearance_level: int = 3,
+        limit: int = 50,
+        timeout_sec: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """指定Articleを一方の端点に持つ未確認関係候補を取得する。
+
+        候補は方向を確定関係として利用せず、LLMが親子双方の本文を取得するための
+        ナビゲーション情報としてだけ返す。
+        """
+        if not article_ids:
+            return []
+        if timeout_sec is not None and timeout_sec <= 0:
+            return []
+        allowed_types = [
+            edge_type
+            for edge_type in dict.fromkeys(suggested_types or [])
+            if edge_type in expandable_edge_types()
+        ]
+        if suggested_types and len(allowed_types) != len(set(suggested_types)):
+            raise ValueError("unregistered or unimplemented suggested relation type")
+        query = """
+        MATCH (assertion:RelationAssertion)
+        MATCH (from:Article {graphNodeId: assertion.fromArticleId})
+        MATCH (to:Article {graphNodeId: assertion.toArticleId})
+        WHERE (
+          assertion.fromArticleId IN $articleIds
+          OR assertion.toArticleId IN $articleIds
+        )
+        AND assertion.status IN $visibleStatuses
+        AND coalesce(assertion.clearanceLevel, 3) <= $userClearanceLevel
+        AND coalesce(from.clearanceLevel, 3) <= $userClearanceLevel
+        AND coalesce(to.clearanceLevel, 3) <= $userClearanceLevel
+        AND (
+          size($suggestedTypes) = 0
+          OR assertion.suggestedType IN $suggestedTypes
+        )
+        OPTIONAL MATCH (fromDocument:GraphNode {graphNodeId: from.documentId})
+        OPTIONAL MATCH (toDocument:GraphNode {graphNodeId: to.documentId})
+        RETURN assertion {
+          .*,
+          fromDocumentId: from.documentId,
+          fromTitle: coalesce(from.title, fromDocument.title),
+          fromHeading: from.heading,
+          toDocumentId: to.documentId,
+          toTitle: coalesce(to.title, toDocument.title),
+          toHeading: to.heading
+        } AS assertion
+        ORDER BY assertion.assertionId
+        LIMIT $limit
+        """
+        parameters = {
+            "articleIds": list(dict.fromkeys(article_ids)),
+            "suggestedTypes": allowed_types,
+            "visibleStatuses": [
+                RELATION_STATUS_UNVERIFIED,
+                RELATION_STATUS_LLM_UNCERTAIN,
+                RELATION_STATUS_LLM_IMPLEMENTS,
+            ],
+            "userClearanceLevel": user_clearance_level,
+            "limit": max(1, min(limit, 500)),
+        }
+        with self.driver.session() as session:
+            if timeout_sec is None:
+                return [
+                    dict(record["assertion"])
+                    for record in session.run(query, **parameters)
+                ]
+            with session.begin_transaction(timeout=float(timeout_sec)) as transaction:
+                return [
+                    dict(record["assertion"])
+                    for record in transaction.run(query, **parameters)
+                ]
+
+    def relation_assertions_for_classification(
+        self,
+        *,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """オフライン分類対象と既存の分類provenanceを取得する。"""
+        query = """
+        MATCH (assertion:RelationAssertion)
+        MATCH (from:Article {graphNodeId: assertion.fromArticleId})
+        MATCH (to:Article {graphNodeId: assertion.toArticleId})
+        RETURN properties(assertion) AS assertion
+        ORDER BY assertion.assertionId
+        """
+        parameters: dict[str, Any] = {}
+        if limit is not None:
+            query += "\nLIMIT $limit"
+            parameters["limit"] = max(1, limit)
+        with self.driver.session() as session:
+            return [
+                dict(record["assertion"])
+                for record in session.run(query, **parameters)
+            ]
+
+    def update_relation_classifications(
+        self, records: list[dict[str, Any]]
+    ) -> None:
+        """分類派生データだけを更新し、正式Article間エッジは作らない。"""
+        if not records:
+            return
+        query = """
+        UNWIND $records AS item
+        MATCH (assertion:RelationAssertion {assertionId: item.assertionId})
+        SET assertion += item
+        """
+        with self.driver.session() as session:
+            session.run(query, records=records).consume()
 
     def edge_inventory(self) -> dict[str, int]:
         """seed済みエッジ種別と件数。ドキュメント・コードとの一致検査に使う(§6.3-13)。"""
@@ -185,6 +432,22 @@ class GraphClient:
             }
 
 
+def _with_relation_article_ids(relation: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(relation)
+    normalized["fromArticleId"] = _article_id_from_content_unit(
+        normalized.get("fromContentUnitId")
+    )
+    normalized["toArticleId"] = _article_id_from_content_unit(
+        normalized.get("toContentUnitId")
+    )
+    return normalized
+
+
+def _article_id_from_content_unit(value: Any) -> str:
+    content_unit_id = str(value or "")
+    return content_unit_id.split("-paragraph-", 1)[0].split("-item-", 1)[0]
+
+
 def _allowed_edge_types(
     edge_types: list[str] | tuple[str, ...] | None,
     edge_type: str | None,
@@ -207,3 +470,9 @@ def _allowed_edge_types(
 def _safe_label(value: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9_]", "_", value)
     return cleaned or "Unknown"
+
+
+def _chunks(
+    items: list[dict[str, Any]], size: int
+) -> list[list[dict[str, Any]]]:
+    return [items[index : index + size] for index in range(0, len(items), size)]

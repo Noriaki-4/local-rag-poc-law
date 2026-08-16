@@ -14,6 +14,7 @@ from .llm_directed_research import (
     RESEARCH_STATUS_READY,
     TOOL_FETCH_ARTICLES,
     EvidenceCatalog,
+    ResearchAction,
     ResearchCheckpoint,
     sanitize_research_checkpoint,
     validate_research_checkpoint,
@@ -22,6 +23,7 @@ from .llm_directed_research import (
 from .llm_research_tools import LegalResearchToolGateway
 from .models import AnswerRequest
 from .opensearch_client import OpenSearchClient
+from .research_case_store import InMemoryCaseStore
 
 
 @dataclass(frozen=True)
@@ -118,7 +120,7 @@ def _run_iterative_research(
     budget_cap_sec: int,
     connected_to_answer: bool,
 ) -> LLMResearchOutcome:
-    """探索・掘り下げ・統合を1組とし、結論と根拠階層を引き継いで反復する。"""
+    """確認済み事実を案件へ逐次確定しつつ、LLM判断を反復する。"""
     started = perf_counter()
     answer_reserve = max(
         settings.agent_answer_reserve_sec,
@@ -131,7 +133,7 @@ def _run_iterative_research(
     trace: dict[str, Any] = {
         "enabled": True,
         "mode": mode,
-        "algorithm": "iterative_cycles_v5_state_compression",
+        "algorithm": "iterative_cycles_v8_hypothesis_testing",
         "connectedToAnswer": connected_to_answer,
         "availableBeforeCapMs": max(0, int(available * 1000)),
         "budgetMs": int(budget * 1000),
@@ -161,11 +163,14 @@ def _run_iterative_research(
     try:
         catalog.add_documents(os_client.law_titles())
         trace["documentCatalogCount"] = len(catalog.known_document_ids)
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         trace["documentCatalogCount"] = 0
-        trace["documentCatalogError"] = f"{type(exc).__name__}: {exc}"
+        trace["documentCatalogErrorCode"] = "document_catalog_error"
 
     gateway = LegalResearchToolGateway(os_client, graph_client)
+    case_store = InMemoryCaseStore()
+    research_case = case_store.create_case(request.question)
+    trace["caseStore"] = research_case.trace()
     checkpoint = ResearchCheckpoint(
         status=RESEARCH_STATUS_CONTINUE,
         conclusion="",
@@ -210,6 +215,63 @@ def _run_iterative_research(
         cycle_direct_content_ids: list[str] = []
         latest_valid_stage_turn: Any | None = None
 
+        # Checkpointで次回実行すると確定したTaskは、LLMにもう一度同じActionを
+        # 出させず、次サイクルの先頭でCaseStoreから直列実行する。
+        pending_limit = min(
+            settings.llm_research_max_actions_per_turn,
+            max(0, settings.llm_research_max_tool_calls - tool_calls),
+        )
+        for pending_task in research_case.runnable_tasks(limit=pending_limit):
+            remaining = (
+                cycle_deadline
+                - perf_counter()
+                - integration_reserve
+                - min(20.0, cycle_budget * 0.15)
+            )
+            if remaining <= 0.1:
+                cycle_trace["skippedPhases"].append(
+                    {
+                        "phase": "resume_pending",
+                        "reason": "task_skipped_for_llm_reserve",
+                    }
+                )
+                break
+            action = _action_from_case_task(pending_task)
+            research_case.start_task(pending_task.task_ref)
+            execution = gateway.execute(
+                action,
+                catalog,
+                user_clearance_level=request.userClearanceLevel,
+                timeout_sec=remaining,
+            )
+            research_case.complete_tool_task(
+                task_ref=pending_task.task_ref,
+                action=action,
+                execution=execution,
+                catalog=catalog,
+            )
+            execution_trace = execution.as_trace(action)
+            execution_trace.update(
+                {
+                    "cycleIndex": cycle_index,
+                    "phase": "resume_pending",
+                    "taskRef": pending_task.task_ref,
+                    "caseVersion": research_case.current_version,
+                }
+            )
+            trace["toolExecutions"].append(execution_trace)
+            cycle_trace["toolExecutions"].append(execution_trace)
+            cycle_history.append(execution_trace)
+            cycle_new_content_ids.extend(
+                execution.returned_content_unit_ids
+                or execution.new_content_unit_ids
+            )
+            if action.tool == TOOL_FETCH_ARTICLES:
+                cycle_direct_content_ids.extend(
+                    execution.returned_content_unit_ids
+                )
+            tool_calls += 1
+
         for phase in ("explore", "deepen"):
             future_stage_reserve = (
                 min(20.0, cycle_budget * 0.15)
@@ -234,7 +296,7 @@ def _run_iterative_research(
             preferred_ids = tuple(
                 dict.fromkeys(
                     [
-                        *catalog.diversify_content_ids(
+                        *catalog.diversify_content_ids_for_prompt(
                             cycle_new_content_ids
                         ),
                         *recovery_content_ids,
@@ -267,12 +329,16 @@ def _run_iterative_research(
                     cycle_index=cycle_index,
                     cycle_count=cycle_count,
                     checkpoint=checkpoint,
+                    case_context=research_case.llm_input_context(
+                        max_candidate_tasks=20,
+                        max_recent_events=6,
+                    ),
                 )
-            except requests.Timeout as exc:
+            except requests.Timeout:
                 cycle_trace["stageTimeout"] = {
                     "component": f"llm_research_{phase}",
                     "cycleIndex": cycle_index,
-                    "error": f"{type(exc).__name__}: {exc}",
+                    "errorCode": "model_timeout",
                 }
                 cycle_trace["skippedPhases"].append(
                     {
@@ -281,13 +347,13 @@ def _run_iterative_research(
                     }
                 )
                 break
-            except requests.ConnectionError as exc:
+            except requests.ConnectionError:
                 failure_status = "transport_error"
                 stop_reason = "llm_connection_error"
                 trace["transportError"] = {
                     "component": f"llm_research_{phase}",
                     "cycleIndex": cycle_index,
-                    "error": f"{type(exc).__name__}: {exc}",
+                    "errorCode": "model_connection_error",
                 }
                 break
             except Exception as exc:  # noqa: BLE001
@@ -297,12 +363,12 @@ def _run_iterative_research(
                     trace["providerError"] = {
                         "component": f"llm_research_{phase}",
                         "cycleIndex": cycle_index,
-                        "error": f"{type(exc).__name__}: {exc}",
+                        "errorCode": "model_provider_quota",
                     }
                 else:
                     failure_status = "internal_error"
                     stop_reason = "llm_call_error"
-                    trace["error"] = f"{type(exc).__name__}: {exc}"
+                    trace["errorCode"] = "model_call_error"
                 break
 
             stage_trace = {
@@ -326,7 +392,13 @@ def _run_iterative_research(
                     ],
                 }
                 continue
-            validation = validate_research_turn(result.turn, catalog)
+            validation = validate_research_turn(
+                result.turn,
+                catalog,
+                allowed_content_unit_ids=getattr(
+                    result, "promptContentUnitIds", None
+                ),
+            )
             stage_trace["validation"] = validation.as_trace()
             if not validation.valid:
                 cycle_history.append(
@@ -337,6 +409,7 @@ def _run_iterative_research(
                 )
                 continue
             latest_valid_stage_turn = result.turn
+            research_case.record_stage_decision(result.turn, phase=phase)
             cycle_history.append(
                 {
                     "phase": phase,
@@ -346,6 +419,10 @@ def _run_iterative_research(
                         "missingEvidence": list(
                             result.turn.missingEvidence
                         ),
+                        "hypotheses": [
+                            item.model_dump()
+                            for item in result.turn.hypotheses
+                        ],
                         "selectedEvidence": [
                             item.model_dump()
                             for item in result.turn.selectedEvidence
@@ -370,17 +447,27 @@ def _run_iterative_research(
                         }
                     )
                     break
+                task = research_case.register_action(action, phase=phase)
+                research_case.start_task(task.task_ref)
                 execution = gateway.execute(
                     action,
                     catalog,
                     user_clearance_level=request.userClearanceLevel,
                     timeout_sec=remaining,
                 )
+                research_case.complete_tool_task(
+                    task_ref=task.task_ref,
+                    action=action,
+                    execution=execution,
+                    catalog=catalog,
+                )
                 execution_trace = execution.as_trace(action)
                 execution_trace.update(
                     {
                         "cycleIndex": cycle_index,
                         "phase": phase,
+                        "taskRef": task.task_ref,
+                        "caseVersion": research_case.current_version,
                     }
                 )
                 trace["toolExecutions"].append(execution_trace)
@@ -441,6 +528,9 @@ def _run_iterative_research(
             "carriedRecoveryContentUnitIds": list(recovery_content_ids),
         }
         llm_calls += 1
+        required_issue_ids = tuple(
+            issue.issueId for issue in checkpoint.logicalStructure.issues
+        )
         try:
             integration = llm_client.integrate_legal_research_cycle(
                 request,
@@ -459,8 +549,16 @@ def _run_iterative_research(
                         int(remaining),
                     ),
                 ),
+                # 統合ではArticle候補を全件再提示せず、判断差分と次に読む候補だけを渡す。
+                case_context=research_case.llm_input_context(
+                    max_candidate_tasks=8,
+                    max_recent_events=6,
+                    # 統合LLMは候補Taskを直接実行できない。ここで候補ページを
+                    # 消費すると、次の探索LLMが未確認候補を見ないままになる。
+                    advance_candidate_cursor=False,
+                ),
             )
-        except requests.Timeout as exc:
+        except requests.Timeout:
             fallback = _checkpoint_from_stage_selection(
                 checkpoint,
                 latest_valid_stage_turn,
@@ -475,7 +573,7 @@ def _run_iterative_research(
             timeout_trace = {
                 "component": "llm_research_integrate",
                 "cycleIndex": cycle_index,
-                "error": f"{type(exc).__name__}: {exc}",
+                "errorCode": "model_timeout",
             }
             cycle_trace["integrationTimeout"] = timeout_trace
             if (
@@ -493,7 +591,7 @@ def _run_iterative_research(
             stop_reason = "llm_timeout"
             trace["timeout"] = timeout_trace
             break
-        except requests.ConnectionError as exc:
+        except requests.ConnectionError:
             fallback = _checkpoint_from_stage_selection(
                 checkpoint,
                 latest_valid_stage_turn,
@@ -510,7 +608,7 @@ def _run_iterative_research(
             trace["transportError"] = {
                 "component": "llm_research_integrate",
                 "cycleIndex": cycle_index,
-                "error": f"{type(exc).__name__}: {exc}",
+                "errorCode": "model_connection_error",
             }
             break
         except Exception as exc:  # noqa: BLE001
@@ -531,20 +629,21 @@ def _run_iterative_research(
                 trace["providerError"] = {
                     "component": "llm_research_integrate",
                     "cycleIndex": cycle_index,
-                    "error": f"{type(exc).__name__}: {exc}",
+                    "errorCode": "model_provider_quota",
                 }
             else:
                 failure_status = "internal_error"
                 stop_reason = "llm_call_error"
-                trace["error"] = f"{type(exc).__name__}: {exc}"
+                trace["errorCode"] = "model_call_error"
             break
 
         integration_trace = {
             "phase": "integrate",
             **integration.as_trace(),
         }
+        llm_calls += int(integration.retryCount)
         cycle_trace["stateCompression"]["promptContentUnitIds"] = list(
-            integration.promptContentUnitIds
+            getattr(integration, "promptContentUnitIds", None) or ()
         )
         cycle_trace["stages"].append(integration_trace)
         if integration.checkpoint is None:
@@ -571,6 +670,12 @@ def _run_iterative_research(
         checkpoint_validation = validate_research_checkpoint(
             integration.checkpoint,
             catalog,
+            allowed_content_unit_ids=getattr(
+                integration, "promptContentUnitIds", None
+            ),
+            required_issue_ids=required_issue_ids,
+            final_cycle=bool(getattr(integration, "finalCycle", False)),
+            require_structured_follow_up=True,
         )
         integration_trace["validation"] = (
             checkpoint_validation.as_trace()
@@ -580,11 +685,22 @@ def _run_iterative_research(
                 sanitize_research_checkpoint(
                     integration.checkpoint,
                     catalog,
+                    allowed_content_unit_ids=(
+                        getattr(integration, "promptContentUnitIds", None)
+                    ),
                 )
             )
             sanitized_validation = validate_research_checkpoint(
                 sanitized_checkpoint,
                 catalog,
+                allowed_content_unit_ids=getattr(
+                    integration, "promptContentUnitIds", None
+                ),
+                required_issue_ids=required_issue_ids,
+                final_cycle=bool(
+                    getattr(integration, "finalCycle", False)
+                ),
+                require_structured_follow_up=True,
             )
             if sanitization:
                 integration_trace["sanitization"] = {
@@ -592,8 +708,21 @@ def _run_iterative_research(
                     "validation": sanitized_validation.as_trace(),
                 }
             if sanitization and sanitized_validation.valid:
-                checkpoint = sanitized_checkpoint
+                checkpoint, deferred_articles = _defer_ready_for_case_tasks(
+                    sanitized_checkpoint,
+                    research_case,
+                    has_future_cycle=(cycle_index + 1 < cycle_count),
+                )
+                if deferred_articles:
+                    integration_trace["readyConsistency"] = {
+                        "deferred": True,
+                        "articleIds": list(deferred_articles),
+                        "resultStatus": checkpoint.status,
+                    }
                 last_valid_checkpoint = checkpoint
+                checkpoint_record = research_case.create_checkpoint(
+                    checkpoint
+                )
                 recovery_content_ids = (
                     ()
                     if _checkpoint_has_research_state(checkpoint)
@@ -608,6 +737,12 @@ def _run_iterative_research(
                     "sanitized_integration_checkpoint"
                 )
                 cycle_trace["checkpointStatus"] = checkpoint.status
+                cycle_trace["checkpointRef"] = (
+                    checkpoint_record.checkpoint_ref
+                )
+                cycle_trace["checkpointStoreVersion"] = (
+                    checkpoint_record.store_version
+                )
                 cycle_trace["checkpointConclusion"] = (
                     checkpoint.conclusion
                 )
@@ -625,8 +760,19 @@ def _run_iterative_research(
                 )
             recovery_content_ids = recovery_candidates
             continue
-        checkpoint = integration.checkpoint
+        checkpoint, deferred_articles = _defer_ready_for_case_tasks(
+            integration.checkpoint,
+            research_case,
+            has_future_cycle=(cycle_index + 1 < cycle_count),
+        )
+        if deferred_articles:
+            integration_trace["readyConsistency"] = {
+                "deferred": True,
+                "articleIds": list(deferred_articles),
+                "resultStatus": checkpoint.status,
+            }
         last_valid_checkpoint = checkpoint
+        checkpoint_record = research_case.create_checkpoint(checkpoint)
         recovery_content_ids = (
             ()
             if _checkpoint_has_research_state(checkpoint)
@@ -638,24 +784,28 @@ def _run_iterative_research(
             integration_content_ids,
         )
         cycle_trace["checkpointStatus"] = checkpoint.status
+        cycle_trace["checkpointRef"] = checkpoint_record.checkpoint_ref
+        cycle_trace["checkpointStoreVersion"] = (
+            checkpoint_record.store_version
+        )
         cycle_trace["checkpointConclusion"] = checkpoint.conclusion
 
     trace["cycleCount"] = len(trace["cycles"])
     trace["llmCallCount"] = llm_calls
     trace["toolCallCount"] = tool_calls
     final_checkpoint = last_valid_checkpoint or checkpoint
-    selected_ids = tuple(
-        content_unit_id
-        for content_unit_id in dict.fromkeys(
-            final_checkpoint.evidenceIds
-        )
-        if content_unit_id in set(catalog.content_unit_ids)
+    selected_ids = _checkpoint_answer_content_ids(
+        final_checkpoint,
+        catalog,
+        limit=settings.llm_research_max_selected_evidence,
     )
     status = final_checkpoint.status
     if failure_status:
-        status = "partial" if selected_ids else failure_status
+        # 取得済み根拠が存在するだけで、プログラムが「部分回答可能」とは
+        # 判定しない。失敗種別を保ち、回答可能範囲はMain LLMへ委ねる。
+        status = failure_status
     elif len(trace["cycles"]) < cycle_count:
-        status = "partial" if selected_ids else "incomplete"
+        status = "incomplete"
     if not failure_status and len(trace["cycles"]) == cycle_count:
         stop_reason = (
             "iterative_ready"
@@ -667,6 +817,8 @@ def _run_iterative_research(
             )
         )
     trace["checkpoint"] = final_checkpoint.model_dump()
+    trace["checkpointAnswerContentUnitIds"] = list(selected_ids)
+    trace["caseStore"] = research_case.trace()
     return _finish(
         trace,
         started,
@@ -690,6 +842,62 @@ def _recovery_content_ids(
     return catalog.diversify_content_ids_by_document(
         cycle_content_ids
     )[:18]
+
+
+def _action_from_case_task(task: Any) -> ResearchAction:
+    """永続Taskを実行可能なResearchActionへ投影する。"""
+    return ResearchAction(
+        tool=task.task_type,
+        query=task.query,
+        articleIds=list(task.article_ids),
+        documentIds=list(task.document_ids),
+        edgeTypes=list(task.edge_types),
+        hypothesisIds=list(task.hypothesis_ids),
+        reason=task.purpose,
+    )
+
+
+def _defer_ready_for_case_tasks(
+    checkpoint: ResearchCheckpoint,
+    research_case: Any,
+    *,
+    has_future_cycle: bool,
+) -> tuple[ResearchCheckpoint, tuple[str, ...]]:
+    """重要本文が未取得ならreadyを次サイクルまで延期する。"""
+    article_ids = research_case.ready_blocking_article_ids(checkpoint)
+    if not article_ids:
+        return checkpoint, ()
+    next_article_ids = tuple(
+        dict.fromkeys([*checkpoint.nextArticleIds, *article_ids])
+    )[:10]
+    return (
+        checkpoint.model_copy(
+            update={
+                "status": (
+                    RESEARCH_STATUS_CONTINUE
+                    if has_future_cycle
+                    else RESEARCH_STATUS_INSUFFICIENT
+                ),
+                "nextArticleIds": list(next_article_ids),
+            }
+        ),
+        article_ids,
+    )
+
+
+def _checkpoint_answer_content_ids(
+    checkpoint: ResearchCheckpoint,
+    catalog: EvidenceCatalog,
+    *,
+    limit: int,
+) -> tuple[str, ...]:
+    """LLMがCheckpointで選んだ根拠IDを、順序を変えず回答用本文へ投影する。"""
+    known_ids = set(catalog.content_unit_ids)
+    return tuple(
+        content_unit_id
+        for content_unit_id in dict.fromkeys(checkpoint.evidenceIds)
+        if content_unit_id in known_ids
+    )[: max(0, limit)]
 
 
 def _record_checkpoint_classification(
@@ -727,6 +935,7 @@ def _checkpoint_has_research_state(
         checkpoint.evidenceIds
         or checkpoint.openEvidenceIds
         or checkpoint.nextArticleIds
+        or checkpoint.logicalStructure.hypotheses
     ):
         return True
     return any(
@@ -834,9 +1043,9 @@ def _run_legacy_research(
     try:
         catalog.add_documents(os_client.law_titles())
         base_trace["documentCatalogCount"] = len(catalog.known_document_ids)
-    except Exception as exc:  # noqa: BLE001 - 文書一覧なしでも通常検索は可能
+    except Exception:  # noqa: BLE001 - 文書一覧なしでも通常検索は可能
         base_trace["documentCatalogCount"] = 0
-        base_trace["documentCatalogError"] = f"{type(exc).__name__}: {exc}"
+        base_trace["documentCatalogErrorCode"] = "document_catalog_error"
     gateway = LegalResearchToolGateway(os_client, graph_client)
     tool_history: list[dict[str, Any]] = []
     tool_calls = 0
@@ -883,28 +1092,28 @@ def _run_legacy_research(
                 finalize_only=finalize_only,
                 preferred_content_ids=preferred_content_ids,
             )
-        except requests.Timeout as exc:
+        except requests.Timeout:
             status = "timeout"
             stop_reason = "llm_timeout"
             base_trace["timeout"] = {
                 "component": "llm_research_decision",
                 "turnIndex": turn_index,
-                "error": f"{type(exc).__name__}: {exc}",
+                "errorCode": "model_timeout",
             }
             break
-        except requests.ConnectionError as exc:
+        except requests.ConnectionError:
             status = "transport_error"
             stop_reason = "llm_connection_error"
             base_trace["transportError"] = {
                 "component": "llm_research_decision",
                 "turnIndex": turn_index,
-                "error": f"{type(exc).__name__}: {exc}",
+                "errorCode": "model_connection_error",
             }
             break
-        except Exception as exc:  # noqa: BLE001 - traceへ分類して呼び出し元で扱う
+        except Exception:  # noqa: BLE001 - traceへ分類して呼び出し元で扱う
             status = "internal_error"
             stop_reason = "llm_call_error"
-            base_trace["error"] = f"{type(exc).__name__}: {exc}"
+            base_trace["errorCode"] = "model_call_error"
             break
         turn_trace = {
             "turnIndex": turn_index,
@@ -929,6 +1138,9 @@ def _run_legacy_research(
             result.turn,
             catalog,
             finalize_only=finalize_only,
+            allowed_content_unit_ids=getattr(
+                result, "promptContentUnitIds", None
+            ),
         )
         turn_trace["validation"] = validation.as_trace()
         if not validation.valid:

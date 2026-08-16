@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any
@@ -21,6 +22,13 @@ SUPPLEMENTARY_PROVISION_CUES = (
     "旧法",
     "適用関係",
     "みなし規定",
+)
+
+_LEGAL_NUMBER = r"[一二三四五六七八九十百千〇零\d]+"
+LEGAL_REFERENCE_PHRASE_PATTERN = re.compile(
+    rf"(?:(?:当該|同|本)?(?:内閣府令|主務省令|省令|政令|法律|法|令))?"
+    rf"第{_LEGAL_NUMBER}条(?:の{_LEGAL_NUMBER})*"
+    rf"(?:第{_LEGAL_NUMBER}項)?(?:第{_LEGAL_NUMBER}号)?"
 )
 
 
@@ -280,6 +288,7 @@ class OpenSearchClient:
                             }
                         }
                     ],
+                    "should": _legal_reference_should_clauses(query),
                 }
             },
         }
@@ -322,6 +331,76 @@ class OpenSearchClient:
         response = requests.post(f"{self.base_url}/{self.index}/_search", json=body, timeout=10)
         response.raise_for_status()
         return [hit["_source"] for hit in response.json()["hits"]["hits"]]
+
+    def get_complete_articles_by_ids(
+        self,
+        article_content_unit_ids: list[str],
+        user_clearance_level: int,
+        *,
+        request_batch_size: int = 100,
+        page_size: int = 1000,
+    ) -> list[dict[str, Any]]:
+        """オフライン分類用に、指定Articleの全チャンクを欠落なく取得する。
+
+        通常検索の件数上限を流用すると長いArticleが黙って欠けるため、ID群を分割して
+        total件数までページングする。OpenSearchの既定result windowを超える入力は
+        不完全な本文で分類せず明示的に失敗させる。
+        """
+        ids = list(dict.fromkeys(article_content_unit_ids))
+        if not ids:
+            return []
+        output: list[dict[str, Any]] = []
+        for offset in range(0, len(ids), request_batch_size):
+            batch = ids[offset : offset + request_batch_size]
+            start = 0
+            total: int | None = None
+            while total is None or start < total:
+                if start + page_size > 10000:
+                    raise RuntimeError(
+                        "offline relation classification article batch exceeds "
+                        "OpenSearch max_result_window"
+                    )
+                body = {
+                    "from": start,
+                    "size": page_size,
+                    "track_total_hits": True,
+                    "sort": [{"contentUnitId": "asc"}],
+                    "query": {
+                        "bool": {
+                            "filter": self._filters(None, user_clearance_level),
+                            "should": [
+                                {"terms": {"contentUnitId": batch}},
+                                {"terms": {"articleContentUnitId": batch}},
+                            ],
+                            "minimum_should_match": 1,
+                        }
+                    },
+                }
+                response = requests.post(
+                    f"{self.base_url}/{self.index}/_search",
+                    json=body,
+                    timeout=30,
+                )
+                response.raise_for_status()
+                hits_block = response.json().get("hits") or {}
+                total_value = hits_block.get("total", 0)
+                total = int(
+                    total_value.get("value", 0)
+                    if isinstance(total_value, dict)
+                    else total_value
+                )
+                hits = list(hits_block.get("hits") or [])
+                output.extend(
+                    hit["_source"] for hit in hits if isinstance(hit.get("_source"), dict)
+                )
+                if not hits:
+                    break
+                start += len(hits)
+            if total is not None and start < total:
+                raise RuntimeError(
+                    "OpenSearch returned an incomplete Article set for relation classification"
+                )
+        return output
 
     def get_by_content_unit_ids(
         self,
@@ -518,6 +597,7 @@ class OpenSearchClient:
                             }
                         }
                     ],
+                    "should": _legal_reference_should_clauses(spec.query),
                 }
             },
         }
@@ -598,6 +678,7 @@ class OpenSearchClient:
                             }
                         }
                     ],
+                    "should": _legal_reference_should_clauses(query),
                 }
             },
         }
@@ -673,3 +754,28 @@ class OpenSearchClient:
                 }
             scored[content_unit_id][score_key] = raw_score
             scored[content_unit_id]["score"] += weight / (settings.agent_rrf_k + rank)
+
+
+def _legal_reference_phrases(query: str) -> tuple[str, ...]:
+    """検索語に明示された法令の条・項・号表現を順序を保って抽出する。"""
+    return tuple(
+        dict.fromkeys(
+            re.sub(r"\s+", "", match.group(0))
+            for match in LEGAL_REFERENCE_PHRASE_PATTERN.finditer(query or "")
+        )
+    )
+
+
+def _legal_reference_should_clauses(query: str) -> list[dict[str, Any]]:
+    """明示条番号の完全一致を加点する。候補の採否や必須条件にはしない。"""
+    return [
+        {
+            "multi_match": {
+                "query": phrase,
+                "fields": ["heading^16", "text^12", "sectionPath^4"],
+                "type": "phrase",
+                "boost": 8,
+            }
+        }
+        for phrase in _legal_reference_phrases(query)
+    ]

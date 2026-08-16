@@ -9,7 +9,7 @@ from dataclasses import replace
 
 import pytest
 
-from app.llm import LLMClient, LLMResult
+from app.llm import LLMClient, LLMResult, _build_contract_retry_prompt
 from app.models import AnswerRequest
 
 
@@ -65,9 +65,11 @@ def test_retries_with_a_larger_budget_when_output_hit_the_token_cap(client, monk
 
 def test_keeps_the_same_budget_for_other_validation_errors(client, monkeypatch):
     calls: list[int] = []
+    prompts: list[str] = []
 
     def fake_generate_once(request, prompt, timeout, citations, max_tokens):
         calls.append(max_tokens)
+        prompts.append(prompt)
         if len(calls) == 1:
             return _result(validationError="schema_error", stopReason="end_turn")
         return _result(predictedAnswer="A")
@@ -77,6 +79,9 @@ def test_keeps_the_same_budget_for_other_validation_errors(client, monkeypatch):
     client.generate_answer(_request(), [], [], timeout_sec=120)
 
     assert calls == [calls[0], calls[0]]
+    assert prompts[0] == "prompt"
+    assert "schema_error" in prompts[1]
+    assert "プログラムは法的判断や次動作を推測して補正しません" in prompts[1]
 
 
 def test_falls_back_to_the_first_result_when_the_retry_fails(client, monkeypatch):
@@ -107,3 +112,31 @@ def test_skips_the_retry_when_too_little_time_remains(client, monkeypatch):
     client.generate_answer(_request(), [], [], timeout_sec=1)
 
     assert len(calls) == 1
+
+
+def test_contract_retry_includes_only_the_current_role_rules() -> None:
+    prompt = _build_contract_retry_prompt(
+        "original",
+        "invalid articleId",
+        role="Research Integration Agent",
+    )
+
+    assert "段落・項・号のcontentUnitId" in prompt
+    assert "前回CheckpointのIssueを省略せず" in prompt
+    assert "各Issueをverified" in prompt
+    assert "needs_researchのときだけ" not in prompt
+    assert "answer本文へcontentUnitId" not in prompt
+
+
+def test_reviewer_contract_retry_repeats_verdict_dependent_arrays() -> None:
+    prompt = _build_contract_retry_prompt(
+        "original",
+        "grounding_review_missing_findings",
+        role="Reviewer",
+    )
+
+    assert "supportedではfindings=[]かつresearchQueries=[]" in prompt
+    assert "needs_revisionではfindingsを1件以上" in prompt
+    assert "needs_researchでは" in prompt
+    assert "insufficientではfindingsを1件以上" in prompt
+    assert "insufficientを単なるpartialの意味に使わない" in prompt

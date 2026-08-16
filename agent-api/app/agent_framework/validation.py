@@ -1,0 +1,947 @@
+"""LLMの意味判断を書き換えず、参照と構造だけを検証する。"""
+
+from __future__ import annotations
+
+from collections.abc import Collection, Mapping
+from typing import TypeVar
+
+from pydantic import ValidationError
+
+from .contracts import CaseUpdate, SolverDecision, WorkItemImpactDecision
+from .profiles import AgentLimits
+from .state import CaseState, FrameworkModel, Hypothesis, WorkItem, utc_now
+
+ModelT = TypeVar("ModelT", bound=FrameworkModel)
+
+
+class ContractViolation(ValueError):
+    pass
+
+
+def apply_solver_decision(
+    state: CaseState,
+    decision: SolverDecision,
+    *,
+    limits: AgentLimits,
+    known_tool_names: Collection[str],
+    material_evidence_ids: Collection[str],
+    finalize_only: bool,
+    fetchable_article_ids: Collection[str] | None = None,
+    required_dependency_kind: str | None = None,
+    require_dependency_decisions: bool = False,
+    dependency_target_fetch_tool_name: str | None = None,
+    dependency_source_discovery_tool_name: str | None = None,
+    dependency_resolution_requires_distinct_document: bool = False,
+    tool_list_argument_limits: Mapping[tuple[str, str], int] | None = None,
+    required_graph_review_request_ids: Collection[str] = (),
+    graph_candidate_article_ids: Collection[str] = (),
+    graph_known_article_ids: Collection[str] | None = None,
+    graph_review_fetch_tool_name: str | None = None,
+    graph_review_frontiers: Mapping[
+        str, tuple[str, str, str | None]
+    ] | None = None,
+    graph_review_link_ids: Collection[str] = (),
+    graph_selectable_frontiers: Mapping[
+        str, tuple[str, str, str | None]
+    ] | None = None,
+    remaining_fetch_capacity: int | None = None,
+    cycle_close_required: bool = False,
+    can_start_next_cycle: bool = True,
+) -> CaseState:
+    if state.run_status != "running":
+        raise ContractViolation("solver can update only a running case")
+    if decision.start_next_cycle and required_graph_review_request_ids:
+        raise ContractViolation(
+            "Graph candidate review must continue the current research cycle"
+        )
+    if (
+        decision.start_next_cycle
+        and state.research_cycle_count >= limits.max_research_cycles
+    ):
+        raise ContractViolation("cannot start a research cycle beyond the profile limit")
+    if decision.start_next_cycle and not can_start_next_cycle:
+        raise ContractViolation("remaining time is insufficient to start another Cycle")
+    if finalize_only and decision.next != "finalize":
+        raise ContractViolation("this solver call must finalize")
+    if (
+        cycle_close_required
+        and decision.next == "continue"
+        and not decision.start_next_cycle
+        and decision.tool_requests
+    ):
+        raise ContractViolation(
+            "Cycle boundary requires finalize or start_next_cycle before new Tools"
+        )
+    if len(decision.tool_requests) > limits.max_tool_requests_per_step:
+        raise ContractViolation("tool request count exceeds the step limit")
+    if len(decision.retain_evidence_ids) > limits.max_retained_evidence:
+        raise ContractViolation("retained evidence count exceeds the profile limit")
+
+    _require_unique_state_ids(state)
+    work_items = {item.work_item_id: item for item in state.work_items}
+    hypotheses = {item.hypothesis_id: item for item in state.hypotheses}
+    evidence_by_id = {item.evidence_id: item for item in state.evidence}
+    evidence_ids = set(evidence_by_id)
+    citable_evidence_ids = {
+        evidence_id
+        for evidence_id, evidence in evidence_by_id.items()
+        if evidence.metadata.get("citationEligible") is not False
+    }
+    material_ids = set(material_evidence_ids)
+    unknown_material_ids = material_ids - evidence_ids
+    if unknown_material_ids:
+        raise ContractViolation(
+            f"material evidence is not stored: {sorted(unknown_material_ids)}"
+        )
+    changed_hypothesis_ids: set[str] = set()
+    added_work_item_ids = {item.work_item_id for item in decision.update.add_work_items}
+    dependency_scope_ids = {
+        item.work_item_id for item in state.work_items if item.state == "open"
+    }
+
+    _reject_duplicate_delta_ids(
+        (item.work_item_id for item in decision.update.add_work_items),
+        "new work item",
+    )
+    _reject_duplicate_delta_ids(
+        (item.work_item_id for item in decision.update.update_work_items),
+        "work item update",
+    )
+    _reject_duplicate_delta_ids(
+        (item.hypothesis_id for item in decision.update.add_hypotheses),
+        "new hypothesis",
+    )
+    _reject_duplicate_delta_ids(
+        (item.hypothesis_id for item in decision.update.update_hypotheses),
+        "hypothesis update",
+    )
+    _reject_duplicate_delta_ids(
+        (item.work_item_id for item in decision.update.impact_decisions),
+        "impact decision",
+    )
+
+    for new_work_item in decision.update.add_work_items:
+        if new_work_item.work_item_id in work_items:
+            raise ContractViolation(
+                f"duplicate work item ID: {new_work_item.work_item_id}"
+            )
+        work_items[new_work_item.work_item_id] = new_work_item
+    for new_hypothesis in decision.update.add_hypotheses:
+        if new_hypothesis.hypothesis_id in hypotheses:
+            raise ContractViolation(
+                f"duplicate hypothesis ID: {new_hypothesis.hypothesis_id}"
+            )
+        hypotheses[new_hypothesis.hypothesis_id] = new_hypothesis
+        changed_hypothesis_ids.add(new_hypothesis.hypothesis_id)
+
+    newly_contradicted: set[str] = set()
+    affected_source_items = dict(work_items)
+
+    for work_update in decision.update.update_work_items:
+        current_work_item = work_items.get(work_update.work_item_id)
+        if current_work_item is None:
+            raise ContractViolation(
+                f"unknown work item update: {work_update.work_item_id}"
+            )
+        work_items[work_update.work_item_id] = _validated_copy(
+            current_work_item,
+            state=work_update.state,
+            resolution=work_update.resolution,
+            basis_hypothesis_ids=work_update.basis_hypothesis_ids,
+        )
+
+    for hypothesis_update in decision.update.update_hypotheses:
+        current_hypothesis = hypotheses.get(hypothesis_update.hypothesis_id)
+        if current_hypothesis is None:
+            raise ContractViolation(
+                f"unknown hypothesis update: {hypothesis_update.hypothesis_id}"
+            )
+        hypotheses[hypothesis_update.hypothesis_id] = _validated_copy(
+            current_hypothesis,
+            judgment=hypothesis_update.judgment,
+            evidence_ids=hypothesis_update.evidence_ids,
+            gaps=hypothesis_update.gaps,
+        )
+        changed_hypothesis_ids.add(hypothesis_update.hypothesis_id)
+        if (
+            current_hypothesis.judgment != "contradicted"
+            and hypothesis_update.judgment == "contradicted"
+        ):
+            newly_contradicted.add(hypothesis_update.hypothesis_id)
+
+    for new_hypothesis in decision.update.add_hypotheses:
+        if new_hypothesis.judgment == "contradicted":
+            newly_contradicted.add(new_hypothesis.hypothesis_id)
+
+    affected_ids = {
+        item.work_item_id
+        for item in affected_source_items.values()
+        if item.state == "open"
+        and newly_contradicted.intersection(item.basis_hypothesis_ids)
+    }
+    impact_by_id = {
+        item.work_item_id: item for item in decision.update.impact_decisions
+    }
+    if set(impact_by_id) != affected_ids:
+        missing = sorted(affected_ids - set(impact_by_id))
+        extra = sorted(set(impact_by_id) - affected_ids)
+        raise ContractViolation(
+            f"impact decisions do not match affected work items; "
+            f"missing={missing}, extra={extra}"
+        )
+
+    for impact in decision.update.impact_decisions:
+        _apply_impact(
+            impact,
+            work_items,
+            hypotheses,
+            newly_contradicted=newly_contradicted,
+            added_work_item_ids=added_work_item_ids,
+        )
+
+    _validate_work_tree(work_items, hypotheses)
+    _validate_hypotheses(
+        hypotheses,
+        work_items,
+        known_evidence_ids=evidence_ids,
+        material_evidence_ids=material_ids,
+        citable_evidence_ids=citable_evidence_ids,
+        changed_hypothesis_ids=changed_hypothesis_ids,
+    )
+
+    focus_ids = tuple(dict.fromkeys(decision.next_focus_work_item_ids))
+    if len(focus_ids) != len(decision.next_focus_work_item_ids):
+        raise ContractViolation("focus work item IDs must be unique")
+    for work_item_id in focus_ids:
+        focused_work_item = work_items.get(work_item_id)
+        if focused_work_item is None or focused_work_item.state != "open":
+            raise ContractViolation(
+                f"focus must reference an open work item: {work_item_id}"
+            )
+
+    retained_ids = tuple(dict.fromkeys(decision.retain_evidence_ids))
+    if len(retained_ids) != len(decision.retain_evidence_ids):
+        raise ContractViolation("retained evidence IDs must be unique")
+    unknown_retained = set(retained_ids) - evidence_ids
+    if unknown_retained:
+        raise ContractViolation(
+            f"unknown retained evidence IDs: {sorted(unknown_retained)}"
+        )
+
+    request_ids = {item.request_id for item in state.tool_requests}
+    new_request_ids: set[str] = set()
+    new_requests_by_id = {
+        item.request_id: item for item in decision.tool_requests
+    }
+    for request in decision.tool_requests:
+        if request.request_id in request_ids or request.request_id in new_request_ids:
+            raise ContractViolation(f"duplicate tool request ID: {request.request_id}")
+        new_request_ids.add(request.request_id)
+        if request.tool_name not in known_tool_names:
+            raise ContractViolation(f"unknown tool: {request.tool_name}")
+        for (tool_name, argument_name), max_items in (
+            tool_list_argument_limits or {}
+        ).items():
+            if request.tool_name != tool_name or argument_name not in request.arguments:
+                continue
+            value = request.arguments[argument_name]
+            if not isinstance(value, list):
+                raise ContractViolation(
+                    f"{tool_name}.{argument_name} must be a list"
+                )
+            if len(value) > max_items:
+                raise ContractViolation(
+                    f"{tool_name}.{argument_name} exceeds the profile limit "
+                    f"of {max_items} items"
+                )
+        target = work_items.get(request.work_item_id)
+        if target is None or target.state != "open":
+            raise ContractViolation(
+                f"tool request requires an open work item: {request.work_item_id}"
+            )
+        for hypothesis_id in request.hypothesis_ids:
+            if hypothesis_id not in hypotheses:
+                raise ContractViolation(
+                    f"tool request references unknown hypothesis: {hypothesis_id}"
+                )
+        requested_article_ids = request.arguments.get("article_ids")
+        if fetchable_article_ids is not None and requested_article_ids is not None:
+            if not isinstance(requested_article_ids, list) or any(
+                not isinstance(item, str) for item in requested_article_ids
+            ):
+                raise ContractViolation("tool article_ids must be a string list")
+            unknown_article_ids = set(requested_article_ids) - set(
+                fetchable_article_ids
+            )
+            if unknown_article_ids:
+                raise ContractViolation(
+                    "tool request references unknown Article IDs: "
+                    f"{sorted(unknown_article_ids)}"
+                )
+
+    effective_fetch_capacity = (
+        limits.max_fetched_resources_per_cycle
+        if decision.start_next_cycle
+        else (0 if cycle_close_required else remaining_fetch_capacity)
+    )
+    if graph_review_fetch_tool_name is not None and effective_fetch_capacity is not None:
+        requested_articles = {
+            article_id
+            for request in decision.tool_requests
+            if request.tool_name == graph_review_fetch_tool_name
+            for article_id in request.arguments.get("article_ids", ())
+            if isinstance(article_id, str)
+        }
+        if len(requested_articles) > effective_fetch_capacity:
+            raise ContractViolation(
+                "Article body fetch exceeds the remaining Cycle capacity of "
+                f"{effective_fetch_capacity} items"
+            )
+
+    if graph_review_fetch_tool_name is not None:
+        article_fetch_requests = tuple(
+            request
+            for request in decision.tool_requests
+            if request.tool_name == graph_review_fetch_tool_name
+        )
+        if len(article_fetch_requests) > 1:
+            raise ContractViolation(
+                "Article body fetches in one SolverDecision must be consolidated "
+                "into exactly one request"
+            )
+        if article_fetch_requests:
+            article_ids = article_fetch_requests[0].arguments.get("article_ids")
+            if isinstance(article_ids, list) and len(article_ids) != len(
+                set(article_ids)
+            ):
+                raise ContractViolation(
+                    "Article body fetch request contains duplicate Article IDs"
+                )
+
+    required_graph_ids = tuple(dict.fromkeys(required_graph_review_request_ids))
+    graph_review = decision.graph_candidate_review
+    if required_graph_ids:
+        if decision.frontier_re_adoptions:
+            raise ContractViolation(
+                "Graph Review mode cannot re-adopt another Frontier"
+            )
+        if decision.update != CaseUpdate():
+            raise ContractViolation(
+                "Graph Review mode cannot update WorkItems or Hypotheses"
+            )
+        if decision.dependency_decisions:
+            raise ContractViolation(
+                "Graph Review mode cannot update dependency decisions"
+            )
+        if graph_review is None:
+            raise ContractViolation(
+                "new Graph candidates require a graph_candidate_review"
+            )
+        if set(graph_review.graph_request_ids) != set(required_graph_ids):
+            raise ContractViolation(
+                "graph review request IDs do not match the newly projected Graph "
+                f"results: expected={sorted(required_graph_ids)}"
+            )
+        expected_frontiers = dict(graph_review_frontiers or {})
+        decisions_by_frontier = {
+            item.frontier_item_id: item
+            for item in graph_review.frontier_decisions
+        }
+        missing_frontiers = set(expected_frontiers) - set(decisions_by_frontier)
+        if missing_frontiers:
+            raise ContractViolation(
+                "graph review must decide every batch Frontier: "
+                f"missing={sorted(missing_frontiers)}"
+            )
+        selectable_frontiers = dict(graph_selectable_frontiers or {})
+        allowed_extra_frontiers = set(selectable_frontiers)
+        unknown_frontiers = (
+            set(decisions_by_frontier)
+            - set(expected_frontiers)
+            - allowed_extra_frontiers
+        )
+        if unknown_frontiers:
+            raise ContractViolation(
+                "graph review references unknown Frontier IDs: "
+                f"{sorted(unknown_frontiers)}"
+            )
+        all_frontier_refs = {**selectable_frontiers, **expected_frontiers}
+        for item in graph_review.frontier_decisions:
+            expected = all_frontier_refs.get(item.frontier_item_id)
+            if expected is None:
+                raise ContractViolation("graph review Frontier is not selectable")
+            if (
+                item.frontier_item_id not in expected_frontiers
+                and item.action != "select"
+            ):
+                raise ContractViolation("ledger-only Frontier may only be selected")
+            if (
+                item.action == "select"
+                and item.frontier_item_id not in selectable_frontiers
+            ):
+                raise ContractViolation(
+                    "graph review selected a pending or already fetched Frontier"
+                )
+            actual = (item.article_id, item.work_item_id, item.hypothesis_id)
+            if actual != expected:
+                raise ContractViolation(
+                    "graph review Frontier references do not match the batch"
+                )
+        expected_link_ids = set(graph_review_link_ids)
+        if set(graph_review.reviewed_link_ids) != expected_link_ids:
+            raise ContractViolation(
+                "graph review Link IDs do not match the current batch"
+            )
+        selected_ids = tuple(graph_review.selected_article_ids)
+        max_selected = min(
+            limits.max_selected_frontier_per_step,
+            effective_fetch_capacity
+            if effective_fetch_capacity is not None
+            else limits.max_selected_frontier_per_step,
+        )
+        if len(selected_ids) > max_selected:
+            raise ContractViolation(
+                "graph review selected Article count exceeds the remaining limit "
+                f"of {max_selected} items"
+            )
+        if decision.tool_requests:
+            raise ContractViolation(
+                "Graph candidate review returns selections only; AgentLoop executes "
+                "the selected IDs deterministically"
+            )
+        if selected_ids:
+            if decision.next != "continue":
+                raise ContractViolation(
+                    "graph review with selected Articles must continue"
+                )
+    elif graph_review is not None:
+        raise ContractViolation(
+            "graph_candidate_review is allowed only for newly projected Graph results"
+        )
+
+    graph_known_articles = set(graph_known_article_ids or ())
+    open_work_ids = {
+        item.work_item_id for item in work_items.values() if item.state == "open"
+    }
+    re_adoption_keys = [
+        (item.article_id, item.work_item_id, item.hypothesis_id)
+        for item in decision.frontier_re_adoptions
+    ]
+    if len(re_adoption_keys) != len(set(re_adoption_keys)):
+        raise ContractViolation("frontier re-adoptions must be unique")
+    reviewed_frontier_keys = {
+        (item.article_id, item.work_item_id, item.hypothesis_id)
+        for review_item in state.graph_candidate_reviews
+        for item in review_item.frontier_decisions
+    }
+    for re_adoption in decision.frontier_re_adoptions:
+        if re_adoption.article_id not in graph_known_articles:
+            raise ContractViolation(
+                "frontier re-adoption references an unknown Graph Article"
+            )
+        if re_adoption.work_item_id not in open_work_ids:
+            raise ContractViolation(
+                "frontier re-adoption requires an open WorkItem"
+            )
+        hypothesis = hypotheses.get(re_adoption.hypothesis_id)
+        if hypothesis is None or hypothesis.work_item_id != re_adoption.work_item_id:
+            raise ContractViolation(
+                "frontier re-adoption Hypothesis must belong to its WorkItem"
+            )
+        if (
+            re_adoption.article_id,
+            re_adoption.work_item_id,
+            re_adoption.hypothesis_id,
+        ) in reviewed_frontier_keys:
+            raise ContractViolation(
+                "frontier re-adoption must bind the Article to a new Hypothesis"
+            )
+
+    dependency_by_key = {
+        (item.dependency_kind, item.work_item_id): item
+        for item in state.dependency_decisions
+    }
+    new_dependency_keys = [
+        (item.dependency_kind, item.work_item_id)
+        for item in decision.dependency_decisions
+    ]
+    if len(new_dependency_keys) != len(set(new_dependency_keys)):
+        raise ContractViolation("dependency decision keys must be unique")
+    for dependency in decision.dependency_decisions:
+        if dependency.work_item_id not in work_items:
+            raise ContractViolation(
+                f"dependency decision references unknown work item: "
+                f"{dependency.work_item_id}"
+            )
+        source_may_be_unknown = (
+            dependency.status == "needs_action"
+            and dependency.action == "discover_source"
+        )
+        if not dependency.source_evidence_ids and not source_may_be_unknown:
+            raise ContractViolation("dependency decision requires source evidence")
+        if source_may_be_unknown and dependency.source_evidence_ids:
+            raise ContractViolation(
+                "discover_source dependency cannot name source evidence"
+            )
+        if len(dependency.source_evidence_ids) != len(
+            set(dependency.source_evidence_ids)
+        ):
+            raise ContractViolation("dependency source evidence IDs must be unique")
+        if len(dependency.evidence_ids) != len(set(dependency.evidence_ids)):
+            raise ContractViolation("dependency evidence IDs must be unique")
+        if len(dependency.target_article_ids) != len(
+            set(dependency.target_article_ids)
+        ):
+            raise ContractViolation("dependency target Article IDs must be unique")
+        if set(dependency.source_evidence_ids).intersection(
+            dependency.evidence_ids
+        ):
+            raise ContractViolation(
+                "dependency source and resolution evidence must differ"
+            )
+        unknown_dependency_sources = set(dependency.source_evidence_ids) - material_ids
+        if unknown_dependency_sources:
+            raise ContractViolation(
+                "dependency source evidence was not shown in full: "
+                f"{sorted(unknown_dependency_sources)}"
+            )
+        if dependency.status == "needs_action":
+            if dependency.action is None:
+                raise ContractViolation(
+                    "needs_action dependency requires an action type"
+                )
+            if dependency.evidence_ids:
+                raise ContractViolation(
+                    "needs_action dependency cannot use resolution evidence"
+                )
+            if dependency.action == "fetch_target" and not dependency.target_article_ids:
+                raise ContractViolation(
+                    "fetch_target dependency requires target Article IDs"
+                )
+            if dependency.action != "fetch_target" and dependency.target_article_ids:
+                raise ContractViolation(
+                    "only fetch_target may name target Article IDs"
+                )
+            if dependency.action_request_id not in new_requests_by_id:
+                raise ContractViolation(
+                    "dependency action must reference a ToolRequest in the same decision"
+                )
+            dependency_request = new_requests_by_id[dependency.action_request_id]
+            if dependency.action == "discover_source" and (
+                dependency_request.tool_name
+                != dependency_source_discovery_tool_name
+            ):
+                raise ContractViolation(
+                    "discover_source dependency action must use "
+                    f"{dependency_source_discovery_tool_name}"
+                )
+            if dependency_request.tool_name == dependency_target_fetch_tool_name:
+                source_article_ids = {
+                    str(evidence_by_id[evidence_id].metadata.get("articleId") or "")
+                    for evidence_id in dependency.source_evidence_ids
+                } - {""}
+                target_article_ids = {
+                    str(article_id)
+                    for article_id in dependency_request.arguments.get(
+                        "article_ids", ()
+                    )
+                }
+                requested_source_overlap = source_article_ids.intersection(
+                    target_article_ids
+                )
+                if dependency.action == "discover_target":
+                    raise ContractViolation(
+                        "discover_target dependency action must use a discovery tool"
+                    )
+                if dependency.action == "assess_source" and not requested_source_overlap:
+                    raise ContractViolation(
+                        "assess_source dependency action must fetch its declared "
+                        "source article"
+                    )
+                if dependency.action == "fetch_target":
+                    declared_target_ids = set(dependency.target_article_ids)
+                    source_overlap = source_article_ids.intersection(
+                        declared_target_ids
+                    )
+                    if source_overlap:
+                        raise ContractViolation(
+                            "dependency target Article repeats its source article: "
+                            f"{sorted(source_overlap)}"
+                        )
+                    missing_targets = declared_target_ids - target_article_ids
+                    if missing_targets:
+                        raise ContractViolation(
+                            "dependency target fetch does not include declared target "
+                            f"Articles: {sorted(missing_targets)}"
+                        )
+            elif dependency.action in {"assess_source", "fetch_target"}:
+                raise ContractViolation(
+                    f"{dependency.action} dependency action must use "
+                    f"{dependency_target_fetch_tool_name}"
+                )
+        elif dependency.status == "resolved":
+            if dependency.action is not None or dependency.action_request_id is not None:
+                raise ContractViolation(
+                    "resolved dependency cannot require an action"
+                )
+            if not dependency.target_article_ids or not dependency.evidence_ids:
+                raise ContractViolation(
+                    "resolved dependency requires target Articles and evidence"
+                )
+            unknown_dependency_evidence = (
+                set(dependency.evidence_ids) - material_ids
+            )
+            if unknown_dependency_evidence:
+                raise ContractViolation(
+                    "resolved dependency uses evidence not shown in full: "
+                    f"{sorted(unknown_dependency_evidence)}"
+                )
+            navigation_dependency_evidence = (
+                set(dependency.evidence_ids) - citable_evidence_ids
+            )
+            if navigation_dependency_evidence:
+                raise ContractViolation(
+                    "resolved dependency uses navigation-only evidence: "
+                    f"{sorted(navigation_dependency_evidence)}"
+                )
+            if dependency_resolution_requires_distinct_document:
+                source_document_ids = {
+                    str(evidence_by_id[evidence_id].metadata.get("documentId") or "")
+                    for evidence_id in dependency.source_evidence_ids
+                } - {""}
+                resolution_document_ids = {
+                    str(evidence_by_id[evidence_id].metadata.get("documentId") or "")
+                    for evidence_id in dependency.evidence_ids
+                } - {""}
+                if not source_document_ids or not resolution_document_ids:
+                    raise ContractViolation(
+                        "resolved dependency requires document provenance for both "
+                        "source and resolution evidence"
+                    )
+                shared_document_ids = source_document_ids.intersection(
+                    resolution_document_ids
+                )
+                if shared_document_ids:
+                    raise ContractViolation(
+                        "resolved dependency must use evidence from a document distinct "
+                        f"from its source: {sorted(shared_document_ids)}"
+                    )
+            resolved_article_ids = {
+                str(evidence_by_id[evidence_id].metadata.get("articleId") or "")
+                for evidence_id in dependency.evidence_ids
+            } - {""}
+            missing_resolved_targets = set(dependency.target_article_ids) - (
+                resolved_article_ids
+            )
+            if missing_resolved_targets:
+                raise ContractViolation(
+                    "resolved dependency has no grounding evidence for target Articles: "
+                    f"{sorted(missing_resolved_targets)}"
+                )
+        elif (
+            dependency.action is not None
+            or dependency.action_request_id is not None
+            or dependency.target_article_ids
+            or dependency.evidence_ids
+        ):
+            raise ContractViolation(
+                "not_required dependency cannot name action, target, or evidence"
+            )
+        dependency_by_key[
+            (dependency.dependency_kind, dependency.work_item_id)
+        ] = dependency
+
+    if required_dependency_kind is not None and require_dependency_decisions:
+        provided_scope_ids = {
+            item.work_item_id
+            for item in decision.dependency_decisions
+            if item.dependency_kind == required_dependency_kind
+        }
+        if provided_scope_ids != dependency_scope_ids:
+            missing = sorted(dependency_scope_ids - provided_scope_ids)
+            extra = sorted(provided_scope_ids - dependency_scope_ids)
+            raise ContractViolation(
+                f"{required_dependency_kind} decisions do not match open work items; "
+                f"missing={missing}, extra={extra}"
+            )
+
+    if decision.answer is not None:
+        unknown_citations = set(decision.answer.citation_ids) - material_ids
+        if unknown_citations:
+            raise ContractViolation(
+                f"answer cites evidence not shown in full: {sorted(unknown_citations)}"
+            )
+        navigation_citations = set(decision.answer.citation_ids) - citable_evidence_ids
+        if navigation_citations:
+            raise ContractViolation(
+                f"answer cites navigation-only evidence: {sorted(navigation_citations)}"
+            )
+
+    if decision.next == "finalize":
+        open_work_item_ids = sorted(
+            item.work_item_id for item in work_items.values() if item.state == "open"
+        )
+        if open_work_item_ids:
+            raise ContractViolation(
+                "finalize requires every work item to be resolved or dropped; "
+                f"open={open_work_item_ids}"
+            )
+        declared_basis_evidence_ids = {
+            evidence_id
+            for item in work_items.values()
+            if item.state == "resolved"
+            for hypothesis_id in item.basis_hypothesis_ids
+            for evidence_id in hypotheses[hypothesis_id].evidence_ids
+        }
+        missing_basis_citations = declared_basis_evidence_ids - set(
+            decision.answer.citation_ids
+        )
+        if missing_basis_citations:
+            raise ContractViolation(
+                "final answer citations omit Evidence declared as resolved WorkItem "
+                f"basis: {sorted(missing_basis_citations)}"
+            )
+
+    return _validated_copy(
+        state,
+        work_items=tuple(work_items.values()),
+        hypotheses=tuple(hypotheses.values()),
+        tool_requests=(*state.tool_requests, *decision.tool_requests),
+        focus_work_item_ids=focus_ids,
+        retained_evidence_ids=retained_ids,
+        dependency_decisions=tuple(dependency_by_key.values()),
+        graph_candidate_reviews=(
+            (
+                *state.graph_candidate_reviews,
+                graph_review.model_copy(
+                    update={"reviewed_cycle": max(1, state.research_cycle_count)}
+                ),
+            )
+            if graph_review is not None
+            else state.graph_candidate_reviews
+        ),
+        frontier_re_adoptions=(
+            *state.frontier_re_adoptions,
+            *decision.frontier_re_adoptions,
+        ),
+        final_answer=decision.answer,
+        updated_at=utc_now(),
+    )
+
+
+def _apply_impact(
+    impact: WorkItemImpactDecision,
+    work_items: dict[str, WorkItem],
+    hypotheses: Mapping[str, Hypothesis],
+    *,
+    newly_contradicted: set[str],
+    added_work_item_ids: set[str],
+) -> None:
+    current = work_items.get(impact.work_item_id)
+    if current is None:
+        raise ContractViolation(f"unknown impacted work item: {impact.work_item_id}")
+    if current.state != "open":
+        raise ContractViolation("impact decision requires an open work item")
+    if not newly_contradicted.intersection(current.basis_hypothesis_ids):
+        raise ContractViolation(
+            "impact decision must address a newly contradicted basis"
+        )
+    unknown_basis = set(impact.new_basis_hypothesis_ids) - set(hypotheses)
+    if unknown_basis:
+        raise ContractViolation(
+            f"impact decision has unknown basis IDs: {sorted(unknown_basis)}"
+        )
+    if newly_contradicted.intersection(impact.new_basis_hypothesis_ids):
+        raise ContractViolation("impact decision retains a contradicted basis")
+
+    if impact.action == "retain":
+        work_items[current.work_item_id] = _validated_copy(
+            current,
+            basis_hypothesis_ids=impact.new_basis_hypothesis_ids,
+        )
+        return
+
+    work_items[current.work_item_id] = _validated_copy(
+        current,
+        state="dropped",
+        resolution=impact.reason,
+    )
+    if impact.action == "replace":
+        if impact.replacement_work_item_id not in added_work_item_ids:
+            raise ContractViolation(
+                "replacement work item must be added in the same update"
+            )
+        replacement = work_items.get(impact.replacement_work_item_id or "")
+        if replacement is None:
+            raise ContractViolation("replacement work item does not exist")
+        if replacement.replaces_work_item_id != current.work_item_id:
+            raise ContractViolation(
+                "replacement work item must point to the replaced work item"
+            )
+        if tuple(replacement.basis_hypothesis_ids) != tuple(
+            impact.new_basis_hypothesis_ids
+        ):
+            raise ContractViolation("replacement basis must match the impact decision")
+        return
+
+    if impact.drop_subtree:
+        for descendant_id in _descendant_ids(current.work_item_id, work_items):
+            descendant = work_items[descendant_id]
+            if descendant.state == "open":
+                work_items[descendant_id] = _validated_copy(
+                    descendant,
+                    state="dropped",
+                    resolution=impact.reason,
+                )
+
+
+def _validate_work_tree(
+    work_items: Mapping[str, WorkItem],
+    hypotheses: Mapping[str, Hypothesis],
+) -> None:
+    for item in work_items.values():
+        if (
+            item.parent_work_item_id is not None
+            and item.parent_work_item_id not in work_items
+        ):
+            raise ContractViolation(
+                f"unknown parent work item: {item.parent_work_item_id}"
+            )
+        if (
+            item.replaces_work_item_id is not None
+            and item.replaces_work_item_id not in work_items
+        ):
+            raise ContractViolation(
+                f"unknown replaced work item: {item.replaces_work_item_id}"
+            )
+        unknown_basis = set(item.basis_hypothesis_ids) - set(hypotheses)
+        if unknown_basis:
+            raise ContractViolation(
+                f"unknown basis hypothesis IDs: {sorted(unknown_basis)}"
+            )
+        unresolved_basis = {
+            hypothesis_id
+            for hypothesis_id in item.basis_hypothesis_ids
+            if hypotheses[hypothesis_id].judgment == "unresolved"
+        }
+        if item.state == "resolved" and unresolved_basis:
+            raise ContractViolation(
+                "resolved work item retains unresolved basis hypotheses: "
+                f"{item.work_item_id}={sorted(unresolved_basis)}"
+            )
+        if item.state == "open" and any(
+            hypotheses[hypothesis_id].judgment == "contradicted"
+            for hypothesis_id in item.basis_hypothesis_ids
+        ):
+            raise ContractViolation(
+                f"open work item retains a contradicted basis: {item.work_item_id}"
+            )
+
+    for item in work_items.values():
+        seen = {item.work_item_id}
+        parent_id = item.parent_work_item_id
+        while parent_id is not None:
+            if parent_id in seen:
+                raise ContractViolation("work item parent cycle detected")
+            seen.add(parent_id)
+            parent_id = work_items[parent_id].parent_work_item_id
+
+    for item in work_items.values():
+        if item.parent_work_item_id is None:
+            continue
+        parent = work_items[item.parent_work_item_id]
+        if parent.state != "open" and item.state == "open":
+            raise ContractViolation(
+                f"closed parent has an open child: {item.work_item_id}"
+            )
+
+
+def _validate_hypotheses(
+    hypotheses: Mapping[str, Hypothesis],
+    work_items: Mapping[str, WorkItem],
+    *,
+    known_evidence_ids: set[str],
+    material_evidence_ids: set[str],
+    citable_evidence_ids: set[str],
+    changed_hypothesis_ids: set[str],
+) -> None:
+    for item in hypotheses.values():
+        if item.work_item_id not in work_items:
+            raise ContractViolation(
+                f"hypothesis has unknown work item: {item.work_item_id}"
+            )
+        unknown_evidence = set(item.evidence_ids) - known_evidence_ids
+        if unknown_evidence:
+            raise ContractViolation(
+                f"hypothesis has unknown evidence IDs: {sorted(unknown_evidence)}"
+            )
+        if item.hypothesis_id in changed_hypothesis_ids and item.judgment in {
+            "supported",
+            "contradicted",
+        }:
+            unseen = set(item.evidence_ids) - material_evidence_ids
+            if unseen:
+                raise ContractViolation(
+                    f"semantic judgment uses evidence not shown in full: "
+                    f"{sorted(unseen)}"
+                )
+            navigation_only = set(item.evidence_ids) - citable_evidence_ids
+            if navigation_only:
+                raise ContractViolation(
+                    "semantic judgment uses navigation-only evidence: "
+                    f"{sorted(navigation_only)}"
+                )
+
+
+def _descendant_ids(
+    root_id: str,
+    work_items: Mapping[str, WorkItem],
+) -> tuple[str, ...]:
+    descendants: list[str] = []
+    frontier = [root_id]
+    while frontier:
+        parent_id = frontier.pop()
+        children = [
+            item.work_item_id
+            for item in work_items.values()
+            if item.parent_work_item_id == parent_id
+        ]
+        descendants.extend(children)
+        frontier.extend(children)
+    return tuple(descendants)
+
+
+def _require_unique_state_ids(state: CaseState) -> None:
+    _reject_duplicate_delta_ids(
+        (item.work_item_id for item in state.work_items),
+        "stored work item",
+    )
+    _reject_duplicate_delta_ids(
+        (item.hypothesis_id for item in state.hypotheses),
+        "stored hypothesis",
+    )
+    _reject_duplicate_delta_ids(
+        (item.evidence_id for item in state.evidence),
+        "stored evidence",
+    )
+    _reject_duplicate_delta_ids(
+        (item.request_id for item in state.tool_requests),
+        "stored tool request",
+    )
+    dependency_keys = tuple(
+        (item.dependency_kind, item.work_item_id)
+        for item in state.dependency_decisions
+    )
+    if len(dependency_keys) != len(set(dependency_keys)):
+        raise ContractViolation("stored dependency decision keys must be unique")
+def _validated_copy(model: ModelT, /, **updates) -> ModelT:
+    try:
+        return type(model).model_validate({**model.model_dump(), **updates})
+    except ValidationError as exc:
+        raise ContractViolation("updated state violates its schema") from exc
+
+
+def _reject_duplicate_delta_ids(values, label: str) -> None:
+    values = tuple(values)
+    if len(values) != len(set(values)):
+        raise ContractViolation(f"{label} IDs must be unique")

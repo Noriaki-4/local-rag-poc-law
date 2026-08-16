@@ -1,0 +1,462 @@
+"""新FrameworkのArticle検索とGraphナビゲーション接続。"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+
+from app.adapters.tools.legal_search import (
+    LegalFetchArticlesTool,
+    LegalGraphNeighborsTool,
+    LegalSearchTool,
+)
+from app.agent_framework.contracts import SolverDecision
+from app.agent_framework.profiles import AgentLimits
+from app.agent_framework.state import CaseState, Evidence, FinalAnswer, ToolRequest
+from app.agent_framework.validation import ContractViolation, apply_solver_decision
+from app.domains.legal.tools import legal_tool_registry
+
+
+class FakeArticleSearch:
+    def __init__(self) -> None:
+        self.specs: list[Any] = []
+        self.timeout_sec: float | None = None
+
+    def search_requirement_specs(
+        self,
+        specs,
+        *,
+        user_clearance_level: int,
+        timeout_sec: float,
+    ) -> dict[str, list[dict[str, Any]]]:
+        assert user_clearance_level == 2
+        self.specs = specs
+        self.timeout_sec = timeout_sec
+        output: dict[str, list[dict[str, Any]]] = {}
+        for spec in specs:
+            if spec.doc_type == "law":
+                output[spec.requirement_id] = [
+                    {
+                        "articleId": "law-a-article-27_2",
+                        "chunks": [
+                            {
+                                "contentUnitId": "law-a-article-27_2-paragraph-1",
+                                "articleContentUnitId": "law-a-article-27_2",
+                                "documentId": "law-a",
+                                "docType": "law",
+                                "heading": "第二十七条の二 第1項",
+                                "text": "公開買付けの要件を定める。",
+                            },
+                            {
+                                "contentUnitId": "law-a-article-27_2-paragraph-2",
+                                "articleContentUnitId": "law-a-article-27_2",
+                                "documentId": "law-a",
+                                "docType": "law",
+                                "heading": "第二十七条の二 第2項",
+                                "text": "同じArticleの別chunk。",
+                            },
+                            *[
+                                {
+                                    "contentUnitId": (
+                                        "law-a-article-27_2-paragraph-1-item-"
+                                        f"{item_no}"
+                                    ),
+                                    "articleContentUnitId": "law-a-article-27_2",
+                                    "documentId": "law-a",
+                                    "docType": "law",
+                                    "heading": f"第二十七条の二 第1項第{item_no}号",
+                                    "text": (
+                                        "同じArticleの一致箇所。"
+                                        + (
+                                            "少数所有者と全所有者同意を"
+                                            "内閣府令で定める。"
+                                            if item_no == 13
+                                            else ""
+                                        )
+                                    ),
+                                }
+                                for item_no in range(3, 14)
+                            ],
+                        ],
+                    }
+                ]
+            else:
+                output[spec.requirement_id] = [
+                    {
+                        "source": {
+                            "contentUnitId": "guide-1",
+                            "documentId": "guide",
+                            "docType": "guideline",
+                            "heading": "Q&A",
+                            "text": "公開買付けの解説。",
+                        }
+                    }
+                ]
+        return output
+
+    def get_by_article_ids(
+        self,
+        article_ids,
+        user_clearance_level: int,
+        *,
+        max_chunks: int,
+    ) -> list[dict[str, Any]]:
+        assert article_ids == ["law-a-article-27_2"]
+        assert user_clearance_level == 2
+        assert max_chunks > 0
+        return [
+            {
+                "contentUnitId": "law-a-article-27_2-paragraph-1",
+                "articleContentUnitId": "law-a-article-27_2",
+                "documentId": "law-a",
+                "docType": "law",
+                "heading": "第二十七条の二 第1項",
+                "text": "公開買付けの要件を定める。",
+            }
+        ]
+
+
+class FakeGraph:
+    def __init__(self) -> None:
+        self.formal_args: dict[str, Any] = {}
+        self.assertion_args: dict[str, Any] = {}
+
+    def article_relations_touching(self, article_ids, **kwargs):
+        self.formal_args = {"article_ids": article_ids, **kwargs}
+        return [
+            {
+                "graphEdgeId": "edge-1",
+                "edgeType": "REFERENCES",
+                "fromArticleId": "law-order-article-7",
+                "fromDocumentId": "law-order",
+                "fromTitle": "金融商品取引法施行令",
+                "fromHeading": "第七条",
+                "toArticleId": "law-act-article-27_2",
+                "toDocumentId": "law-act",
+                "toTitle": "金融商品取引法",
+                "toHeading": "第二十七条の二",
+            }
+        ]
+
+    def relation_assertions_touching(self, article_ids, **kwargs):
+        self.assertion_args = {"article_ids": article_ids, **kwargs}
+        return [
+            {
+                "assertionId": "assertion-1",
+                "suggestedType": "IMPLEMENTS",
+                "status": "unverified",
+                "fromArticleId": "law-act-article-27_2",
+                "toArticleId": "law-ordinance-article-2_5",
+            }
+        ]
+
+
+class MultiSeedGraph:
+    def __init__(self) -> None:
+        self.formal_calls: list[list[str]] = []
+        self.assertion_calls: list[list[str]] = []
+
+    def article_relations_touching(self, article_ids, **kwargs):
+        del kwargs
+        self.formal_calls.append(article_ids)
+        if article_ids == ["law-act-article-27_2"]:
+            return [
+                {
+                    "graphEdgeId": "edge-ordinance-2_5",
+                    "edgeType": "REFERENCES",
+                    "fromArticleId": "law-ordinance-article-2_5",
+                    "fromDocumentId": "law-ordinance",
+                    "fromHeading": "第二条の五",
+                    "toArticleId": "law-act-article-27_2",
+                    "toDocumentId": "law-act",
+                    "toHeading": "第二十七条の二",
+                }
+            ]
+        if article_ids == ["law-act-article-27_3"]:
+            return [
+                {
+                    "graphEdgeId": "edge-ordinance-10",
+                    "edgeType": "REFERENCES",
+                    "fromArticleId": "law-ordinance-article-10",
+                    "fromDocumentId": "law-ordinance",
+                    "fromHeading": "第十条",
+                    "toArticleId": "law-act-article-27_3",
+                    "toDocumentId": "law-act",
+                    "toHeading": "第二十七条の三",
+                }
+            ]
+        return []
+
+    def relation_assertions_touching(self, article_ids, **kwargs):
+        del kwargs
+        self.assertion_calls.append(article_ids)
+        return []
+
+
+class DuplicatePairGraph:
+    def article_relations_touching(self, article_ids, **kwargs):
+        del article_ids, kwargs
+        return [
+            {
+                "graphEdgeId": "edge-reference-paragraph-1",
+                "edgeType": "REFERENCES",
+                "fromArticleId": "law-order-article-7",
+                "fromDocumentId": "law-order",
+                "toArticleId": "law-act-article-27_2",
+                "toDocumentId": "law-act",
+            },
+            {
+                "graphEdgeId": "edge-reference-paragraph-2",
+                "edgeType": "REFERENCES",
+                "fromArticleId": "law-order-article-7",
+                "fromDocumentId": "law-order",
+                "toArticleId": "law-act-article-27_2",
+                "toDocumentId": "law-act",
+            },
+            {
+                "graphEdgeId": "edge-applied-by",
+                "edgeType": "APPLIED_BY",
+                "derivedFromEdgeId": "edge-reference-paragraph-1",
+                "fromArticleId": "law-act-article-27_2",
+                "fromDocumentId": "law-act",
+                "toArticleId": "law-order-article-7",
+                "toDocumentId": "law-order",
+            },
+        ]
+
+    def relation_assertions_touching(self, article_ids, **kwargs):
+        del article_ids, kwargs
+        return [
+            {
+                "assertionId": "assertion-implements",
+                "suggestedType": "IMPLEMENTS",
+                "status": "unverified",
+                "fromArticleId": "law-act-article-27_2",
+                "fromDocumentId": "law-act",
+                "toArticleId": "law-order-article-7",
+                "toDocumentId": "law-order",
+            }
+        ]
+
+
+def _request(tool_name: str, arguments: dict[str, Any]) -> ToolRequest:
+    return ToolRequest(
+        request_id=f"request-{tool_name}",
+        work_item_id="work-1",
+        tool_name=tool_name,
+        arguments=arguments,
+        purpose="接続を確認する",
+    )
+
+
+def test_legal_search_uses_article_aggregation_and_document_scope() -> None:
+    client = FakeArticleSearch()
+    execution = LegalSearchTool(
+        client,  # type: ignore[arg-type]
+        user_clearance_level=2,
+        top_k=8,
+    ).execute(
+        _request(
+            "legal_search",
+            {
+                "query": "公開買付けの要件",
+                "doc_types": ["law", "guideline"],
+                "document_ids": ["law-a"],
+            },
+        ),
+        cycle_no=1,
+        timeout_sec=12.5,
+    )
+
+    assert [spec.doc_type for spec in client.specs] == ["law", "guideline"]
+    assert [spec.top_k for spec in client.specs] == [8, 2]
+    assert all(spec.document_ids == ("law-a",) for spec in client.specs)
+    assert client.timeout_sec == 12.5
+    assert execution.result.evidence_ids == (
+        execution.evidence[0].evidence_id,
+        "search-nav-guide-1",
+    )
+    assert execution.evidence[0].evidence_id.startswith("search-nav-")
+    assert "公開買付けの要件を定める。" in execution.evidence[0].content
+    assert "同じArticleの別chunk。" in execution.evidence[0].content
+    assert "少数所有者と全所有者同意" in execution.evidence[0].content
+    assert execution.evidence[0].metadata["matchedChunkCount"] == 13
+    assert "law-a-article-27_2-paragraph-2" not in execution.evidence[0].content
+    assert execution.evidence[0].metadata["articleId"] == "law-a-article-27_2"
+    assert execution.evidence[0].metadata["citationEligible"] is False
+    assert execution.evidence[0].metadata["evidenceRole"] == "search_navigation"
+    assert execution.evidence[1].metadata["citationEligible"] is False
+    assert execution.evidence[1].metadata["articleId"] is None
+
+
+def test_fetch_articles_returns_citation_eligible_text_with_source_id() -> None:
+    execution = LegalFetchArticlesTool(
+        FakeArticleSearch(),  # type: ignore[arg-type]
+        user_clearance_level=2,
+    ).execute(
+        _request(
+            "fetch_articles",
+            {"article_ids": ["law-a-article-27_2"]},
+        ),
+        cycle_no=2,
+        timeout_sec=12.5,
+    )
+
+    assert execution.result.evidence_ids == ("law-a-article-27_2-paragraph-1",)
+    assert execution.evidence[0].metadata["citationEligible"] is True
+    assert execution.evidence[0].metadata["evidenceRole"] == "retrieved_text"
+
+
+def test_fetch_articles_rejects_more_than_four_article_ids() -> None:
+    with pytest.raises(ValueError, match="tool arguments violate schema"):
+        LegalFetchArticlesTool(
+            FakeArticleSearch(),  # type: ignore[arg-type]
+            user_clearance_level=2,
+        ).execute(
+            _request(
+                "fetch_articles",
+                {
+                    "article_ids": [
+                        f"law-a-article-{index}" for index in range(1, 6)
+                    ]
+                },
+            ),
+            cycle_no=2,
+            timeout_sec=12.5,
+        )
+
+
+def test_graph_tool_returns_both_relation_kinds_as_navigation_only() -> None:
+    graph = FakeGraph()
+    execution = LegalGraphNeighborsTool(
+        graph,  # type: ignore[arg-type]
+        user_clearance_level=2,
+    ).execute(
+        _request(
+            "legal_graph_neighbors",
+            {
+                "article_ids": ["law-act-article-27_2"],
+                "edge_types": ["REFERENCES", "IMPLEMENTS"],
+            },
+        ),
+        cycle_no=2,
+        timeout_sec=10,
+    )
+
+    assert graph.formal_args["article_ids"] == ["law-act-article-27_2"]
+    assert graph.assertion_args["article_ids"] == ["law-act-article-27_2"]
+    assert len(execution.evidence) == 2
+    assert all(
+        item.metadata["citationEligible"] is False for item in execution.evidence
+    )
+    assert "law-order-article-7" in execution.evidence[0].content
+    assert "law-ordinance-article-2_5" in execution.evidence[1].content
+    assert execution.evidence[0].metadata["neighborTitle"] == "金融商品取引法施行令"
+    assert execution.evidence[0].metadata["neighborHeading"] == "第七条"
+
+
+def test_graph_tool_keeps_an_independent_relation_window_for_each_seed() -> None:
+    graph = MultiSeedGraph()
+    execution = LegalGraphNeighborsTool(
+        graph,  # type: ignore[arg-type]
+        user_clearance_level=2,
+    ).execute(
+        _request(
+            "legal_graph_neighbors",
+            {
+                "article_ids": [
+                    "law-act-article-27_2",
+                    "law-act-article-27_3",
+                ],
+                "edge_types": ["REFERENCES"],
+            },
+        ),
+        cycle_no=2,
+        timeout_sec=10,
+    )
+
+    assert graph.formal_calls == [
+        ["law-act-article-27_2"],
+        ["law-act-article-27_3"],
+    ]
+    assert graph.assertion_calls == [
+        ["law-act-article-27_2"],
+        ["law-act-article-27_3"],
+    ]
+    contents = [item.content for item in execution.evidence]
+    assert any("law-ordinance-article-2_5" in content for content in contents)
+    assert any("law-ordinance-article-10" in content for content in contents)
+
+
+def test_graph_tool_collapses_duplicate_relations_into_one_article_pair() -> None:
+    execution = LegalGraphNeighborsTool(
+        DuplicatePairGraph(),  # type: ignore[arg-type]
+        user_clearance_level=2,
+    ).execute(
+        _request(
+            "legal_graph_neighbors",
+            {
+                "article_ids": ["law-act-article-27_2"],
+                "edge_types": ["REFERENCES", "IMPLEMENTS", "APPLIED_BY"],
+            },
+        ),
+        cycle_no=2,
+        timeout_sec=10,
+    )
+
+    assert len(execution.evidence) == 1
+    content = execution.evidence[0].content
+    assert '"neighborArticleId":"law-order-article-7"' in content
+    assert content.count('"kind":"formal_relation"') == 3
+    assert content.count('"kind":"relation_assertion"') == 1
+    assert execution.evidence[0].metadata["edgeTypes"] == (
+        "REFERENCES",
+        "APPLIED_BY",
+        "IMPLEMENTS",
+    )
+
+
+def test_graph_navigation_evidence_cannot_be_cited() -> None:
+    navigation = Evidence(
+        evidence_id="graph-nav-1",
+        source_ref="neo4j:edge-1",
+        content='{"fromArticleId":"law-a","toArticleId":"law-b"}',
+        created_cycle=1,
+        metadata={"citationEligible": False},
+    )
+    state = CaseState(
+        case_id="case-1",
+        question="質問",
+        evidence=(navigation,),
+    )
+
+    with pytest.raises(ContractViolation, match="navigation-only"):
+        apply_solver_decision(
+            state,
+            SolverDecision(
+                next="finalize",
+                answer=FinalAnswer(
+                    text="回答",
+                    citation_ids=(navigation.evidence_id,),
+                ),
+            ),
+            limits=AgentLimits(),
+            known_tool_names={"legal_search"},
+            material_evidence_ids={navigation.evidence_id},
+            finalize_only=False,
+        )
+
+
+def test_legal_registry_exposes_graph_navigation_tool() -> None:
+    registry = legal_tool_registry(
+        FakeArticleSearch(),  # type: ignore[arg-type]
+        FakeGraph(),  # type: ignore[arg-type]
+        user_clearance_level=2,
+    )
+
+    assert registry.names == {
+        "legal_search",
+        "fetch_articles",
+        "legal_graph_neighbors",
+    }

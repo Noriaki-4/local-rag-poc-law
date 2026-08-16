@@ -13,6 +13,7 @@ from .legal_ontology import (
     GRAPH_SCHEMA_VERSION,
     NODE_TYPE_ARTICLE,
     NODE_TYPE_DOCUMENT,
+    NODE_TYPE_RELATION_ASSERTION,
     RELATION_STATUS_UNVERIFIED,
     SEEDED_EDGE_TYPES,
     edge_spec,
@@ -63,6 +64,7 @@ def audit_graph(
     violations.extend(_cross_family_implements(edges, nodes_by_id))
     violations.extend(_guidance_edge_endpoints(edges, nodes_by_id))
     violations.extend(_unverified_assertions_used_as_edges(edges))
+    violations.extend(_invalid_relation_assertions(nodes, edges, nodes_by_id))
     violations.extend(_missing_authority_types(nodes))
 
     return GraphAuditReport(
@@ -292,6 +294,103 @@ def _unverified_assertions_used_as_edges(edges: list[dict[str, Any]]) -> list[di
         for edge in edges
         if str(edge.get("status") or "") == RELATION_STATUS_UNVERIFIED
     ]
+
+
+def _invalid_relation_assertions(
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+    nodes_by_id: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """候補関係の端点・出所・未確認状態が自己矛盾していないか検査する。"""
+    edges_by_id = {
+        str(edge.get("graphEdgeId") or ""): edge
+        for edge in edges
+        if edge.get("graphEdgeId")
+    }
+    violations: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for assertion in nodes:
+        if assertion.get("nodeType") != NODE_TYPE_RELATION_ASSERTION:
+            continue
+        assertion_id = str(
+            assertion.get("assertionId")
+            or assertion.get("graphNodeId")
+            or ""
+        )
+        from_article_id = str(assertion.get("fromArticleId") or "")
+        to_article_id = str(assertion.get("toArticleId") or "")
+        suggested_type = str(assertion.get("suggestedType") or "")
+        source_reference_edge_id = str(
+            assertion.get("sourceReferenceEdgeId") or ""
+        )
+        missing = [
+            article_id
+            for article_id in (from_article_id, to_article_id)
+            if (
+                article_id not in nodes_by_id
+                or nodes_by_id[article_id].get("nodeType") != NODE_TYPE_ARTICLE
+            )
+        ]
+        if missing:
+            violations.append(
+                _violation(
+                    "relation_assertion_invalid_endpoint",
+                    assertionId=assertion_id,
+                    missing=missing,
+                )
+            )
+        if str(assertion.get("status") or "") != RELATION_STATUS_UNVERIFIED:
+            violations.append(
+                _violation(
+                    "relation_assertion_not_unverified",
+                    assertionId=assertion_id,
+                    status=assertion.get("status"),
+                )
+            )
+        spec = edge_spec(suggested_type)
+        if spec is None or not spec.implemented:
+            violations.append(
+                _violation(
+                    "relation_assertion_unknown_suggested_type",
+                    assertionId=assertion_id,
+                    suggestedType=suggested_type,
+                )
+            )
+        if source_reference_edge_id:
+            reference = edges_by_id.get(source_reference_edge_id)
+            if (
+                reference is None
+                or reference.get("edgeType") != "REFERENCES"
+                or str(reference.get("fromGraphNodeId") or "")
+                != to_article_id
+                or str(reference.get("toGraphNodeId") or "")
+                != from_article_id
+            ):
+                violations.append(
+                    _violation(
+                        "relation_assertion_invalid_source_reference",
+                        assertionId=assertion_id,
+                        sourceReferenceEdgeId=source_reference_edge_id,
+                    )
+                )
+        key = (
+            str(assertion.get("assertionSource") or ""),
+            from_article_id,
+            suggested_type,
+            to_article_id,
+        )
+        if key in seen:
+            violations.append(
+                _violation(
+                    "duplicate_relation_assertion",
+                    assertionId=assertion_id,
+                    fromArticleId=from_article_id,
+                    suggestedType=suggested_type,
+                    toArticleId=to_article_id,
+                )
+            )
+        seen.add(key)
+    return violations
 
 
 def _missing_authority_types(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:

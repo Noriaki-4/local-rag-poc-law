@@ -74,6 +74,7 @@ class FakeGraph:
         self,
         article_ids: list[str],
         limit: int = 20,
+        user_clearance_level: int = 3,
         timeout_sec: float | None = None,
     ) -> list[dict[str, Any]]:
         self.assertion_calls.append(list(article_ids))

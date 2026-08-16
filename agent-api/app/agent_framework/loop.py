@@ -1,0 +1,975 @@
+"""意味判断をModelへ委ね、上限と参照整合だけを扱うAgentLoop。"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+import hashlib
+import json
+import logging
+from time import monotonic
+
+from pydantic import ValidationError
+
+from .context import (
+    ContextCapacityExceeded,
+    SolverContractFeedback,
+    build_solver_context,
+)
+from .observability import (
+    AgentRunResult,
+    ModelCallTrace,
+    RunTrace,
+    ToolCallTrace,
+)
+from .ports.model import ModelPort, ModelProtocolError, ReviewContext
+from .ports.tool import ToolExecution, ToolRegistry
+from .profiles import AgentProfile, ModelCallProfile, ReviewerProfile
+from .state import (
+    CaseState,
+    Evidence,
+    GraphCandidateReview,
+    ReviewFinding,
+    RunStatus,
+    ToolRequest,
+    ToolResult,
+    utc_now,
+)
+from .store import CaseStore
+from .validation import ContractViolation, apply_solver_decision
+
+LOAD_EVIDENCE_TOOL = "load_evidence"
+MAX_SOLVER_CONTRACT_ATTEMPTS = 3
+logger = logging.getLogger(__name__)
+
+
+class AgentLoop:
+    def __init__(
+        self,
+        *,
+        store: CaseStore,
+        model: ModelPort,
+        tools: ToolRegistry,
+        profile: AgentProfile,
+        clock: Callable[[], float] = monotonic,
+    ) -> None:
+        self._store = store
+        self._model = model
+        self._tools = tools
+        self._profile = profile
+        self._clock = clock
+
+    def run(self, case_id: str) -> AgentRunResult:
+        state = self._store.load(case_id)
+        if state.run_status != "running":
+            raise ValueError("agent loop requires a running case")
+
+        started_at = self._clock()
+        model_traces: list[ModelCallTrace] = []
+        tool_traces: list[ToolCallTrace] = []
+        reviewer_findings: tuple[ReviewFinding, ...] = ()
+        revisions = 0
+        failure_code: str | None = None
+
+        try:
+            while True:
+                state = self._run_solver_until_answer(
+                    state,
+                    started_at=started_at,
+                    reviewer_findings=reviewer_findings,
+                    model_traces=model_traces,
+                    tool_traces=tool_traces,
+                )
+                if state.run_status != "running":
+                    break
+                if not self._profile.reviewer.enabled:
+                    state = self._finish(state, "completed")
+                    break
+
+                review_context = self._build_review_context(state)
+                remaining = self._remaining_wall_time(started_at)
+                if remaining <= 0:
+                    state = self._finish(
+                        state,
+                        "failed",
+                        stop_reason="max_wall_time",
+                    )
+                    break
+                review_profile = ReviewerProfile.model_validate(
+                    {
+                        **self._profile.reviewer.model_dump(),
+                        "timeout_sec": min(
+                            self._profile.reviewer.timeout_sec,
+                            remaining,
+                        ),
+                    }
+                )
+                review_started = self._clock()
+                review_call = self._model.review(
+                    review_context,
+                    review_profile,
+                )
+                model_traces.append(
+                    ModelCallTrace(
+                        purpose="review",
+                        model=review_profile.model,
+                        latency_ms=self._elapsed_ms(review_started),
+                        input_tokens=review_call.input_tokens,
+                        output_tokens=review_call.output_tokens,
+                        attempt_count=review_call.attempt_count,
+                    )
+                )
+                state = self._replace_state(state, review=review_call.review)
+                self._store.save(state)
+                if review_call.review.verdict == "accept":
+                    state = self._finish(state, "completed")
+                    break
+                if revisions >= self._profile.reviewer.max_revisions:
+                    state = self._finish(
+                        state,
+                        "failed",
+                        stop_reason="review_failed",
+                    )
+                    break
+
+                revisions += 1
+                reviewer_findings = review_call.review.findings
+                state = self._replace_state(state, final_answer=None)
+                self._store.save(state)
+        except ContextCapacityExceeded:
+            state = self._store.load(case_id)
+            state = self._finish(
+                state,
+                "failed",
+                stop_reason="context_capacity_exceeded",
+            )
+            failure_code = "context_capacity_exceeded"
+        except ContractViolation as exc:
+            state = self._store.load(case_id)
+            state = self._finish(state, "failed", stop_reason="protocol_error")
+            failure_code = f"contract_violation:{exc}"
+        except ModelProtocolError as exc:
+            state = self._store.load(case_id)
+            state = self._finish(state, "failed", stop_reason="protocol_error")
+            failure_code = f"model_protocol:{exc}"
+        except ValidationError:
+            state = self._store.load(case_id)
+            state = self._finish(state, "failed", stop_reason="protocol_error")
+            failure_code = "schema_validation"
+        except TimeoutError:
+            state = self._store.load(case_id)
+            state = self._finish(state, "failed", stop_reason="model_timeout")
+            failure_code = "model_timeout"
+        except Exception as exc:  # noqa: BLE001 - provider境界で内部例外を公開しない
+            logger.exception("unexpected AgentLoop failure", exc_info=exc)
+            state = self._store.load(case_id)
+            state = self._finish(state, "failed", stop_reason="provider_error")
+            failure_code = "provider_error"
+
+        return AgentRunResult(
+            state=state,
+            trace=RunTrace(
+                reviewer_enabled=self._profile.reviewer.enabled,
+                model_calls=tuple(model_traces),
+                tool_calls=tuple(tool_traces),
+                failure_code=failure_code,
+            ),
+        )
+
+    def _run_solver_until_answer(
+        self,
+        state: CaseState,
+        *,
+        started_at: float,
+        reviewer_findings: tuple[ReviewFinding, ...],
+        model_traces: list[ModelCallTrace],
+        tool_traces: list[ToolCallTrace],
+    ) -> CaseState:
+        while state.final_answer is None:
+            remaining = self._remaining_wall_time(started_at)
+            if remaining <= 0:
+                return self._finish(
+                    state,
+                    "failed",
+                    stop_reason="max_wall_time",
+                )
+
+            cycle_limit_reached = (
+                state.research_cycle_count >= self._profile.limits.max_research_cycles
+            )
+            time_reserve_reached = (
+                remaining <= self._profile.limits.finalization_reserve_sec
+            )
+            finalize_only = cycle_limit_reached or time_reserve_reached
+            stop_reason = None
+            if cycle_limit_reached:
+                stop_reason = "max_research_cycles"
+            elif time_reserve_reached:
+                stop_reason = "finalization_reserve"
+            if stop_reason is not None and state.stop_reason != stop_reason:
+                state = self._replace_state(state, stop_reason=stop_reason)
+                self._store.save(state)
+
+            integration_call = bool(state.research_cycle_count or reviewer_findings)
+            contract_feedback: SolverContractFeedback | None = None
+            cycle_step_timed_out = False
+            for contract_attempt in range(MAX_SOLVER_CONTRACT_ATTEMPTS):
+                attempt_remaining = self._remaining_wall_time(started_at)
+                model_budget = attempt_remaining
+                if not finalize_only:
+                    model_budget -= self._profile.limits.finalization_reserve_sec
+                if model_budget <= 0:
+                    raise TimeoutError("solver contract repair time exhausted")
+                context = build_solver_context(
+                    state,
+                    self._profile.limits,
+                    remaining_wall_time_sec=attempt_remaining,
+                    finalize_only=finalize_only,
+                    reviewer_findings=reviewer_findings,
+                    contract_feedback=contract_feedback,
+                    required_dependency_kind=(
+                        self._profile.required_dependency_kind
+                        if integration_call
+                        else None
+                    ),
+                    required_dependency_work_item_ids=(
+                        tuple(
+                            item.work_item_id
+                            for item in state.work_items
+                            if item.state == "open"
+                        )
+                        if integration_call
+                        and self._profile.required_dependency_kind is not None
+                        else ()
+                    ),
+                )
+                graph_review_call = bool(
+                    context.required_graph_review_request_ids
+                    and self._profile.solver_graph_review is not None
+                    and not finalize_only
+                )
+                if graph_review_call and not finalize_only:
+                    context = context.model_copy(
+                        update={
+                            "grounding_evidence_ids": (),
+                            "navigation_evidence_ids": (),
+                            "evidence_manifest": (),
+                            "material_evidence": (),
+                            "omitted_evidence_ids": (),
+                        }
+                    )
+                base_call_profile = (
+                    self._profile.solver_graph_review
+                    if graph_review_call
+                    else (
+                        self._profile.solver_integration
+                        if integration_call or finalize_only
+                        else self._profile.solver_research
+                    )
+                )
+                purpose = (
+                    "graph_selection"
+                    if graph_review_call
+                    else (
+                        "integration"
+                        if integration_call or finalize_only
+                        else "research"
+                    )
+                )
+                call_profile = self._bounded_model_profile(
+                    base_call_profile,
+                    model_budget,
+                )
+                call_started = self._clock()
+                try:
+                    solver_call = self._model.solve(context, call_profile)
+                except TimeoutError:
+                    if finalize_only or state.cycle_step_timeout:
+                        raise
+                    model_traces.append(
+                        ModelCallTrace(
+                            purpose=f"{purpose}_cycle_step_timeout",
+                            model=call_profile.model,
+                            latency_ms=self._elapsed_ms(call_started),
+                            attempt_count=1,
+                            finalize_only=False,
+                        )
+                    )
+                    state = self._replace_state(
+                        state,
+                        cycle_step_timeout=True,
+                        stop_reason="cycle_step_timeout",
+                        updated_at=utc_now(),
+                    )
+                    self._store.save(state)
+                    cycle_step_timed_out = True
+                    break
+                model_traces.append(
+                    ModelCallTrace(
+                        purpose=(
+                            f"{purpose}_contract_repair"
+                            if contract_attempt
+                            else purpose
+                        ),
+                        model=call_profile.model,
+                        latency_ms=self._elapsed_ms(call_started),
+                        input_tokens=solver_call.input_tokens,
+                        output_tokens=solver_call.output_tokens,
+                        attempt_count=solver_call.attempt_count,
+                        finalize_only=finalize_only,
+                    )
+                )
+                try:
+                    candidate = apply_solver_decision(
+                        state,
+                        solver_call.decision,
+                        limits=self._profile.limits,
+                        known_tool_names=self._read_only_tool_names,
+                        material_evidence_ids=context.material_evidence_ids,
+                        fetchable_article_ids=context.fetchable_article_ids,
+                        required_dependency_kind=(
+                            self._profile.required_dependency_kind
+                        ),
+                        require_dependency_decisions=integration_call,
+                        dependency_target_fetch_tool_name=(
+                            self._profile.dependency_target_fetch_tool_name
+                        ),
+                        dependency_source_discovery_tool_name=(
+                            self._profile.dependency_source_discovery_tool_name
+                        ),
+                        dependency_resolution_requires_distinct_document=(
+                            self._profile.dependency_resolution_requires_distinct_document
+                        ),
+                        tool_list_argument_limits={
+                            (item.tool_name, item.argument_name): item.max_items
+                            for item in self._profile.tool_list_argument_limits
+                        },
+                        required_graph_review_request_ids=(
+                            context.required_graph_review_request_ids
+                        ),
+                        graph_candidate_article_ids=tuple(
+                            item.article_id
+                            for item in context.graph_review_batch.candidates
+                            if item.content_status
+                            in {"not_requested", "failed", "timeout"}
+                        ),
+                        graph_known_article_ids=tuple(
+                            dict.fromkeys(
+                                [
+                                    *(
+                                        item.article_id
+                                        for item in context.graph_review_batch.candidates
+                                    ),
+                                    *(
+                                        item.article_id
+                                        for item in context.graph_review_ledger
+                                    ),
+                                ]
+                            )
+                        ),
+                        graph_review_fetch_tool_name=(
+                            self._profile.graph_review_fetch_tool_name
+                        ),
+                        graph_review_frontiers={
+                            item.frontier_item_id: (
+                                item.article_id,
+                                item.work_item_id,
+                                item.hypothesis_id,
+                            )
+                            for item in context.graph_review_batch.candidates
+                        },
+                        graph_review_link_ids=tuple(
+                            dict.fromkeys(
+                                link.link_id
+                                for item in context.graph_review_batch.candidates
+                                for link in item.links
+                            )
+                        ),
+                        graph_selectable_frontiers={
+                            item.frontier_item_id: (
+                                item.article_id,
+                                item.work_item_id,
+                                item.hypothesis_id,
+                            )
+                            for item in (
+                                *(
+                                    candidate
+                                    for candidate in context.graph_review_batch.candidates
+                                    if candidate.content_status
+                                    in {"not_requested", "failed", "timeout"}
+                                ),
+                                *(
+                                    ledger_item
+                                    for ledger_item in context.graph_review_ledger
+                                    if (
+                                        ledger_item.review_status
+                                        == "relevant_deferred"
+                                        and ledger_item.content_status
+                                        in {"not_requested", "failed", "timeout"}
+                                    )
+                                    or (
+                                        ledger_item.review_status == "selected"
+                                        and ledger_item.content_status
+                                        in {"failed", "timeout"}
+                                    )
+                                ),
+                            )
+                        },
+                        remaining_fetch_capacity=context.remaining_fetch_capacity,
+                        cycle_close_required=context.cycle_close_required,
+                        can_start_next_cycle=context.can_start_next_cycle,
+                        finalize_only=finalize_only,
+                    )
+                    break
+                except ContractViolation as exc:
+                    if contract_attempt == MAX_SOLVER_CONTRACT_ATTEMPTS - 1:
+                        raise
+                    contract_feedback = SolverContractFeedback(
+                        violation=str(exc),
+                        previous_decision=solver_call.decision,
+                    )
+            if cycle_step_timed_out:
+                continue
+            if solver_call.decision.next == "finalize":
+                candidate = self._replace_state(
+                    candidate,
+                    cycle_step_timeout=False,
+                    stop_reason=None,
+                    updated_at=utc_now(),
+                )
+                self._store.save(candidate)
+                return candidate
+
+            decision_requests = solver_call.decision.tool_requests
+            if (
+                graph_review_call
+                and solver_call.decision.graph_candidate_review is not None
+                and solver_call.decision.graph_candidate_review.selected_article_ids
+            ):
+                decision_requests = (
+                    self._graph_review_fetch_request(
+                        candidate,
+                        solver_call.decision.graph_candidate_review,
+                    ),
+                )
+                candidate = self._replace_state(
+                    candidate,
+                    tool_requests=(*candidate.tool_requests, *decision_requests),
+                )
+
+            if not decision_requests:
+                if solver_call.decision.start_next_cycle and not graph_review_call:
+                    candidate = self._replace_state(
+                        candidate,
+                        research_cycle_count=max(
+                            1,
+                            candidate.research_cycle_count + 1,
+                        ),
+                        cycle_step_timeout=False,
+                        stop_reason=None,
+                        updated_at=utc_now(),
+                    )
+                self._store.save(candidate)
+                state = candidate
+                continue
+
+            remaining_after_decision = self._remaining_wall_time(started_at)
+            if (
+                remaining_after_decision
+                <= self._profile.limits.finalization_reserve_sec
+            ):
+                state = self._replace_state(
+                    candidate,
+                    tool_requests=state.tool_requests,
+                    stop_reason="finalization_reserve",
+                )
+                self._store.save(state)
+                reviewer_findings = ()
+                continue
+
+            state = candidate
+            requests = self._with_automatic_tools(
+                state,
+                decision_requests,
+            )
+            automatic_requests = requests[len(decision_requests) :]
+            if automatic_requests:
+                state = self._replace_state(
+                    state,
+                    tool_requests=(*state.tool_requests, *automatic_requests),
+                )
+            self._store.save(state)
+            state = self._execute_cycle(
+                state,
+                requests,
+                started_at=started_at,
+                tool_traces=tool_traces,
+                advance_research_cycle=(
+                    state.research_cycle_count == 0
+                    or solver_call.decision.start_next_cycle
+                )
+                and not graph_review_call,
+            )
+            reviewer_findings = ()
+
+        return state
+
+    def _graph_review_fetch_request(
+        self,
+        state: CaseState,
+        review: GraphCandidateReview,
+    ) -> ToolRequest:
+        selected_ids = tuple(review.selected_article_ids)
+        selected_decisions = tuple(
+            item for item in review.frontier_decisions if item.action == "select"
+        )
+        if not selected_decisions:
+            raise ContractViolation("Graph review fetch requires a selected Frontier")
+        primary_work_item_id = selected_decisions[0].work_item_id
+        hypothesis_ids = tuple(
+            dict.fromkeys(
+                item.hypothesis_id
+                for item in selected_decisions
+                if item.hypothesis_id is not None
+            )
+        )
+        payload = json.dumps(
+            {
+                "graph_request_ids": review.graph_request_ids,
+                "selected_article_ids": selected_ids,
+                "review_sequence": len(state.graph_candidate_reviews),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
+        return ToolRequest(
+            request_id=f"graph-review-fetch-{digest}",
+            work_item_id=primary_work_item_id,
+            tool_name=self._profile.graph_review_fetch_tool_name or "fetch_articles",
+            arguments={"article_ids": list(selected_ids)},
+            purpose="Solverが選んだGraph候補Article本文を取得する",
+            hypothesis_ids=hypothesis_ids,
+        )
+
+    @property
+    def _read_only_tool_names(self) -> frozenset[str]:
+        names = {
+            name
+            for name in self._tools.names
+            if self._tools.get(name).definition.read_only
+        }
+        names.add(LOAD_EVIDENCE_TOOL)
+        for automatic in self._profile.automatic_tools:
+            if not automatic.solver_may_request:
+                names.discard(automatic.tool_name)
+        return frozenset(names)
+
+    def _with_automatic_tools(
+        self,
+        state: CaseState,
+        requests: tuple[ToolRequest, ...],
+    ) -> tuple[ToolRequest, ...]:
+        automatic_requests: list[ToolRequest] = []
+        for automatic in self._profile.automatic_tools:
+            tool = self._tools.get(automatic.tool_name)
+            if not tool.definition.read_only:
+                raise ContractViolation(
+                    f"automatic tool is not read-only: {automatic.tool_name}"
+                )
+
+            seen_values: set[str] = set()
+            one_hop_candidates = self._evidence_metadata_values(
+                state,
+                automatic.one_hop_candidate_metadata_key,
+            )
+            independent_roots = self._evidence_metadata_values(
+                state,
+                automatic.independent_root_metadata_key,
+                evidence_role=automatic.independent_root_evidence_role,
+            )
+            # 同じArticleがGraph候補としても検索起点としても発見された場合、
+            # 独立したdepth 0経路をGraph由来depth 1で上書きしない。
+            one_hop_candidates.difference_update(independent_roots)
+            deduplicate_name = automatic.deduplicate_list_argument
+            if deduplicate_name is not None:
+                successful_request_ids = {
+                    result.request_id
+                    for result in state.tool_results
+                    if result.status == "succeeded"
+                }
+                for existing in state.tool_requests:
+                    if existing.tool_name != automatic.tool_name:
+                        continue
+                    if existing.request_id not in successful_request_ids:
+                        continue
+                    values = existing.arguments.get(deduplicate_name, ())
+                    if isinstance(values, (list, tuple)):
+                        seen_values.update(
+                            value for value in values if isinstance(value, str)
+                        )
+                for existing in automatic_requests:
+                    if existing.tool_name != automatic.tool_name:
+                        continue
+                    values = existing.arguments.get(deduplicate_name, ())
+                    if isinstance(values, (list, tuple)):
+                        seen_values.update(
+                            value for value in values if isinstance(value, str)
+                        )
+
+            for request in requests:
+                if request.tool_name != automatic.trigger_tool_name:
+                    continue
+                arguments = dict(automatic.fixed_arguments)
+                for name in automatic.copied_argument_names:
+                    if name not in request.arguments:
+                        raise ContractViolation(
+                            f"automatic tool trigger is missing argument: {name}"
+                        )
+                    arguments[name] = request.arguments[name]
+
+                if deduplicate_name is not None:
+                    values = arguments[deduplicate_name]
+                    if not isinstance(values, (list, tuple)) or any(
+                        not isinstance(value, str) for value in values
+                    ):
+                        raise ContractViolation(
+                            "automatic tool deduplicated argument must be a string list"
+                        )
+                    unique_values = [
+                        value
+                        for value in dict.fromkeys(values)
+                        if value not in seen_values
+                        and value not in one_hop_candidates
+                    ]
+                    if not unique_values:
+                        continue
+                    arguments[deduplicate_name] = unique_values
+                    seen_values.update(unique_values)
+
+                automatic_requests.append(
+                    ToolRequest(
+                        request_id=self._automatic_request_id(
+                            request,
+                            automatic.tool_name,
+                            arguments,
+                        ),
+                        work_item_id=request.work_item_id,
+                        tool_name=automatic.tool_name,
+                        arguments=arguments,
+                        purpose=automatic.purpose,
+                        hypothesis_ids=request.hypothesis_ids,
+                    )
+                )
+        return (*requests, *automatic_requests)
+
+    @staticmethod
+    def _evidence_metadata_values(
+        state: CaseState,
+        metadata_key: str | None,
+        *,
+        evidence_role: str | None = None,
+    ) -> set[str]:
+        if metadata_key is None:
+            return set()
+        values: set[str] = set()
+        for evidence in state.evidence:
+            if (
+                evidence_role is not None
+                and evidence.metadata.get("evidenceRole") != evidence_role
+            ):
+                continue
+            value = evidence.metadata.get(metadata_key)
+            if isinstance(value, str):
+                values.add(value)
+            elif isinstance(value, (list, tuple)):
+                values.update(item for item in value if isinstance(item, str))
+        return values
+
+    @staticmethod
+    def _automatic_request_id(
+        trigger: ToolRequest,
+        tool_name: str,
+        arguments: dict[str, object],
+    ) -> str:
+        payload = json.dumps(
+            {
+                "trigger_request_id": trigger.request_id,
+                "tool_name": tool_name,
+                "arguments": arguments,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
+        return f"automatic-{digest}"
+
+    def _execute_cycle(
+        self,
+        state: CaseState,
+        requests: tuple[ToolRequest, ...],
+        *,
+        started_at: float,
+        tool_traces: list[ToolCallTrace],
+        advance_research_cycle: bool = True,
+    ) -> CaseState:
+        cycle_no = (
+            state.research_cycle_count + 1
+            if advance_research_cycle
+            else max(1, state.research_cycle_count)
+        )
+        remaining = self._remaining_wall_time(started_at)
+        timeout_sec = max(
+            0.001,
+            remaining - self._profile.limits.finalization_reserve_sec,
+        )
+
+        if self._can_run_in_parallel(requests):
+            with ThreadPoolExecutor(
+                max_workers=min(
+                    len(requests),
+                    self._profile.limits.max_parallel_tools,
+                )
+            ) as executor:
+                executions = tuple(
+                    executor.map(
+                        lambda request: self._execute_one(
+                            state,
+                            request,
+                            cycle_no=cycle_no,
+                            timeout_sec=timeout_sec,
+                        ),
+                        requests,
+                    )
+                )
+        else:
+            executions = tuple(
+                self._execute_one(
+                    state,
+                    request,
+                    cycle_no=cycle_no,
+                    timeout_sec=timeout_sec,
+                )
+                for request in requests
+            )
+
+        evidence_by_id = {item.evidence_id: item for item in state.evidence}
+        new_evidence: list[Evidence] = []
+        new_results: list[ToolResult] = []
+        for request, execution in zip(requests, executions, strict=True):
+            self._validate_tool_execution(request, execution, cycle_no)
+            new_results.append(execution.result)
+            tool_traces.append(
+                ToolCallTrace(
+                    request_id=request.request_id,
+                    tool_name=request.tool_name,
+                    arguments=request.arguments,
+                    purpose=request.purpose,
+                    status=execution.result.status,
+                    elapsed_ms=execution.result.elapsed_ms,
+                    cycle_no=cycle_no,
+                )
+            )
+            for evidence in execution.evidence:
+                existing = evidence_by_id.get(evidence.evidence_id)
+                if existing is not None and not self._same_evidence(
+                    existing,
+                    evidence,
+                ):
+                    raise ContractViolation(
+                        f"tool returned conflicting evidence ID: {evidence.evidence_id}"
+                    )
+                if existing is None:
+                    evidence_by_id[evidence.evidence_id] = evidence
+                    new_evidence.append(evidence)
+
+        state = self._replace_state(
+            state,
+            research_cycle_count=(
+                cycle_no if advance_research_cycle else state.research_cycle_count
+            ),
+            evidence=(*state.evidence, *new_evidence),
+            tool_results=(*state.tool_results, *new_results),
+            updated_at=utc_now(),
+            cycle_step_timeout=False,
+            stop_reason=None,
+        )
+        self._store.save(state)
+        return state
+
+    def _execute_one(
+        self,
+        state: CaseState,
+        request: ToolRequest,
+        *,
+        cycle_no: int,
+        timeout_sec: float,
+    ) -> ToolExecution:
+        started = self._clock()
+        if request.tool_name == LOAD_EVIDENCE_TOOL:
+            return self._load_evidence(state, request, cycle_no, started)
+
+        tool = self._tools.get(request.tool_name)
+        if not tool.definition.read_only:
+            raise ContractViolation(f"write tool is not allowed: {request.tool_name}")
+        try:
+            return tool.execute(
+                request,
+                cycle_no=cycle_no,
+                timeout_sec=timeout_sec,
+            )
+        except TimeoutError:
+            return ToolExecution(
+                result=ToolResult(
+                    request_id=request.request_id,
+                    status="timeout",
+                    error_code="tool_timeout",
+                    elapsed_ms=self._elapsed_ms(started),
+                    cycle_no=cycle_no,
+                )
+            )
+        except Exception:  # noqa: BLE001 - Tool境界を失敗結果へ正規化する
+            return ToolExecution(
+                result=ToolResult(
+                    request_id=request.request_id,
+                    status="failed",
+                    error_code="tool_error",
+                    elapsed_ms=self._elapsed_ms(started),
+                    cycle_no=cycle_no,
+                )
+            )
+
+    def _load_evidence(
+        self,
+        state: CaseState,
+        request: ToolRequest,
+        cycle_no: int,
+        started: float,
+    ) -> ToolExecution:
+        requested_ids = request.arguments.get("evidence_ids")
+        if (
+            not isinstance(requested_ids, list)
+            or not requested_ids
+            or any(not isinstance(item, str) for item in requested_ids)
+            or len(requested_ids) != len(set(requested_ids))
+        ):
+            raise ContractViolation(
+                "load_evidence requires a non-empty unique evidence_ids list"
+            )
+        known_ids = {item.evidence_id for item in state.evidence}
+        unknown_ids = set(requested_ids) - known_ids
+        if unknown_ids:
+            raise ContractViolation(
+                f"load_evidence references unknown IDs: {sorted(unknown_ids)}"
+            )
+        return ToolExecution(
+            result=ToolResult(
+                request_id=request.request_id,
+                status="succeeded",
+                evidence_ids=tuple(requested_ids),
+                elapsed_ms=self._elapsed_ms(started),
+                cycle_no=cycle_no,
+            )
+        )
+
+    def _can_run_in_parallel(self, requests: tuple[ToolRequest, ...]) -> bool:
+        if len(requests) <= 1:
+            return False
+        for request in requests:
+            if request.tool_name == LOAD_EVIDENCE_TOOL:
+                continue
+            definition = self._tools.get(request.tool_name).definition
+            if not definition.read_only or not definition.parallel_safe:
+                return False
+        return True
+
+    def _validate_tool_execution(
+        self,
+        request: ToolRequest,
+        execution: ToolExecution,
+        cycle_no: int,
+    ) -> None:
+        result = execution.result
+        if result.request_id != request.request_id:
+            raise ContractViolation("tool result request ID does not match")
+        if result.cycle_no != cycle_no:
+            raise ContractViolation("tool result cycle does not match")
+        evidence_ids = tuple(item.evidence_id for item in execution.evidence)
+        if len(evidence_ids) != len(set(evidence_ids)):
+            raise ContractViolation("tool returned duplicate evidence IDs")
+        if request.tool_name != LOAD_EVIDENCE_TOOL and set(result.evidence_ids) != set(
+            evidence_ids
+        ):
+            raise ContractViolation("tool result evidence IDs do not match payload")
+        if any(item.created_cycle != cycle_no for item in execution.evidence):
+            raise ContractViolation("tool evidence cycle does not match")
+
+    def _build_review_context(self, state: CaseState) -> ReviewContext:
+        if state.final_answer is None:
+            raise ContractViolation("review requires a final answer")
+        evidence_by_id = {item.evidence_id: item for item in state.evidence}
+        try:
+            cited = tuple(
+                evidence_by_id[evidence_id]
+                for evidence_id in state.final_answer.citation_ids
+            )
+        except KeyError as exc:
+            raise ContractViolation("review citation is not stored") from exc
+        return ReviewContext(
+            question=state.question,
+            answer=state.final_answer,
+            evidence=cited,
+        )
+
+    def _finish(
+        self,
+        state: CaseState,
+        status: RunStatus,
+        *,
+        stop_reason: str | None = None,
+    ) -> CaseState:
+        state = self._replace_state(
+            state,
+            run_status=status,
+            stop_reason=stop_reason if stop_reason is not None else state.stop_reason,
+            updated_at=utc_now(),
+        )
+        self._store.save(state)
+        return state
+
+    def _bounded_model_profile(
+        self,
+        profile: ModelCallProfile,
+        remaining_sec: float,
+    ) -> ModelCallProfile:
+        return ModelCallProfile.model_validate(
+            {
+                **profile.model_dump(),
+                "timeout_sec": min(profile.timeout_sec, remaining_sec),
+            }
+        )
+
+    def _remaining_wall_time(self, started_at: float) -> float:
+        return max(
+            0.0,
+            self._profile.limits.max_wall_time_sec - (self._clock() - started_at),
+        )
+
+    def _elapsed_ms(self, started_at: float) -> int:
+        return max(0, round((self._clock() - started_at) * 1000))
+
+    @staticmethod
+    def _replace_state(state: CaseState, **updates) -> CaseState:
+        return CaseState.model_validate({**state.model_dump(), **updates})
+
+    @staticmethod
+    def _same_evidence(first: Evidence, second: Evidence) -> bool:
+        return (
+            first.evidence_id == second.evidence_id
+            and first.source_ref == second.source_ref
+            and first.content == second.content
+            and first.title == second.title
+            and first.metadata == second.metadata
+        )

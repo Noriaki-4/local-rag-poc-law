@@ -78,6 +78,33 @@ class TestCleanGraph:
         assert report.edge_type_counts["IMPLEMENTS"] == 1
         assert report.authority_type_counts[AUTHORITY_ACT] == 2
 
+    def test_unverified_relation_assertion_is_not_a_confirmed_edge(self) -> None:
+        nodes = [
+            _article_node("law-a-article-1", "law-a"),
+            _article_node(
+                "law-b-article-2",
+                "law-b",
+                AUTHORITY_CABINET_ORDER,
+            ),
+            {
+                "graphNodeId": "assertion-law-1",
+                "nodeType": "RelationAssertion",
+                "assertionId": "assertion-law-1",
+                "fromArticleId": "law-a-article-1",
+                "toArticleId": "law-b-article-2",
+                "suggestedType": "IMPLEMENTS",
+                "assertionSource": "law_reference_candidate_rule",
+                "sourceReferenceEdgeId": "edge-ref-1",
+                "status": "unverified",
+            },
+        ]
+        report = audit_graph(
+            nodes,
+            [_reference_edge("law-b-article-2", "law-a-article-1")],
+        )
+        assert report.ok, report.violations
+        assert "IMPLEMENTS" not in report.edge_type_counts
+
 
 class TestViolations:
     def test_dangling_edge_is_detected(self) -> None:
@@ -214,6 +241,26 @@ class TestViolations:
             },
         ]
         assert "unverified_assertion_stored_as_edge" in _rules(audit_graph(nodes, edges))
+
+    def test_relation_assertion_requires_matching_source_reference(self) -> None:
+        nodes = [
+            _article_node("law-a-article-1", "law-a"),
+            _article_node("law-b-article-2", "law-b"),
+            {
+                "graphNodeId": "assertion-law-1",
+                "nodeType": "RelationAssertion",
+                "assertionId": "assertion-law-1",
+                "fromArticleId": "law-a-article-1",
+                "toArticleId": "law-b-article-2",
+                "suggestedType": "IMPLEMENTS",
+                "assertionSource": "law_reference_candidate_rule",
+                "sourceReferenceEdgeId": "missing-reference",
+                "status": "unverified",
+            },
+        ]
+        assert "relation_assertion_invalid_source_reference" in _rules(
+            audit_graph(nodes, [])
+        )
 
     def test_missing_authority_type_is_detected(self) -> None:
         nodes = [{"graphNodeId": "law-a-article-1", "nodeType": "Article", "documentId": "law-a"}]

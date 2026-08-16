@@ -14,7 +14,7 @@ from app.legal_ontology import (
     IMPLEMENTS_CONFIDENCE_EXPLICIT_DELEGATION,
     IMPLEMENTS_CONFIDENCE_FAMILY_RULE,
     REFERENCE_KIND_APPLICATION,
-    REFERENCE_KIND_DELEGATION_PARENT,
+    REFERENCE_KIND_PARENT_LAW_REFERENCE,
     REFERENCE_KIND_EXCEPTION,
     REFERENCE_ONLY_CONFIDENCE,
 )
@@ -80,6 +80,21 @@ class TestImplementsAssessment:
         assert assessment.confidence == REFERENCE_ONLY_CONFIDENCE
         assert assessment.is_implements is False
 
+    def test_definition_reference_does_not_inherit_other_delegation_wording(self) -> None:
+        assessment = assess_implements(
+            parent_text=(
+                "第一項ただし書の政令で定める場合を除く。"
+                "第七項の特別関係者をいう。"
+            ),
+            child_text="法第二十七条の二第七項に規定する特別関係者をいう。",
+            child_authority_type=AUTHORITY_CABINET_ORDER,
+            same_family=True,
+        )
+
+        assert assessment.delegation_wording_detected is True
+        assert assessment.specification_wording_detected is False
+        assert assessment.is_implements is False
+
     def test_specification_wording_without_delegation_is_family_rule(self) -> None:
         assessment = assess_implements(
             parent_text="公開買付開始公告を行わなければならない。",
@@ -109,7 +124,7 @@ class TestReferenceKind:
     def test_delegation_parent(self) -> None:
         assert (
             classify_reference_kind("法第五条に規定する", is_parent_law_reference=True)
-            == REFERENCE_KIND_DELEGATION_PARENT
+            == REFERENCE_KIND_PARENT_LAW_REFERENCE
         )
 
     def test_application(self) -> None:

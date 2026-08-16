@@ -72,3 +72,46 @@ def test_vector_hits_are_reused_across_document_type_filters(monkeypatch):
     assert [item["_source"]["contentUnitId"] for item in law] == ["law-1"]
     assert [item["_source"]["contentUnitId"] for item in guidance] == ["guidance-1"]
     assert len(post_calls) == 1
+
+
+def test_complete_article_lookup_pages_until_exact_total(monkeypatch):
+    from app import opensearch_client as module
+
+    bodies = []
+
+    class FakeResponse:
+        def __init__(self, source):
+            self.source = source
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "hits": {
+                    "total": {"value": 2, "relation": "eq"},
+                    "hits": [{"_source": self.source}],
+                }
+            }
+
+    def fake_post(url, json, timeout):
+        bodies.append(json)
+        suffix = len(bodies)
+        return FakeResponse(
+            {
+                "contentUnitId": f"law-a-article-1-paragraph-{suffix}",
+                "articleContentUnitId": "law-a-article-1",
+                "text": f"第{suffix}項",
+            }
+        )
+
+    monkeypatch.setattr(module.requests, "post", fake_post)
+    sources = module.OpenSearchClient().get_complete_articles_by_ids(
+        ["law-a-article-1"],
+        3,
+        page_size=1,
+    )
+
+    assert len(sources) == 2
+    assert [body["from"] for body in bodies] == [0, 1]
+    assert all(body["track_total_hits"] is True for body in bodies)

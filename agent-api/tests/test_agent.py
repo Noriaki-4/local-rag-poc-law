@@ -1371,6 +1371,25 @@ def test_choice_questions_cap_even_when_assessments_exceed_top_k():
     assert len(citations) == 5
 
 
+def test_reviewed_free_text_citations_do_not_add_unused_candidates():
+    from app.agent import _select_final_citations
+
+    candidates = [_citation(f"law-test-article-{n}") for n in range(1, 6)]
+
+    citations = _select_final_citations(
+        candidates,
+        ["law-test-article-4"],
+        5,
+        answer_text="第4条だけを使う。",
+        expand_answer_citations=False,
+        fill_remaining=False,
+    )
+
+    assert [citation.contentUnitId for citation in citations] == [
+        "law-test-article-4"
+    ]
+
+
 def test_named_law_candidates_never_outrank_the_global_search(monkeypatch):
     """法令内検索のスコアは、その法令の中だけの相対値。
 

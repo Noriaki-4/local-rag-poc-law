@@ -37,7 +37,7 @@ lawqa_jp 140問、関係エッジのサンプル監査によって調整する�
 | 範囲 | 状況 | 主なモジュール |
 |---|---|---|
 | §5-6 オントロジー(authorityType / role / edge registry / schema version) | 実装済み | `agent-api/app/legal_ontology.py` |
-| §6.1 referenceKind・derivedFromEdgeId・IMPLEMENTS段階confidence・MENTIONS・RelationAssertion | 実装済み(再シード要) | `agent-api/app/seed.py`, `legal_relation_resolver.py` |
+| §6.1 referenceKind・derivedFromEdgeId・確認済み関係とRelationAssertionの分離 | 実装済み(再シード要) | `agent-api/app/seed.py`, `legal_relation_resolver.py` |
 | §6.3 Graph監査 | 実装済み(seed時に自動実行、違反はmanifestとログへ) | `agent-api/app/graph_audit.py` |
 | §7 論点・EvidenceRequirement・conclusionGroup | 実装済み | `evidence_requirements.py`, `legal_issue_planner.py` |
 | §8 ラウンド単位の反復探索・子Requirement生成・停止条件 | 実装済み | `layered_retriever.py` |
@@ -69,6 +69,13 @@ lawqa_jp 140問、関係エッジのサンプル監査によって調整する�
 | MinIO同期 | OpenSearchが参照する16,458 vector文書と同期。過去seedの未参照5,606件を削除し、以後のseedでも管理prefix内を自動同期 |
 | §2の失敗ケース(公開買付府令10条) | 到達。最終16枠に法律27条の3・施行令9条の3・府令10条の3レイヤーが揃い`answerStatus=complete` |
 | shadow phase | 13〜16秒 / 予算20秒。現行回答への影響なし |
+
+上表は2026-07-28時点のschema version 3データの実測記録である。2026-08-15のschema version 6
+では、下位法令の親条文参照を文言ルールだけで正式`IMPLEMENTS`へ確定する方式を廃止した。
+明示参照は`REFERENCES`として残し、逆向きの`IMPLEMENTS`は未確認`RelationAssertion`候補として
+保存する。seed後のオフラインHaikuが両端本文から分類し、`uncertain`だけをSonnet Reviewerが
+再検討する。分類は本文ハッシュ付きの派生データであり正式エッジには昇格しない。検索時LLMは
+質問への関連性を判断するが関係種別を再分類しない。旧件数は現行Graphの期待件数ではない。
 
 判明した設計上の問題と対応:
 

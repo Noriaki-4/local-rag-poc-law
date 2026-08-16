@@ -18,7 +18,7 @@ from .graph_client import GraphClient
 from .legal_ontology import (
     AUTHORITY_GUIDANCE,
     GRAPH_SCHEMA_VERSION,
-    REFERENCE_KIND_DELEGATION_PARENT,
+    REFERENCE_KIND_PARENT_LAW_REFERENCE,
     RELATION_STATUS_UNVERIFIED,
     UNVERIFIED_ASSERTION_CONFIDENCE,
     resolve_authority_type,
@@ -39,6 +39,10 @@ PARENT_ORDER_ARTICLE_PATTERN = re.compile(
     r"(?:当該政令|同令|本令|(?<![一-鿏])令)"
     r"第([一二三四五六七八九十百千〇零\d]+)条"
     r"((?:の[一二三四五六七八九十百千〇零\d]+)*)"
+)
+ARTICLE_HEADING_CHILD_SUFFIX_PATTERN = re.compile(
+    r"\s+第[一二三四五六七八九十百千〇零\d]+項"
+    r"(?:第[一二三四五六七八九十百千〇零\d]+号)?$"
 )
 JAPANESE_DIGITS = {"〇": 0, "零": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
 JAPANESE_UNITS = {"十": 10, "百": 100, "千": 1000}
@@ -1007,7 +1011,8 @@ def _graph_artifacts_from_documents(
             "deptCode": document.get("deptCode"),
             "docType": document.get("docType"),
             "contentDomain": document.get("contentDomain"),
-            "heading": document.get("heading"),
+            "title": document.get("title"),
+            "heading": _article_heading(document.get("heading")),
             "publishStatus": document.get("publishStatus"),
             "isLatest": document.get("isLatest"),
             "confidentiality": document.get("confidentiality"),
@@ -1066,7 +1071,13 @@ def _graph_artifacts_from_documents(
     reference_edges = _reference_edges(documents)
     edges.extend(reference_edges)
     edges.extend(_incorporation_edges(documents, reference_edges))
-    edges.extend(_delegation_edges(documents, law_family_roots or {}))
+    delegation_assertions, delegation_edges = _delegation_graph_artifacts(
+        documents,
+        law_family_roots or {},
+    )
+    for assertion in delegation_assertions:
+        nodes_by_id[assertion["graphNodeId"]] = assertion
+    edges.extend(delegation_edges)
     return list(nodes_by_id.values()), edges
 
 
@@ -1212,49 +1223,104 @@ def _guidance_relation_assertions(
     for document in documents:
         if document.get("docType") != "guideline":
             continue
-        source_articles = list(document.get("relatedArticleContentUnitIds") or [])
         text = str(document.get("text") or "")
-        if not source_articles or not text:
+        if not text:
             continue
         guidance_document_id = str(document["documentId"])
-        for from_article_id in source_articles:
+        relation_pairs: list[tuple[str, str, str]] = []
+        if document.get("chunkStrategy") == "guidance_docling_table_v1":
+            relation_pairs = _guidance_table_relation_pairs(
+                document,
+                law_family_roots,
+                decree_by_family,
+            )
+        else:
+            for from_article_id in list(
+                document.get("relatedArticleContentUnitIds") or []
+            ):
+                law_document_id = from_article_id.split("-article-", 1)[0]
+                family_root = law_family_roots.get(
+                    law_document_id, law_document_id
+                )
+                decree_document_id = decree_by_family.get(family_root)
+                if not decree_document_id or decree_document_id == law_document_id:
+                    continue
+                relation_pairs.extend(
+                    (from_article_id, to_article_id, text[:200])
+                    for to_article_id in _prefixed_article_reference_ids(
+                        decree_document_id,
+                        text,
+                        GUIDANCE_ORDER_ARTICLE_PATTERN,
+                    )
+                )
+        for from_article_id, to_article_id, source_text in relation_pairs:
             if from_article_id not in available_articles:
                 continue
-            law_document_id = from_article_id.split("-article-", 1)[0]
+            if to_article_id not in available_articles:
+                continue
+            if counts.get(guidance_document_id, 0) >= GUIDANCE_ASSERTION_MAX_PER_DOCUMENT:
+                break
+            assertion_id = f"assertion-{from_article_id}-implements-{to_article_id}"
+            if assertion_id in assertions:
+                continue
+            counts[guidance_document_id] = counts.get(guidance_document_id, 0) + 1
+            assertions[assertion_id] = {
+                "graphNodeId": assertion_id,
+                "nodeType": "RelationAssertion",
+                "assertionId": assertion_id,
+                "fromArticleId": from_article_id,
+                "toArticleId": to_article_id,
+                "suggestedType": "IMPLEMENTS",
+                "assertedByDocumentId": guidance_document_id,
+                "assertionSource": "guidance_relation_candidate",
+                "sourceText": source_text,
+                "confidence": UNVERIFIED_ASSERTION_CONFIDENCE,
+                "status": RELATION_STATUS_UNVERIFIED,
+                "publishStatus": "published",
+                "isLatest": True,
+                "clearanceLevel": document.get("clearanceLevel", 1),
+                "graphSchemaVersion": GRAPH_SCHEMA_VERSION,
+            }
+    return list(assertions.values())
+
+
+def _guidance_table_relation_pairs(
+    document: dict[str, Any],
+    law_family_roots: dict[str, str],
+    decree_by_family: dict[str, str],
+) -> list[tuple[str, str, str]]:
+    """対応表の同じ行にある法律条文と施行令条文だけを組にする。
+
+    表全体の参照集合を直積にすると別行の条文同士を誤接続するため、行境界は
+    決定的に保持する。関係の法的意味自体はここでは判断しない。
+    """
+    related_law_ids = {
+        str(article_id).split("-article-", 1)[0]
+        for article_id in document.get("relatedArticleContentUnitIds") or []
+        if "-article-" in str(article_id)
+    }
+    pairs: list[tuple[str, str, str]] = []
+    for raw_line in str(document.get("text") or "").splitlines():
+        line = raw_line.strip()
+        if not line or set(line.replace("|", "").replace(":", "").strip()) <= {"-"}:
+            continue
+        for law_document_id in related_law_ids:
             family_root = law_family_roots.get(law_document_id, law_document_id)
             decree_document_id = decree_by_family.get(family_root)
             if not decree_document_id or decree_document_id == law_document_id:
                 continue
-            for to_article_id in _prefixed_article_reference_ids(
+            from_ids = _table_self_ref_article_ids(law_document_id, line)
+            to_ids = _prefixed_article_reference_ids(
                 decree_document_id,
-                text,
+                line,
                 GUIDANCE_ORDER_ARTICLE_PATTERN,
-            ):
-                if to_article_id not in available_articles:
-                    continue
-                if counts.get(guidance_document_id, 0) >= GUIDANCE_ASSERTION_MAX_PER_DOCUMENT:
-                    break
-                assertion_id = f"assertion-{from_article_id}-implements-{to_article_id}"
-                if assertion_id in assertions:
-                    continue
-                counts[guidance_document_id] = counts.get(guidance_document_id, 0) + 1
-                assertions[assertion_id] = {
-                    "graphNodeId": assertion_id,
-                    "nodeType": "RelationAssertion",
-                    "assertionId": assertion_id,
-                    "fromArticleId": from_article_id,
-                    "toArticleId": to_article_id,
-                    "suggestedType": "IMPLEMENTS",
-                    "assertedByDocumentId": guidance_document_id,
-                    "sourceText": text[:200],
-                    "confidence": UNVERIFIED_ASSERTION_CONFIDENCE,
-                    "status": RELATION_STATUS_UNVERIFIED,
-                    "publishStatus": "published",
-                    "isLatest": True,
-                    "clearanceLevel": document.get("clearanceLevel", 1),
-                    "graphSchemaVersion": GRAPH_SCHEMA_VERSION,
-                }
-    return list(assertions.values())
+            )
+            pairs.extend(
+                (from_article_id, to_article_id, line[:200])
+                for from_article_id in from_ids
+                for to_article_id in to_ids
+            )
+    return list(dict.fromkeys(pairs))
 
 
 def _drop_dangling_guidance_edges(
@@ -1402,12 +1468,33 @@ def _delegation_edges(
     documents: list[dict[str, Any]],
     law_family_roots: dict[str, str],
 ) -> list[dict[str, Any]]:
-    """下位法令の親法参照から、双方向に辿れる委任関係を生成する。
+    """下位法令の親法参照を事実として保存するREFERENCESを返す。
 
-    下位法令側の「法第五条第一項に規定する政令で定めるもの」のような文言を
-    REFERENCES（下位→親）として保持し、その逆向きに IMPLEMENTS（親→下位）も張る。
-    これにより、親法の薄い委任規定から具体化条文へも、先に取得した府令等から
-    根拠となる親法条文へもたどれる。
+    逆向きのIMPLEMENTSは法的意味の判断を伴うため自動確定しない。探索候補は
+    `_delegation_graph_artifacts`がRelationAssertionとして別に返す。
+    """
+    _, edges = _delegation_graph_artifacts(documents, law_family_roots)
+    return edges
+
+
+def _delegation_relation_assertions(
+    documents: list[dict[str, Any]],
+    law_family_roots: dict[str, str],
+) -> list[dict[str, Any]]:
+    """下位法令の親法参照から生成した、未確認IMPLEMENTS候補を返す。"""
+    assertions, _ = _delegation_graph_artifacts(documents, law_family_roots)
+    return assertions
+
+
+def _delegation_graph_artifacts(
+    documents: list[dict[str, Any]],
+    law_family_roots: dict[str, str],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """親参照の事実エッジと、意味判断前の委任関係候補を一度の走査で作る。
+
+    同一法令系統の下位法令が親Articleを明示参照した組合せは、ルールの文言検出結果に
+    かかわらず候補として保存する。文言検出は候補を落とす条件や信頼済み判定には使わず、
+    LLMが両Article本文を確認するときの監査可能なシグナルとしてだけ保持する。
     """
     available_articles = {
         str(document.get("articleContentUnitId") or document.get("parentContentUnitId") or document["contentUnitId"])
@@ -1431,6 +1518,16 @@ def _delegation_edges(
         for document in documents
         if document.get("docType") == "law"
     }
+    article_clearance_levels = {
+        str(
+            document.get("articleContentUnitId")
+            or document.get("parentContentUnitId")
+            or document["contentUnitId"]
+        ).split("-paragraph-", 1)[0]: int(document.get("clearanceLevel", 3))
+        for document in documents
+        if document.get("docType") == "law"
+    }
+    assertions: dict[str, dict[str, Any]] = {}
     edges: list[dict[str, Any]] = []
     seen: set[str] = set()
     for document in documents:
@@ -1448,19 +1545,30 @@ def _delegation_edges(
         if lower_article_id not in available_articles:
             continue
         text = str(document.get("text") or "")
-        referenced_parent_articles = _parent_law_article_reference_ids(
+        referenced_parent_articles = _prefixed_article_references_with_context(
             parent_document_id,
             text,
+            PARENT_LAW_ARTICLE_PATTERN,
+            expected_authority_title=document_titles.get(parent_document_id),
+            known_authority_titles=tuple(document_titles.values()),
         )
         decree_document_id = family_decrees.get(parent_document_id)
         if decree_document_id and decree_document_id != lower_document_id:
             referenced_parent_articles.extend(
-                _parent_order_article_reference_ids(
+                _prefixed_article_references_with_context(
                     decree_document_id,
                     text,
+                    PARENT_ORDER_ARTICLE_PATTERN,
+                    expected_authority_title=document_titles.get(decree_document_id),
+                    known_authority_titles=tuple(document_titles.values()),
                 )
             )
-        for parent_article_id in dict.fromkeys(referenced_parent_articles):
+        contexts_by_parent: dict[str, list[str]] = {}
+        for parent_article_id, reference_context in referenced_parent_articles:
+            contexts_by_parent.setdefault(parent_article_id, []).append(
+                reference_context
+            )
+        for parent_article_id, reference_contexts in contexts_by_parent.items():
             if parent_article_id not in available_articles:
                 continue
             reference_edge_id = (
@@ -1475,44 +1583,81 @@ def _delegation_edges(
                         "fromGraphNodeId": lower_article_id,
                         "toGraphNodeId": parent_article_id,
                         "documentId": lower_document_id,
-                        "referenceKind": REFERENCE_KIND_DELEGATION_PARENT,
+                        "referenceKind": REFERENCE_KIND_PARENT_LAW_REFERENCE,
                         "relationSource": "subordinate_law_parent_reference",
                         "relationConfidence": 0.95,
                         "publishStatus": "published",
                         "isLatest": True,
                     }
                 )
-            # 下位法令が親条文を参照するだけで IMPLEMENTS を確定しない。親条文の委任文言、
-            # または同一法令系統かつ下位法令側の具体化表現を確認する(§6.1)。
-            assessment = assess_implements(
-                parent_text=article_texts.get(parent_article_id, ""),
-                child_text=text,
-                child_authority_type=authority_types.get(lower_document_id),
-                same_family=True,
+            # 文言シグナルは候補の説明にだけ残す。ここでIMPLEMENTSを確定したり、
+            # 弱い候補を削除したりしない。
+            assessments = [
+                assess_implements(
+                    parent_text=article_texts.get(parent_article_id, ""),
+                    child_text=reference_context,
+                    child_authority_type=authority_types.get(lower_document_id),
+                    same_family=True,
+                )
+                for reference_context in reference_contexts
+            ]
+            assessment = max(
+                assessments,
+                key=lambda item: item.confidence,
             )
-            if not assessment.is_implements:
-                continue
-            edge_id = f"edge-{parent_article_id}-implements-{lower_article_id}"
-            if edge_id in seen:
-                continue
-            seen.add(edge_id)
-            edges.append(
-                {
-                    "graphEdgeId": edge_id,
-                    "edgeType": "IMPLEMENTS",
-                    "fromGraphNodeId": parent_article_id,
-                    "toGraphNodeId": lower_article_id,
-                    "documentId": lower_document_id,
-                    "derivedFromEdgeId": reference_edge_id,
-                    "relationSource": "subordinate_law_parent_reference",
-                    "relationConfidence": assessment.confidence,
+            assertion_id = (
+                f"assertion-law-reference-{parent_article_id}"
+                f"-implements-{lower_article_id}"
+            )
+            assertion = assertions.get(assertion_id)
+            reference_context_values = list(
+                dict.fromkeys(context[:240] for context in reference_contexts)
+            )[:4]
+            if assertion is None:
+                assertions[assertion_id] = {
+                    "graphNodeId": assertion_id,
+                    "nodeType": "RelationAssertion",
+                    "assertionId": assertion_id,
+                    "fromArticleId": parent_article_id,
+                    "toArticleId": lower_article_id,
+                    "suggestedType": "IMPLEMENTS",
+                    "assertedByDocumentId": lower_document_id,
+                    "sourceReferenceEdgeId": reference_edge_id,
+                    "sourceText": reference_context_values[0],
+                    "sourceTexts": reference_context_values,
+                    "assertionSource": "law_reference_candidate_rule",
+                    # 未確認候補は文言の強弱にかかわらず同じ信頼状態とする。
+                    "confidence": UNVERIFIED_ASSERTION_CONFIDENCE,
+                    "status": RELATION_STATUS_UNVERIFIED,
+                    "sameFamily": True,
                     "delegationWordingDetected": assessment.delegation_wording_detected,
                     "specificationWordingDetected": assessment.specification_wording_detected,
                     "publishStatus": "published",
                     "isLatest": True,
+                    "clearanceLevel": max(
+                        article_clearance_levels.get(parent_article_id, 3),
+                        article_clearance_levels.get(lower_article_id, 3),
+                    ),
+                    "graphSchemaVersion": GRAPH_SCHEMA_VERSION,
                 }
-            )
-    return edges
+            else:
+                assertion["sourceTexts"] = list(
+                    dict.fromkeys(
+                        [
+                            *(assertion.get("sourceTexts") or []),
+                            *reference_context_values,
+                        ]
+                    )
+                )[:4]
+                assertion["delegationWordingDetected"] = bool(
+                    assertion.get("delegationWordingDetected")
+                    or assessment.delegation_wording_detected
+                )
+                assertion["specificationWordingDetected"] = bool(
+                    assertion.get("specificationWordingDetected")
+                    or assessment.specification_wording_detected
+                )
+    return list(assertions.values()), edges
 
 
 def _parent_law_article_reference_ids(parent_document_id: str, text: str) -> list[str]:
@@ -1550,6 +1695,115 @@ def _prefixed_article_reference_ids(
         if content_unit_id not in references:
             references.append(content_unit_id)
     return references
+
+
+def _prefixed_article_references_with_context(
+    parent_document_id: str,
+    text: str,
+    pattern: re.Pattern[str],
+    *,
+    expected_authority_title: str | None = None,
+    known_authority_titles: tuple[str, ...] = (),
+) -> list[tuple[str, str]]:
+    """親Article IDと、その参照を含む局所文脈を返す。
+
+    条全体を使うと、別の項号への単純参照と委任文言を誤って結合してしまうため、
+    参照位置から文末または閉じ括弧までに限定する。
+    """
+    references: list[tuple[str, str]] = []
+    for match in pattern.finditer(text):
+        if not _relative_reference_targets_expected_authority(
+            text,
+            match,
+            expected_authority_title=expected_authority_title,
+            known_authority_titles=known_authority_titles,
+        ):
+            continue
+        parts = [
+            match.group(1),
+            *match.group(2).removeprefix("の").split("の"),
+        ]
+        numbers = [_japanese_number_to_int(part) for part in parts if part]
+        if not numbers or any(number is None for number in numbers):
+            continue
+        suffix = "_".join(str(number) for number in numbers)
+        article_id = f"{parent_document_id}-article-{suffix}"
+        context_end = min(len(text), match.end() + 160)
+        # 同じ括弧・文の後半に別Articleへの「規定による」が現れることがあるため、
+        # 読点も境界にして現在の参照へ直接係る表現だけを判定する。
+        for delimiter in ("、", "。", "\n"):
+            position = text.find(delimiter, match.end(), context_end)
+            if position >= 0:
+                context_end = min(context_end, position + len(delimiter))
+        if text[: match.start()].count("（") > text[: match.start()].count("）"):
+            position = text.find("）", match.end(), context_end)
+            if position >= 0:
+                context_end = min(context_end, position + 1)
+        references.append((article_id, text[match.start():context_end]))
+    return references
+
+
+def _relative_reference_targets_expected_authority(
+    text: str,
+    match: re.Match[str],
+    *,
+    expected_authority_title: str | None,
+    known_authority_titles: tuple[str, ...],
+) -> bool:
+    matched = match.group(0)
+    if not matched.startswith(("同法", "同令")):
+        return True
+
+    sentence_start = max(
+        text.rfind(delimiter, 0, match.start()) for delimiter in ("。", "\n", "；")
+    )
+    prefix = text[sentence_start + 1 : match.start()]
+    anchors: list[tuple[int, bool]] = []
+    standalone_pattern = (
+        re.compile(r"(?:当該法律|本法|(?<![一-鿏])法)第")
+        if matched.startswith("同法")
+        else re.compile(r"(?:当該政令|本令|(?<![一-鿏])令)第")
+    )
+    anchors.extend((item.start(), True) for item in standalone_pattern.finditer(prefix))
+
+    for title in dict.fromkeys(known_authority_titles):
+        if not title:
+            continue
+        marker = f"{title}第"
+        position = prefix.rfind(marker)
+        if position >= 0:
+            anchors.append((position, title == expected_authority_title))
+
+    # The referenced law may be outside the indexed family (for example,
+    # 会社法). Treat such an explicit title as a non-parent anchor. Ambiguous
+    # relative tokens never become a confirmed REFERENCES edge.
+    suffix = "(?:法律|法)" if matched.startswith("同法") else "(?:政令|令)"
+    named_pattern = re.compile(rf"(?<![一-鿏])([一-鿏々]{{1,50}}{suffix})第")
+    for item in named_pattern.finditer(prefix):
+        anchors.append(
+            (
+                item.start(),
+                bool(expected_authority_title)
+                and item.group(1) == expected_authority_title,
+            )
+        )
+
+    if not anchors:
+        return False
+    nearest_position = max(position for position, _ in anchors)
+    return any(
+        is_expected
+        for position, is_expected in anchors
+        if position == nearest_position
+    )
+
+
+def _article_heading(value: Any) -> str | None:
+    """項・号チャンクの見出しからArticle共通の見出しだけを取り出す。"""
+    if value is None:
+        return None
+    heading = str(value).strip()
+    return ARTICLE_HEADING_CHILD_SUFFIX_PATTERN.sub("", heading)
 
 
 def _explicit_article_reference_ids(document_id: str, text: str) -> list[str]:

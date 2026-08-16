@@ -13,7 +13,7 @@ from typing import Any
 
 # オントロジーまたは抽出規則を変更した場合に上げる。seed metadataとtraceへ保存し、
 # 「どのschemaでseedされたGraphか」を後から判別できるようにする(§6.3)。
-GRAPH_SCHEMA_VERSION = 3
+GRAPH_SCHEMA_VERSION = 7
 
 
 # --------------------------------------------------------------------------------------
@@ -283,6 +283,9 @@ def normalize_role_subtypes(role_family: str, role_subtypes: Any) -> tuple[str, 
 # --------------------------------------------------------------------------------------
 
 REFERENCE_KIND_ARTICLE_REFERENCE = "article_reference"
+# 親法令への明示参照という構文上の事実。委任関係の確定を意味しない。
+REFERENCE_KIND_PARENT_LAW_REFERENCE = "parent_law_reference"
+# schema version 4以前の読込互換。version 5のseedでは生成しない。
 REFERENCE_KIND_DELEGATION_PARENT = "delegation_parent"
 REFERENCE_KIND_APPLICATION = "application"
 REFERENCE_KIND_DEFINITION = "definition"
@@ -291,6 +294,7 @@ REFERENCE_KIND_FORM_OR_TABLE = "form_or_table"
 
 REFERENCE_KINDS: tuple[str, ...] = (
     REFERENCE_KIND_ARTICLE_REFERENCE,
+    REFERENCE_KIND_PARENT_LAW_REFERENCE,
     REFERENCE_KIND_DELEGATION_PARENT,
     REFERENCE_KIND_APPLICATION,
     REFERENCE_KIND_DEFINITION,
@@ -307,6 +311,16 @@ UNVERIFIED_ASSERTION_CONFIDENCE = 0.50
 
 RELATION_STATUS_UNVERIFIED = "unverified"
 RELATION_STATUS_LAW_TEXT_VERIFIED = "law_text_verified"
+RELATION_STATUS_LLM_IMPLEMENTS = "llm_classified_implements"
+RELATION_STATUS_LLM_REFERENCE_ONLY = "llm_classified_reference_only"
+RELATION_STATUS_LLM_UNCERTAIN = "llm_classified_uncertain"
+
+RELATION_ASSERTION_CLASSIFICATION_STATUSES: tuple[str, ...] = (
+    RELATION_STATUS_UNVERIFIED,
+    RELATION_STATUS_LLM_IMPLEMENTS,
+    RELATION_STATUS_LLM_REFERENCE_ONLY,
+    RELATION_STATUS_LLM_UNCERTAIN,
+)
 
 
 def implements_confidence(

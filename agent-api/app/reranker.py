@@ -35,13 +35,13 @@ class RerankerClient:
                 "ok": payload.get("status") == "ok",
                 "model": payload.get("model") or settings.rerank_model,
             }
-        except Exception as exc:
+        except Exception:
             return {
                 "enabled": True,
                 "provider": settings.rerank_provider,
                 "ok": False,
                 "model": settings.rerank_model,
-                "error": str(exc),
+                "errorCode": "reranker_health_check_failed",
             }
 
     def rerank(

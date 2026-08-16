@@ -217,6 +217,33 @@ class TestAuthorityTypeFilter:
             "law-b-article-2",
         }
 
+    def test_explicit_legal_reference_gets_phrase_boost(
+        self,
+        client: tuple[OpenSearchClient, dict[str, Any]],
+    ) -> None:
+        os_client, recorder = client
+        os_client.search_requirement_specs(
+            [
+                RequirementSearchSpec(
+                    requirement_id="req-1",
+                    query="令第二条の十二第一号 経営を支配している会社",
+                )
+            ],
+            user_clearance_level=2,
+        )
+
+        should = recorder["bodies"][0]["query"]["bool"]["should"]
+        assert should == [
+            {
+                "multi_match": {
+                    "query": "令第二条の十二第一号",
+                    "fields": ["heading^16", "text^12", "sectionPath^4"],
+                    "type": "phrase",
+                    "boost": 8,
+                }
+            }
+        ]
+
 
 class TestArticleAggregation:
     def test_chunks_of_the_same_article_are_merged(

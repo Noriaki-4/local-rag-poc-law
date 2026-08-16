@@ -2,17 +2,20 @@ import json
 
 import pytest
 
+from app.config import settings
 from app.llm import (
+    LLMResult,
+    _answer_contract_error,
     _answer_json_schema,
-    _derive_predicted_answer,
     _format_citations_with_budget,
     _parse_answer_payload,
     _parse_evidence_evaluation,
     _parse_search_plan,
-    _resolve_predicted_answer,
     _sum_optional,
     _to_anthropic_schema,
+    _shown_citations_for_prompt,
     citation_context_stats,
+    build_answer_prompt,
 )
 from app.models import AnswerRequest, Citation
 
@@ -22,7 +25,7 @@ CITATION_IDS = ["law-test-article-1", "law-test-article-2"]
 
 def _payload(**overrides) -> str:
     payload = {
-        "answer": "根拠説明",
+        "answer": f"根拠説明 {CITATION_IDS[0]}",
         "questionPolarity": "select_entailed",
         "predictedAnswer": "A",
         "choiceAssessments": {
@@ -46,6 +49,9 @@ def _payload(**overrides) -> str:
             },
             "D": {"verdict": "insufficient", "citationIds": [], "reason": "根拠不足", "confidence": 0.4},
         },
+        "answerStatus": None,
+        "citationIds": None,
+        "missing": None,
     }
     payload.update(overrides)
     return json.dumps(payload, ensure_ascii=False)
@@ -56,7 +62,7 @@ class TestParseAnswerPayload:
         answer, predicted, judgements, assessments, polarity, error = _parse_answer_payload(
             _payload(), CHOICES, CITATION_IDS
         )
-        assert answer == "結論: 選択肢A。根拠説明"
+        assert answer == f"結論: 選択肢A。根拠説明 {CITATION_IDS[0]}"
         assert predicted == "A"
         assert judgements["A"] == "supported"
         assert assessments["A"]["verdict"] == "entailed"
@@ -88,13 +94,13 @@ class TestParseAnswerPayload:
         assert parsed_assessments["B"]["verdict"] == "contradicted"
         assert polarity == "select_contradicted"
 
-    def test_model_prediction_is_ignored_and_derived_from_assessments(self):
+    def test_unknown_model_prediction_is_rejected(self):
         _, predicted, judgements, _, _, error = _parse_answer_payload(
             _payload(predictedAnswer="E"), CHOICES, CITATION_IDS
         )
-        assert predicted == "A"
-        assert judgements["A"] == "supported"
-        assert error is None
+        assert predicted is None
+        assert judgements is None
+        assert "predictedAnswer must be one of" in error
 
     def test_assessment_keys_mismatch_is_rejected(self):
         raw_payload = json.loads(_payload())
@@ -123,31 +129,111 @@ class TestParseAnswerPayload:
         assert predicted is None
         assert "unknown IDs" in error
 
-    def test_assessment_citations_are_deduplicated_and_capped_after_validation(self):
+    def test_assessment_citations_over_contract_are_rejected(self):
         ids = [f"law-test-article-{index}" for index in range(1, 6)]
         raw_payload = json.loads(_payload())
         raw_payload["choiceAssessments"]["A"]["citationIds"] = [*ids, ids[0]]
-        _, _, _, assessments, _, error = _parse_answer_payload(
+        _, predicted, _, _, _, error = _parse_answer_payload(
             json.dumps(raw_payload), CHOICES, ids
         )
-        assert error is None
-        assert assessments["A"]["citationIds"] == ids[:3]
+        assert predicted is None
+        assert "too_long" in error
 
-    def test_inconsistent_model_prediction_is_repaired(self):
+    def test_choice_answer_references_must_be_in_selected_assessment(self):
+        raw_payload = json.loads(_payload())
+        raw_payload["answer"] = f"根拠説明 {CITATION_IDS[1]}"
+        *_, error = _parse_answer_payload(
+            json.dumps(raw_payload), CHOICES, CITATION_IDS
+        )
+        assert "must be included in predictedAnswer citationIds" in error
+
+    def test_choice_answer_may_reference_subset_of_selected_assessment(self):
+        raw_payload = json.loads(_payload())
+        raw_payload["choiceAssessments"]["A"]["citationIds"] = CITATION_IDS
+        *_, error = _parse_answer_payload(
+            json.dumps(raw_payload), CHOICES, CITATION_IDS
+        )
+        assert error is None
+
+    def test_inconsistent_model_prediction_is_rejected(self):
         _, predicted, _, _, _, error = _parse_answer_payload(
             _payload(predictedAnswer="B"), CHOICES, CITATION_IDS
         )
-        assert predicted == "A"
-        assert error is None
+        assert predicted is None
+        assert "inconsistent with questionPolarity" in error
 
     def test_no_choices_requires_null_fields(self):
-        raw = _payload(questionPolarity=None, predictedAnswer=None, choiceAssessments=None)
-        answer, predicted, judgements, assessments, polarity, error = _parse_answer_payload(raw, None)
+        raw = _payload(
+            answer=(
+                f"根拠説明 {CITATION_IDS[0]} {CITATION_IDS[1]}"
+            ),
+            questionPolarity=None,
+            predictedAnswer=None,
+            choiceAssessments=None,
+            answerStatus="ready",
+            citationIds=CITATION_IDS,
+            missing=[],
+        )
+        answer, predicted, judgements, assessments, polarity, error = _parse_answer_payload(
+            raw, None, CITATION_IDS, 2
+        )
         assert error is None
         assert predicted is None
         assert judgements is None
         assert assessments is None
         assert polarity is None
+
+    def test_no_choices_rejects_unknown_final_citation(self):
+        raw = _payload(
+            questionPolarity=None,
+            predictedAnswer=None,
+            choiceAssessments=None,
+            answerStatus="ready",
+            citationIds=["invented-id"],
+            missing=[],
+        )
+        *_, error = _parse_answer_payload(raw, None, CITATION_IDS, 2)
+        assert "unknown IDs" in error
+
+    def test_ready_answer_cannot_claim_missing_items(self):
+        raw = _payload(
+            questionPolarity=None,
+            predictedAnswer=None,
+            choiceAssessments=None,
+            answerStatus="ready",
+            citationIds=[CITATION_IDS[0]],
+            missing=["例外"],
+        )
+        *_, error = _parse_answer_payload(raw, None, CITATION_IDS, 2)
+        assert "ready answer cannot contain missing" in error
+
+    def test_free_text_answer_references_must_be_in_structured_citations(self):
+        raw = _payload(
+            answer=(
+                f"根拠説明 {CITATION_IDS[0]} {CITATION_IDS[1]}"
+            ),
+            questionPolarity=None,
+            predictedAnswer=None,
+            choiceAssessments=None,
+            answerStatus="ready",
+            citationIds=[CITATION_IDS[0]],
+            missing=[],
+        )
+        *_, error = _parse_answer_payload(raw, None, CITATION_IDS, 2)
+        assert "must be included in citationIds" in error
+
+    def test_free_text_answer_may_reference_subset_of_structured_citations(self):
+        raw = _payload(
+            answer=f"根拠説明 {CITATION_IDS[0]}",
+            questionPolarity=None,
+            predictedAnswer=None,
+            choiceAssessments=None,
+            answerStatus="ready",
+            citationIds=CITATION_IDS,
+            missing=[],
+        )
+        *_, error = _parse_answer_payload(raw, None, CITATION_IDS, 2)
+        assert error is None
 
     def test_no_choices_with_assessments_is_rejected(self):
         _, predicted, _, _, _, error = _parse_answer_payload(_payload(), None)
@@ -160,38 +246,102 @@ class TestParseAnswerPayload:
         answer, _, _, _, _, error = _parse_answer_payload(
             json.dumps(raw_payload), CHOICES, CITATION_IDS
         )
-        assert answer == "根拠説明"
+        assert answer == f"根拠説明 {CITATION_IDS[0]}"
         assert error is not None
 
 
-class TestDerivePredictedAnswer:
-    def test_keeps_explicit_prediction(self):
-        judgements = {"A": "not_supported", "B": "supported"}
-        assert _derive_predicted_answer("A", judgements) == "A"
+def test_free_text_prompt_limits_claims_to_main_selected_citations() -> None:
+    prompt = build_answer_prompt(
+        AnswerRequest(question="全要件を教えてください", topK=5),
+        ["answer_composer"],
+        [Citation(documentId="law-test", contentUnitId=CITATION_IDS[0], text="本文")],
+    )
 
-    @pytest.mark.parametrize(
-        "judgements,expected",
-        [
-            ({"A": "supported", "B": "not_supported"}, "A"),
-            ({"A": "not_supported", "B": "not_supported"}, None),
-            ({"A": "supported", "B": "supported"}, None),
-            (None, None),
+    assert "citationIdsに選んだ引用だけ" in prompt
+    assert "answer本文にはcontentUnitIdを書かず" in prompt
+    assert "構造化citationIdsだけ" in prompt
+    assert "partial" in prompt
+    assert "missing" in prompt
+
+
+def test_main_revision_prompt_includes_previous_structured_decision() -> None:
+    prompt = build_answer_prompt(
+        AnswerRequest(question="要件と手続を説明してください", topK=5),
+        ["llm_directed_legal_research"],
+        [Citation(documentId="law-test", contentUnitId=CITATION_IDS[0], text="本文")],
+        review_feedback=["手続が欠落している"],
+        review_verdict="needs_research",
+        previous_answer="要件だけを回答します。",
+        previous_answer_status="ready",
+        previous_citation_ids=[CITATION_IDS[0]],
+        previous_missing=[],
+    )
+
+    assert "前回のMain Agent判断" in prompt
+    assert '"answerStatus": "ready"' in prompt
+    assert f'"citationIds": ["{CITATION_IDS[0]}"]' in prompt
+    assert '"verdict": "needs_research"' in prompt
+    assert "各指摘を引用本文と質問に照らして" in prompt
+    assert "質問が発生条件、対象、例外、手続などを複数明示" in prompt
+
+
+def test_research_main_receives_issue_contract_without_intermediate_conclusion() -> None:
+    prompt = build_answer_prompt(
+        AnswerRequest(question="要件と手続を説明してください", topK=5),
+        ["llm_directed_legal_research"],
+        [Citation(documentId="law-test", contentUnitId=CITATION_IDS[0], text="本文")],
+        research_context={
+            "answerContract": {
+                "version": "issue-grounding-v1",
+                "issues": [{"issueId": "ISSUE-1", "question": "要件は何か"}],
+                "availableCitationIds": [CITATION_IDS[0]],
+                "maxSelectedCitations": 5,
+            },
+            "researchConclusion": "誤った中間結論",
+            "logicalStructure": {"hypotheses": ["誤った仮説"]},
+        },
+    )
+
+    assert '"issueId": "ISSUE-1"' in prompt
+    assert "issueDecisions" in prompt
+    assert "誤った中間結論" not in prompt
+    assert "誤った仮説" not in prompt
+
+
+def test_main_issue_contract_checks_only_structural_consistency() -> None:
+    result = LLMResult(
+        text="回答",
+        provider="fake",
+        model="fake",
+        latencyMs=1,
+        inputTokens=1,
+        outputTokens=1,
+        estimatedCost=0,
+        answer="回答",
+        predictedAnswer=None,
+        choiceJudgements=None,
+        answerStatus="ready",
+        answerCitationIds=[CITATION_IDS[0]],
+        missing=[],
+        answerIssueDecisions=[
+            {
+                "issueId": "ISSUE-1",
+                "status": "ready",
+                "conclusion": "LLMが判断した結論",
+                "citationIds": [CITATION_IDS[0]],
+                "missing": [],
+            }
         ],
     )
-    def test_derives_only_when_single_supported(self, judgements, expected):
-        assert _derive_predicted_answer(None, judgements) == expected
-
-
-class TestResolvePredictedAnswer:
-    def test_uses_question_polarity_and_confidence(self):
-        assessments = {
-            "A": {"verdict": "entailed", "confidence": 0.4, "citationIds": ["a"]},
-            "B": {"verdict": "entailed", "confidence": 0.9, "citationIds": ["b"]},
-            "C": {"verdict": "contradicted", "confidence": 1.0, "citationIds": ["c"]},
+    context = {
+        "answerContract": {
+            "issues": [{"issueId": "ISSUE-1", "question": "要件は何か"}]
         }
+    }
 
-        assert _resolve_predicted_answer("select_entailed", assessments) == "B"
-        assert _resolve_predicted_answer("select_contradicted", assessments) == "C"
+    assert _answer_contract_error(result, context) is None
+    result.answerCitationIds = [CITATION_IDS[1]]
+    assert "union of issueDecisions" in _answer_contract_error(result, context)
 
 
 class TestParseSearchPlan:
@@ -237,6 +387,26 @@ def test_citation_context_stats_report_prompt_truncation_deterministically():
     assert stats["truncatedChunkCount"] > 0
     assert stats["includedChars"] == len(block)
     assert stats["includedChars"] <= 1200
+    assert stats["truncatedContentUnitIds"] == [
+        "article-1",
+        "article-2",
+        "article-3",
+    ]
+
+
+def test_omitted_citation_is_not_available_to_answer_schema() -> None:
+    citations = [
+        Citation(documentId="law-test", contentUnitId=f"article-{index}", text="本文")
+        for index in range(1, 4)
+    ]
+    original_limit = settings.llm_finalization_material_max_items
+    settings.llm_finalization_material_max_items = 2
+    try:
+        shown = _shown_citations_for_prompt(citations)
+    finally:
+        settings.llm_finalization_material_max_items = original_limit
+
+    assert [item.contentUnitId for item in shown] == ["article-1", "article-2"]
 
 
 def test_valid_evidence_evaluation():
@@ -302,10 +472,12 @@ class TestToAnthropicSchema:
         request = AnswerRequest(question="q", choices=CHOICES)
         citations = [Citation(documentId="law-test", contentUnitId=CITATION_IDS[0])]
         converted = _to_anthropic_schema(_answer_json_schema(request, citations))
-        assert "predictedAnswer" not in converted["properties"]
+        assert converted["properties"]["predictedAnswer"] == {
+            "type": "string",
+            "enum": sorted(CHOICES),
+        }
         assessments = converted["properties"]["choiceAssessments"]
-        assert {"type": "null"} in assessments["anyOf"]
-        object_branch = next(b for b in assessments["anyOf"] if b.get("type") == "object")
+        object_branch = assessments
         assert object_branch["additionalProperties"] is False
         citation_schema = object_branch["properties"]["A"]["properties"]["citationIds"]["items"]
         assert citation_schema["enum"] == [CITATION_IDS[0]]
@@ -314,7 +486,7 @@ class TestToAnthropicSchema:
     def test_no_choices_schema_converts(self):
         request = AnswerRequest(question="q")
         converted = _to_anthropic_schema(_answer_json_schema(request))
-        assert "predictedAnswer" not in converted["properties"]
+        assert converted["properties"]["predictedAnswer"] == {"type": "null"}
         assert converted["properties"]["choiceAssessments"] == {"type": "null"}
 
     def test_unsupported_constraint_keywords_are_stripped(self):

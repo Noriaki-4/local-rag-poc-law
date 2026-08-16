@@ -2,7 +2,8 @@
 
 ## 1. 目的
 
-GraphRAGの成否は、Graphエッジの品質に強く依存する。Phase 1では、エッジ種別ごとに抽出方式を明示し、LLM抽出に頼りすぎない。
+GraphRAGの成否は、Graphエッジの品質に強く依存する。構造・明示参照の抽出と、法的意味の
+判断を分離する。前者は決定的処理、後者は両端本文を読んだLLMの案件内判断とする。
 
 ## 2. 初期対象エッジ
 
@@ -36,7 +37,7 @@ EXCEPTION_TO
 |---|---|---|
 | HAS_CONTENT_UNIT | XML構造からルール生成 | 信頼度1.0 |
 | REFERENCES | 条文中の「第X条」「前条」「同項」「同号」等をルール抽出 | 法令XMLの構造と正規表現で生成 |
-| IMPLEMENTS | 下位法令の「法第X条」または「令第X条」REFERENCESを反転し、親法律・施行令の条文から下位法令条文へ接続 | 委任規定の逆引き。下位→親はREFERENCESとして保持 |
+| IMPLEMENTS | 人手・公式対応表等で確認済みの関係だけを正式エッジとして投入 | 下位法令の親参照は反転確定せずRelationAssertion候補にする |
 | APPLIED_BY | 「準用」を含むREFERENCESを反転して準用先から準用元へ接続 | 準用関係の逆引き |
 | DEFINES | 「...とは」「...をいう」「定義する」等をルール抽出 + 必要に応じLLMレビュー | 金商法第2条などで重要 |
 | USES_TERM | 定義語辞書からルール抽出 | 定義語ノード生成後に実施 |
@@ -69,7 +70,7 @@ manual:        1.0
 1. 法令XMLからLaw / Article / Paragraph / Itemノードを生成
 2. HAS_CONTENT_UNITを生成
 3. 条文番号参照を正規表現で抽出しREFERENCESを生成
-4. 下位法令の親法律・施行令参照からIMPLEMENTS、準用参照からAPPLIED_BYを逆向きに生成
+4. 下位法令の親法律・施行令参照から未確認RelationAssertion候補、準用参照からAPPLIED_BYを生成
 5. 定義語候補を抽出しTerm / Definition / DEFINESを生成
 6. 例外表現を検出しEXCEPTION_TO候補を生成
 7. dangling edge検査を実施
@@ -82,8 +83,12 @@ Graph edgeだけで回答しない。Graphは関連条文の展開に使い、�
 委任関係は法令系統ごとに解決する。府省令等の「法第X条」は系統の親法律へ、
 「令第X条」「同令第X条」「本令第X条」「当該政令第X条」は同じ系統でタイトルが
 「施行令」で終わる政令へ接続する。単に同じ条番号を持つ別法令へは接続しない。
-この関係はseed時に生成するため、抽出規則を変更した環境では `/admin/seed` による
-Graph再構築が必要になる。
+`同法`・`同令`は、同じ文中で直前の明示法令名または`法第X条`・`令第X条`から
+参照先が同一法令系統だと一意に決まる場合だけ確定`REFERENCES`にする。他法令名が
+先行する場合や先行詞がない場合は、親法律・施行令へ推測で接続しない。
+明示参照の`REFERENCES`と、逆向きの`IMPLEMENTS`提案を持つ`RelationAssertion`はseed時に
+生成する。候補の方向・種類・文言シグナルは探索用であって法的関係の確定ではない。
+抽出規則を変更した環境では `/admin/seed` によるGraph再構築が必要になる。
 
 ## 6.1 EXPLAINS(ガイドライン→法令条文)
 
@@ -119,40 +124,40 @@ Graph再構築が必要になる。
 |---|---|---|---|
 | `HAS_CONTENT_UNIT` | container → child | - | 従来どおり |
 | `REFERENCES` | citing → cited | `referenceKind` | 原文上の参照。法的意味は referenceKind で表す |
-| `IMPLEMENTS` | parent → child | `derivedFromEdgeId`, `delegationWordingDetected`, `specificationWordingDetected` | 段階的confidence |
+| `IMPLEMENTS` | parent → child | 出所に応じた監査情報 | 人手・公式資料等で確認済みの正式関係だけ |
 | `APPLIED_BY` | applied → applying | `derivedFromEdgeId` | 現行名・現行方向を維持 |
 | `EXPLAINS` | ガイド文書 → 条 | - | 条文注釈・対応表で明示された参照だけ |
 | `MENTIONS` | ガイド文書 → 条 | - | 前ページからの引き継ぎ等の単なる言及。探索拡張・根拠充足には使わない |
 
-`referenceKind`: `article_reference` / `delegation_parent` / `application` / `definition` /
-`exception` / `form_or_table`。
+`referenceKind`: `article_reference` / `parent_law_reference` / `application` / `definition` /
+`exception` / `form_or_table`。`delegation_parent`はschema version 4以前の読込互換値であり、
+version 7のseedでは生成しない。
 
-### IMPLEMENTS の段階的confidence
+### 確認済みIMPLEMENTSと未確認候補の境界
 
-固定値 0.95 を廃止し、根拠の強さで段階化する。下位法令が親条文を参照するだけでは
-IMPLEMENTS にせず、`REFERENCES` のまま残す。
+confidence値や文言検出だけで、プログラムが`IMPLEMENTS`を確定しない。正式エッジとして
+探索できるのは、人手・公式資料等の出所を持ち`is_trusted_relation`を満たす関係だけである。
 
-| 値 | 条件 |
-|---:|---|
-| 1.00 | manual |
-| 0.98 | 親条文の委任文言(「政令で定める」等)と下位法令の親参照の両方を確認 |
-| 0.90 | 同一法令系統かつ下位法令側の具体化表現を確認 |
-| 0.70 | 親条文への参照だけ。IMPLEMENTSを作らずREFERENCESのままにする |
-| 0.50 | ガイド由来の未確認候補。RelationAssertion |
+同一法令系統の下位法令本文に「法第X条」「令第X条」の明示参照がある場合、seedは次の2点を
+保存する。
 
-信頼判定は confidence の数値だけでなく、`relationSource` が許可値であること、派生エッジに
-`derivedFromEdgeId` があること、委任文言が検出されていること、未確認assertionでないことを
-同時に検証する(`legal_ontology.is_trusted_relation`)。
+1. 原文上の事実である `下位Article -REFERENCES-> 親Article`
+2. 探索用の `RelationAssertion(parent Article, IMPLEMENTS, 下位Article)`
 
-### RelationAssertion（ガイドが示唆する未確認関係）
+候補は文言の強弱にかかわらず`status=unverified`, `confidence=0.5`とする。委任・具体化文言の
+検出結果と局所文脈は監査シグナルとして残すが、候補の削除・昇格には使わない。ガイドが示唆する
+関係も同じ型へ保存する。ガイドの表は同じ行に現れる法律Articleと施行令Articleだけを組にし、
+表全体の参照集合の直積は作らない。
 
-ガイドが示唆した法令間関係は、正式なArticle間エッジにせず `RelationAssertion` ノードとして
-保存する(`status=unverified`, `confidence=0.5`)。候補拡張だけに使い、根拠充足・mustInclude・
-法令関係図の確定線には使わない。法令本文で確認できた場合に正式な関係を作る。
+seed後の別ジョブは、両端Article全文をHaikuへ渡して`implements / reference_only / uncertain`へ
+分類し、`uncertain`だけをSonnet Reviewerへ渡す。プログラムは既知ID・件数・引用が入力本文に
+存在することだけを検証し、関係の意味を補正しない。分類結果には本文SHA-256、provider、一次・
+Reviewerモデル、prompt version、引用、分類時刻を保存する。本文またはpromptが変われば失効する。
 
-v1の抽出規則は、条文注釈で法律の条に紐づいたガイドチャンク本文に「(施行)令第N条」がある場合に、
-同一法令系統の施行令の条への `IMPLEMENTS` 候補を作るところまで。府令名の明示的な言及からの
-抽出は未実装。
+`expand_graph`は正式Graph経路、`llm_classified_implements`、未分類／`llm_classified_uncertain`を
+区別する。分類済み`implements`は検索ナビゲーションに利用できるが、正式エッジ、根拠充足、
+mustIncludeへ昇格しない。検索時LLMは質問への関連性を判断し、関係種別は再分類しない。
+`reference_only`は既存`REFERENCES`で表現されるためIMPLEMENTS候補拡張から除外する。
 
 ### 未実装エッジ
 

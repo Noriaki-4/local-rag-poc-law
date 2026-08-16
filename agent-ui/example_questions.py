@@ -265,7 +265,10 @@ EXAMPLE_QUESTIONS: tuple[ExampleQuestion, ...] = (
         required_evidence=(
             _articles("公開買付規制（金融商品取引法27条の2）", "law-323AC0000000025-article-27_2"),
             _articles("適用除外（施行令7条）", "law-340CO0000000321-article-7"),
-            _articles("対象となる株券等（公開買付府令2条の5）", "law-402M50000040038-article-2_5"),
+            _articles(
+                "少数所有者・全所有者同意に関する適用除外の詳細（公開買付府令2条の5）",
+                "law-402M50000040038-article-2_5",
+            ),
             _articles("公開買付開始公告（公開買付府令10条）", "law-402M50000040038-article-10"),
         ),
         answer_points=(
@@ -288,7 +291,10 @@ EXAMPLE_QUESTIONS: tuple[ExampleQuestion, ...] = (
         required_evidence=(
             _articles("届出免除（金融商品取引法4条1項）", "law-323AC0000000025-article-4-paragraph-1"),
             _articles("役職員向け株式の要件（施行令2条の12）", "law-340CO0000000321-article-2_12"),
-            _articles("譲渡制限等の具体化（開示府令2条2項）", "law-348M50000040005-article-2-paragraph-2"),
+            _articles(
+                "対象となる子会社の具体化（開示府令2条1項）",
+                "law-348M50000040005-article-2-paragraph-1",
+            ),
         ),
         answer_points=(
             _point("対象は自社・子会社等の役職員", ("取締役",), ("役職員",), ("使用人",)),

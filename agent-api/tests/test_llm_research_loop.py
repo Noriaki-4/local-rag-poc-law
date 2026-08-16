@@ -19,12 +19,14 @@ from app.llm_directed_research import (
     ResearchClaimStructure,
     ResearchCheckpoint,
     ResearchEvidenceSelection,
+    ResearchHypothesis,
     ResearchIssueStructure,
     ResearchLogicalStructure,
     ResearchTurn,
 )
 from app.llm_research_loop import (
     _checkpoint_from_stage_selection,
+    _checkpoint_answer_content_ids,
     run_llm_directed_research,
     run_llm_directed_research_shadow,
 )
@@ -33,6 +35,41 @@ from app.models import AnswerRequest
 
 
 def _result(turn: ResearchTurn) -> ResearchTurnResult:
+    """旧テスト用判断を現行の仮説検証契約へ補完する。"""
+    hypothesis_id = "H-test-core"
+    hypotheses = list(turn.hypotheses)
+    if not hypotheses:
+        evidence_ids = [
+            item.contentUnitId for item in turn.selectedEvidence
+        ]
+        hypotheses = [
+            ResearchHypothesis(
+                hypothesisId=hypothesis_id,
+                statement="質問の中心的結論が取得本文で支持される",
+                status=(
+                    "supported"
+                    if turn.status == RESEARCH_STATUS_READY and evidence_ids
+                    else "unverified"
+                ),
+                evidenceIds=evidence_ids,
+                missing=([] if evidence_ids else ["中心的根拠"]),
+            )
+        ]
+    else:
+        hypothesis_id = hypotheses[0].hypothesisId
+    actions = [
+        (
+            action
+            if action.hypothesisIds
+            else action.model_copy(
+                update={"hypothesisIds": [hypothesis_id]}
+            )
+        )
+        for action in turn.actions
+    ]
+    turn = turn.model_copy(
+        update={"hypotheses": hypotheses, "actions": actions}
+    )
     return ResearchTurnResult(
         turn=turn,
         provider="test",
@@ -256,6 +293,7 @@ def test_iterative_loop_runs_three_complete_cycles_and_carries_checkpoint(
             cycle_new_content_ids,
             tool_history,
             timeout_sec,
+            **kwargs,
         ):
             self.integration_calls.append(
                 {
@@ -326,7 +364,7 @@ def test_iterative_loop_runs_three_complete_cycles_and_carries_checkpoint(
 
     assert (
         outcome.trace["algorithm"]
-        == "iterative_cycles_v5_state_compression"
+        == "iterative_cycles_v8_hypothesis_testing"
     )
     assert outcome.trace["cycleCount"] == 3
     assert outcome.trace["llmCallCount"] == 9
@@ -347,7 +385,7 @@ def test_iterative_loop_runs_three_complete_cycles_and_carries_checkpoint(
         call["historyLength"]
         for call in llm.stage_calls
         if call["phase"] == "explore"
-    ] == [0, 0, 0]
+    ] == [0, 1, 0]
     assert [
         call["checkpointNextArticleIds"]
         for call in llm.stage_calls
@@ -366,6 +404,142 @@ def test_iterative_loop_runs_three_complete_cycles_and_carries_checkpoint(
     assert outcome.trace["status"] == RESEARCH_STATUS_READY
     assert outcome.selected_content_unit_ids == (
         "law-a-article-12-paragraph-1",
+    )
+
+
+def test_iterative_loop_executes_checkpoint_pending_task_before_next_llm(
+    monkeypatch,
+) -> None:
+    class ArticleAwareOpenSearch(FakeOpenSearch):
+        def law_titles(self) -> dict[str, str]:
+            return {"law-a": "テスト法", "law-b": "テスト府令"}
+
+        def get_by_article_ids(
+            self,
+            article_ids: list[str],
+            user_clearance_level: int,
+            max_chunks: int,
+        ) -> list[dict]:
+            self.fetch_calls.append(article_ids)
+            self.fetch_max_chunks.append(max_chunks)
+            article_id = article_ids[0]
+            return [
+                {
+                    "contentUnitId": f"{article_id}-paragraph-1",
+                    "articleContentUnitId": article_id,
+                    "documentId": article_id.split("-article-")[0],
+                    "docType": "law",
+                    "title": "テスト府令" if article_id.startswith("law-b") else "テスト法",
+                    "heading": "第三条" if article_id.startswith("law-b") else "第十二条",
+                    "text": "具体的要件を定める。",
+                }
+            ]
+
+    class PendingTaskLLM:
+        supports_iterative_research = True
+
+        def decide_legal_research_turn(
+            self, request, catalog, history, timeout_sec, **kwargs
+        ):
+            cycle_index = kwargs["cycle_index"]
+            phase = kwargs["phase"]
+            if cycle_index == 0 and phase == "explore":
+                return _result(
+                    ResearchTurn(
+                        status=RESEARCH_STATUS_CONTINUE,
+                        actions=[
+                            ResearchAction(
+                                tool=TOOL_SEARCH_CORPUS,
+                                query="許可",
+                                docTypes=["law"],
+                            )
+                        ],
+                    )
+                )
+            if cycle_index == 0 and phase == "deepen":
+                return _result(
+                    ResearchTurn(
+                        status=RESEARCH_STATUS_CONTINUE,
+                            actions=[
+                                ResearchAction(
+                                    tool=TOOL_FETCH_ARTICLES,
+                                    articleIds=["law-a-article-12"],
+                                ),
+                                ResearchAction(
+                                    tool=TOOL_EXPAND_GRAPH,
+                                    articleIds=["law-a-article-12"],
+                                    edgeTypes=["IMPLEMENTS"],
+                                ),
+                            ],
+                    )
+                )
+            assert "law-b-article-3-paragraph-1" in catalog.content_unit_ids
+            return _result(
+                ResearchTurn(
+                    status=RESEARCH_STATUS_READY,
+                    selectedEvidence=[
+                        ResearchEvidenceSelection(
+                            contentUnitId="law-b-article-3-paragraph-1"
+                        )
+                    ],
+                )
+            )
+
+        def integrate_legal_research_cycle(
+            self,
+            request,
+            catalog,
+            checkpoint,
+            *,
+            cycle_index,
+            **kwargs,
+        ):
+            if cycle_index == 0:
+                integrated = ResearchCheckpoint(
+                    status=RESEARCH_STATUS_CONTINUE,
+                    conclusion="配下法令の本文確認が必要",
+                    evidenceIds=["law-a-article-12-paragraph-1"],
+                    nextArticleIds=["law-b-article-3"],
+                )
+            else:
+                integrated = ResearchCheckpoint(
+                    status=RESEARCH_STATUS_READY,
+                    conclusion="配下法令で具体的要件を確認した",
+                    evidenceIds=["law-b-article-3-paragraph-1"],
+                )
+            return ResearchCheckpointResult(
+                checkpoint=integrated,
+                provider="test",
+                model="test",
+                latencyMs=1,
+                inputTokens=1,
+                outputTokens=1,
+            )
+
+    monkeypatch.setattr(settings, "llm_timeout_sec", 10)
+    monkeypatch.setattr(settings, "agent_answer_reserve_sec", 10)
+    monkeypatch.setattr(settings, "llm_research_active_budget_sec", 120)
+    monkeypatch.setattr(settings, "llm_research_max_turns", 3)
+    monkeypatch.setattr(settings, "llm_research_max_tool_calls", 18)
+    os_client = ArticleAwareOpenSearch()
+
+    outcome = run_llm_directed_research(
+        request=AnswerRequest(question="許可の具体的要件は何ですか"),
+        os_client=os_client,
+        graph_client=FakeGraph(),
+        llm_client=PendingTaskLLM(),
+        deadline=perf_counter() + 150,
+    )
+
+    assert ["law-b-article-3"] in os_client.fetch_calls
+    assert any(
+        execution["phase"] == "resume_pending"
+        and execution["articleIds"] == ["law-b-article-3"]
+        for execution in outcome.trace["toolExecutions"]
+    )
+    assert outcome.trace["status"] == RESEARCH_STATUS_READY
+    assert outcome.selected_content_unit_ids == (
+        "law-b-article-3-paragraph-1",
     )
 
 
@@ -397,6 +571,108 @@ def test_integration_failure_keeps_last_stage_evidence_selection() -> None:
     assert recovered.evidenceIds == [
         "law-a-article-12-paragraph-1"
     ]
+
+
+def test_answer_evidence_preserves_checkpoint_selection_only() -> None:
+    catalog = EvidenceCatalog()
+    catalog.add_results(
+        [
+            _law_source(),
+            {
+                "contentUnitId": "law-b-article-3-paragraph-1",
+                "articleContentUnitId": "law-b-article-3",
+                "documentId": "law-b",
+                "docType": "law",
+                "title": "テスト施行令",
+                "heading": "第三条",
+                "text": "具体的要件を定める。",
+            },
+            {
+                "contentUnitId": "law-c-article-5",
+                "articleContentUnitId": "law-c-article-5",
+                "documentId": "law-c",
+                "docType": "law",
+                "title": "テスト府令",
+                "heading": "第五条",
+                "text": "手続を定める。",
+            },
+            {
+                "contentUnitId": "law-b-article-3-paragraph-2",
+                "articleContentUnitId": "law-b-article-3",
+                "documentId": "law-b",
+                "docType": "law",
+                "title": "テスト施行令",
+                "heading": "第三条第二項",
+                "text": "例外を定める。",
+            },
+        ]
+    )
+    checkpoint = ResearchCheckpoint(
+        status=RESEARCH_STATUS_READY,
+        evidenceIds=[
+            "law-c-article-5",
+            "law-a-article-12-paragraph-1",
+        ],
+        openEvidenceIds=[
+            "law-b-article-3-paragraph-1",
+            "law-c-article-5",
+            "law-b-article-3-paragraph-2",
+        ],
+        logicalStructure=ResearchLogicalStructure(
+            issues=[
+                ResearchIssueStructure(
+                    issueId="permit",
+                    status="verified",
+                    authorityNodes=[
+                        ResearchAuthorityNode(
+                            nodeId="act",
+                            articleId="law-a-article-12",
+                            verificationStatus="text_verified",
+                            evidenceIds=[
+                                "law-a-article-12-paragraph-1"
+                            ],
+                        ),
+                        ResearchAuthorityNode(
+                            nodeId="order",
+                            articleId="law-b-article-3",
+                            verificationStatus="text_verified",
+                            evidenceIds=[
+                                "law-b-article-3-paragraph-1"
+                            ],
+                        ),
+                        ResearchAuthorityNode(
+                            nodeId="ordinance",
+                            articleId="law-c-article-5",
+                            verificationStatus="text_verified",
+                            evidenceIds=["law-c-article-5"],
+                        ),
+                    ],
+                    claims=[
+                        ResearchClaimStructure(
+                            claimId="claim",
+                            status="verified",
+                            authorityNodeIds=[
+                                "act",
+                                "order",
+                                "ordinance",
+                            ],
+                        )
+                    ],
+                )
+            ]
+        ),
+    )
+
+    selected = _checkpoint_answer_content_ids(
+        checkpoint,
+        catalog,
+        limit=16,
+    )
+
+    assert selected == (
+        "law-c-article-5",
+        "law-a-article-12-paragraph-1",
+    )
 
 
 def test_intermediate_integration_timeout_continues_to_next_cycle(
@@ -726,12 +1002,17 @@ def test_gateway_fetch_and_graph_accept_only_cataloged_article() -> None:
 
     assert fetch.error is None
     assert graph.error is None
-    assert fetch.auto_graph_path_count == 1
-    assert fetch.new_article_ids == ("law-b-article-3",)
-    assert fetch.as_trace(fetch_action)["autoGraphArticleIds"] == [
-        "law-b-article-3"
-    ]
-    assert fetch.as_trace(fetch_action)["graphRelations"] == [
+    assert fetch.auto_graph_path_count == 0
+    assert fetch.new_article_ids == ()
+    assert fetch.as_trace(fetch_action)["autoGraphArticleIds"] == []
+    assert graph.new_article_ids == ("law-b-article-3",)
+    assert graph.as_trace(
+        ResearchAction(
+            tool=TOOL_EXPAND_GRAPH,
+            articleIds=["law-a-article-12"],
+            edgeTypes=["IMPLEMENTS"],
+        )
+    )["graphRelations"] == [
         {
             "fromArticleId": "law-a-article-12",
             "fromDocumentId": "",
@@ -747,11 +1028,130 @@ def test_gateway_fetch_and_graph_accept_only_cataloged_article() -> None:
         }
     ]
     assert "law-b-article-3" in catalog.known_article_ids
-    assert len(graph_client.calls) == 2
+    assert len(graph_client.calls) == 1
     assert all(call["max_depth"] == 1 for call in graph_client.calls)
     assert os_client.fetch_max_chunks == [
         settings.llm_research_max_chunks_per_article
     ]
+
+
+def test_gateway_returns_relation_assertion_separately_from_trusted_paths() -> None:
+    class GraphWithAssertion(FakeGraph):
+        def relation_assertions_touching(
+            self, article_ids: list[str], **kwargs
+        ) -> list[dict]:
+            return [
+                {
+                    "assertionId": "assertion-law-reference-1",
+                    "fromArticleId": "law-a-article-12",
+                    "toArticleId": "law-c-article-7",
+                    "suggestedType": "IMPLEMENTS",
+                    "status": "unverified",
+                }
+            ]
+
+    catalog = EvidenceCatalog()
+    catalog.add_results([_law_source()])
+    result = LegalResearchToolGateway(
+        FakeOpenSearch(), GraphWithAssertion()
+    ).execute(
+        ResearchAction(
+            tool=TOOL_EXPAND_GRAPH,
+            articleIds=["law-a-article-12"],
+            edgeTypes=["IMPLEMENTS"],
+        ),
+        catalog,
+        user_clearance_level=2,
+        timeout_sec=5,
+    )
+
+    assert result.error is None
+    assert result.result_count == 2
+    assert len(result.graph_relations) == 1
+    assert result.relation_assertions == (
+        {
+            "assertionId": "assertion-law-reference-1",
+            "fromArticleId": "law-a-article-12",
+            "toArticleId": "law-c-article-7",
+            "suggestedType": "IMPLEMENTS",
+            "assertionSource": None,
+            "assertedByDocumentId": None,
+            "sourceReferenceEdgeId": None,
+            "sourceText": "",
+            "delegationWordingDetected": False,
+            "specificationWordingDetected": False,
+            "status": "unverified",
+        },
+    )
+    assert "law-c-article-7" in catalog.known_article_ids
+    assert all(
+        relation["toArticleId"] != "law-c-article-7"
+        for relation in result.graph_relations
+    )
+
+
+def test_gateway_uses_offline_classification_as_navigation_only() -> None:
+    class GraphWithClassifiedAssertion(FakeGraph):
+        def relation_assertions_touching(
+            self, article_ids: list[str], **kwargs
+        ) -> list[dict]:
+            return [
+                {
+                    "assertionId": "assertion-classified-1",
+                    "fromArticleId": "law-a-article-12",
+                    "toArticleId": "law-c-article-7",
+                    "fromDocumentId": "law-a",
+                    "toDocumentId": "law-c",
+                    "suggestedType": "IMPLEMENTS",
+                    "status": "llm_classified_implements",
+                    "classifierModel": "haiku-test",
+                }
+            ]
+
+    catalog = EvidenceCatalog()
+    catalog.add_results([_law_source()])
+    result = LegalResearchToolGateway(
+        FakeOpenSearch(), GraphWithClassifiedAssertion()
+    ).execute(
+        ResearchAction(
+            tool=TOOL_EXPAND_GRAPH,
+            articleIds=["law-a-article-12"],
+            edgeTypes=["IMPLEMENTS"],
+        ),
+        catalog,
+        user_clearance_level=2,
+        timeout_sec=5,
+    )
+
+    assert result.error is None
+    assert result.relation_assertions == ()
+    classified = next(
+        relation
+        for relation in result.graph_relations
+        if relation.get("assertionId") == "assertion-classified-1"
+    )
+    assert classified["relationSource"] == "offline_llm_classification"
+    assert "law-c-article-7" in catalog.known_article_ids
+
+
+def test_gateway_fetch_does_not_select_graph_relation_automatically() -> None:
+    catalog = EvidenceCatalog()
+    catalog.add_results([_law_source()])
+    graph_client = FakeGraph()
+    gateway = LegalResearchToolGateway(FakeOpenSearch(), graph_client)
+
+    result = gateway.execute(
+        ResearchAction(
+            tool=TOOL_FETCH_ARTICLES,
+            articleIds=["law-a-article-12"],
+        ),
+        catalog,
+        user_clearance_level=2,
+        timeout_sec=5,
+    )
+
+    assert result.error is None
+    assert graph_client.calls == []
 
 
 def test_gateway_returns_existing_fetched_content_for_next_prompt() -> None:
@@ -810,7 +1210,7 @@ def test_gateway_allocates_enough_chunks_for_multiple_fetched_articles() -> None
     ]
 
 
-def test_gateway_does_not_auto_expand_untrusted_graph_relations() -> None:
+def test_gateway_rejects_untrusted_explicit_graph_relations() -> None:
     class UntrustedGraph(FakeGraph):
         def paths_from_many(self, article_ids: list[str], **kwargs) -> list[dict]:
             self.calls.append({"articleIds": article_ids, **kwargs})
@@ -837,8 +1237,9 @@ def test_gateway_does_not_auto_expand_untrusted_graph_relations() -> None:
         UntrustedGraph(),
     ).execute(
         ResearchAction(
-            tool=TOOL_FETCH_ARTICLES,
+            tool=TOOL_EXPAND_GRAPH,
             articleIds=["law-a-article-12"],
+            edgeTypes=["IMPLEMENTS"],
         ),
         catalog,
         user_clearance_level=2,

@@ -20,12 +20,15 @@ from app.llm_directed_research import (
     ResearchClaimStructure,
     ResearchCheckpoint,
     ResearchEvidenceSelection,
+    ResearchHypothesis,
     ResearchIssueStructure,
     ResearchLogicalStructure,
+    ResearchRelationDecision,
     ResearchTurn,
     ResearchUnresolvedItem,
     build_research_checkpoint_prompt,
     build_research_turn_prompt,
+    hydrate_relation_decision_candidates,
     parse_research_checkpoint,
     parse_research_turn,
     research_checkpoint_json_schema,
@@ -52,6 +55,20 @@ def _law_result(
         },
         "score": 0.9,
     }
+
+
+def _core_hypothesis(
+    *,
+    status: str = "unverified",
+    evidence_ids: list[str] | None = None,
+) -> ResearchHypothesis:
+    return ResearchHypothesis(
+        hypothesisId="H-eligibility",
+        statement="許可を受ける必要がある",
+        status=status,
+        evidenceIds=evidence_ids or [],
+        missing=["義務の本則", "適用範囲"],
+    )
 
 
 class TestResearchAction:
@@ -107,6 +124,47 @@ class TestEvidenceCatalog:
 
         assert added == 1
         assert catalog.known_article_ids == ("law-a-article-12",)
+
+    def test_relation_assertion_adds_both_articles_without_confirming_relation(self) -> None:
+        catalog = EvidenceCatalog()
+        added = catalog.add_relation_assertions(
+            [
+                {
+                    "assertionId": "assertion-1",
+                    "fromArticleId": "law-a-article-12",
+                    "toArticleId": "law-b-article-3",
+                    "suggestedType": "IMPLEMENTS",
+                    "status": "unverified",
+                }
+            ]
+        )
+        assert added == 1
+        assert set(catalog.known_article_ids) == {
+            "law-a-article-12",
+            "law-b-article-3",
+        }
+        assert catalog.prompt_graph_relations() == []
+        assert catalog.prompt_relation_assertions()[0]["status"] == "unverified"
+
+    def test_preclassified_relation_is_navigation_not_unverified_candidate(self) -> None:
+        catalog = EvidenceCatalog()
+        catalog.add_preclassified_relations(
+            [
+                {
+                    "assertionId": "assertion-1",
+                    "fromArticleId": "law-a-article-12",
+                    "toArticleId": "law-b-article-3",
+                    "status": "llm_classified_implements",
+                    "classifierModel": "haiku-test",
+                }
+            ]
+        )
+
+        assert catalog.prompt_relation_assertions() == []
+        relation = catalog.prompt_graph_relations()[0]
+        assert relation["edgeType"] == "IMPLEMENTS"
+        assert relation["relationSource"] == "offline_llm_classification"
+        assert relation["assertionId"] == "assertion-1"
 
     def test_prompt_items_obey_item_and_character_budget(self) -> None:
         catalog = EvidenceCatalog()
@@ -198,6 +256,39 @@ class TestEvidenceCatalog:
             "law-a-article-12-paragraph-3",
         )
 
+    def test_diversifies_preferred_content_across_documents_then_articles(self) -> None:
+        catalog = EvidenceCatalog()
+        content_ids = []
+        for document_id in ("law-a", "law-b", "law-c"):
+            for article in range(1, 4):
+                content_id = f"{document_id}-article-{article}-paragraph-1"
+                content_ids.append(content_id)
+                catalog.add_results(
+                    [
+                        {
+                            "document": {
+                                "contentUnitId": content_id,
+                                "articleContentUnitId": (
+                                    f"{document_id}-article-{article}"
+                                ),
+                                "documentId": document_id,
+                                "docType": "law",
+                                "title": document_id,
+                                "heading": f"第{article}条",
+                                "text": "本文",
+                            }
+                        }
+                    ]
+                )
+
+        diversified = catalog.diversify_content_ids_for_prompt(content_ids)
+
+        assert [
+            catalog.items_by_ids([content_id])[0]["documentId"]
+            for content_id in diversified[:3]
+        ] == ["law-a", "law-b", "law-c"]
+        assert set(diversified) == set(content_ids)
+
 
 class TestResearchTurnValidation:
     def test_ready_can_select_only_visible_evidence(self) -> None:
@@ -225,6 +316,7 @@ class TestResearchTurnValidation:
         catalog.add_results([_law_result()])
         turn = ResearchTurn(
             status=RESEARCH_STATUS_CONTINUE,
+            hypotheses=[_core_hypothesis()],
             actions=[
                 ResearchAction(
                     tool=TOOL_FETCH_ARTICLES,
@@ -232,6 +324,7 @@ class TestResearchTurnValidation:
                     articleIds=["law-invented-article-99"],
                     docTypes=[],
                     edgeTypes=[],
+                    hypothesisIds=["H-eligibility"],
                 )
             ],
             selectedEvidence=[
@@ -261,6 +354,7 @@ class TestResearchTurnValidation:
         catalog.add_results([_law_result()])
         turn = ResearchTurn(
             status=RESEARCH_STATUS_CONTINUE,
+            hypotheses=[_core_hypothesis()],
             actions=[
                 ResearchAction(
                     tool=TOOL_FETCH_ARTICLES,
@@ -268,6 +362,7 @@ class TestResearchTurnValidation:
                     articleIds=["law-a-article-12"],
                     docTypes=[],
                     edgeTypes=[],
+                    hypothesisIds=["H-eligibility"],
                 )
             ],
         )
@@ -279,12 +374,14 @@ class TestResearchTurnValidation:
         catalog.add_documents({"law-a": "テスト法"})
         turn = ResearchTurn(
             status=RESEARCH_STATUS_CONTINUE,
+            hypotheses=[_core_hypothesis()],
             actions=[
                 ResearchAction(
                     tool=TOOL_SEARCH_CORPUS,
                     query="許可",
                     documentIds=["law-invented"],
                     docTypes=["law"],
+                    hypothesisIds=["H-eligibility"],
                 )
             ],
         )
@@ -295,6 +392,23 @@ class TestResearchTurnValidation:
         assert validation.errors == (
             "unknown_document_id:actions[0]:law-invented",
         )
+
+    def test_action_requires_an_explicit_hypothesis(self) -> None:
+        turn = ResearchTurn(
+            status=RESEARCH_STATUS_CONTINUE,
+            actions=[
+                ResearchAction(
+                    tool=TOOL_SEARCH_CORPUS,
+                    query="許可",
+                    docTypes=["law"],
+                )
+            ],
+        )
+
+        validation = validate_research_turn(turn, EvidenceCatalog())
+
+        assert validation.valid is False
+        assert validation.errors == ("actions_require_hypothesis",)
 
 
 def test_prompt_leaves_search_strategy_to_llm() -> None:
@@ -313,6 +427,12 @@ def test_prompt_leaves_search_strategy_to_llm() -> None:
     )
 
     assert "調査方法、検索語、探索順序はあなたが判断してください" in prompt
+    assert "仮説検証の中心原則" in prompt
+    assert "仮説を維持・修正・棄却・追加する" in prompt
+    assert "質問の重要な特徴を説明できない" in prompt
+    assert "プログラムが次の調査対象を推測すると期待しない" in prompt
+    assert "IDの実在性" in prompt
+    assert "禁止事項の検証" in prompt
     assert "selectedEvidenceには" in prompt
     assert "出力上限は4,096トークンです" in prompt
     assert "JSON全体を2,500トークン以内" in prompt
@@ -321,7 +441,8 @@ def test_prompt_leaves_search_strategy_to_llm() -> None:
     assert "JSONを完全に閉じること" in prompt
     assert "readyを返す直前に" in prompt
     assert "自分が本文確認を必要と判断" in prompt
-    assert "質問された全事項や考え得る全論点の網羅を要求するものではなく" in prompt
+    assert "質問に明示されていない全論点の網羅を要求するものではない" in prompt
+    assert "質問が明示した事項" in prompt
     assert "探索を無期限に続けない" in prompt
     assert '"documentId": "law-a"' in prompt
     assert "law-a-article-12-paragraph-1" in prompt
@@ -358,6 +479,65 @@ def test_finalization_prompt_requires_a_terminal_decision() -> None:
         RESEARCH_STATUS_INSUFFICIENT,
     ]
     assert schema["properties"]["actions"]["maxItems"] == 0
+
+
+def test_research_turn_schema_limits_database_ids_to_catalog_values() -> None:
+    schema = research_turn_json_schema(
+        max_actions=4,
+        max_selected_evidence=16,
+        known_article_ids=["law-a-article-12", "law-b-article-3"],
+        known_document_ids=["law-a", "law-b"],
+        known_content_unit_ids=[
+            "law-a-article-12-paragraph-1",
+            "law-b-article-3-paragraph-1",
+        ],
+    )
+    action = schema["properties"]["actions"]["items"]
+    evidence = schema["properties"]["selectedEvidence"]["items"]
+
+    assert action["properties"]["articleIds"]["items"]["enum"] == [
+        "law-a-article-12",
+        "law-b-article-3",
+    ]
+    assert action["properties"]["documentIds"]["items"]["enum"] == [
+        "law-a",
+        "law-b",
+    ]
+    assert evidence["properties"]["contentUnitId"]["enum"] == [
+        "law-a-article-12-paragraph-1",
+        "law-b-article-3-paragraph-1",
+    ]
+
+
+def test_checkpoint_schema_disallows_invented_article_and_evidence_ids() -> None:
+    schema = research_checkpoint_json_schema(
+        max_selected_evidence=10,
+        known_article_ids=["law-a-article-12"],
+        known_content_unit_ids=["law-a-article-12-paragraph-1"],
+    )
+    properties = schema["properties"]
+    authority_node = (
+        properties["logicalStructure"]["properties"]["issues"]["items"]
+        ["properties"]["authorityNodes"]["items"]
+    )
+    unresolved = (
+        properties["logicalStructure"]["properties"]["unresolved"]["items"]
+    )
+
+    assert properties["nextArticleIds"]["items"]["enum"] == [
+        "law-a-article-12"
+    ]
+    assert authority_node["properties"]["articleId"]["enum"] == [
+        "law-a-article-12",
+        None,
+    ]
+    assert unresolved["properties"]["articleId"]["enum"] == [
+        "law-a-article-12",
+        None,
+    ]
+    assert properties["evidenceIds"]["items"]["enum"] == [
+        "law-a-article-12-paragraph-1"
+    ]
 
 
 def test_finalization_prompt_compacts_tool_history() -> None:
@@ -432,6 +612,63 @@ def test_checkpoint_rejects_unknown_evidence_and_next_article_ids() -> None:
     )
 
 
+def test_relation_decision_requires_known_candidate_and_both_article_texts() -> None:
+    catalog = EvidenceCatalog()
+    catalog.add_results([_law_result()])
+    catalog.add_relation_assertions(
+        [
+            {
+                "assertionId": "assertion-1",
+                "fromArticleId": "law-a-article-12",
+                "toArticleId": "law-b-article-3",
+                "suggestedType": "IMPLEMENTS",
+            }
+        ]
+    )
+    decision = ResearchRelationDecision(
+        assertionId="assertion-1",
+        verdict="confirmed",
+        relationType="IMPLEMENTS",
+        fromArticleId="law-a-article-12",
+        toArticleId="law-b-article-3",
+        evidenceIds=["law-a-article-12-paragraph-1"],
+        reason="両条文が対応する",
+    )
+    checkpoint = ResearchCheckpoint(
+        status=RESEARCH_STATUS_CONTINUE,
+        logicalStructure=ResearchLogicalStructure(
+            relationDecisions=[decision]
+        ),
+    )
+
+    validation = validate_research_checkpoint(checkpoint, catalog)
+
+    assert validation.valid is False
+    assert validation.errors == (
+        "relation_decision_requires_both_article_texts:assertion-1",
+    )
+
+    catalog.add_results(
+        [
+            {
+                "document": {
+                    "contentUnitId": "law-b-article-3-paragraph-1",
+                    "articleContentUnitId": "law-b-article-3",
+                    "documentId": "law-b",
+                    "docType": "law",
+                    "title": "テスト施行令",
+                    "heading": "第三条",
+                    "text": "具体的要件を定める。",
+                }
+            }
+        ]
+    )
+    checkpoint.logicalStructure.relationDecisions[0].evidenceIds.append(
+        "law-b-article-3-paragraph-1"
+    )
+    assert validate_research_checkpoint(checkpoint, catalog).valid is True
+
+
 def test_checkpoint_prompt_carries_state_and_reloads_exact_text() -> None:
     catalog = EvidenceCatalog()
     catalog.add_results([_law_result()])
@@ -462,8 +699,13 @@ def test_checkpoint_prompt_carries_state_and_reloads_exact_text() -> None:
     assert "生の検索履歴は引き継がない" not in prompt
     assert "status=readyを確定する直前に" in prompt
     assert "自分が本文確認を必要と判断" in prompt
-    assert "質問された全事項の完全調査を要求するものではない" in prompt
+    assert "質問に明示されていない全論点の完全調査を要求するものではない" in prompt
+    assert "質問が明示して求めた各事項を直接検証" in prompt
+    assert "明示事項の根拠を落としてまで重複採用しない" in prompt
     assert "無期限に継続せず" in prompt
+    assert "unresolved 6件" in prompt
+    assert "relationDecisions 8件" in prompt
+    assert "authorityNodesは合計20件" in prompt
     assert schema["required"] == [
         "status",
         "conclusion",
@@ -473,6 +715,37 @@ def test_checkpoint_prompt_carries_state_and_reloads_exact_text() -> None:
         "nextArticleIds",
         "logicalStructure",
     ]
+
+
+def test_research_prompt_separates_unverified_relation_candidates() -> None:
+    catalog = EvidenceCatalog()
+    catalog.add_results([_law_result()])
+    catalog.add_relation_assertions(
+        [
+            {
+                "assertionId": "assertion-1",
+                "fromArticleId": "law-a-article-12",
+                "toArticleId": "law-b-article-3",
+                "suggestedType": "IMPLEMENTS",
+                "sourceText": "法第十二条に規定するもの",
+            }
+        ]
+    )
+
+    prompt = build_research_turn_prompt(
+        question="具体化規定は何ですか",
+        choices=None,
+        catalog=catalog,
+        tool_history=[],
+        max_actions=2,
+        max_evidence_items=10,
+        evidence_chars=4000,
+    )
+    schema = research_checkpoint_json_schema(max_selected_evidence=16)
+
+    assert "未確認のGraph関係候補" in prompt
+    assert "assertion-1" in prompt
+    assert "両端本文をfetch_articles" in prompt
     assert "findings" not in schema["properties"]
     assert schema["properties"]["evidenceIds"]["maxItems"] == 10
     assert schema["properties"]["nextArticleIds"]["maxItems"] == 10
@@ -482,6 +755,234 @@ def test_checkpoint_prompt_carries_state_and_reloads_exact_text() -> None:
     )
     assert authority_node_schema["properties"]["evidenceIds"]["maxItems"] == 20
     assert "issues" in schema["properties"]["logicalStructure"]["properties"]
+    claim_schema = (
+        schema["properties"]["logicalStructure"]["properties"]["issues"]
+        ["items"]["properties"]["claims"]["items"]
+    )
+    assert claim_schema["properties"]["conclusion"]["maxLength"] == 300
+    unresolved_schema = (
+        schema["properties"]["logicalStructure"]["properties"]["unresolved"]
+        ["items"]
+    )
+    assert unresolved_schema["properties"]["reason"]["maxLength"] == 180
+
+
+def test_integration_prompt_assigns_relation_meaning_to_llm_with_both_texts() -> None:
+    catalog = EvidenceCatalog()
+    catalog.add_results([_law_result()])
+    catalog.add_relation_assertions(
+        [
+            {
+                "assertionId": "assertion-1",
+                "fromArticleId": "law-a-article-12",
+                "toArticleId": "law-b-article-3",
+                "suggestedType": "IMPLEMENTS",
+            }
+        ]
+    )
+
+    prompt = build_research_checkpoint_prompt(
+        question="具体化規定は何ですか",
+        choices=None,
+        catalog=catalog,
+        checkpoint=ResearchCheckpoint(status=RESEARCH_STATUS_CONTINUE),
+        cycle_index=0,
+        cycle_count=3,
+        cycle_new_content_ids=tuple(catalog.content_unit_ids),
+        tool_history=[],
+        max_selected_evidence=16,
+    )
+
+    assert "新しいrelationDecisionを作り" in prompt
+    assert "両端Article本文の意味を比較して判断" in prompt
+    assert "場合はuncertainとし" in prompt
+    assert "場合はunverifiedとし" not in prompt
+    assert "正式Graphエッジや他案件の法的事実へ昇格させない" in prompt
+
+    relation_schema = research_checkpoint_json_schema(
+        max_selected_evidence=16
+    )["properties"]["logicalStructure"]["properties"]["relationDecisions"][
+        "items"
+    ]
+    assert set(relation_schema["properties"]) == {
+        "assertionId",
+        "verdict",
+        "evidenceIds",
+        "reason",
+    }
+
+
+def test_final_cycle_checkpoint_schema_and_prompt_disallow_continue() -> None:
+    catalog = EvidenceCatalog()
+    prompt = build_research_checkpoint_prompt(
+        question="許可の根拠は何ですか",
+        choices=None,
+        catalog=catalog,
+        checkpoint=ResearchCheckpoint(status=RESEARCH_STATUS_CONTINUE),
+        cycle_index=2,
+        cycle_count=3,
+        cycle_new_content_ids=(),
+        tool_history=[],
+        max_selected_evidence=16,
+    )
+    schema = research_checkpoint_json_schema(
+        max_selected_evidence=16,
+        final_cycle=True,
+    )
+
+    assert "status=continueは禁止" in prompt
+    assert schema["properties"]["status"]["enum"] == [
+        RESEARCH_STATUS_READY,
+        RESEARCH_STATUS_INSUFFICIENT,
+    ]
+
+
+def test_prompt_evidence_marks_truncation_and_scope_validation_rejects_hidden_id() -> None:
+    catalog = EvidenceCatalog()
+    first = _law_result("law-a-article-12-paragraph-1")
+    first["document"]["text"] = "長い本文" * 100
+    catalog.add_results(
+        [first, _law_result("law-a-article-12-paragraph-2")]
+    )
+    items = catalog.prompt_items(max_items=2, max_chars=150)
+
+    assert items[0]["textTruncated"] is True
+    assert items[0]["displayedTextChars"] < items[0]["originalTextChars"]
+    turn = ResearchTurn(
+        status=RESEARCH_STATUS_READY,
+        selectedEvidence=[
+            ResearchEvidenceSelection(
+                contentUnitId="law-a-article-12-paragraph-2"
+            )
+        ],
+    )
+    validation = validate_research_turn(
+        turn,
+        catalog,
+        allowed_content_unit_ids=["law-a-article-12-paragraph-1"],
+    )
+
+    assert validation.valid is False
+    assert "unknown_evidence_id:law-a-article-12-paragraph-2" in validation.errors
+
+
+def test_active_checkpoint_continue_requires_structured_follow_up() -> None:
+    validation = validate_research_checkpoint(
+        ResearchCheckpoint(status=RESEARCH_STATUS_CONTINUE),
+        EvidenceCatalog(),
+        require_structured_follow_up=True,
+    )
+
+    assert validation.valid is False
+    assert "continue_requires_structured_follow_up" in validation.errors
+
+
+def test_relation_decision_transport_hydrates_only_known_candidate_fields() -> None:
+    catalog = EvidenceCatalog()
+    catalog.add_relation_assertions(
+        [
+            {
+                "assertionId": "assertion-1",
+                "fromArticleId": "law-a-article-12",
+                "toArticleId": "law-b-article-3",
+                "suggestedType": "IMPLEMENTS",
+            }
+        ]
+    )
+    raw = json.dumps(
+        {
+            "logicalStructure": {
+                "relationDecisions": [
+                    {
+                        "assertionId": "assertion-1",
+                        "verdict": "confirmed",
+                        "evidenceIds": ["evidence-a", "evidence-b"],
+                        "reason": "両端本文が対応する",
+                    },
+                    {
+                        "assertionId": "unknown",
+                        "verdict": "confirmed",
+                        "evidenceIds": [],
+                        "reason": "未知候補",
+                    },
+                ]
+            }
+        },
+        ensure_ascii=False,
+    )
+
+    hydrated = json.loads(hydrate_relation_decision_candidates(raw, catalog))
+    decisions = hydrated["logicalStructure"]["relationDecisions"]
+
+    assert len(decisions) == 1
+    assert decisions[0]["relationType"] == "IMPLEMENTS"
+    assert decisions[0]["fromArticleId"] == "law-a-article-12"
+    assert decisions[0]["toArticleId"] == "law-b-article-3"
+
+
+def test_research_prompt_does_not_reopen_case_decided_relation() -> None:
+    catalog = EvidenceCatalog()
+    catalog.add_results([_law_result()])
+    catalog.add_relation_assertions(
+        [
+            {
+                "assertionId": "assertion-decided",
+                "fromArticleId": "law-a-article-12",
+                "toArticleId": "law-b-article-3",
+                "suggestedType": "IMPLEMENTS",
+            }
+        ]
+    )
+
+    prompt = build_research_turn_prompt(
+        question="具体化規定は何ですか",
+        choices=None,
+        catalog=catalog,
+        tool_history=[],
+        max_actions=2,
+        max_evidence_items=10,
+        evidence_chars=4000,
+        case_context={
+            "relationDecisions": [
+                {
+                    "assertionId": "assertion-decided",
+                    "verdict": "confirmed",
+                }
+            ]
+        },
+    )
+
+    candidate_section = prompt.split(
+        "未確認のGraph関係候補（必要なら両端本文を取得して統合段階で判断する）:\n",
+        1,
+    )[1].split("\n\n本文を確認できる証拠:", 1)[0]
+    assert candidate_section == "[]"
+    assert "assertion-decided" in prompt  # 案件状態の既存判断は引き続き見える
+
+
+def test_relation_candidates_are_not_duplicated_from_case_view() -> None:
+    catalog = EvidenceCatalog()
+    catalog.add_results([_law_result()])
+    candidate = {
+        "assertionId": "assertion-once",
+        "fromArticleId": "law-a-article-12",
+        "toArticleId": "law-b-article-3",
+        "suggestedType": "IMPLEMENTS",
+    }
+    catalog.add_relation_assertions([candidate])
+
+    prompt = build_research_turn_prompt(
+        question="具体化規定は何ですか",
+        choices=None,
+        catalog=catalog,
+        tool_history=[],
+        max_actions=2,
+        max_evidence_items=10,
+        evidence_chars=4000,
+        case_context={"relationCandidates": [candidate]},
+    )
+
+    assert prompt.count("assertion-once") == 1
 
 
 def test_checkpoint_accepts_expanded_pending_articles_and_node_evidence() -> None:
@@ -647,6 +1148,76 @@ def test_checkpoint_keeps_hierarchical_legal_structure() -> None:
     assert '"toArticleId": "law-b-article-3"' in prompt
 
 
+def test_checkpoint_cannot_drop_an_issue_from_the_previous_cycle() -> None:
+    checkpoint = ResearchCheckpoint(
+        status=RESEARCH_STATUS_CONTINUE,
+        logicalStructure=ResearchLogicalStructure(
+            issues=[
+                ResearchIssueStructure(
+                    issueId="requirements",
+                    status="unresolved",
+                )
+            ]
+        ),
+    )
+
+    validation = validate_research_checkpoint(
+        checkpoint,
+        EvidenceCatalog(),
+        required_issue_ids=("requirements", "procedure"),
+    )
+
+    assert validation.valid is False
+    assert "missing_previous_issue_id:procedure" in validation.errors
+
+
+def test_ready_checkpoint_selects_evidence_for_every_retained_issue() -> None:
+    first_id = "law-a-article-12-paragraph-1"
+    second_id = "law-a-article-12-paragraph-2"
+    catalog = EvidenceCatalog()
+    catalog.add_results([_law_result(first_id), _law_result(second_id)])
+    checkpoint = ResearchCheckpoint(
+        status=RESEARCH_STATUS_READY,
+        evidenceIds=[first_id],
+        logicalStructure=ResearchLogicalStructure(
+            issues=[
+                ResearchIssueStructure(
+                    issueId="requirements",
+                    status="verified",
+                    authorityNodes=[
+                        ResearchAuthorityNode(
+                            nodeId="requirements-law",
+                            articleId="law-a-article-12",
+                            verificationStatus="text_verified",
+                            evidenceIds=[first_id],
+                        )
+                    ],
+                ),
+                ResearchIssueStructure(
+                    issueId="procedure",
+                    status="verified",
+                    authorityNodes=[
+                        ResearchAuthorityNode(
+                            nodeId="procedure-law",
+                            articleId="law-a-article-12",
+                            verificationStatus="text_verified",
+                            evidenceIds=[second_id],
+                        )
+                    ],
+                ),
+            ]
+        ),
+    )
+
+    validation = validate_research_checkpoint(checkpoint, catalog)
+
+    assert validation.valid is False
+    assert (
+        "ready_issue_requires_selected_evidence:procedure"
+        in validation.errors
+    )
+
+
 def test_next_cycle_prompt_does_not_reinject_unselected_evidence_or_graph() -> None:
     catalog = EvidenceCatalog()
     selected = _law_result()
@@ -792,6 +1363,37 @@ def test_next_cycle_prompt_includes_open_and_already_fetched_next_article() -> N
     assert "未取得扱いだがカタログには存在する本文" in prompt
 
 
+def test_next_cycle_prompt_does_not_repeat_visible_evidence_in_inventory() -> None:
+    catalog = EvidenceCatalog()
+    catalog.add_results([_law_result()])
+    checkpoint = ResearchCheckpoint(
+        status=RESEARCH_STATUS_CONTINUE,
+        conclusion="確認を継続する。",
+        evidenceIds=["law-a-article-12-paragraph-1"],
+    )
+
+    prompt = build_research_turn_prompt(
+        question="許可要件は何ですか",
+        choices=None,
+        catalog=catalog,
+        tool_history=[],
+        max_actions=4,
+        max_evidence_items=20,
+        evidence_chars=8000,
+        checkpoint=checkpoint,
+        phase="explore",
+        cycle_index=1,
+        cycle_count=3,
+    )
+
+    inventory_block = prompt.split(
+        "候補一覧（本文が省略された候補はArticle IDをfetch_articlesして確認できる）:\n",
+        1,
+    )[1].split("\n\nGraph・索引時分類済み", 1)[0]
+    assert inventory_block == "[]"
+    assert "許可を受けなければならない" in prompt
+
+
 def test_checkpoint_rejects_evidence_that_is_also_open() -> None:
     catalog = EvidenceCatalog()
     catalog.add_results([_law_result()])
@@ -847,6 +1449,9 @@ def test_current_cycle_graph_is_present_once_and_raw_history_is_compacted() -> N
     assert prompt.count('"fromArticleId": "law-a-article-12"') == 1
     assert '"graphRelations"' not in prompt
     assert '"graphRelationCount": 1' in prompt
+    assert "本文が実際に定めているかで検証" in prompt
+    assert "反証、適用範囲の不一致" in prompt
+    assert "同じ仮説の周辺検索を続けず" in prompt
 
 
 def test_ready_checkpoint_rejects_unresolved_core_structure() -> None:
@@ -877,8 +1482,55 @@ def test_ready_checkpoint_rejects_unresolved_core_structure() -> None:
     validation = validate_research_checkpoint(checkpoint, catalog)
 
     assert validation.valid is False
-    assert "ready_has_unresolved_issue" in validation.errors
     assert "ready_has_unresolved_core_item" in validation.errors
+
+
+def test_sanitizer_downgrades_ready_with_core_gap_without_losing_next_tasks() -> None:
+    catalog = EvidenceCatalog()
+    catalog.add_results([_law_result()])
+    catalog.add_graph_paths(
+        [
+            {
+                "nodes": [
+                    {"graphNodeId": "law-a-article-12"},
+                    {"graphNodeId": "law-b-article-3"},
+                ],
+                "edges": [{"edgeType": "IMPLEMENTS"}],
+            }
+        ]
+    )
+    checkpoint = ResearchCheckpoint(
+        status=RESEARCH_STATUS_READY,
+        conclusion="本則は確認したが配下法令は未確認",
+        evidenceIds=["law-a-article-12-paragraph-1"],
+        nextArticleIds=["law-b-article-3"],
+        logicalStructure=ResearchLogicalStructure(
+            issues=[
+                ResearchIssueStructure(
+                    issueId="permit",
+                    status="partial",
+                )
+            ],
+            unresolved=[
+                ResearchUnresolvedItem(
+                    issueId="permit",
+                    articleId="law-b-article-3",
+                    action="fetch_article",
+                    reason="配下法令本文が未確認",
+                    affectsCoreConclusion=True,
+                )
+            ],
+        ),
+    )
+
+    sanitized, changes = sanitize_research_checkpoint(checkpoint, catalog)
+
+    assert sanitized.status == RESEARCH_STATUS_CONTINUE
+    assert sanitized.nextArticleIds == ["law-b-article-3"]
+    assert changes["downgradedReadyStatus"] == [
+        "unresolved_core_evidence"
+    ]
+    assert validate_research_checkpoint(sanitized, catalog).valid is True
 
 
 def test_checkpoint_rejects_authority_hierarchy_cycle() -> None:
@@ -1263,10 +1915,17 @@ def test_llm_client_returns_structured_research_turn(
         ensure_ascii=False,
     )
     client = LLMClient()
+    captured: dict[str, object] = {}
+
+    def fake_transport(*args, **kwargs):
+        captured["model"] = args[2]
+        return raw, 12, 100, 50, "end_turn"
+
+    monkeypatch.setattr(client, "_json_transport", fake_transport)
     monkeypatch.setattr(
-        client,
-        "_json_transport",
-        lambda *args, **kwargs: (raw, 12, 100, 50, "end_turn"),
+        settings,
+        "llm_research_stage_model",
+        "stage-model-test",
     )
     monkeypatch.setattr(settings, "llm_research_max_actions_per_turn", 4)
     monkeypatch.setattr(settings, "llm_research_max_selected_evidence", 16)
@@ -1280,7 +1939,103 @@ def test_llm_client_returns_structured_research_turn(
     assert result.turn is not None
     assert result.turn.actions[0].query == "製造販売業 許可"
     assert result.inputTokens == 100
+    assert captured["model"] == "stage-model-test"
+    assert result.model == "stage-model-test"
     assert result.as_trace()["decision"]["status"] == RESEARCH_STATUS_CONTINUE
+
+
+def test_research_turn_requires_actions_to_reference_current_hypothesis() -> None:
+    catalog = EvidenceCatalog()
+    catalog.add_documents({"law-a": "テスト法"})
+    hypothesis = _core_hypothesis()
+    valid_turn = ResearchTurn(
+        status=RESEARCH_STATUS_CONTINUE,
+        hypotheses=[hypothesis],
+        actions=[
+            ResearchAction(
+                tool=TOOL_SEARCH_CORPUS,
+                query="許可の本則",
+                documentIds=["law-a"],
+                hypothesisIds=[hypothesis.hypothesisId],
+            )
+        ],
+    )
+    invalid_turn = valid_turn.model_copy(
+        update={
+            "actions": [
+                valid_turn.actions[0].model_copy(
+                    update={"hypothesisIds": ["H-unknown"]}
+                )
+            ]
+        }
+    )
+
+    assert validate_research_turn(valid_turn, catalog).valid is True
+    validation = validate_research_turn(invalid_turn, catalog)
+    assert validation.valid is False
+    assert (
+        "unknown_action_hypothesis_id:actions[0]:H-unknown"
+        in validation.errors
+    )
+
+
+def test_research_schemas_expose_hypothesis_and_verification_contract() -> None:
+    turn_schema = research_turn_json_schema(
+        max_actions=4,
+        max_selected_evidence=16,
+    )
+    checkpoint_schema = research_checkpoint_json_schema(
+        max_selected_evidence=16,
+    )
+
+    assert "hypotheses" in turn_schema["required"]
+    assert turn_schema["properties"]["hypotheses"]["minItems"] == 1
+    action = turn_schema["properties"]["actions"]["items"]
+    assert "hypothesisIds" in action["required"]
+    assert action["properties"]["hypothesisIds"]["minItems"] == 1
+    logical = checkpoint_schema["properties"]["logicalStructure"]
+    assert "hypotheses" in logical["required"]
+    assert logical["properties"]["hypotheses"]["minItems"] == 1
+    hypothesis = logical["properties"]["hypotheses"]["items"]
+    assert hypothesis["required"] == [
+        "hypothesisId",
+        "statement",
+        "status",
+        "evidenceIds",
+        "missing",
+    ]
+
+
+def test_ready_checkpoint_does_not_reclassify_unverified_hypothesis() -> None:
+    catalog = EvidenceCatalog()
+    catalog.add_results([_law_result()])
+    checkpoint = ResearchCheckpoint(
+        status=RESEARCH_STATUS_READY,
+        evidenceIds=["law-a-article-12-paragraph-1"],
+        logicalStructure=ResearchLogicalStructure(
+            hypotheses=[_core_hypothesis(status="unverified")]
+        ),
+    )
+
+    validation = validate_research_checkpoint(checkpoint, catalog)
+
+    assert validation.valid is True
+    assert "ready_has_unverified_hypothesis" not in validation.errors
+
+
+def test_legacy_nested_hypothesis_is_not_semantically_reclassified() -> None:
+    with pytest.raises(ValidationError):
+        ResearchHypothesis.model_validate(
+            {
+                "hypothesisId": "H-old",
+                "statement": "許可が必要である",
+                "status": "unresolved",
+                "verification": {
+                    "result": "insufficient",
+                    "evidenceIds": ["law-a-article-12-paragraph-1"],
+                },
+            }
+        )
 
 
 def test_llm_client_uses_separate_budget_for_checkpoint_integration(
@@ -1304,8 +2059,10 @@ def test_llm_client_uses_separate_budget_for_checkpoint_integration(
     client = LLMClient()
 
     def fake_transport(*args, **kwargs):
+        captured["model"] = args[2]
         captured["maxTokens"] = args[3]
         captured["effort"] = kwargs.get("effort")
+        captured["schema"] = args[1]
         return raw, 12, 100, 50, "end_turn"
 
     monkeypatch.setattr(client, "_json_transport", fake_transport)
@@ -1318,6 +2075,11 @@ def test_llm_client_uses_separate_budget_for_checkpoint_integration(
         settings,
         "llm_research_integration_effort",
         "low",
+    )
+    monkeypatch.setattr(
+        settings,
+        "llm_research_integration_model",
+        "integration-model-test",
     )
 
     result = client.integrate_legal_research_cycle(
@@ -1333,7 +2095,93 @@ def test_llm_client_uses_separate_budget_for_checkpoint_integration(
 
     assert result.validationError is None
     assert result.checkpoint is not None
-    assert captured == {"maxTokens": 8192, "effort": "low"}
+    assert captured["maxTokens"] == 8192
+    assert captured["model"] == "integration-model-test"
+    assert result.model == "integration-model-test"
+    assert captured["effort"] == "low"
+    schema = captured["schema"]
+    assert isinstance(schema, dict)
+    assert "enum" not in schema["properties"]["nextArticleIds"]["items"]
+    assert "enum" not in schema["properties"]["evidenceIds"]["items"]
+
+
+def test_checkpoint_integration_retries_unknown_structure_id_without_coercion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    catalog = EvidenceCatalog()
+    catalog.add_results([_law_result()])
+
+    def payload(article_id: str) -> str:
+        return json.dumps(
+            {
+                "status": RESEARCH_STATUS_READY,
+                "conclusion": "許可が必要である。",
+                "evidenceIds": ["law-a-article-12-paragraph-1"],
+                "nextQuestions": [],
+                "nextArticleIds": [],
+                "logicalStructure": {
+                    "issues": [
+                        {
+                            "issueId": "permit",
+                            "question": "許可が必要か",
+                            "status": "verified",
+                            "authorityNodes": [
+                                {
+                                    "nodeId": "N-1",
+                                    "articleId": article_id,
+                                    "title": "テスト法第十二条",
+                                    "legalRole": "本則",
+                                    "verificationStatus": "text_verified",
+                                    "evidenceIds": [
+                                        "law-a-article-12-paragraph-1"
+                                    ],
+                                    "parentNodeId": None,
+                                    "relationFromParent": "",
+                                    "purpose": "許可義務の確認",
+                                }
+                            ],
+                            "claims": [],
+                        }
+                    ],
+                    "hypotheses": [],
+                    "unresolved": [],
+                    "relationDecisions": [],
+                },
+            },
+            ensure_ascii=False,
+        )
+
+    responses = [
+        payload("law-a-article-12-paragraph-1"),
+        payload("law-a-article-12"),
+    ]
+    prompts: list[str] = []
+    client = LLMClient()
+
+    def fake_transport(prompt, *args, **kwargs):
+        prompts.append(prompt)
+        return responses.pop(0), 10, 100, 50, "end_turn"
+
+    monkeypatch.setattr(client, "_json_transport", fake_transport)
+
+    result = client.integrate_legal_research_cycle(
+        AnswerRequest(question="許可の根拠は何ですか"),
+        catalog,
+        ResearchCheckpoint(status=RESEARCH_STATUS_CONTINUE),
+        cycle_index=0,
+        cycle_count=3,
+        cycle_new_content_ids=("law-a-article-12-paragraph-1",),
+        tool_history=[],
+        timeout_sec=60,
+    )
+
+    assert result.validationError is None
+    assert result.retryCount == 1
+    assert result.checkpoint is not None
+    node = result.checkpoint.logicalStructure.issues[0].authorityNodes[0]
+    assert node.articleId == "law-a-article-12"
+    assert "unknown_structure_article_id" in prompts[1]
+    assert "プログラムは法的判断や次動作を推測して補正しません" in prompts[1]
 
 
 def test_answer_prompt_requires_each_requested_matter_to_be_addressed() -> None:
@@ -1348,24 +2196,22 @@ def test_answer_prompt_requires_each_requested_matter_to_be_addressed() -> None:
             )
         ],
         research_context={
-            "status": RESEARCH_STATUS_READY,
-            "logicalStructure": {
+            "answerContract": {
                 "issues": [
                     {
                         "issueId": "permit",
-                        "claims": [
-                            {
-                                "claimId": "permit-required",
-                                "conclusion": "許可が必要",
-                            }
-                        ],
+                        "question": "許可の要件と例外は何か",
                     }
-                ]
+                ],
+                "availableCitationIds": [
+                    "law-a-article-12-paragraph-1"
+                ],
             },
         },
     )
 
-    assert "実際に質問された各事項へ一つずつ答えてください" in prompt
-    assert "根拠を確認できない事項は推測せず未確認" in prompt
-    assert "反復調査の法的論理構造" in prompt
-    assert "permit-required" in prompt
+    assert "各issueIdのquestionと引用本文を読み" in prompt
+    assert "根拠を確認できない論点は推測せず" in prompt
+    assert "Main・Reviewer共有回答契約" in prompt
+    assert "許可の要件と例外は何か" in prompt
+    assert "反復調査の法的論理構造" not in prompt

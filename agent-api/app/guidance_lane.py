@@ -21,7 +21,12 @@ from typing import Any
 
 from .config import settings
 from .evidence_requirements import LegalIssue
-from .legal_ontology import RELATION_STATUS_UNVERIFIED, is_trusted_relation
+from .legal_ontology import (
+    RELATION_STATUS_LLM_IMPLEMENTS,
+    RELATION_STATUS_LLM_UNCERTAIN,
+    RELATION_STATUS_UNVERIFIED,
+    is_trusted_relation,
+)
 from .opensearch_client import RequirementSearchSpec
 from .retrieval_budget import COMPONENT_GRAPH, COMPONENT_SEARCH, BudgetTracker
 
@@ -96,7 +101,11 @@ class GuidanceLane:
             return GuidanceLaneResult(trace={"used": False, **search_trace})
 
         explained, mentioned, graph_trace = self._articles_from_graph(findings, tracker)
-        assertions, assertion_trace = self._relation_assertions(explained, tracker)
+        assertions, assertion_trace = self._relation_assertions(
+            explained,
+            tracker,
+            user_clearance_level=user_clearance_level,
+        )
 
         candidate_documents: dict[str, list[str]] = {}
         for issue_id, article_ids in mentioned.items():
@@ -275,6 +284,8 @@ class GuidanceLane:
         self,
         explained: dict[str, list[str]],
         tracker: BudgetTracker,
+        *,
+        user_clearance_level: int,
     ) -> tuple[tuple[dict[str, Any], ...], dict[str, Any]]:
         """ガイドが示唆した未確認の法令間関係を候補拡張のためだけに取得する(§10-3)。"""
         article_ids = [article_id for ids in explained.values() for article_id in ids]
@@ -294,6 +305,7 @@ class GuidanceLane:
         try:
             rows = self.graph_client.relation_assertions_from(
                 article_ids,
+                user_clearance_level=user_clearance_level,
                 timeout_sec=timeout,
             )
         except Exception as exc:  # noqa: BLE001 - 未確認関係が取れなくても探索は続く
@@ -308,16 +320,27 @@ class GuidanceLane:
             for issue_id, ids in explained.items()
             for article_id in ids
         }
+        visible_statuses = {
+            RELATION_STATUS_UNVERIFIED,
+            RELATION_STATUS_LLM_UNCERTAIN,
+            RELATION_STATUS_LLM_IMPLEMENTS,
+        }
         assertions = tuple(
             {
                 **row,
                 "issueId": issue_by_article.get(str(row.get("fromArticleId") or "")),
                 # 確定関係として使わないことを明示する(§6.1, §16.4)。
                 "status": str(row.get("status") or RELATION_STATUS_UNVERIFIED),
-                "usage": "candidate_expansion_only",
+                "usage": (
+                    "preclassified_navigation_only"
+                    if str(row.get("status") or "")
+                    == RELATION_STATUS_LLM_IMPLEMENTS
+                    else "candidate_expansion_only"
+                ),
             }
             for row in rows
-            if str(row.get("status") or RELATION_STATUS_UNVERIFIED) == RELATION_STATUS_UNVERIFIED
+            if str(row.get("status") or RELATION_STATUS_UNVERIFIED)
+            in visible_statuses
         )
         return assertions, {"relationAssertionCount": len(assertions)}
 

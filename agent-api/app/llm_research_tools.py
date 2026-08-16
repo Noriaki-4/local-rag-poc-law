@@ -6,7 +6,7 @@ from typing import Any
 
 from .config import settings
 from .graph_client import GraphClient
-from .legal_ontology import expandable_edge_types, is_trusted_relation
+from .legal_ontology import RELATION_STATUS_LLM_IMPLEMENTS, is_trusted_relation
 from .llm_directed_research import (
     TOOL_EXPAND_GRAPH,
     TOOL_FETCH_ARTICLES,
@@ -17,7 +17,6 @@ from .llm_directed_research import (
 )
 from .opensearch_client import OpenSearchClient, RequirementSearchSpec
 
-AUTO_GRAPH_TIMEOUT_SEC = 5.0
 GRAPH_PATHS_PER_ARTICLE = 50
 GRAPH_RELATIONS_PER_TOOL_RESULT = 50
 
@@ -36,6 +35,7 @@ class ResearchToolExecution:
     auto_graph_path_count: int = 0
     auto_graph_article_ids: tuple[str, ...] = ()
     graph_relations: tuple[dict[str, Any], ...] = ()
+    relation_assertions: tuple[dict[str, Any], ...] = ()
     auto_graph_error: str | None = None
 
     def as_trace(self, action: ResearchAction) -> dict[str, Any]:
@@ -46,6 +46,7 @@ class ResearchToolExecution:
             "documentIds": action.documentIds,
             "docTypes": action.docTypes,
             "edgeTypes": action.edgeTypes,
+            "hypothesisIds": action.hypothesisIds,
             "reason": action.reason,
             "resultCount": self.result_count,
             "newEvidenceCount": self.new_evidence_count,
@@ -67,6 +68,7 @@ class ResearchToolExecution:
             trace["autoGraphError"] = self.auto_graph_error
         if self.tool in {TOOL_FETCH_ARTICLES, TOOL_EXPAND_GRAPH}:
             trace["graphRelations"] = list(self.graph_relations)
+            trace["relationAssertions"] = list(self.relation_assertions)
         return trace
 
 
@@ -100,6 +102,7 @@ class LegalResearchToolGateway:
         auto_graph_article_ids: tuple[str, ...] = ()
         returned_content_unit_ids: tuple[str, ...] = ()
         graph_relations: tuple[dict[str, Any], ...] = ()
+        relation_assertions: tuple[dict[str, Any], ...] = ()
         auto_graph_error: str | None = None
         try:
             unknown_documents = sorted(
@@ -149,52 +152,84 @@ class LegalResearchToolGateway:
                         )
                     )
                 )
-                # LLMがArticleを選んだ時点で、seed時に本文根拠を検証済みの
-                # 委任・準用・参照関係だけを1hop取得する。関係先を採用するか、
-                # さらに本文を取得するかは次ターンのLLM判断へ委ねる。
-                graph_articles_before = set(catalog.known_article_ids)
-                try:
-                    paths = self._graph_paths_per_article(
-                        action.articleIds,
-                        edge_types=list(expandable_edge_types()),
-                        user_clearance_level=user_clearance_level,
-                        timeout_sec=max(
-                            0.1,
-                            min(
-                                AUTO_GRAPH_TIMEOUT_SEC,
-                                timeout_sec - (perf_counter() - started),
-                            ),
-                        ),
-                    )
-                    trusted_paths = _trusted_graph_paths(paths)
-                    auto_graph_path_count = len(trusted_paths)
-                    catalog.add_graph_paths(trusted_paths)
-                    graph_relations = tuple(
-                        _diversify_graph_relations(
-                            compact_graph_relations(trusted_paths),
-                            max_items=GRAPH_RELATIONS_PER_TOOL_RESULT,
-                        )
-                    )
-                    auto_graph_article_ids = tuple(
-                        article_id
-                        for article_id in catalog.known_article_ids
-                        if article_id not in graph_articles_before
-                    )
-                except Exception as exc:  # noqa: BLE001 - 本文取得は成功扱いのまま残す
-                    auto_graph_error = f"{type(exc).__name__}: {exc}"
             elif action.tool == TOOL_EXPAND_GRAPH:
-                paths = self._graph_paths_per_article(
-                    action.articleIds,
-                    edge_types=action.edgeTypes or None,
-                    user_clearance_level=user_clearance_level,
-                    timeout_sec=max(0.1, timeout_sec),
+                assertion_lookup = getattr(
+                    self.graph_client,
+                    "relation_assertions_touching",
+                    None,
+                )
+                assertion_items = (
+                    assertion_lookup(
+                        action.articleIds,
+                        suggested_types=action.edgeTypes or None,
+                        user_clearance_level=user_clearance_level,
+                        limit=GRAPH_RELATIONS_PER_TOOL_RESULT,
+                        timeout_sec=max(0.1, timeout_sec),
+                    )
+                    if callable(assertion_lookup)
+                    else []
+                )
+                preclassified_items = [
+                    item
+                    for item in assertion_items
+                    if str(item.get("status") or "")
+                    == RELATION_STATUS_LLM_IMPLEMENTS
+                ]
+                unresolved_items = [
+                    item
+                    for item in assertion_items
+                    if str(item.get("status") or "")
+                    != RELATION_STATUS_LLM_IMPLEMENTS
+                ]
+                catalog.add_preclassified_relations(preclassified_items)
+                catalog.add_relation_assertions(unresolved_items)
+                preclassified_ids = {
+                    str(item.get("assertionId") or "")
+                    for item in preclassified_items
+                }
+                preclassified_relations = [
+                    relation
+                    for relation in catalog.prompt_graph_relations(
+                        max_items=GRAPH_RELATIONS_PER_TOOL_RESULT * 2
+                    )
+                    if str(relation.get("assertionId") or "")
+                    in preclassified_ids
+                ]
+                normalized_assertions: list[dict[str, Any]] = []
+                for item in unresolved_items:
+                    assertion_id = str(
+                        item.get("assertionId")
+                        or item.get("graphNodeId")
+                        or ""
+                    )
+                    normalized = catalog.relation_assertion(assertion_id)
+                    if normalized is not None:
+                        normalized_assertions.append(normalized)
+                relation_assertions = tuple(normalized_assertions)
+                remaining_graph_sec = timeout_sec - (perf_counter() - started)
+                paths = (
+                    self._graph_paths_per_article(
+                        action.articleIds,
+                        edge_types=action.edgeTypes or None,
+                        user_clearance_level=user_clearance_level,
+                        timeout_sec=max(0.1, remaining_graph_sec),
+                    )
+                    if remaining_graph_sec > 0.1
+                    else []
                 )
                 trusted_paths = _trusted_graph_paths(paths)
-                result_count = len(trusted_paths)
+                result_count = (
+                    len(trusted_paths)
+                    + len(preclassified_relations)
+                    + len(relation_assertions)
+                )
                 catalog.add_graph_paths(trusted_paths)
                 graph_relations = tuple(
                     _diversify_graph_relations(
-                        compact_graph_relations(trusted_paths),
+                        [
+                            *compact_graph_relations(trusted_paths),
+                            *preclassified_relations,
+                        ],
                         max_items=GRAPH_RELATIONS_PER_TOOL_RESULT,
                     )
                 )
@@ -225,6 +260,7 @@ class LegalResearchToolGateway:
             auto_graph_path_count=auto_graph_path_count,
             auto_graph_article_ids=auto_graph_article_ids,
             graph_relations=graph_relations,
+            relation_assertions=relation_assertions,
             auto_graph_error=auto_graph_error,
         )
 
@@ -235,6 +271,7 @@ class LegalResearchToolGateway:
         edge_types: list[str] | None,
         user_clearance_level: int,
         timeout_sec: float,
+        limit_per_article: int = GRAPH_PATHS_PER_ARTICLE,
     ) -> list[dict[str, Any]]:
         """起点ごとの上限を分け、一つのArticleがGraph候補を独占しないようにする。"""
         started = perf_counter()
@@ -248,7 +285,7 @@ class LegalResearchToolGateway:
                     [article_id],
                     edge_types=edge_types,
                     max_depth=1,
-                    limit=GRAPH_PATHS_PER_ARTICLE,
+                    limit=limit_per_article,
                     user_clearance_level=user_clearance_level,
                     timeout_sec=max(0.1, remaining),
                 )

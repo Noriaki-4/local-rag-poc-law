@@ -4,11 +4,11 @@ from pathlib import Path
 
 class Settings:
     opensearch_url = os.getenv("OPENSEARCH_URL", "http://localhost:9200")
-    opensearch_index = os.getenv("OPENSEARCH_INDEX", "legal-rag-content")
+    opensearch_index = os.getenv("OPENSEARCH_INDEX", "legal-rag-content-ja-v2")
     opensearch_index_mapping = Path(
         os.getenv(
             "OPENSEARCH_INDEX_MAPPING",
-            "metadata/opensearch_index_mapping.sample.json",
+            "metadata/opensearch_index_mapping.japanese.sample.json",
         )
     )
     neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
@@ -22,16 +22,41 @@ class Settings:
     eval_results_dir = Path(os.getenv("EVAL_RESULTS_DIR", "/workspace/eval-results"))
     lawqa_eval_path = os.getenv("LAWQA_EVAL_PATH")
     lawqa_eval_url = os.getenv("LAWQA_EVAL_URL")
-    seed_lawqa_egov = os.getenv("SEED_LAWQA_EGOV", "false").lower() in {"1", "true", "yes", "on"}
+    seed_lawqa_egov = os.getenv("SEED_LAWQA_EGOV", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     lawqa_egov_law_ids = os.getenv("LAWQA_EGOV_LAW_IDS", "")
     egov_api_base_url = os.getenv("EGOV_API_BASE_URL", "https://laws.e-gov.go.jp/api/1")
-    seed_external_guidance = os.getenv("SEED_EXTERNAL_GUIDANCE", "false").lower() in {"1", "true", "yes", "on"}
+    seed_external_guidance = os.getenv("SEED_EXTERNAL_GUIDANCE", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     external_guidance_manifest = Path(
-        os.getenv("EXTERNAL_GUIDANCE_MANIFEST", "/workspace/datasets/lawqa_jp/external-guidance/manifest.json")
+        os.getenv(
+            "EXTERNAL_GUIDANCE_MANIFEST",
+            "/workspace/datasets/lawqa_jp/external-guidance/manifest.json",
+        )
     )
-    external_guidance_chunk_chars = max(400, min(int(os.getenv("EXTERNAL_GUIDANCE_CHUNK_CHARS", "900")), 3000))
-    agent_use_bm25 = os.getenv("AGENT_USE_BM25", "true").lower() in {"1", "true", "yes", "on"}
-    agent_use_vector = os.getenv("AGENT_USE_VECTOR", "true").lower() in {"1", "true", "yes", "on"}
+    external_guidance_chunk_chars = max(
+        400, min(int(os.getenv("EXTERNAL_GUIDANCE_CHUNK_CHARS", "900")), 3000)
+    )
+    agent_use_bm25 = os.getenv("AGENT_USE_BM25", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    agent_use_vector = os.getenv("AGENT_USE_VECTOR", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     embedding_provider = os.getenv("EMBEDDING_PROVIDER", "ollama")
     embedding_model = os.getenv("EMBEDDING_MODEL", "bge-m3")
     embedding_dimension = int(os.getenv("EMBEDDING_DIMENSION", "1024"))
@@ -39,10 +64,16 @@ class Settings:
     embedding_batch_size = int(os.getenv("EMBEDDING_BATCH_SIZE", "8"))
     embedding_max_chars = int(os.getenv("EMBEDDING_MAX_CHARS", "1000"))
     agent_max_queries = max(2, min(int(os.getenv("AGENT_MAX_QUERIES", "5")), 8))
-    agent_max_retry_rounds = max(0, min(int(os.getenv("AGENT_MAX_RETRY_ROUNDS", "1")), 2))
-    agent_max_total_tool_calls = max(1, min(int(os.getenv("AGENT_MAX_TOTAL_TOOL_CALLS", "8")), 16))
+    agent_max_retry_rounds = max(
+        0, min(int(os.getenv("AGENT_MAX_RETRY_ROUNDS", "1")), 2)
+    )
+    agent_max_total_tool_calls = max(
+        1, min(int(os.getenv("AGENT_MAX_TOTAL_TOOL_CALLS", "8")), 16)
+    )
     agent_max_graph_hop = max(1, min(int(os.getenv("AGENT_MAX_GRAPH_HOP", "1")), 3))
-    agent_max_graph_paths = max(1, min(int(os.getenv("AGENT_MAX_GRAPH_PATHS", "10")), 50))
+    agent_max_graph_paths = max(
+        1, min(int(os.getenv("AGENT_MAX_GRAPH_PATHS", "10")), 50)
+    )
     agent_max_wall_time_sec = max(
         10,
         min(int(os.getenv("AGENT_MAX_WALL_TIME_SEC", "110")), 600),
@@ -60,9 +91,18 @@ class Settings:
     agent_issue_coverage_shadow = os.getenv(
         "AGENT_ISSUE_COVERAGE_SHADOW", "true"
     ).lower() in {"1", "true", "yes", "on"}
-    agent_use_llm_planner = os.getenv("AGENT_USE_LLM_PLANNER", "true").lower() in {"1", "true", "yes", "on"}
-    agent_candidate_top_k = max(5, min(int(os.getenv("AGENT_CANDIDATE_TOP_K", "20")), 100))
-    agent_guidance_candidate_top_k = max(1, min(int(os.getenv("AGENT_GUIDANCE_CANDIDATE_TOP_K", "10")), 50))
+    agent_use_llm_planner = os.getenv("AGENT_USE_LLM_PLANNER", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    agent_candidate_top_k = max(
+        5, min(int(os.getenv("AGENT_CANDIDATE_TOP_K", "20")), 100)
+    )
+    agent_guidance_candidate_top_k = max(
+        1, min(int(os.getenv("AGENT_GUIDANCE_CANDIDATE_TOP_K", "10")), 50)
+    )
     agent_rerank_top_k = max(1, min(int(os.getenv("AGENT_RERANK_TOP_K", "16")), 50))
     agent_rrf_k = max(1, int(os.getenv("AGENT_RRF_K", "60")))
     # shadow期間はplanner + 旧Evaluator + 新replan + answer で最大4 logical callsになる
@@ -71,7 +111,9 @@ class Settings:
     rerank_provider = os.getenv("RERANK_PROVIDER", "none").lower()
     rerank_base_url = os.getenv("RERANK_BASE_URL", "http://localhost:8100")
     rerank_model = os.getenv("RERANK_MODEL", "hotchpotch/japanese-reranker-base-v2")
-    rerank_candidate_top_k = max(2, min(int(os.getenv("RERANK_CANDIDATE_TOP_K", "30")), 100))
+    rerank_candidate_top_k = max(
+        2, min(int(os.getenv("RERANK_CANDIDATE_TOP_K", "30")), 100)
+    )
     rerank_timeout_sec = max(1, min(int(os.getenv("RERANK_TIMEOUT_SEC", "30")), 120))
     rerank_max_chars = max(256, min(int(os.getenv("RERANK_MAX_CHARS", "3000")), 12000))
     llm_provider = os.getenv("LLM_PROVIDER", "ollama")
@@ -83,8 +125,20 @@ class Settings:
     # 本文(text)が返らずJSONパースに失敗するため、本文が載る余裕を見て大きめに取る。
     anthropic_max_tokens = int(os.getenv("ANTHROPIC_MAX_TOKENS", "16384"))
     # 上限到達時に再試行で広げる際の天井。
-    anthropic_max_tokens_ceiling = int(os.getenv("ANTHROPIC_MAX_TOKENS_CEILING", "32768"))
-    answer_model = os.getenv("ANSWER_MODEL") or ("claude-sonnet-5" if llm_provider == "anthropic" else "gemma4:e4b")
+    anthropic_max_tokens_ceiling = int(
+        os.getenv("ANTHROPIC_MAX_TOKENS_CEILING", "32768")
+    )
+    answer_model = os.getenv("ANSWER_MODEL") or (
+        "claude-sonnet-5" if llm_provider == "anthropic" else "gemma4:e4b"
+    )
+    reviewer_model = os.getenv("REVIEWER_MODEL") or answer_model
+    reviewer_max_tokens = max(
+        1024,
+        min(
+            int(os.getenv("REVIEWER_MAX_TOKENS", "8192")),
+            anthropic_max_tokens_ceiling,
+        ),
+    )
     planner_model = os.getenv("PLANNER_MODEL") or answer_model
     planner_max_tokens = int(os.getenv("PLANNER_MAX_TOKENS", "1024"))
     planner_timeout_sec = int(os.getenv("PLANNER_TIMEOUT_SEC", "30"))
@@ -94,6 +148,10 @@ class Settings:
     judge_model = os.getenv("JUDGE_MODEL", "none")
     llm_timeout_sec = int(os.getenv("LLM_TIMEOUT_SEC", "90"))
     llm_max_context_chars = int(os.getenv("LLM_MAX_CONTEXT_CHARS", "12000"))
+    llm_finalization_material_max_items = max(
+        1,
+        min(int(os.getenv("LLM_FINALIZATION_MATERIAL_MAX_ITEMS", "24")), 60),
+    )
 
     # ------------------------------------------------------------------------------
     # LLM主導の法令調査
@@ -105,10 +163,53 @@ class Settings:
     agent_llm_directed_retrieval_shadow = os.getenv(
         "AGENT_LLM_DIRECTED_RETRIEVAL_SHADOW", "false"
     ).lower() in {"1", "true", "yes", "on"}
+    # LLM_RESEARCH_MODELは従来設定との互換用。役割別設定があればそちらを優先する。
     llm_research_model = os.getenv("LLM_RESEARCH_MODEL") or answer_model
+    llm_research_stage_model = (
+        os.getenv("LLM_RESEARCH_STAGE_MODEL") or llm_research_model
+    )
+    llm_research_integration_model = (
+        os.getenv("LLM_RESEARCH_INTEGRATION_MODEL") or llm_research_model
+    )
+    # RelationAssertionの分類はseedとは分離したオフライン処理で行う。一次分類には探索用の
+    # 軽量モデル、uncertainだけを再検討するReviewerにはReviewerモデルを既定利用する。
+    relation_classifier_model = (
+        os.getenv("RELATION_CLASSIFIER_MODEL") or llm_research_stage_model
+    )
+    relation_classifier_reviewer_model = (
+        os.getenv("RELATION_CLASSIFIER_REVIEWER_MODEL") or reviewer_model
+    )
+    relation_classifier_batch_size = max(
+        1, min(int(os.getenv("RELATION_CLASSIFIER_BATCH_SIZE", "8")), 8)
+    )
+    relation_classifier_batch_chars = max(
+        4000,
+        min(int(os.getenv("RELATION_CLASSIFIER_BATCH_CHARS", "30000")), 60000),
+    )
+    relation_classifier_max_tokens = max(
+        1024,
+        min(
+            int(os.getenv("RELATION_CLASSIFIER_MAX_TOKENS", "4096")),
+            anthropic_max_tokens_ceiling,
+        ),
+    )
+    relation_classifier_timeout_sec = max(
+        10, min(int(os.getenv("RELATION_CLASSIFIER_TIMEOUT_SEC", "120")), 600)
+    )
     llm_research_max_tokens = max(
         256, min(int(os.getenv("LLM_RESEARCH_MAX_TOKENS", "4096")), 16384)
     )
+    llm_research_stage_effort = os.getenv(
+        "LLM_RESEARCH_STAGE_EFFORT",
+        "low",
+    ).lower()
+    if llm_research_stage_effort not in {
+        "low",
+        "medium",
+        "high",
+        "max",
+    }:
+        llm_research_stage_effort = "low"
     llm_research_integration_max_tokens = max(
         512,
         min(
@@ -185,6 +286,185 @@ class Settings:
     )
 
     # ------------------------------------------------------------------------------
+    # 新しい汎用Agent Framework。明示的に有効化するまで現行/answerは切り替えない。
+    # Reviewerは品質や質問内容から自動選択せず、この設定がtrueのときだけ呼ぶ。
+    # ------------------------------------------------------------------------------
+    agent_framework_active = os.getenv("AGENT_FRAMEWORK_ACTIVE", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    agent_framework_reviewer_enabled = os.getenv(
+        "AGENT_FRAMEWORK_REVIEWER_ENABLED", "false"
+    ).lower() in {"1", "true", "yes", "on"}
+    agent_framework_research_model = (
+        os.getenv("AGENT_FRAMEWORK_RESEARCH_MODEL") or llm_research_stage_model
+    )
+    agent_framework_integration_model = (
+        os.getenv("AGENT_FRAMEWORK_INTEGRATION_MODEL")
+        or os.getenv("AGENT_FRAMEWORK_FINALIZE_MODEL")
+        or llm_research_integration_model
+    )
+    # 旧設定名は既存環境との互換性のためだけに残す。
+    agent_framework_finalize_model = agent_framework_integration_model
+    agent_framework_reviewer_model = (
+        os.getenv("AGENT_FRAMEWORK_REVIEWER_MODEL") or reviewer_model
+    )
+    agent_framework_research_max_tokens = max(
+        1024,
+        min(
+            int(os.getenv("AGENT_FRAMEWORK_RESEARCH_MAX_TOKENS", "4096")),
+            anthropic_max_tokens_ceiling,
+        ),
+    )
+    agent_framework_integration_max_tokens = max(
+        1024,
+        min(
+            int(
+                os.getenv("AGENT_FRAMEWORK_INTEGRATION_MAX_TOKENS")
+                or os.getenv("AGENT_FRAMEWORK_FINALIZE_MAX_TOKENS", "8192")
+            ),
+            anthropic_max_tokens_ceiling,
+        ),
+    )
+    agent_framework_finalize_max_tokens = agent_framework_integration_max_tokens
+    agent_framework_reviewer_max_tokens = max(
+        1024,
+        min(
+            int(os.getenv("AGENT_FRAMEWORK_REVIEWER_MAX_TOKENS", "8192")),
+            anthropic_max_tokens_ceiling,
+        ),
+    )
+    agent_framework_model_timeout_sec = max(
+        10,
+        min(
+            int(os.getenv("AGENT_FRAMEWORK_MODEL_TIMEOUT_SEC", "90")),
+            180,
+        ),
+    )
+    agent_framework_max_research_cycles = max(
+        1,
+        min(int(os.getenv("AGENT_FRAMEWORK_MAX_RESEARCH_CYCLES", "4")), 4),
+    )
+    agent_framework_max_tool_requests_per_step = max(
+        1,
+        min(
+            int(
+                os.getenv("AGENT_FRAMEWORK_MAX_TOOL_REQUESTS_PER_STEP")
+                or os.getenv("AGENT_FRAMEWORK_MAX_TOOL_REQUESTS_PER_CYCLE", "4")
+            ),
+            16,
+        ),
+    )
+    # 旧名は既存環境・参照との互換用。意味はCycle累計ではなく1 step上限。
+    agent_framework_max_tool_requests_per_cycle = (
+        agent_framework_max_tool_requests_per_step
+    )
+    agent_framework_max_fetched_resources_per_cycle = max(
+        1,
+        min(
+            int(os.getenv("AGENT_FRAMEWORK_MAX_FETCHED_RESOURCES_PER_CYCLE", "4")),
+            32,
+        ),
+    )
+    agent_framework_max_selected_frontier_per_step = max(
+        1,
+        min(
+            int(os.getenv("AGENT_FRAMEWORK_MAX_SELECTED_FRONTIER_PER_STEP", "3")),
+            16,
+        ),
+    )
+    agent_framework_max_graph_candidates_per_review_batch = max(
+        1,
+        min(
+            int(
+                os.getenv(
+                    "AGENT_FRAMEWORK_MAX_GRAPH_CANDIDATES_PER_REVIEW_BATCH",
+                    "20",
+                )
+            ),
+            200,
+        ),
+    )
+    agent_framework_max_parallel_tools = max(
+        1,
+        min(int(os.getenv("AGENT_FRAMEWORK_MAX_PARALLEL_TOOLS", "4")), 16),
+    )
+    agent_framework_max_retained_evidence = max(
+        0,
+        min(
+            int(os.getenv("AGENT_FRAMEWORK_MAX_RETAINED_EVIDENCE", "12")),
+            60,
+        ),
+    )
+    agent_framework_max_material_evidence_chars = max(
+        1000,
+        min(
+            int(
+                os.getenv(
+                    "AGENT_FRAMEWORK_MAX_MATERIAL_EVIDENCE_CHARS",
+                    "50000",
+                )
+            ),
+            200000,
+        ),
+    )
+    agent_framework_max_solver_input_chars = max(
+        2000,
+        min(
+            int(
+                os.getenv(
+                    "AGENT_FRAMEWORK_MAX_SOLVER_INPUT_CHARS",
+                    "240000",
+                )
+            ),
+            1000000,
+        ),
+    )
+    agent_framework_cycle_close_reserve_sec = max(
+        5,
+        min(
+            int(os.getenv("AGENT_FRAMEWORK_CYCLE_CLOSE_RESERVE_SEC", "15")),
+            179,
+        ),
+    )
+    agent_framework_min_next_cycle_budget_sec = max(
+        5,
+        min(
+            int(os.getenv("AGENT_FRAMEWORK_MIN_NEXT_CYCLE_BUDGET_SEC", "25")),
+            179,
+        ),
+    )
+    agent_framework_finalization_reserve_sec = max(
+        10,
+        min(
+            int(
+                os.getenv("AGENT_FRAMEWORK_FINALIZATION_RESERVE_SEC")
+                or os.getenv("AGENT_FRAMEWORK_NEXT_SOLVER_RESERVE_SEC", "35")
+            ),
+            179,
+        ),
+    )
+    agent_framework_next_solver_reserve_sec = (
+        agent_framework_finalization_reserve_sec
+    )
+    agent_framework_max_wall_time_sec = max(
+        agent_framework_finalization_reserve_sec + 1,
+        min(
+            int(os.getenv("AGENT_FRAMEWORK_MAX_WALL_TIME_SEC", "180")),
+            600,
+        ),
+    )
+    agent_framework_reviewer_max_revisions = max(
+        0,
+        min(
+            int(os.getenv("AGENT_FRAMEWORK_REVIEWER_MAX_REVISIONS", "1")),
+            3,
+        ),
+    )
+
+    # ------------------------------------------------------------------------------
     # 法令レイヤー別探索 vNext (docs/requirements/docs/layered_legal_evidence_retrieval_plan.md)
     # 既定はshadowのみ。active切替はPhase 6の評価後に行う(§19)。
     # 上限値は §11.1 の初期値案であり、Phase 0の実測後に確定する。
@@ -195,14 +475,18 @@ class Settings:
     agent_layered_legal_retrieval_shadow = os.getenv(
         "AGENT_LAYERED_LEGAL_RETRIEVAL_SHADOW", "false"
     ).lower() in {"1", "true", "yes", "on"}
-    layered_max_primary_issues = max(1, min(int(os.getenv("LAYERED_MAX_PRIMARY_ISSUES", "8")), 16))
+    layered_max_primary_issues = max(
+        1, min(int(os.getenv("LAYERED_MAX_PRIMARY_ISSUES", "8")), 16)
+    )
     layered_active_issue_batch_size = max(
         1, min(int(os.getenv("LAYERED_ACTIVE_ISSUE_BATCH_SIZE", "4")), 8)
     )
     layered_max_requirements_total = max(
         1, min(int(os.getenv("LAYERED_MAX_REQUIREMENTS_TOTAL", "24")), 96)
     )
-    layered_max_legal_hops = max(1, min(int(os.getenv("LAYERED_MAX_LEGAL_HOPS", "3")), 5))
+    layered_max_legal_hops = max(
+        1, min(int(os.getenv("LAYERED_MAX_LEGAL_HOPS", "3")), 5)
+    )
     layered_max_expansion_rounds = max(
         0, min(int(os.getenv("LAYERED_MAX_EXPANSION_ROUNDS", "3")), 5)
     )
@@ -265,7 +549,9 @@ class Settings:
     layered_max_guide_derived_articles = max(
         0, min(int(os.getenv("LAYERED_MAX_GUIDE_DERIVED_ARTICLES", "6")), 20)
     )
-    layered_max_replan_calls = max(0, min(int(os.getenv("LAYERED_MAX_REPLAN_CALLS", "1")), 2))
+    layered_max_replan_calls = max(
+        0, min(int(os.getenv("LAYERED_MAX_REPLAN_CALLS", "1")), 2)
+    )
     layered_shadow_phase_budget_sec = max(
         1, min(int(os.getenv("LAYERED_SHADOW_PHASE_BUDGET_SEC", "20")), 240)
     )

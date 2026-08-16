@@ -8,6 +8,7 @@ from app.seed import (
     _docling_guidance_chunks,
     _drop_dangling_guidance_edges,
     _delegation_edges,
+    _delegation_relation_assertions,
     _external_guidance_documents,
     _external_guidance_sources,
     _guidance_graph_artifacts,
@@ -76,7 +77,76 @@ def test_delegation_edges_reverse_subordinate_law_parent_references():
         for edge in edges
     ] == [
         ("law-order-article-2_13", "law-test-article-5", "REFERENCES"),
-        ("law-test-article-5", "law-order-article-2_13", "IMPLEMENTS"),
+    ]
+    assertions = _delegation_relation_assertions(
+        [parent, subordinate],
+        {"law-test": "law-test", "law-order": "law-test"},
+    )
+    assert [
+        (
+            item["fromArticleId"],
+            item["toArticleId"],
+            item["suggestedType"],
+            item["status"],
+        )
+        for item in assertions
+    ] == [
+        (
+            "law-test-article-5",
+            "law-order-article-2_13",
+            "IMPLEMENTS",
+            "unverified",
+        )
+    ]
+
+
+def test_delegation_edges_do_not_resolve_other_laws_douhou_as_parent_law():
+    parent = {
+        **_document("179", "第百七十九条 審判手続を定める。"),
+        "title": "金融商品取引法",
+    }
+    subordinate = {
+        **_document(
+            "7",
+            "会社法第百七十九条第二項に規定する請求に併せて、"
+            "同法第百七十九条第三項の請求をする。",
+        ),
+        "documentId": "law-order",
+        "contentUnitId": "law-order-article-7",
+        "title": "金融商品取引法施行令",
+    }
+
+    edges = _delegation_edges(
+        [parent, subordinate],
+        {"law-test": "law-test", "law-order": "law-test"},
+    )
+
+    assert edges == []
+
+
+def test_delegation_edges_resolve_douhou_after_explicit_parent_law_title():
+    parent = {
+        **_document("179", "第百七十九条 審判手続を定める。"),
+        "title": "金融商品取引法",
+    }
+    subordinate = {
+        **_document(
+            "7",
+            "金融商品取引法第百七十九条第二項に規定する手続について、"
+            "同法第百七十九条第三項を適用する。",
+        ),
+        "documentId": "law-order",
+        "contentUnitId": "law-order-article-7",
+        "title": "金融商品取引法施行令",
+    }
+
+    edges = _delegation_edges(
+        [parent, subordinate],
+        {"law-test": "law-test", "law-order": "law-test"},
+    )
+
+    assert [(edge["fromGraphNodeId"], edge["toGraphNodeId"]) for edge in edges] == [
+        ("law-order-article-7", "law-test-article-179")
     ]
 
 
@@ -119,13 +189,21 @@ def test_delegation_edges_link_ordinance_order_references():
         (edge["fromGraphNodeId"], edge["toGraphNodeId"], edge["edgeType"])
         for edge in edges
     }
+    assertions = _delegation_relation_assertions(
+        [act, order, ordinance],
+        {
+            "law-test": "law-test",
+            "law-order": "law-test",
+            "law-ordinance": "law-test",
+        },
+    )
     assert (
         "law-order-article-1_7",
         "law-ordinance-article-13",
         "IMPLEMENTS",
     ) in {
-        (edge["fromGraphNodeId"], edge["toGraphNodeId"], edge["edgeType"])
-        for edge in edges
+        (item["fromArticleId"], item["toArticleId"], item["suggestedType"])
+        for item in assertions
     }
 
 

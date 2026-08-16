@@ -9,7 +9,8 @@ from app.graph_client import GraphClient
 
 
 class _FakeResult(list):
-    pass
+    def consume(self) -> None:
+        return None
 
 
 class _FakeTransaction:
@@ -68,6 +69,63 @@ def client(monkeypatch: pytest.MonkeyPatch) -> tuple[GraphClient, dict[str, Any]
 
 
 class TestBatchTraversal:
+    def test_seed_nodes_uses_unwind_batch(
+        self, client: tuple[GraphClient, dict[str, Any]]
+    ) -> None:
+        graph, recorder = client
+        graph.seed_nodes(
+            [
+                {"graphNodeId": "law-a-article-1", "nodeType": "Article"},
+                {"graphNodeId": "law-a-article-2", "nodeType": "Article"},
+            ]
+        )
+        assert "UNWIND $rows AS row" in recorder["query"]
+        assert ":GraphNode:Article" in recorder["query"]
+        assert len(recorder["kwargs"]["rows"]) == 2
+
+    def test_seed_edges_uses_unwind_batch(
+        self, client: tuple[GraphClient, dict[str, Any]]
+    ) -> None:
+        graph, recorder = client
+        graph.seed_edges(
+            [
+                {
+                    "graphEdgeId": "edge-1",
+                    "edgeType": "REFERENCES",
+                    "fromGraphNodeId": "law-a-article-1",
+                    "toGraphNodeId": "law-a-article-2",
+                },
+                {
+                    "graphEdgeId": "edge-2",
+                    "edgeType": "REFERENCES",
+                    "fromGraphNodeId": "law-a-article-2",
+                    "toGraphNodeId": "law-a-article-1",
+                },
+            ]
+        )
+        assert "UNWIND $rows AS row" in recorder["query"]
+        assert "[r:REFERENCES" in recorder["query"]
+        assert "MATCH (from:GraphNode" in recorder["query"]
+        assert "MATCH (to:GraphNode" in recorder["query"]
+        assert len(recorder["kwargs"]["rows"]) == 2
+
+    def test_seed_edges_rejects_invalid_type_before_writing(
+        self, client: tuple[GraphClient, dict[str, Any]]
+    ) -> None:
+        graph, recorder = client
+        with pytest.raises(ValueError, match="Invalid edgeType"):
+            graph.seed_edges(
+                [
+                    {
+                        "graphEdgeId": "edge-1",
+                        "edgeType": "REFERENCES] DELETE n",
+                        "fromGraphNodeId": "law-a-article-1",
+                        "toGraphNodeId": "law-a-article-2",
+                    }
+                ]
+            )
+        assert recorder == {}
+
     def test_multiple_edge_types_use_relationship_union(
         self, client: tuple[GraphClient, dict[str, Any]]
     ) -> None:
@@ -146,6 +204,13 @@ class TestAssertionsAndInventory:
         graph, recorder = client
         graph.relation_assertions_from(["law-a-article-27_2"])
         assert "RelationAssertion" in recorder["query"]
+        assert "assertion.status IN $visibleStatuses" in recorder["query"]
+        assert recorder["kwargs"]["visibleStatuses"] == [
+            "unverified",
+            "llm_classified_uncertain",
+            "llm_classified_implements",
+        ]
+        assert "coalesce(to.clearanceLevel, 3)" in recorder["query"]
         assert recorder["kwargs"]["fromArticleIds"] == ["law-a-article-27_2"]
 
     def test_empty_inputs_short_circuit(
@@ -155,3 +220,77 @@ class TestAssertionsAndInventory:
         assert graph.relation_assertions_from([]) == []
         assert graph.paths_from_many([]) == []
         assert recorder == {}
+
+    def test_touching_assertions_query_checks_both_endpoints_and_clearance(
+        self, client: tuple[GraphClient, dict[str, Any]]
+    ) -> None:
+        graph, recorder = client
+        graph.relation_assertions_touching(
+            ["law-a-article-27_2"],
+            suggested_types=["IMPLEMENTS"],
+            user_clearance_level=2,
+            timeout_sec=1.5,
+        )
+        assert "assertion.fromArticleId IN $articleIds" in recorder["query"]
+        assert "assertion.toArticleId IN $articleIds" in recorder["query"]
+        assert "assertion.status IN $visibleStatuses" in recorder["query"]
+        assert recorder["kwargs"]["visibleStatuses"] == [
+            "unverified",
+            "llm_classified_uncertain",
+            "llm_classified_implements",
+        ]
+        assert "coalesce(from.clearanceLevel, 3)" in recorder["query"]
+        assert "coalesce(to.clearanceLevel, 3)" in recorder["query"]
+        assert recorder["kwargs"]["suggestedTypes"] == ["IMPLEMENTS"]
+        assert recorder["kwargs"]["userClearanceLevel"] == 2
+        assert recorder["timeout"] == 1.5
+
+    def test_touching_formal_relations_query_checks_both_directions(
+        self, client: tuple[GraphClient, dict[str, Any]]
+    ) -> None:
+        graph, recorder = client
+        graph.article_relations_touching(
+            ["law-a-article-27_2"],
+            edge_types=["REFERENCES", "IMPLEMENTS"],
+            user_clearance_level=2,
+            timeout_sec=1.5,
+        )
+        assert "from.graphNodeId = articleId" in recorder["query"]
+        assert "to.graphNodeId = articleId" in recorder["query"]
+        assert "from.graphNodeId STARTS WITH articleId + '-'" in recorder["query"]
+        assert "to.graphNodeId STARTS WITH articleId + '-'" in recorder["query"]
+        assert "type(relation) IN $edgeTypes" in recorder["query"]
+        assert recorder["kwargs"]["edgeTypes"] == ["REFERENCES", "IMPLEMENTS"]
+        assert recorder["kwargs"]["userClearanceLevel"] == 2
+        assert recorder["timeout"] == 1.5
+
+    def test_touching_formal_relations_rejects_unimplemented_type(
+        self, client: tuple[GraphClient, dict[str, Any]]
+    ) -> None:
+        graph, _ = client
+        with pytest.raises(ValueError):
+            graph.article_relations_touching(
+                ["law-a-article-1"],
+                edge_types=["EXCEPTION_TO"],
+            )
+
+    def test_touching_assertions_rejects_unimplemented_type(
+        self, client: tuple[GraphClient, dict[str, Any]]
+    ) -> None:
+        graph, _ = client
+        with pytest.raises(ValueError):
+            graph.relation_assertions_touching(
+                ["law-a-article-1"],
+                suggested_types=["EXCEPTION_TO"],
+            )
+
+    def test_classification_updates_only_assertion_properties(
+        self, client: tuple[GraphClient, dict[str, Any]]
+    ) -> None:
+        graph, recorder = client
+        graph.update_relation_classifications(
+            [{"assertionId": "assertion-1", "status": "llm_classified_implements"}]
+        )
+        assert "MATCH (assertion:RelationAssertion" in recorder["query"]
+        assert "SET assertion += item" in recorder["query"]
+        assert "MERGE" not in recorder["query"]

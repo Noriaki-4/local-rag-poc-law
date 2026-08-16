@@ -1,10 +1,11 @@
-"""条文本文とGraph関係から、法令間関係の種類・信頼度・子Requirementを決める。
+"""条文本文とGraph関係から、語句シグナルと旧経路用の子Requirementを得る。
 
 計画書 §6.1(IMPLEMENTSの段階的confidence)、§8.4(子Requirementの生成)、§9.5(充足)に対応する。
 
-ここに置くのは本文の手掛かり検出と関係判定だけで、外部I/Oは持たない。seed(Graph構築時)と
-探索ループ(実行時)の双方が同じ規則を使うことで、「seedされるエッジ」と「検索で使うエッジ」の
-定義がずれないようにする(§6.3-13)。
+ここに置くのは本文の決定的な手掛かり検出と旧レイヤー探索の補助規則だけで、外部I/Oは持たない。
+schema version 5のseedは`assess_implements`のconfidenceで正式IMPLEMENTSを作らず、検出した
+語句を未確認RelationAssertionの監査シグナルとしてだけ保存する。法的関係の確定は両端本文を
+読んだLLMが案件内で行う。
 """
 
 import re
@@ -26,9 +27,9 @@ from .legal_ontology import (
     REFERENCE_KIND_APPLICATION,
     REFERENCE_KIND_ARTICLE_REFERENCE,
     REFERENCE_KIND_DEFINITION,
-    REFERENCE_KIND_DELEGATION_PARENT,
     REFERENCE_KIND_EXCEPTION,
     REFERENCE_KIND_FORM_OR_TABLE,
+    REFERENCE_KIND_PARENT_LAW_REFERENCE,
     REFERENCE_ONLY_CONFIDENCE,
     edge_spec,
     implements_confidence,
@@ -59,13 +60,20 @@ ALL_DELEGATION_CUES: tuple[str, ...] = tuple(
 
 # 下位法令側の具体化表現。単純な条文参照と区別する。
 SPECIFICATION_CUES: tuple[str, ...] = (
-    "に規定する",
     "の規定により",
     "の規定による",
     "で定めるもの",
     "で定める事項",
     "で定める場合",
     "で定めるところにより",
+)
+
+# 「A条に規定するX」という定義上の単純参照は、A条を具体化する関係ではない。
+# 下位法令が参照先を受けて何を定めるかまで同じ局所文脈に現れる場合だけ、
+# 具体化表現として扱う。
+REFERENCE_SPECIFICATION_PATTERN = re.compile(
+    r"に規定する[^。\n]{0,50}"
+    r"(?:事項|方式|方法|条件|要件|もの|場合)を定める"
 )
 
 APPLICATION_CUES: tuple[str, ...] = ("準用", "読み替え")
@@ -88,7 +96,7 @@ ITEM_PARAGRAPH_PATTERN = re.compile(r"第[0-9一二三四五六七八九十百�
 
 @dataclass(frozen=True)
 class ImplementsAssessment:
-    """親条文→下位法令条文の委任関係の判定結果。"""
+    """親・下位条文にある委任候補語句の検出結果（正式関係ではない）。"""
 
     confidence: float
     delegation_wording_detected: bool
@@ -118,7 +126,11 @@ def has_delegation_wording(text: str, authority_type: str | None = None) -> bool
 
 
 def has_specification_wording(text: str) -> bool:
-    return any(cue in text for cue in SPECIFICATION_CUES)
+    return (
+        any(cue in text for cue in SPECIFICATION_CUES)
+        or any(cue in text for cue in ALL_DELEGATION_CUES)
+        or bool(REFERENCE_SPECIFICATION_PATTERN.search(text))
+    )
 
 
 def assess_implements(
@@ -129,16 +141,18 @@ def assess_implements(
     same_family: bool,
     manual: bool = False,
 ) -> ImplementsAssessment:
-    """委任関係の確からしさを段階化する(§6.1)。
+    """委任候補の語句シグナルを旧confidence形式で返す(§6.1)。
 
-    下位法令が親条文を参照するだけでは IMPLEMENTS にしない。親条文側の委任文言か、
-    少なくとも同一法令系統かつ下位法令側の具体化表現を確認する。
+    schema version 5のseedではconfidenceを候補の採否・昇格に使わない。旧レイヤー探索との
+    互換性を保ちながら、親条文側の委任文言と下位法令側の具体化表現を観測する。
     """
     delegation = has_delegation_wording(parent_text, child_authority_type)
     specification = has_specification_wording(child_text)
+    # 親条文のどこかに委任文言があるだけでは足りない。下位法令側の当該参照箇所にも
+    # 具体化表現がなければ、単純REFERENCESとして残す。
     confidence = implements_confidence(
         manual=manual,
-        delegation_wording=delegation,
+        delegation_wording=delegation and specification,
         same_family=same_family,
         specification_wording=specification,
     )
@@ -152,7 +166,7 @@ def assess_implements(
 def classify_reference_kind(source_text: str, *, is_parent_law_reference: bool = False) -> str:
     """REFERENCESへ付与する参照の種類を決める(§6.1)。"""
     if is_parent_law_reference:
-        return REFERENCE_KIND_DELEGATION_PARENT
+        return REFERENCE_KIND_PARENT_LAW_REFERENCE
     if any(cue in source_text for cue in APPLICATION_CUES):
         return REFERENCE_KIND_APPLICATION
     if any(cue in source_text for cue in FORM_CUES):
