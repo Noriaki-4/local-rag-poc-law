@@ -180,6 +180,33 @@
   終了判断時間を予約し、予算由来の中間timeoutは`cycle_step_timeout`としてCycle終了判断へ渡す。
   状態型・Context・Provider schema・Prompt・Profile version・設定は実装へ反映済み。検証は利用者指示により
   未実施で、既存fixtureの新契約への更新と非APIテスト・実モデル評価は次の作業とする。
+- Legal Profile v45: v44の公開買付け実測では、Cycle 1の本文取得枠消費後に未評価Graph候補が残ったが、
+  Solverが全WorkItemをclosedへ修復し、limitationsでは関連府令未確認と記載したまま8/11でfinalizeした。
+  契約修復Promptから「全open WorkItemを閉じる」という近道を除き、未確認事項・gaps・limitationsを保って
+  通常判断へ戻すよう変更した。Cycle境界の未評価Graph候補群には`UnreviewedGraphResolution`を必須とし、
+  `review_next_cycle / no_longer_needed / unresolved_at_limit`と次動作の構造整合だけをProgramが検証する。
+  `answer.limitations`は未確認事項専用とし、対応するopen WorkItemとunresolved Hypothesisの既知IDを
+  `unresolved_work_item_ids / unresolved_hypothesis_ids`へ必須化した。次Cycleを開始可能な通常finalizeでは
+  未解決scopeを許さず、上限時はWorkItemを偽ってclosedにせず限定回答として保持できる。
+- Legal Profile v46: v45実測は、未知Evidence ID、未評価Graph方針欠落、open WorkItem finalizeが
+  fail-fast検証で順番に1件ずつ現れ、3回の契約試行を使い切って停止した。Cycle境界で
+  `remaining_unreviewed_count > 0`ならProvider schemaから`unreviewed_graph_resolution=null`を除外する。
+  同一Decisionの未知Article ID、未知Evidence ID、未評価Graph方針欠落、open WorkItem finalizeを
+  構造preflightでまとめて差し戻す。open-finalize違反の修復時に次Cycleを開始可能なら、Provider schemaを
+  `next=continue / start_next_cycle=true / answer=null / tool_requests=[]`へ限定し、未評価Graph候補があれば
+  `review_next_cycle`を必須にする。Programは法的必要性を判定せず、既知IDと状態遷移の矛盾だけを扱う。
+- Legal Profile v47: v46実測では、open WorkItemの修復時に、一度修復済みだった未知Evidence IDを
+  Solverが再生成した。open-finalize違反まで到達した直前Decisionの`CaseUpdate`は、それ以前の検査を
+  通過済みなので、修復呼出しのProvider schemaで単一候補として維持する。修復対象はCycle遷移と
+  未評価Graph候補の扱いに限定し、ProgramはEvidenceの意味やWorkItemの完了状態を変更しない。
+- Legal Profile v48: v47実測では、初回Decisionが追加したWorkItem・HypothesisのIDと、同じDecisionの
+  focus・ToolRequestが参照したIDに表記ずれが生じた。focus、ToolのWorkItem、ToolのHypothesisを
+  構造preflightで同時に検査して一括差し戻しし、修復呼出しのfocus候補を直前Decisionに実在する
+  open WorkItemへschema制限する。Programは参照先を選ばず、Solverが既知候補から選択する。
+- Legal Profile v49: v48実測では、open-finalize修復で検証済み`CaseUpdate`全体を長いJSON文字列enumとして
+  再出力させた結果、Anthropic輸送が`invalid_json`になった。修復呼出しは`update_json={}`だけを返し、
+  Adapterが直前Solver Decisionの`CaseUpdate`を同一内容のまま復元する。LLMの意味判断を変更せず、
+  冗長な再出力と再生成による参照破損を防ぐ。
 
 Phase 1の契約テストは`agent-api/tests/test_agent_framework.py`を正本とする。
 
@@ -410,8 +437,9 @@ Solverは1回の`continue_cycle`で複数のToolRequestを返せる。
 
 `cycle_budget_reached=true`または`cycle_step_limit_reached=true`でも残りCycle・総step・時間がある場合、
 Solverは現方針の結果と
-変更した`cycle_plan`を示して`start_next_cycle`を選べる。同じ方針のstep上限をリセットする目的では
-使わず、次Cycleで確かめる命題、取得済みEvidenceの評価、再採用するfrontierを明示する。
+次Cycleで確かめる命題を示して`start_next_cycle`を選べる。仮説・探索方針の仕切り直しに加え、
+Cycleの本文取得枠が尽きても必要と判断した未取得Evidenceが残る場合も対象とする。単なるTool終了や
+Graph 1ホップ完了だけを理由にせず、取得済みEvidenceの評価と引き継ぐfrontierを明示する。
 Cycle回数、総step、全体時間のいずれかで新しいToolを実行できない場合だけ
 `finalize_only=true`とし、`continue_cycle / start_next_cycle`のToolRequestを禁止する。
 
@@ -736,6 +764,7 @@ statusは「実行事実」と「意味判断」を分離する。同じ文字�
 | WorkItem | `open / resolved / dropped` | Solver |
 | Hypothesis | `supported / contradicted / unresolved` | Solver |
 | Frontier action | `select / defer / reject` | Solver |
+| Deferred Frontier resolution | `fetch_next_cycle / carry_forward / no_longer_needed / unresolved_at_limit` | Solver |
 | 外部依存の確認 | `not_required / needs_action / resolved` | Solver |
 | Review | `accept / revise` | Reviewer |
 
@@ -781,6 +810,10 @@ Solverが決める意味status・action:
 | Frontier `select` | この候補を次の仮説検証行動へ採用する |
 | Frontier `defer` | 現在の質問・Hypothesisに関連するが、今回の本文取得枠に入れず後続Cycle候補として保留する |
 | Frontier `reject` | 現在の質問・Hypothesisには関係しないと判断し、理由付きで候補から外す |
+| `fetch_next_cycle` | 保留候補を次Cycle最初の本文取得に含める |
+| `carry_forward` | 取得上限等によりactive候補のまま次Cycle以降へ保持する |
+| `no_longer_needed` | 後続Evidenceを踏まえ、質問への回答には不要と判断する |
+| `unresolved_at_limit` | 新しいCycleを開始できない上限時に未確認として残し、limitationsへ示す |
 
 `supported`はWorkItem全体の完了を意味せず、`content=succeeded`や`expansion=complete`から
 プログラムが自動生成してはならない。Decisionに現れないfrontierは`reject`と解釈しない。
@@ -843,6 +876,14 @@ class FrontierReAdoption:
     hypothesis_id: str
     reason: str
 
+class DeferredFrontierResolution:
+    frontier_item_id: str
+    article_id: str
+    work_item_id: str
+    hypothesis_id: str | None
+    action: Literal["fetch_next_cycle", "carry_forward", "no_longer_needed", "unresolved_at_limit"]
+    reason: str
+
 class SolverDecision:
     next: Literal["continue_cycle", "start_next_cycle", "finalize"]
     cycle_plan: CyclePlan | None
@@ -852,6 +893,7 @@ class SolverDecision:
     retain_evidence_ids: list[str]
     frontier_decisions: list[FrontierDecision]
     frontier_re_adoptions: list[FrontierReAdoption]
+    deferred_frontier_resolutions: list[DeferredFrontierResolution]
     tool_requests: list[ToolRequest]
     dependency_decisions: list[DependencyDecision]
     answer: str | None
@@ -886,7 +928,23 @@ class SolverDecision:
   通常integrationのCycle終了・追加検索・完了判断へ戻す。
 - `start_next_cycle`は現在Cycleを閉じる評価と次の`cycle_plan`を持つ。次Cycleの最初のToolRequestを
   同じDecisionに含めてもよいが、保存上は前Cycleを閉じてから次Cycleと最初のStepを作る。
-- `finalize`ではToolRequestを持たず、回答を持つ。
+- Cycle境界で未評価Graph候補だけを引き継ぐ場合は、ToolRequestなしの`start_next_cycle`を許す。
+  次Cycleの取得枠を確立してから差分Graph Reviewを行い、枠0の状態で全候補へdeferを強制しない。
+  `remaining_unreviewed_count > 0`のCycle境界では`UnreviewedGraphResolution`を必須とする。
+  `review_next_cycle`は`continue + start_next_cycle`、`no_longer_needed`は通常finalize、
+  `unresolved_at_limit`は次Cycle不能の限定finalizeだけに対応させる。候補の必要性はSolverが判断し、
+  Programは候補数が残る事実、actionと次動作の組合せだけを検証する。
+- `start_next_cycle`または`finalize`では、本文未取得のactiveな`relevant_deferred`全件に
+  `DeferredFrontierResolution`をちょうど1件ずつ持つ。Programは既知frontier・Article・WorkItem・Hypothesis
+  の完全一致、全件性、actionと次動作の参照整合だけを検証し、法的な必要性や理由の妥当性は検証しない。
+- `fetch_next_cycle`は`start_next_cycle`と同じDecisionで選び、Programが既知Article IDを
+  次Cycle最初の一括本文取得へ機械転記する。Solverは同じToolRequestを二重指定しない。
+  `carry_forward`は`start_next_cycle`を必要とするが、同じDecisionの本文取得枠には含めずactive候補として残す。
+  `unresolved_at_limit`は新しいCycleを開始できない最終化時だけ許可し、limitationsを必須とする。
+- `finalize`ではToolRequestを持たず、回答を持つ。通常finalizeでは全WorkItemをclosedにし、
+  `limitations / unresolved_work_item_ids / unresolved_hypothesis_ids`を空にする。上限等により次Cycleを
+  開始できない限定finalizeでは、未完了WorkItemをopen、Hypothesisをunresolvedのまま保ち、
+  limitationsと両ID欄を相互参照させる。一般的な注意書きはlimitationsではなく回答本文へ記載する。
 - 取得済み情報だけで最初から`finalize`する場合はCycleを作らず、`research_cycle_count`も増やさない。
 - 新規IDはCase内で一意、更新IDは既知でなければならない。
 - WorkItemの親IDは同じCaseに存在し、親子関係を循環させない。
@@ -937,8 +995,9 @@ ToolRequestを追加する。観点が不足していた場合も、既存WorkIt
 
 局所的なHypothesis追加、検索語変更、WorkItem追加で現在のCycle goal・strategyを維持できるなら
 `continue_cycle`を選ぶ。初期分解の主要部分が質問を覆っていない、中心Hypothesisの反証で現在の
-作業構造が成立しない、または検索起点・法令階層の前提を変える必要がある場合だけ
-`start_next_cycle`を選ぶ。Tool終了、Graphの1ホップ完了、step上限のリセットだけを理由にしない。
+作業構造が成立しない、検索起点・法令階層の前提を変える必要がある、またはCycle取得枠が尽きても
+必要と判断した未取得Evidenceが残る場合に`start_next_cycle`を選ぶ。Tool終了やGraphの1ホップ完了
+だけを理由にしない。
 
 Solverは影響を受けるWorkItemごとに、次を明示する。
 
@@ -1331,11 +1390,16 @@ LLMが入出力するJSON Schemaに`enum`を載せるだけでは、値の意味
   Decisionに現れないfrontierはrejectせずunreviewedのまま残す。
 - graph_review_ledgerの評価済みNodeを新しいHypothesisの検証に使う場合は、
   frontier_re_adoptionsにNode・WorkItem・Hypothesis・理由を明示する。Programに自動転用を要求しない。
+- Cycle境界では、本文未取得のactiveなrelevant_deferred全件へdeferred_frontier_resolutionsを返す。
+  fetch_next_cycleは次Cycle最初の本文取得、carry_forwardは次Cycle以降への保持、no_longer_neededは回答に不要との意味判断、
+  unresolved_at_limitは次Cycleを開始できない上限時の未確認を表す。Programは既知ID、全件性、
+  actionと次動作の参照整合だけを検証し、どのactionが法的に妥当かは判断しない。
 - impact retainはWorkItemを維持して前提を差替え、replaceは旧WorkItemをdroppedにして新IDへ置換し、
   dropは不要として閉じる。これらは新たにcontradictedとなったbasisの影響をSolverが判断する値である。
 - 観察後に、元の利用者質問に対するWorkTreeの範囲、重複、反証Hypothesisの影響を監査する。局所的な
   Hypothesis・WorkItem・ToolRequestの追加で現在方針を維持できるならcontinue_cycleを選ぶ。初期分解の
-  主要部分、中心仮説、検索起点または対象階層の前提を変える必要がある場合だけstart_next_cycleを選ぶ。
+  主要部分、中心仮説、検索起点または対象階層の前提を変える必要がある場合、またはCycle取得枠が尽きても
+  必要と判断した未取得Evidenceが残る場合にstart_next_cycleを選ぶ。
 - cycle_budget_reached=true、cycle_step_limit_reached=true、またはcycle_close_required=trueなら、
   現Cycleに新しいToolRequestを追加しない。直前までのToolResultを評価し、WorkItem・Hypothesisを更新する。
   完了できるならfinalize、未解決で残りCycle予算があるなら、次Cycleで確かめる命題、
@@ -1418,7 +1482,10 @@ status追加・名称変更時は、型、Prompt語彙、Profile version、schem
 | `solver_graph_review.md` | 各batchの全候補をWorkItem・Hypothesis別に評価し、最大3件を`select`、関連する残りを`defer`、無関係と判断したものだけを`reject`する。 |
 | `solver_graph_review.md` | `remaining_fetch_capacity=0`なら新たにselectせず、関連候補をdeferしてCycle終了判断へ戻す。Graph Reviewから直接次Cycleの法的方針を決めない。 |
 | `solver_integration.md` | Cycle上限に達したら、直前までのToolResultを評価し、Hypothesis・WorkItem・Evidence・Graph ledgerを整理した後に、finalizeまたは次Cycleのgoal・strategy・再採用frontierを返す。 |
+| `solver_integration.md` | Cycle境界でactiveな`relevant_deferred`全件を`fetch_next_cycle / carry_forward / no_longer_needed / unresolved_at_limit`のいずれかへ明示し、黙って破棄しない。 |
 | Provider schema | Review判断対象は現在のbatch、本文取得へ選べるIDはbatchの候補とledgerの`relevant_deferred`、再試行時の`selected + failed/timeout`に制限する。選択上限は`min(3, remaining_fetch_capacity)`とする。`rejected`は新Link差分でbatchへ再提示された場合を除き同じHypothesisで再選択させず、別Hypothesisへの`frontier_re_adoptions`はledgerの既知Nodeと既知のopen WorkItem・Hypothesisだけを許可する。候補の関連性や優先度はschemaまたはProgramで補正しない。 |
+| Provider schema | Deferred解消はledgerの既知IDだけを許可する。Programは全件性と次動作との矛盾だけを拒否し、関連性・必要性を補正しない。 |
+| Provider schema | Graph Reviewモードで必ず空になるdependency、re-adoption、deferred解消、answerは空配列またはnullの簡易schemaとし、未使用の動的enumをコンパイルさせない。 |
 
 Prompt契約テストでは、旧の「累積catalogを毎回全件読む」「未取得関連候補がある限り
 同じCycleでReviewを繰り返す」「Graph Reviewごとに最大4件選ぶ」という指示が残っていないことも検査する。
@@ -1650,7 +1717,9 @@ context組立ては、全WorkTree案内、現Cycleのgoal・strategy、直前Ste
 - 不足観点のfixtureでは既存WorkItemをreplaceせず、子または兄弟WorkItemを追加できる。
 - 問い自体が不適切なfixtureだけで旧部分木を閉じ、新しい部分木へreplaceできる。
 - プログラムがHypothesisの意味statusを書き換えない。
-- `finalize`時にopen WorkItemが残る契約違反を拒否するが、終了状態やresolutionの意味は選ばない。
+- 通常の`finalize`時にopen WorkItemが残る契約違反を拒否する。上限時の限定回答だけ、limitationsと
+  unresolved ID欄が全open WorkItem・対応unresolved Hypothesisを漏れなく参照する場合に保持を許す。
+  Programは未確認事項の法的内容や、Graph候補が本当に不要かは判断しない。
 - 未知ID、不正Tool、権限外Tool、上限超過だけを拒否する。
 - Reviewerの既定値が無効である。
 

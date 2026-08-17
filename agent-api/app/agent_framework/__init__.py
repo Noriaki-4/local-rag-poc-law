@@ -17,6 +17,7 @@ from .profiles import (
 )
 from .state import (
     CaseState,
+    DeferredFrontierResolution,
     Evidence,
     FinalAnswer,
     FrontierReAdoption,
@@ -27,6 +28,7 @@ from .state import (
     ReviewResult,
     ToolRequest,
     ToolResult,
+    UnreviewedGraphResolution,
     WorkItem,
 )
 from .store import CaseStore
@@ -38,6 +40,7 @@ __all__ = [
     "CaseState",
     "CaseStore",
     "CaseUpdate",
+    "DeferredFrontierResolution",
     "Evidence",
     "FinalAnswer",
     "FrontierReAdoption",
@@ -53,6 +56,7 @@ __all__ = [
     "SolverDecision",
     "ToolRequest",
     "ToolResult",
+    "UnreviewedGraphResolution",
     "WorkItem",
     "WorkItemImpactDecision",
     "WorkItemUpdate",

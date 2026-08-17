@@ -44,6 +44,10 @@ def apply_solver_decision(
     graph_selectable_frontiers: Mapping[
         str, tuple[str, str, str | None]
     ] | None = None,
+    deferred_frontiers: Mapping[
+        str, tuple[str, str, str | None]
+    ] | None = None,
+    unreviewed_graph_candidate_count: int = 0,
     remaining_fetch_capacity: int | None = None,
     cycle_close_required: bool = False,
     can_start_next_cycle: bool = True,
@@ -76,6 +80,13 @@ def apply_solver_decision(
         raise ContractViolation("tool request count exceeds the step limit")
     if len(decision.retain_evidence_ids) > limits.max_retained_evidence:
         raise ContractViolation("retained evidence count exceeds the profile limit")
+
+    _raise_preflight_contract_violations(
+        state,
+        decision,
+        fetchable_article_ids=fetchable_article_ids,
+        unreviewed_graph_candidate_count=unreviewed_graph_candidate_count,
+    )
 
     _require_unique_state_ids(state)
     work_items = {item.work_item_id: item for item in state.work_items}
@@ -318,9 +329,145 @@ def apply_solver_decision(
                     "Article body fetch request contains duplicate Article IDs"
                 )
 
+    expected_deferred = dict(deferred_frontiers or {})
+    deferred_resolutions = decision.deferred_frontier_resolutions
+    resolution_ids = [item.frontier_item_id for item in deferred_resolutions]
+    if len(resolution_ids) != len(set(resolution_ids)):
+        raise ContractViolation("deferred Frontier resolutions must be unique")
+    cycle_boundary = decision.next == "finalize" or decision.start_next_cycle
+    if deferred_resolutions and not cycle_boundary:
+        raise ContractViolation(
+            "deferred Frontier resolutions are allowed only at a Cycle boundary"
+        )
+    if cycle_boundary and set(resolution_ids) != set(expected_deferred):
+        missing = sorted(set(expected_deferred) - set(resolution_ids))
+        extra = sorted(set(resolution_ids) - set(expected_deferred))
+        raise ContractViolation(
+            "Cycle boundary must resolve every active deferred Frontier; "
+            f"missing={missing}, extra={extra}"
+        )
+    fetched_article_ids = {
+        article_id
+        for request in decision.tool_requests
+        if request.tool_name == graph_review_fetch_tool_name
+        for article_id in request.arguments.get("article_ids", ())
+        if isinstance(article_id, str)
+    }
+    next_cycle_article_ids = {
+        item.article_id
+        for item in deferred_resolutions
+        if item.action == "fetch_next_cycle"
+    }
+    if len(next_cycle_article_ids) > limits.max_fetched_resources_per_cycle:
+        raise ContractViolation(
+            "fetch_next_cycle Article count exceeds the next Cycle capacity"
+        )
+    if next_cycle_article_ids and fetched_article_ids and (
+        fetched_article_ids != next_cycle_article_ids
+    ):
+        raise ContractViolation(
+            "Cycle-start Article fetch conflicts with fetch_next_cycle resolutions"
+        )
+    if (
+        next_cycle_article_ids
+        and not fetched_article_ids
+        and len(decision.tool_requests) + 1 > limits.max_tool_requests_per_step
+    ):
+        raise ContractViolation(
+            "projected Cycle-start Article fetch exceeds the step Tool limit"
+        )
+    for resolution in deferred_resolutions:
+        expected = expected_deferred.get(resolution.frontier_item_id)
+        actual = (
+            resolution.article_id,
+            resolution.work_item_id,
+            resolution.hypothesis_id,
+        )
+        if actual != expected:
+            raise ContractViolation(
+                "deferred Frontier resolution references do not match the ledger"
+            )
+        if resolution.action == "fetch_next_cycle":
+            if not decision.start_next_cycle:
+                raise ContractViolation(
+                    "fetch_next_cycle requires start_next_cycle=true"
+                )
+            target = work_items.get(resolution.work_item_id)
+            if target is None or target.state != "open":
+                raise ContractViolation(
+                    "fetch_next_cycle requires an open WorkItem"
+                )
+        elif resolution.action == "carry_forward":
+            if not decision.start_next_cycle:
+                raise ContractViolation(
+                    "carry_forward requires start_next_cycle=true"
+                )
+            target = work_items.get(resolution.work_item_id)
+            if target is None or target.state != "open":
+                raise ContractViolation(
+                    "carry_forward requires an open WorkItem"
+                )
+        elif resolution.action == "unresolved_at_limit":
+            if not (finalize_only or not can_start_next_cycle):
+                raise ContractViolation(
+                    "unresolved_at_limit is allowed only when another Cycle cannot "
+                    "start"
+                )
+            if decision.next != "finalize" or not decision.answer.limitations:
+                raise ContractViolation(
+                    "unresolved_at_limit requires finalize with limitations"
+                )
+
+    unreviewed_resolution = decision.unreviewed_graph_resolution
+    if unreviewed_graph_candidate_count and cycle_boundary:
+        if unreviewed_resolution is None:
+            raise ContractViolation(
+                "Cycle boundary must state how the unreviewed Graph candidate pool "
+                "will be handled"
+            )
+    elif unreviewed_resolution is not None:
+        if not unreviewed_graph_candidate_count:
+            raise ContractViolation(
+                "unreviewed Graph resolution requires a non-empty candidate pool"
+            )
+        if not cycle_boundary:
+            raise ContractViolation(
+                "unreviewed Graph resolution is allowed only at a Cycle boundary"
+            )
+    if unreviewed_resolution is not None:
+        if unreviewed_resolution.action == "review_next_cycle":
+            if decision.next != "continue" or not decision.start_next_cycle:
+                raise ContractViolation(
+                    "review_next_cycle requires continue with start_next_cycle=true"
+                )
+        elif unreviewed_resolution.action == "no_longer_needed":
+            if decision.next != "finalize":
+                raise ContractViolation(
+                    "no_longer_needed for an unreviewed Graph pool requires finalize"
+                )
+        elif unreviewed_resolution.action == "unresolved_at_limit":
+            if not (finalize_only or not can_start_next_cycle):
+                raise ContractViolation(
+                    "unreviewed Graph candidates may remain unresolved only when "
+                    "another Cycle cannot start"
+                )
+            if decision.next != "finalize" or not decision.answer.limitations:
+                raise ContractViolation(
+                    "unresolved unreviewed Graph candidates require finalize with "
+                    "limitations"
+                )
+
     required_graph_ids = tuple(dict.fromkeys(required_graph_review_request_ids))
     graph_review = decision.graph_candidate_review
     if required_graph_ids:
+        if deferred_resolutions:
+            raise ContractViolation(
+                "Graph Review mode cannot resolve deferred Frontiers"
+            )
+        if unreviewed_resolution is not None:
+            raise ContractViolation(
+                "Graph Review mode cannot resolve the unreviewed Graph pool"
+            )
         if decision.frontier_re_adoptions:
             raise ContractViolation(
                 "Graph Review mode cannot re-adopt another Frontier"
@@ -677,14 +824,93 @@ def apply_solver_decision(
                 f"answer cites navigation-only evidence: {sorted(navigation_citations)}"
             )
 
-    if decision.next == "finalize":
-        open_work_item_ids = sorted(
-            item.work_item_id for item in work_items.values() if item.state == "open"
+        unresolved_work_item_ids = set(decision.answer.unresolved_work_item_ids)
+        unresolved_hypothesis_ids = set(
+            decision.answer.unresolved_hypothesis_ids
         )
-        if open_work_item_ids:
+        unknown_unresolved_work_items = unresolved_work_item_ids - set(work_items)
+        if unknown_unresolved_work_items:
             raise ContractViolation(
-                "finalize requires every work item to be resolved or dropped; "
-                f"open={open_work_item_ids}"
+                "answer names unknown unresolved WorkItems: "
+                f"{sorted(unknown_unresolved_work_items)}"
+            )
+        unknown_unresolved_hypotheses = unresolved_hypothesis_ids - set(hypotheses)
+        if unknown_unresolved_hypotheses:
+            raise ContractViolation(
+                "answer names unknown unresolved Hypotheses: "
+                f"{sorted(unknown_unresolved_hypotheses)}"
+            )
+        if bool(decision.answer.limitations) != bool(unresolved_work_item_ids):
+            raise ContractViolation(
+                "answer limitations and unresolved_work_item_ids must either both "
+                "be present or both be empty"
+            )
+        if unresolved_work_item_ids and not unresolved_hypothesis_ids:
+            raise ContractViolation(
+                "limited answer requires unresolved_hypothesis_ids"
+            )
+        for hypothesis_id in unresolved_hypothesis_ids:
+            hypothesis = hypotheses[hypothesis_id]
+            if hypothesis.judgment != "unresolved":
+                raise ContractViolation(
+                    "answer unresolved Hypothesis must have judgment=unresolved: "
+                    f"{hypothesis_id}"
+                )
+            if hypothesis.work_item_id not in unresolved_work_item_ids:
+                raise ContractViolation(
+                    "answer unresolved Hypothesis must belong to a named unresolved "
+                    f"WorkItem: {hypothesis_id}"
+                )
+        unresolved_hypothesis_work_items = {
+            hypotheses[hypothesis_id].work_item_id
+            for hypothesis_id in unresolved_hypothesis_ids
+        }
+        missing_unresolved_hypotheses = (
+            unresolved_work_item_ids - unresolved_hypothesis_work_items
+        )
+        if missing_unresolved_hypotheses:
+            raise ContractViolation(
+                "each unresolved WorkItem requires an unresolved Hypothesis: "
+                f"{sorted(missing_unresolved_hypotheses)}"
+            )
+
+    if decision.next == "finalize":
+        open_work_item_ids = {
+            item.work_item_id for item in work_items.values() if item.state == "open"
+        }
+        declared_unresolved_work_item_ids = set(
+            decision.answer.unresolved_work_item_ids
+        )
+        if open_work_item_ids != declared_unresolved_work_item_ids:
+            raise ContractViolation(
+                "finalize must account for every open WorkItem as an unresolved "
+                "answer scope; "
+                f"open={sorted(open_work_item_ids)}, "
+                f"declared={sorted(declared_unresolved_work_item_ids)}"
+            )
+        if open_work_item_ids and not (finalize_only or not can_start_next_cycle):
+            raise ContractViolation(
+                "finalize cannot leave unresolved WorkItems while another Cycle can "
+                "start"
+            )
+        if (
+            unreviewed_resolution is not None
+            and unreviewed_resolution.action == "unresolved_at_limit"
+            and not open_work_item_ids
+        ):
+            raise ContractViolation(
+                "unresolved unreviewed Graph candidates require an unresolved answer "
+                "scope"
+            )
+        unresolved_deferred_work_items = {
+            item.work_item_id
+            for item in deferred_resolutions
+            if item.action == "unresolved_at_limit"
+        }
+        if not unresolved_deferred_work_items.issubset(open_work_item_ids):
+            raise ContractViolation(
+                "unresolved deferred Frontiers must reference unresolved answer "
+                "WorkItems"
             )
         declared_basis_evidence_ids = {
             evidence_id
@@ -701,6 +927,20 @@ def apply_solver_decision(
                 "final answer citations omit Evidence declared as resolved WorkItem "
                 f"basis: {sorted(missing_basis_citations)}"
             )
+
+    deferred_resolution_by_frontier = {
+        item.frontier_item_id: item
+        for item in state.deferred_frontier_resolutions
+    }
+    if graph_review is not None:
+        for item in graph_review.frontier_decisions:
+            deferred_resolution_by_frontier.pop(item.frontier_item_id, None)
+    for resolution in deferred_resolutions:
+        deferred_resolution_by_frontier[resolution.frontier_item_id] = (
+            resolution.model_copy(
+                update={"decided_cycle": max(1, state.research_cycle_count)}
+            )
+        )
 
     return _validated_copy(
         state,
@@ -723,6 +963,22 @@ def apply_solver_decision(
         frontier_re_adoptions=(
             *state.frontier_re_adoptions,
             *decision.frontier_re_adoptions,
+        ),
+        deferred_frontier_resolutions=tuple(
+            deferred_resolution_by_frontier.values()
+        ),
+        unreviewed_graph_resolutions=(
+            (
+                *state.unreviewed_graph_resolutions,
+                unreviewed_resolution.model_copy(
+                    update={
+                        "candidate_count": unreviewed_graph_candidate_count,
+                        "decided_cycle": max(1, state.research_cycle_count),
+                    }
+                ),
+            )
+            if unreviewed_resolution is not None
+            else state.unreviewed_graph_resolutions
         ),
         final_answer=decision.answer,
         updated_at=utc_now(),
@@ -909,6 +1165,152 @@ def _descendant_ids(
         descendants.extend(children)
         frontier.extend(children)
     return tuple(descendants)
+
+
+def _raise_preflight_contract_violations(
+    state: CaseState,
+    decision: SolverDecision,
+    *,
+    fetchable_article_ids: Collection[str] | None,
+    unreviewed_graph_candidate_count: int,
+) -> None:
+    """独立した主要違反を一括提示し、修復の逐次エラー化を防ぐ。"""
+
+    violations: list[str] = []
+    projected_states = {
+        item.work_item_id: item.state for item in state.work_items
+    }
+    parent_by_id = {
+        item.work_item_id: item.parent_work_item_id for item in state.work_items
+    }
+    for item in decision.update.add_work_items:
+        projected_states[item.work_item_id] = item.state
+        parent_by_id[item.work_item_id] = item.parent_work_item_id
+    for item in decision.update.update_work_items:
+        if item.work_item_id in projected_states:
+            projected_states[item.work_item_id] = item.state
+    for impact in decision.update.impact_decisions:
+        if impact.action == "retain" or impact.work_item_id not in projected_states:
+            continue
+        projected_states[impact.work_item_id] = "dropped"
+        if impact.drop_subtree:
+            pending = [impact.work_item_id]
+            while pending:
+                parent_id = pending.pop()
+                children = [
+                    work_item_id
+                    for work_item_id, candidate_parent_id in parent_by_id.items()
+                    if candidate_parent_id == parent_id
+                ]
+                for child_id in children:
+                    if projected_states.get(child_id) == "open":
+                        projected_states[child_id] = "dropped"
+                    pending.append(child_id)
+
+    invalid_focus_ids = {
+        work_item_id
+        for work_item_id in decision.next_focus_work_item_ids
+        if projected_states.get(work_item_id) != "open"
+    }
+    if invalid_focus_ids:
+        violations.append(
+            "focus must reference open WorkItem IDs: "
+            f"{sorted(invalid_focus_ids)}"
+        )
+
+    invalid_tool_work_item_ids = {
+        request.work_item_id
+        for request in decision.tool_requests
+        if projected_states.get(request.work_item_id) != "open"
+    }
+    if invalid_tool_work_item_ids:
+        violations.append(
+            "tool requests must reference open WorkItem IDs: "
+            f"{sorted(invalid_tool_work_item_ids)}"
+        )
+
+    projected_hypothesis_ids = {
+        item.hypothesis_id for item in state.hypotheses
+    } | {
+        item.hypothesis_id for item in decision.update.add_hypotheses
+    }
+    unknown_tool_hypothesis_ids = {
+        hypothesis_id
+        for request in decision.tool_requests
+        for hypothesis_id in request.hypothesis_ids
+        if hypothesis_id not in projected_hypothesis_ids
+    }
+    if unknown_tool_hypothesis_ids:
+        violations.append(
+            "tool requests reference unknown Hypothesis IDs: "
+            f"{sorted(unknown_tool_hypothesis_ids)}"
+        )
+
+    if fetchable_article_ids is not None:
+        requested_article_ids = {
+            article_id
+            for request in decision.tool_requests
+            for article_id in request.arguments.get("article_ids", ())
+            if isinstance(article_id, str)
+        }
+        unknown_article_ids = requested_article_ids - set(fetchable_article_ids)
+        if unknown_article_ids:
+            violations.append(
+                "tool request references unknown Article IDs: "
+                f"{sorted(unknown_article_ids)}"
+            )
+
+    known_evidence_ids = {item.evidence_id for item in state.evidence}
+    decision_evidence_ids = {
+        evidence_id
+        for hypothesis in (
+            *decision.update.add_hypotheses,
+            *decision.update.update_hypotheses,
+        )
+        for evidence_id in hypothesis.evidence_ids
+    }
+    unknown_evidence_ids = decision_evidence_ids - known_evidence_ids
+    if unknown_evidence_ids:
+        violations.append(
+            "hypothesis has unknown evidence IDs: "
+            f"{sorted(unknown_evidence_ids)}"
+        )
+
+    cycle_boundary = decision.next == "finalize" or decision.start_next_cycle
+    if (
+        unreviewed_graph_candidate_count
+        and cycle_boundary
+        and decision.unreviewed_graph_resolution is None
+    ):
+        violations.append(
+            "Cycle boundary must state how the unreviewed Graph candidate pool "
+            "will be handled"
+        )
+
+    if decision.next == "finalize" and decision.answer is not None:
+        open_work_item_ids = {
+            work_item_id
+            for work_item_id, work_item_state in projected_states.items()
+            if work_item_state == "open"
+        }
+        declared_unresolved_work_item_ids = set(
+            decision.answer.unresolved_work_item_ids
+        )
+        if open_work_item_ids != declared_unresolved_work_item_ids:
+            violations.append(
+                "finalize must account for every open WorkItem as an unresolved "
+                "answer scope; "
+                f"open={sorted(open_work_item_ids)}, "
+                f"declared={sorted(declared_unresolved_work_item_ids)}"
+            )
+
+    if not violations:
+        return
+    if len(violations) == 1:
+        raise ContractViolation(violations[0])
+    raise ContractViolation(
+        "multiple contract violations: " + " | ".join(violations)
+    )
 
 
 def _require_unique_state_ids(state: CaseState) -> None:

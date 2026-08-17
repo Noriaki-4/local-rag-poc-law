@@ -71,9 +71,12 @@ class StructuredJSONModelAdapter:
                 )
             else:
                 try:
-                    decision = SolverDecision.model_validate(
-                        _normalize_solver_payload(result.payload)
-                    )
+                    normalized = _normalize_solver_payload(result.payload)
+                    if _preserve_previous_update_for_cycle_repair(context):
+                        normalized["update"] = (
+                            context.contract_feedback.previous_decision.update
+                        )
+                    decision = SolverDecision.model_validate(normalized)
                     return SolverCallResult(
                         decision=decision,
                         input_tokens=(input_tokens if input_tokens_known else None),
@@ -140,11 +143,22 @@ def _solver_prompt(context: SolverContext, system_prompt: str) -> str:
         contract_repair_instruction = (
             "\nこれは状態へ未適用のDecisionに対する契約修復呼出しです。"
             "同じviolationを繰り返さないでください。"
+            "前回Decisionのうち契約に適合する意味判断・更新は維持しますが、"
+            "violationが不整合を示したnext、start_next_cycle、answer、参照IDは"
+            "そのまま維持せず、現在のSolverContextと整合する形へ直してください。"
             "violationがfinalize時のopen WorkItemを示す場合は、"
-            "前回の意味判断と整合するresolutionを付けて全open WorkItemを"
-            "resolvedまたはdroppedへ更新するか、正当に閉じられないなら"
-            "next=continueとして必要なToolRequestを返してください。"
-            "どちらを選ぶかとresolutionの内容はあなたが判断します。\n"
+            "契約を通す目的だけでopen WorkItemをresolvedまたはdroppedへ変更してはいけません。"
+            "前回Decisionのanswer、limitations、Hypothesis.gaps、未評価Graph候補を再照合し、"
+            "未確認事項が回答へ影響しcan_start_next_cycle=trueなら、WorkItemをopenのまま"
+            "next=continueとして必要なToolRequest、またはCycle境界なら"
+            "start_next_cycle=trueとunreviewed_graph_resolutionを返してください。"
+            "直接根拠による完了判断が前回Decision内ですでに一貫しており、"
+            "gapsやlimitationsとも矛盾しないWorkItemだけを閉じられます。"
+            "finalize_only=trueまたは次Cycleを開始できない場合はopenを偽って閉じず、"
+            "answerのunresolved_work_item_idsとunresolved_hypothesis_idsへ明示してください。\n"
+            "open WorkItem違反から次Cycleへ移る修復では、直前の検証済みCaseUpdateを"
+            "Adapterが保持するためupdate_jsonは空objectを返してください。"
+            "同じ更新を長いJSON文字列として再出力しません。\n"
             "violationがunknown evidence IDを示す場合は、そのIDを削除するか、"
             "solver_context.grounding_evidence_idsに完全一致するIDだけへ置き換えてください。"
             "検索候補本文中の番号やsourceContentUnitIdをEvidence IDとして使ってはいけません。\n"
@@ -158,6 +172,11 @@ def _solver_prompt(context: SolverContext, system_prompt: str) -> str:
             "下位規範のDependencyDecisionは、委任元が既知ならdiscover_target、"
             "委任元候補も未発見ならdiscover_sourceとして、そのlegal_searchのrequest_idを"
             "action_request_idへ指定してください。\n"
+            "violationがfocusまたはToolRequestのWorkItem・Hypothesis参照を示す場合は、"
+            "前回Decisionのupdateで実際に追加・更新したIDとSolverContextの既知IDを"
+            "文字列の完全一致で使ってください。質問文から別表記のIDを作り直さず、"
+            "参照先に合わせてnext_focus_work_item_ids、work_item_id、hypothesis_idsだけを"
+            "修復してください。どの作業・仮説へ結び付けるかはあなたが判断します。\n"
             "violationがdependency target Article repeats its source articleを示す場合、"
             "同じArticle本文を取得するRequestならaction=assess_source、target_article_ids=[]へ"
             "修正してください。委任先を取得したいが正確な別Article IDが未特定なら、"
@@ -186,18 +205,36 @@ def _solver_prompt(context: SolverContext, system_prompt: str) -> str:
             "batchの全frontier_item_idへselect/defer/rejectを1件ずつ返し、selectは"
             "remaining_fetch_capacityとmax_selected_frontier_per_stepの小さい方以内にします。"
             "候補の関連性はあなたが判断し、プログラムに選別を要求しません。\n"
+            "violationがdeferred Frontierを示す場合は、graph_review_ledgerにある"
+            "activeなrelevant_deferredのIDと参照をそのまま使い、Cycle境界で全件へ"
+            "fetch_next_cycle / carry_forward / no_longer_needed / "
+            "unresolved_at_limitのいずれかを"
+            "返してください。fetch_next_cycleのArticleはProgramが本文取得へ"
+            "機械転記するため、同じfetch_articlesをtool_requestsへ重ねて返しません。"
+            "必要性の判断は変えず、ID・actionと次動作の構造だけを"
+            "修復してください。\n"
+            "violationがunreviewed Graph candidate poolを示す場合は、"
+            "候補を未評価のまま黙って消さず、次Cycleで評価するならreview_next_cycle、"
+            "質問への回答に不要と判断してfinalizeするならno_longer_needed、"
+            "次Cycle不能のため未確認で終える場合だけunresolved_at_limitを返してください。\n"
+            "violationがanswer limitationsまたはunresolved answer scopeを示す場合は、"
+            "limitationsを削除して見かけ上完了させてはいけません。"
+            "調査継続可能ならopen WorkItemを保ってcontinueし、継続不能なら"
+            "limitationsと、それに対応するopen WorkItem・unresolved Hypothesisの既知IDを"
+            "answerへ返してください。\n"
         )
     prompt = (
         f"{system_prompt}\n\n"
         f"{_SOLVER_CONTRACT}\n\n"
         "contract_feedbackがある場合、直前Decisionは状態へ適用されていません。"
-        "意味上の判断を保ち、violationで示された構造だけを修正してください。\n"
+        "適合している意味判断は保ち、violationと矛盾する制御値・参照だけを修正してください。\n"
         f"{contract_repair_instruction}"
         "以下は現在のSolverContextです。Provider輸送schemaに従い、"
         "next、next_focus_work_item_ids、retain_evidence_ids、answerは直接返し、"
         "update全体をupdate_json、tool_requests全体をtool_requests_jsonへ"
         "JSON文字列化し、dependency_decisionsはschemaどおりの配列として直接"
-        "返し、graph_candidate_reviewとfrontier_re_adoptionsもschemaどおり直接返してください。"
+        "返し、graph_candidate_review、frontier_re_adoptions、"
+        "deferred_frontier_resolutions、unreviewed_graph_resolutionもschemaどおり直接返してください。"
         "Adapterが2つのJSON文字列を復元し、"
         "SolverDecisionとして上記契約で完全検証します。\n"
         f"<solver_context>{payload}</solver_context>"
@@ -261,6 +298,8 @@ def _solver_transport_schema(context: SolverContext) -> dict:
             "text": {"type": "string"},
             "citation_ids": string_array,
             "limitations": string_array,
+            "unresolved_work_item_ids": string_array,
+            "unresolved_hypothesis_ids": string_array,
         }
     )
     dependency_decision = _strict_object(
@@ -295,13 +334,18 @@ def _solver_transport_schema(context: SolverContext) -> dict:
         }
     )
     required_dependency_count = len(context.required_dependency_work_item_ids)
-    dependency_decisions = {
-        "type": "array",
-        "items": dependency_decision,
-        "minItems": required_dependency_count,
-        "maxItems": required_dependency_count,
-    }
+    dependency_decisions = (
+        {
+            "type": "array",
+            "items": dependency_decision,
+            "minItems": required_dependency_count,
+            "maxItems": required_dependency_count,
+        }
+        if required_dependency_count
+        else _empty_array_schema()
+    )
     batch_candidates = context.graph_review_batch.candidates
+    graph_review_mode = bool(batch_candidates and not context.finalize_only)
     batch_frontier_ids = tuple(item.frontier_item_id for item in batch_candidates)
     selectable_ledger = tuple(
         item
@@ -410,34 +454,163 @@ def _solver_transport_schema(context: SolverContext) -> dict:
             "reason": {"type": "string"},
         }
     )
+    active_deferred = tuple(
+        item
+        for item in context.graph_review_ledger
+        if item.review_status == "relevant_deferred"
+        and item.content_status in {"not_requested", "failed", "timeout"}
+        and item.deferred_resolution_action != "no_longer_needed"
+    )
+    deferred_frontier_resolution = _strict_object(
+        {
+            "frontier_item_id": _enum_string(
+                tuple(item.frontier_item_id for item in active_deferred)
+            ),
+            "article_id": _enum_string(
+                tuple(dict.fromkeys(item.article_id for item in active_deferred))
+            ),
+            "work_item_id": _enum_string(
+                tuple(dict.fromkeys(item.work_item_id for item in active_deferred))
+            ),
+            "hypothesis_id": {
+                "anyOf": [
+                    _enum_string(
+                        tuple(
+                            dict.fromkeys(
+                                item.hypothesis_id
+                                for item in active_deferred
+                                if item.hypothesis_id is not None
+                            )
+                        )
+                    ),
+                    {"type": "null"},
+                ]
+            },
+            "action": {
+                "type": "string",
+                "enum": [
+                    "fetch_next_cycle",
+                    "carry_forward",
+                    "no_longer_needed",
+                    "unresolved_at_limit",
+                ],
+            },
+            "reason": {"type": "string"},
+        }
+    )
+    force_next_cycle_repair = _preserve_previous_update_for_cycle_repair(context)
+    repair_update_json: str | None = None
+    if force_next_cycle_repair:
+        repair_update_json = "{}"
+    repair_open_work_item_ids: tuple[str, ...] = ()
+    if context.contract_feedback is not None:
+        repair_states = {
+            item.work_item_id: item.state for item in context.work_tree
+        }
+        for item in context.contract_feedback.previous_decision.update.add_work_items:
+            repair_states[item.work_item_id] = item.state
+        for item in context.contract_feedback.previous_decision.update.update_work_items:
+            if item.work_item_id in repair_states:
+                repair_states[item.work_item_id] = item.state
+        repair_open_work_item_ids = tuple(
+            work_item_id
+            for work_item_id, state in repair_states.items()
+            if state == "open"
+        )
+    unreviewed_graph_action_values = (
+        ["review_next_cycle"]
+        if force_next_cycle_repair
+        else [
+            "review_next_cycle",
+            "no_longer_needed",
+            "unresolved_at_limit",
+        ]
+    )
+    unreviewed_graph_resolution = _strict_object(
+        {
+            "action": {
+                "type": "string",
+                "enum": unreviewed_graph_action_values,
+            },
+            "reason": {"type": "string"},
+        }
+    )
     return {
         "type": "object",
         "additionalProperties": False,
         "properties": {
-            "next": {"type": "string", "enum": ["continue", "finalize"]},
-            "start_next_cycle": {"type": "boolean"},
+            "next": {
+                "type": "string",
+                "enum": (
+                    ["continue"]
+                    if graph_review_mode or force_next_cycle_repair
+                    else ["continue", "finalize"]
+                ),
+            },
+            "start_next_cycle": (
+                {"type": "boolean", "enum": [False]}
+                if graph_review_mode
+                else (
+                    {"type": "boolean", "enum": [True]}
+                    if force_next_cycle_repair
+                    else {"type": "boolean"}
+                )
+            ),
             "update_json": {
                 "type": "string",
                 "description": "CaseUpdate encoded as one JSON object string",
+                **(
+                    {"enum": [repair_update_json]}
+                    if repair_update_json is not None
+                    else {}
+                ),
             },
-            "next_focus_work_item_ids": string_array,
+            "next_focus_work_item_ids": (
+                _bounded_enum_array(repair_open_work_item_ids)
+                if context.contract_feedback is not None
+                else string_array
+            ),
             "retain_evidence_ids": string_array,
             "tool_requests_json": {
                 "type": "string",
                 "description": "ToolRequest array encoded as one JSON array string",
+                **({"enum": ["[]"]} if force_next_cycle_repair else {}),
             },
             "dependency_decisions": dependency_decisions,
             "graph_candidate_review": (
                 graph_candidate_review
-                if batch_candidates and not context.finalize_only
+                if graph_review_mode
                 else {"type": "null"}
             ),
-            "frontier_re_adoptions": {
-                "type": "array",
-                "items": frontier_re_adoption,
-                "maxItems": len(context.graph_review_ledger),
-            },
-            "answer": {"anyOf": [answer, {"type": "null"}]},
+            "frontier_re_adoptions": (
+                _empty_array_schema()
+                if graph_review_mode
+                else {
+                    "type": "array",
+                    "items": frontier_re_adoption,
+                    "maxItems": len(context.graph_review_ledger),
+                }
+            ),
+            "deferred_frontier_resolutions": (
+                _empty_array_schema()
+                if graph_review_mode
+                else {
+                    "type": "array",
+                    "items": deferred_frontier_resolution,
+                    "maxItems": len(active_deferred),
+                }
+            ),
+            "unreviewed_graph_resolution": (
+                {"type": "null"}
+                if graph_review_mode
+                or context.graph_review_batch.remaining_unreviewed_count == 0
+                else unreviewed_graph_resolution
+            ),
+            "answer": (
+                {"type": "null"}
+                if graph_review_mode or force_next_cycle_repair
+                else {"anyOf": [answer, {"type": "null"}]}
+            ),
         },
         "required": [
             "next",
@@ -449,6 +622,8 @@ def _solver_transport_schema(context: SolverContext) -> dict:
             "dependency_decisions",
             "graph_candidate_review",
             "frontier_re_adoptions",
+            "deferred_frontier_resolutions",
+            "unreviewed_graph_resolution",
             "answer",
         ],
     }
@@ -460,6 +635,25 @@ def _strict_object(properties: dict[str, Any]) -> dict[str, Any]:
         "additionalProperties": False,
         "properties": properties,
         "required": list(properties),
+    }
+
+
+def _preserve_previous_update_for_cycle_repair(context: SolverContext) -> bool:
+    feedback = context.contract_feedback
+    return bool(
+        feedback is not None
+        and "finalize must account for every open WorkItem" in feedback.violation
+        and context.can_start_next_cycle
+        and context.cycle_close_required
+    )
+
+
+def _empty_array_schema() -> dict[str, Any]:
+    return {
+        "type": "array",
+        "items": {"type": "string"},
+        "minItems": 0,
+        "maxItems": 0,
     }
 
 
@@ -563,20 +757,23 @@ _SOLVER_CONTRACT = """
   "dependency_decisions": [{"dependency_kind": str, "work_item_id": str, "status": "not_required"|"needs_action"|"resolved", "reason": str, "source_evidence_ids": [str], "action": "discover_source"|"assess_source"|"discover_target"|"fetch_target"|null, "action_request_id": str|null, "target_article_ids": [str], "evidence_ids": [str]}],
   "graph_candidate_review": {"graph_request_ids": [str], "reviewed_link_ids": [str], "frontier_decisions": [{"frontier_item_id": str, "article_id": str, "work_item_id": str, "hypothesis_id": str|null, "action": "select"|"defer"|"reject", "reason": str}], "reason": str} | null,
   "frontier_re_adoptions": [{"article_id": str, "work_item_id": str, "hypothesis_id": str, "reason": str}],
+  "deferred_frontier_resolutions": [{"frontier_item_id": str, "article_id": str, "work_item_id": str, "hypothesis_id": str|null, "action": "fetch_next_cycle"|"carry_forward"|"no_longer_needed"|"unresolved_at_limit", "reason": str}],
+  "unreviewed_graph_resolution": {"action": "review_next_cycle"|"no_longer_needed"|"unresolved_at_limit", "reason": str} | null,
   "tool_requests": [{"request_id": str, "work_item_id": str, "tool_name": str, "arguments": object, "purpose": str, "hypothesis_ids": [str]}],
-  "answer": {"text": str, "citation_ids": [str], "limitations": [str]} | null
+  "answer": {"text": str, "citation_ids": [str], "limitations": [str], "unresolved_work_item_ids": [str], "unresolved_hypothesis_ids": [str]} | null
 }
-continueは原則1件以上のtool_requests、graph_candidate_review、またはfrontier_re_adoptionsとanswer=nullを持つ。Graph候補選別判断は選択の有無にかかわらずtool_requests=[]とし、selectした既知Article IDはAgentLoopが本文取得へ機械転記する。finalizeはtool_requests=[]とanswerを持つ。省略可能な配列は空配列、updateは空objectにできる。
+continueは原則1件以上のtool_requests、graph_candidate_review、frontier_re_adoptions、deferred_frontier_resolutions、unreviewed_graph_resolution、またはstart_next_cycle=trueとanswer=nullを持つ。Graph候補選別判断は選択の有無にかかわらずtool_requests=[]とし、selectした既知Article IDはAgentLoopが本文取得へ機械転記する。Cycle境界で未評価Graph候補を次Cycleに引き継ぐ場合は、ToolRequestなしのstart_next_cycle=trueとunreviewed_graph_resolution.action=review_next_cycleを返す。finalizeはtool_requests=[]とanswerを持つ。省略可能な配列は空配列、updateは空objectにできる。
 輸送時だけupdate全体をupdate_jsonへ、tool_requests配列全体をtool_requests_jsonへJSON文字列化する。dependency_decisionsはProvider schemaの構造化配列として直接返し、answer本文も二重エンコードしない。
 
 契約語彙:
-- next: continueは追加Toolを実行して判断を継続する。finalizeは追加Toolなしで現在の確認済み範囲から回答を確定する。
-- start_next_cycle: falseは現在の仮説・探索方針の同じCycleで次のaction-observation stepへ進む。trueは現在の方針を評価して閉じ、更新した仮説・方針で次Cycleを開始する。初回Tool実行はfalseでもCycle 1を開始する。単なる検索、本文取得、Graph候補選別ではfalseとし、初期の作業分解・仮説・探索方針を仕切り直す場合だけtrueにする。Graph候補選別モードでは必ずfalse。
+- next: continueは同じCycleの次stepまたは次Cycleへ判断・実行を継続する。finalizeは追加Toolなしで現在の確認済み範囲から回答を確定する。
+- start_next_cycle: falseは現在のCycleで次のaction-observation stepへ進む。trueは現Cycleを評価して閉じ、次Cycleを開始する。初回Tool実行はfalseでもCycle 1を開始する。通常の検索・本文取得・Graph候補選別ではfalseとする。作業分解・仮説・探索方針を仕切り直す場合、またはCycle取得枠が尽きた後も必要と判断した未取得Evidenceが残る場合はtrueにできる。Graph候補選別モードでは必ずfalse。
 - WorkItem.state: openは未完了で追加作業が必要。resolvedは問いへ結論が出てresolutionにその結論を書く。droppedは前提否定・重複・質問との無関係により作業対象から外し、resolutionに除外理由を書く。取得失敗だけを理由にresolvedへしない。
 - WorkItemのparent_work_item_idは包含する親作業、basis_hypothesis_idsはその作業を成立させる前提、replaces_work_item_idは置換した旧作業を表す。next_focus_work_item_idsには次サイクルでTool対象にするopen WorkItemだけを入れる。
 - Hypothesis.judgment: supportedは提示された根拠がstatementを支持する。contradictedは提示された根拠がstatementを否定する。unresolvedは根拠不足・両義的・未確認で、真偽を確定していない。supportedでもWorkItem全体が完了したとは限らない。
 - 1つのHypothesisは独立に検証できる1つの命題とする。適用要件、数値基準、例外、義務・手続など別の根拠で判断できる観点を束ねず、別の観点のEvidenceで未確認の観点を完了しない。
 - Hypothesis.gapsはunresolvedの理由または追加確認事項であり、limitationsは最終回答に残る制約である。調査可能なgapsをlimitationsへ移すだけで完了扱いにしない。
+- answer.limitationsは質問への回答に残った未確認事項だけを表す。一般的な注意書きはanswer.textへ書く。limitationsがある場合は対応するopen WorkItemをunresolved_work_item_idsへ、そのWorkItemに属するunresolved Hypothesisをunresolved_hypothesis_idsへ指定する。通常の早期finalizeでは3項目をすべて空にする。上限等で次Cycle不能な限定回答だけ、open WorkItemを偽って閉じず3項目を対応させる。
 - impact_decisions.action: retainはWorkItemを維持し、否定された前提をnew_basis_hypothesis_idsへ差し替える。replaceは旧WorkItemをdroppedにして、同じupdateで追加するreplacement_work_item_idへ置き換える。dropはWorkItemを不要として閉じ、drop_subtree=trueなら未完了の子孫も閉じる。これはHypothesisを新たにcontradictedへ変更したことで影響を受けるopen WorkItemにだけ使う。
 - ToolResult.status: succeededはTool実行が完了した状態であり、得た内容が質問を立証したという意味ではない。failedはToolがエラー終了、timeoutは制限時間内に完了しなかった状態。failed/timeoutではerror_codeを確認し、Evidenceがないことを不存在の根拠にしない。
 - Graph ToolResultのgraph_projection_updated=trueは、取得したGraph情報がCaseStoreへ保存され、差分batchまたはledgerへ投影可能になった実行事実であり、候補の関連性や本文確認済みを意味しない。
@@ -588,6 +785,8 @@ continueは原則1件以上のtool_requests、graph_candidate_review、または
 - graph_review_batchのreview_triggerはnew_frontier=新規、re_adopted=別Hypothesisへの明示的再採用、new_link=既評価候補への新経路追加を表す。new_linkではprior_review_statusを前提にせず、今回提示された全Linkを含めて判断を更新する。
 - batch内の全frontierへselect/defer/rejectを返す。selectは質問とHypothesisに関係し今回本文取得、deferは関係するが今回の枠外、rejectは関係しないとの意味判断である。表示順や枠外を理由にrejectしない。選択はmax_selected_frontier_per_stepとremaining_fetch_capacityの小さい方までとする。
 - graph_review_ledgerのrelevant_deferredは後続stepまたは次Cycleでselectできる。selectedかつfailed/timeoutは取得再試行だけを判断できる。rejectedを別Hypothesisで使う場合はfrontier_re_adoptionsに既知Article・open WorkItem・所属Hypothesis・理由を明示し、プログラムへ自動転用を要求しない。
+- Cycle境界では、本文未取得のactiveなrelevant_deferred全件へdeferred_frontier_resolutionsを返す。fetch_next_cycleは次Cycle最初の本文取得に含める判断で、start_next_cycle=trueを必要とする。そのArticleはProgramが1つのfetch_articlesへ機械転記するため、同じToolRequestを重ねて返さない。carry_forwardは取得上限等により次Cycle以降のactive候補として保持する判断で、start_next_cycle=trueを必要とする。no_longer_neededは後続Evidenceを踏まえて質問への回答に不要と判断した状態である。unresolved_at_limitは上限により次Cycleを開始できず未確認のまま最終化する状態で、answer.limitationsへ明記する。Programは既知ID・全件性・次動作との参照整合だけを検証し、どのactionが法的に妥当かは判断しない。
+- graph_review_batch.candidates=[]かつremaining_unreviewed_count>0のCycle境界ではunreviewed_graph_resolutionを必ず返す。review_next_cycleは次Cycleで差分Review、no_longer_neededは質問への回答に不要とのSolver判断、unresolved_at_limitは次Cycle不能のため未確認のまま限定回答する判断である。Programはactionとnext、start_next_cycle、limitationsの構造整合だけを検証する。
 - content_statusは本文取得状態である。not_requestedは未要求、pendingは結果待ち、succeededは取得成功、failedはエラー終了、timeoutは時間切れを示し、法的関連性や根拠採用を意味しない。
 - Graph探索の上限は1ホップである。Graph候補Articleの本文は取得・評価できるが、そのArticleからGraphを再展開しない。その先の確認が必要ならSolverがlegal_searchを要求する。
 - grounding_evidence_idsは意味判断と引用に使える本文Evidence、navigation_evidence_idsはGraph以外の候補発見専用Evidence、fetchable_article_idsはfetch_articlesへ完全一致で渡せるArticle IDである。

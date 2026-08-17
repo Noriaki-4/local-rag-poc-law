@@ -12,6 +12,7 @@ from .contracts import SolverDecision
 from .profiles import AgentLimits
 from .state import (
     CaseState,
+    DeferredFrontierResolutionAction,
     DependencyDecision,
     Evidence,
     FrontierReviewStatus,
@@ -107,6 +108,8 @@ class GraphReviewLedgerItem(FrameworkModel):
     reason: str
     content_status: GraphCandidateContentStatus
     last_reviewed_cycle: int | None
+    deferred_resolution_action: DeferredFrontierResolutionAction | None = None
+    deferred_resolution_reason: str | None = None
 
 
 class GraphReviewBatch(FrameworkModel):
@@ -319,10 +322,6 @@ def build_solver_context(
     )
     if (
         (remaining_fetch_capacity == 0 or time_requires_cycle_close)
-        and any(
-            item.reviewed_cycle == max(1, state.research_cycle_count)
-            for item in state.graph_candidate_reviews
-        )
     ):
         graph_review_batch = GraphReviewBatch(
             remaining_unreviewed_count=(
@@ -373,6 +372,7 @@ def build_solver_context(
                         item.review_status == "relevant_deferred"
                         and item.content_status
                         in {"not_requested", "failed", "timeout"}
+                        and item.deferred_resolution_action != "no_longer_needed"
                     )
                     or (
                         item.review_status == "selected"
@@ -434,7 +434,9 @@ def build_solver_context(
         remaining_wall_time_sec=max(0.0, remaining_wall_time_sec),
         min_next_cycle_budget_sec=limits.min_next_cycle_budget_sec,
         can_start_next_cycle=(
-            remaining_wall_time_sec
+            not finalize_only
+            and state.research_cycle_count < limits.max_research_cycles
+            and remaining_wall_time_sec
             > limits.finalization_reserve_sec + limits.min_next_cycle_budget_sec
         ),
         max_tool_requests_per_step=limits.max_tool_requests_per_step,
@@ -684,6 +686,11 @@ def _graph_review_projection(
                 set(),
             ).update(review.reviewed_link_ids)
 
+    deferred_resolution_by_frontier = {
+        item.frontier_item_id: item
+        for item in state.deferred_frontier_resolutions
+    }
+
     re_adoption_keys = {
         (item.article_id, item.work_item_id, item.hypothesis_id)
         for item in state.frontier_re_adoptions
@@ -738,7 +745,10 @@ def _graph_review_projection(
                 record["links"].append(link)
 
     pending: list[GraphReviewCandidate] = []
-    for frontier_id, record in sorted(frontier_records.items()):
+    # Stable hash ID is identity only. Paging by that hash would make an
+    # unrelated digest determine which discovered candidate the Solver sees.
+    # Preserve the Tool/catalog discovery order without adding semantic ranking.
+    for frontier_id, record in frontier_records.items():
         article = articles_by_id.get(record["article_id"])
         if article is None:
             continue
@@ -803,6 +813,19 @@ def _graph_review_projection(
                 else "not_requested"
             ),
             last_reviewed_cycle=latest_cycle_by_frontier.get(frontier_id),
+            deferred_resolution_action=(
+                deferred_resolution_by_frontier[frontier_id].action
+                if frontier_id in deferred_resolution_by_frontier
+                else None
+            ),
+            deferred_resolution_reason=(
+                _short_text(
+                    deferred_resolution_by_frontier[frontier_id].reason,
+                    240,
+                )
+                if frontier_id in deferred_resolution_by_frontier
+                else None
+            ),
         )
         for frontier_id, decision in sorted(latest_decision_by_frontier.items())
     )

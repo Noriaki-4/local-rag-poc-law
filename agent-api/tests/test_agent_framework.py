@@ -1580,7 +1580,7 @@ def test_delta_keeps_untouched_work_and_revalidates_updates() -> None:
     assert {item.work_item_id for item in updated.work_items} == {"w1", "w2"}
 
 
-def test_finalize_rejects_open_work_but_allows_unresolved_hypothesis() -> None:
+def test_finalize_rejects_open_work_unless_limited_answer_accounts_for_it() -> None:
     state = CaseState(
         case_id="case-1",
         question="質問",
@@ -1594,7 +1594,7 @@ def test_finalize_rejects_open_work_but_allows_unresolved_hypothesis() -> None:
         ),
     )
 
-    with pytest.raises(ContractViolation, match="every work item"):
+    with pytest.raises(ContractViolation, match="every open WorkItem"):
         apply_solver_decision(
             state,
             SolverDecision(next="finalize", answer=FinalAnswer(text="回答")),
@@ -1609,13 +1609,6 @@ def test_finalize_rejects_open_work_but_allows_unresolved_hypothesis() -> None:
         SolverDecision(
             next="finalize",
             update=CaseUpdate(
-                update_work_items=(
-                    WorkItemUpdate(
-                        work_item_id="w1",
-                        state="resolved",
-                        resolution="根拠を取得できず未確認として終了した",
-                    ),
-                ),
                 update_hypotheses=(
                     HypothesisUpdate(
                         hypothesis_id="h1",
@@ -1627,6 +1620,8 @@ def test_finalize_rejects_open_work_but_allows_unresolved_hypothesis() -> None:
             answer=FinalAnswer(
                 text="確認できた範囲で回答",
                 limitations=("根拠本文は未確認",),
+                unresolved_work_item_ids=("w1",),
+                unresolved_hypothesis_ids=("h1",),
             ),
         ),
         limits=AgentLimits(),
@@ -1635,7 +1630,7 @@ def test_finalize_rejects_open_work_but_allows_unresolved_hypothesis() -> None:
         finalize_only=True,
     )
 
-    assert updated.work_items[0].state == "resolved"
+    assert updated.work_items[0].state == "open"
     assert updated.hypotheses[0].judgment == "unresolved"
 
 

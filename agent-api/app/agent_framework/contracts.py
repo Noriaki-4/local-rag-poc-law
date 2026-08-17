@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from .state import (
+    DeferredFrontierResolution,
     DependencyDecision,
     FinalAnswer,
     FrontierReAdoption,
@@ -15,6 +16,7 @@ from .state import (
     Hypothesis,
     HypothesisJudgment,
     ToolRequest,
+    UnreviewedGraphResolution,
     WorkItem,
     WorkItemState,
 )
@@ -72,6 +74,8 @@ class SolverDecision(FrameworkModel):
     dependency_decisions: tuple[DependencyDecision, ...] = ()
     graph_candidate_review: GraphCandidateReview | None = None
     frontier_re_adoptions: tuple[FrontierReAdoption, ...] = ()
+    deferred_frontier_resolutions: tuple[DeferredFrontierResolution, ...] = ()
+    unreviewed_graph_resolution: UnreviewedGraphResolution | None = None
     tool_requests: tuple[ToolRequest, ...] = ()
     answer: FinalAnswer | None = None
 
@@ -84,6 +88,9 @@ class SolverDecision(FrameworkModel):
                 not self.tool_requests
                 and self.graph_candidate_review is None
                 and not self.frontier_re_adoptions
+                and not self.deferred_frontier_resolutions
+                and self.unreviewed_graph_resolution is None
+                and not self.start_next_cycle
             ):
                 raise ValueError("continue decision requires a tool request")
             if self.answer is not None:

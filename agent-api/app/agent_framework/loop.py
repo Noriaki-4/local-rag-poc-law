@@ -27,6 +27,7 @@ from .ports.tool import ToolExecution, ToolRegistry
 from .profiles import AgentProfile, ModelCallProfile, ReviewerProfile
 from .state import (
     CaseState,
+    DeferredFrontierResolution,
     Evidence,
     GraphCandidateReview,
     ReviewFinding,
@@ -406,6 +407,8 @@ class AgentLoop:
                                         == "relevant_deferred"
                                         and ledger_item.content_status
                                         in {"not_requested", "failed", "timeout"}
+                                        and ledger_item.deferred_resolution_action
+                                        != "no_longer_needed"
                                     )
                                     or (
                                         ledger_item.review_status == "selected"
@@ -415,6 +418,22 @@ class AgentLoop:
                                 ),
                             )
                         },
+                        deferred_frontiers={
+                            item.frontier_item_id: (
+                                item.article_id,
+                                item.work_item_id,
+                                item.hypothesis_id,
+                            )
+                            for item in context.graph_review_ledger
+                            if item.review_status == "relevant_deferred"
+                            and item.content_status
+                            in {"not_requested", "failed", "timeout"}
+                            and item.deferred_resolution_action
+                            != "no_longer_needed"
+                        },
+                        unreviewed_graph_candidate_count=(
+                            context.graph_review_batch.remaining_unreviewed_count
+                        ),
                         remaining_fetch_capacity=context.remaining_fetch_capacity,
                         cycle_close_required=context.cycle_close_required,
                         can_start_next_cycle=context.can_start_next_cycle,
@@ -422,6 +441,7 @@ class AgentLoop:
                     )
                     break
                 except ContractViolation as exc:
+                    logger.warning("Solver contract violation: %s", exc)
                     if contract_attempt == MAX_SOLVER_CONTRACT_ATTEMPTS - 1:
                         raise
                     contract_feedback = SolverContractFeedback(
@@ -455,6 +475,26 @@ class AgentLoop:
                 candidate = self._replace_state(
                     candidate,
                     tool_requests=(*candidate.tool_requests, *decision_requests),
+                )
+
+            deferred_fetch_resolutions = tuple(
+                item
+                for item in solver_call.decision.deferred_frontier_resolutions
+                if item.action == "fetch_next_cycle"
+            )
+            has_deferred_article_fetch = any(
+                request.tool_name == self._profile.graph_review_fetch_tool_name
+                for request in decision_requests
+            )
+            if deferred_fetch_resolutions and not has_deferred_article_fetch:
+                projected_request = self._deferred_frontier_fetch_request(
+                    candidate,
+                    deferred_fetch_resolutions,
+                )
+                decision_requests = (*decision_requests, projected_request)
+                candidate = self._replace_state(
+                    candidate,
+                    tool_requests=(*candidate.tool_requests, projected_request),
                 )
 
             if not decision_requests:
@@ -550,6 +590,41 @@ class AgentLoop:
             tool_name=self._profile.graph_review_fetch_tool_name or "fetch_articles",
             arguments={"article_ids": list(selected_ids)},
             purpose="Solverが選んだGraph候補Article本文を取得する",
+            hypothesis_ids=hypothesis_ids,
+        )
+
+    def _deferred_frontier_fetch_request(
+        self,
+        state: CaseState,
+        resolutions: tuple[DeferredFrontierResolution, ...],
+    ) -> ToolRequest:
+        article_ids = tuple(dict.fromkeys(item.article_id for item in resolutions))
+        hypothesis_ids = tuple(
+            dict.fromkeys(
+                item.hypothesis_id
+                for item in resolutions
+                if item.hypothesis_id is not None
+            )
+        )
+        payload = json.dumps(
+            {
+                "article_ids": article_ids,
+                "frontier_item_ids": tuple(
+                    item.frontier_item_id for item in resolutions
+                ),
+                "cycle_no": max(1, state.research_cycle_count + 1),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
+        return ToolRequest(
+            request_id=f"deferred-frontier-fetch-{digest}",
+            work_item_id=resolutions[0].work_item_id,
+            tool_name=self._profile.graph_review_fetch_tool_name or "fetch_articles",
+            arguments={"article_ids": list(article_ids)},
+            purpose="Solverが次Cycle取得を選んだ保留Article本文を取得する",
             hypothesis_ids=hypothesis_ids,
         )
 

@@ -26,6 +26,17 @@ FrontierReviewStatus = Literal[
     "rejected",
 ]
 FrontierReviewAction = Literal["select", "defer", "reject"]
+DeferredFrontierResolutionAction = Literal[
+    "fetch_next_cycle",
+    "carry_forward",
+    "no_longer_needed",
+    "unresolved_at_limit",
+]
+UnreviewedGraphResolutionAction = Literal[
+    "review_next_cycle",
+    "no_longer_needed",
+    "unresolved_at_limit",
+]
 
 
 def utc_now() -> datetime:
@@ -118,6 +129,27 @@ class FrontierReAdoption(FrameworkModel):
     reason: str = Field(min_length=1, max_length=1000)
 
 
+class DeferredFrontierResolution(FrameworkModel):
+    """Solverが以前のdefer判断をCycle境界でどう扱うかを明示する。"""
+
+    frontier_item_id: str = Field(min_length=1, max_length=160)
+    article_id: str = Field(min_length=1, max_length=500)
+    work_item_id: str = Field(min_length=1, max_length=160)
+    hypothesis_id: str | None = Field(default=None, max_length=160)
+    action: DeferredFrontierResolutionAction
+    reason: str = Field(min_length=1, max_length=1000)
+    decided_cycle: int | None = Field(default=None, ge=1)
+
+
+class UnreviewedGraphResolution(FrameworkModel):
+    """SolverがCycle境界で未評価Graph候補群をどう扱うかを明示する。"""
+
+    action: UnreviewedGraphResolutionAction
+    reason: str = Field(min_length=1, max_length=1000)
+    candidate_count: int | None = Field(default=None, ge=1)
+    decided_cycle: int | None = Field(default=None, ge=1)
+
+
 class GraphCandidateReview(FrameworkModel):
     """今回の差分batchに対するSolver自身の意味判断。"""
 
@@ -189,6 +221,20 @@ class FinalAnswer(FrameworkModel):
     text: str = Field(min_length=1)
     citation_ids: tuple[str, ...] = ()
     limitations: tuple[str, ...] = ()
+    unresolved_work_item_ids: tuple[str, ...] = ()
+    unresolved_hypothesis_ids: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def require_unique_unresolved_ids(self) -> FinalAnswer:
+        if len(self.unresolved_work_item_ids) != len(
+            set(self.unresolved_work_item_ids)
+        ):
+            raise ValueError("unresolved work item IDs must be unique")
+        if len(self.unresolved_hypothesis_ids) != len(
+            set(self.unresolved_hypothesis_ids)
+        ):
+            raise ValueError("unresolved hypothesis IDs must be unique")
+        return self
 
 
 class ReviewFinding(FrameworkModel):
@@ -222,6 +268,8 @@ class CaseState(FrameworkModel):
     dependency_decisions: tuple[DependencyDecision, ...] = ()
     graph_candidate_reviews: tuple[GraphCandidateReview, ...] = ()
     frontier_re_adoptions: tuple[FrontierReAdoption, ...] = ()
+    deferred_frontier_resolutions: tuple[DeferredFrontierResolution, ...] = ()
+    unreviewed_graph_resolutions: tuple[UnreviewedGraphResolution, ...] = ()
     tool_results: tuple[ToolResult, ...] = ()
     focus_work_item_ids: tuple[str, ...] = ()
     retained_evidence_ids: tuple[str, ...] = ()

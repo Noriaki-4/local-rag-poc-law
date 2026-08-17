@@ -122,8 +122,26 @@ class LegalFrameworkAgentService:
                         item.model_dump(mode="json")
                         for item in result.state.frontier_re_adoptions
                     ],
+                    "deferredFrontierResolutions": [
+                        item.model_dump(mode="json")
+                        for item in result.state.deferred_frontier_resolutions
+                    ],
+                    "unreviewedGraphResolutions": [
+                        item.model_dump(mode="json")
+                        for item in result.state.unreviewed_graph_resolutions
+                    ],
                     "limitations": (
                         list(final_answer.limitations) if final_answer else []
+                    ),
+                    "unresolvedWorkItemIds": (
+                        list(final_answer.unresolved_work_item_ids)
+                        if final_answer
+                        else []
+                    ),
+                    "unresolvedHypothesisIds": (
+                        list(final_answer.unresolved_hypothesis_ids)
+                        if final_answer
+                        else []
                     ),
                 }
             },
