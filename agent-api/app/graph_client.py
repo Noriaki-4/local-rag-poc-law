@@ -35,6 +35,15 @@ class GraphClient:
         with self.driver.session() as session:
             session.run("MATCH (n) DETACH DELETE n").consume()
 
+    def ensure_legal_graph_schema(self) -> None:
+        """新法令GraphのConstraintとindexを冪等に作成する。"""
+
+        from .domains.legal.graph_schema import NEO4J_SCHEMA_STATEMENTS
+
+        with self.driver.session() as session:
+            for statement in NEO4J_SCHEMA_STATEMENTS:
+                session.run(statement).consume()
+
     def seed_nodes(self, nodes: list[dict[str, Any]]) -> None:
         nodes_by_type: dict[str, list[dict[str, Any]]] = {}
         for node in nodes:
