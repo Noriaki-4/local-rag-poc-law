@@ -1400,10 +1400,11 @@ API経由でLunaを呼ばず、Codexサブスクリプションのオペレー�
 
 現行コードのOllama Profileは比較・契約試験用として残る。Gemmaは手動監査14件で5 predicate完全一致が
 4/14だったため、全件Runのpublishには使用しない。Luna方式は既存14件で14/14、新規20件で最終20/20を
-確認済みである。さらに代表100件は、法令94件を構造監査し73件を意味判定対象とし、
+確認済みである。さらに代表100件は、法令94件を構造監査し、構造上resolvedの73件中、
+Article revision不一致の1件を`needs_resolution`として除いた72件を意味判定対象とし、
 Codex GPT-5.6 Solが法令94件と別schemaのガイド6件を全件個別監査して正解を確定した。
 確定正解を伏せたLuna再評価では、構造`89/94`、意味predicateとstatusの完全一致が差戻し後
-`57/73`、意味方向まで含む完全一致が`56/73`だったため、現行方式を無監査でpublishしない。
+`57/72`、意味方向まで含む完全一致が`56/72`だったため、現行方式を無監査でpublishしない。
 Luna Worker / Reviewerの出力はaudit履歴に残すが、Lunaの精度測定から独立した正解とする。
 ただし、Luna出力を候補hash・snapshot・Pydantic契約で検証して
 `ClassificationRun`へ取り込むimportが完成するまでは、評価JSONLをpublish済みGraphとして扱わない。

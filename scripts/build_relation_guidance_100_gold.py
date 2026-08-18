@@ -75,8 +75,11 @@ def _validate_semantic_decision(
         raise ValueError(f"semantic candidateKey mismatch: {basis_id}")
     if decision.get("basisEdgeId") != basis_id:
         raise ValueError(f"semantic basisEdgeId mismatch: {basis_id}")
-    if decision.get("adjudicationStatus") != "accepted":
-        raise ValueError(f"gold semantic decision must be accepted: {basis_id}")
+    status = decision.get("adjudicationStatus")
+    if status not in {"accepted", "needs_resolution"}:
+        raise ValueError(
+            f"gold semantic decision must be accepted or needs_resolution: {basis_id}"
+        )
 
     assessments = decision.get("predicateAssessments")
     if not isinstance(assessments, dict) or set(assessments) != set(
@@ -108,9 +111,13 @@ def _validate_semantic_decision(
             raise ValueError(
                 f"predicate finding violates condition algebra: {basis_id} {predicate}"
             )
-        if finding == "uncertain":
+        if status == "accepted" and finding == "uncertain":
             raise ValueError(
                 f"accepted gold decision cannot remain uncertain: {basis_id} {predicate}"
+            )
+        if status == "needs_resolution" and finding != "uncertain":
+            raise ValueError(
+                f"needs_resolution must not classify predicates: {basis_id} {predicate}"
             )
         if finding == "established":
             established.add(predicate)
@@ -130,6 +137,12 @@ def _validate_semantic_decision(
     asserted = [str(item.get("proposedPredicate")) for item in assertions]
     if len(asserted) != len(set(asserted)) or set(asserted) != established:
         raise ValueError(f"established predicates and assertions must match: {basis_id}")
+    if status == "needs_resolution" and (
+        assertions or not str(decision.get("note") or "").strip()
+    ):
+        raise ValueError(
+            f"needs_resolution requires no assertions and a note: {basis_id}"
+        )
     for assertion in assertions:
         predicate = str(assertion["proposedPredicate"])
         occurrence_hash = str(assertion["referenceOccurrenceHash"])
@@ -237,19 +250,31 @@ def main() -> int:
             manual = None
             adjudication_source = "gpt_5_6_sol_full_manual_gold_2026_08_19"
         elif manual is not None:
-            semantic_status = "codex_verified"
             semantic = manual["semanticDecision"]
             try:
                 _validate_semantic_decision(packet, semantic)
             except ValueError as exc:
                 parser.error(str(exc))
-            established = {
-                str(assertion["proposedPredicate"])
-                for assertion in semantic.get("assertions", [])
-            }
-            predicates = [value for value in PREDICATE_ORDER if value in established]
+            if semantic["adjudicationStatus"] == "needs_resolution":
+                semantic_status = "needs_resolution"
+                predicates = None
+            else:
+                semantic_status = "codex_verified"
+                established = {
+                    str(assertion["proposedPredicate"])
+                    for assertion in semantic.get("assertions", [])
+                }
+                predicates = [
+                    value for value in PREDICATE_ORDER if value in established
+                ]
+            dispute = manual.get("semanticDispute", dispute)
             annotation = str(manual["annotationBasis"])
-            adjudication_source = "gpt_5_6_sol_full_manual_gold_2026_08_19"
+            adjudication_source = str(
+                manual.get(
+                    "adjudicationSource",
+                    "gpt_5_6_sol_full_manual_gold_2026_08_19",
+                )
+            )
         elif dispute is not None:
             parser.error(f"unresolved semantic decision has no manual adjudication: {basis_id}")
         elif semantic is not None and semantic.get("adjudicationStatus") == "accepted":
@@ -374,7 +399,7 @@ def main() -> int:
                 manual_structure_adjudications
             ),
             "manualSemanticCorrectionCount": len(manual_adjudications),
-            "finalAudit": "Codex full 100-case manual audit",
+            "finalAudit": "Codex full 100-case manual audit plus Article-version mismatch correction",
             "meaningJudgmentByProgram": False,
         },
     }
@@ -383,9 +408,12 @@ def main() -> int:
     if any(
         fixture["expectedResolutionStatus"] == "resolved"
         and fixture["expectedPredicates"] is None
+        and fixture["expectedSemanticStatus"] != "needs_resolution"
         for fixture in fixtures
     ):
-        parser.error("every resolved pair must have a final semantic teacher label")
+        parser.error(
+            "resolved pairs without predicates must explicitly be needs_resolution"
+        )
 
     _atomic_write(args.legal_fixture_output, _jsonl(fixtures))
     _atomic_write(args.audit_output, _jsonl(audit_records))

@@ -28,8 +28,10 @@
 - OpenSearchは`legal-rag-content-ja-v2`（Kuromoji、NFKC、bigram）を既定とする。
 - Graph seedは`HAS_CONTENT_UNIT / REFERENCES / EXPLAINS`だけを決定的に作る。
   5つの意味predicateはseed後に`RelationAssertion`として非同期登録する。
-- 代表100件は法令関係94件とガイド6件を別schemaで確定済み。Lunaのブラインド評価は構造`89/94`、
-  差戻し後の意味predicate・status完全一致`57/73`、意味方向込み`56/73`であり、無監査publishには使わない。
+- 代表100件は法令関係94件とガイド6件を別schemaで確定済み。構造上resolvedの73件中1件は
+  Article revision不一致のため意味判定を`needs_resolution`へ訂正した。Lunaのブラインド評価は構造`89/94`、
+  意味分類可能な72件に対する差戻し後のpredicate・status完全一致`57/72`、意味方向込み`56/72`であり、
+  無監査publishには使わない。
 - 現行Graphの構造正解は`73/94`で、再seed・全件分類・検索時selectorへの接続は残作業である。
 
 ## 1. 現行基盤・Agent設計

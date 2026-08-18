@@ -34,7 +34,8 @@
       "not_reference": 8
     },
     "semanticStatusCounts": {
-      "codex_verified": 73,
+      "codex_verified": 72,
+      "needs_resolution": 1,
       "not_applicable": 21
     },
     "establishedPredicateCounts": {
@@ -49,11 +50,11 @@
     "answerKeyModel": "gpt-5.6-sol",
     "answerKeyAuditScope": "94 legal relation cases and 6 guidance cases",
     "answerKeyVerifiedCaseCount": 100,
-    "semanticVerifiedPairCount": 73,
+    "semanticVerifiedPairCount": 72,
     "priorLunaArtifactsRetainedForAudit": true,
     "manualStructureCorrectionCount": 1,
-    "manualSemanticCorrectionCount": 17,
-    "finalAudit": "Codex full 100-case manual audit",
+    "manualSemanticCorrectionCount": 18,
+    "finalAudit": "Codex full 100-case manual audit plus Article-version mismatch correction",
     "meaningJudgmentByProgram": false
   }
 }
