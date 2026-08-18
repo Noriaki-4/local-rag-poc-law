@@ -45,8 +45,9 @@ from .legal_ontology import GRAPH_SCHEMA_VERSION
 from .legal_relation_classifier import (
     article_evidence_spans,
     article_texts_from_sources,
-    matching_evidence_span_ids,
+    matching_evidence_span_ids_at_source_offsets,
     relation_classification_timeout,
+    without_repeated_parent_context_with_offset,
 )
 
 RELATION_CLASSIFICATION_PROMPT_VERSION = "legal-relation-5predicate-v19"
@@ -522,6 +523,55 @@ def candidates_from_graph_and_sources(
         citation_texts = basis.get("citationTexts")
         if not isinstance(citation_texts, list) or not citation_texts:
             citation_texts = [basis.get("citationText")]
+        source_starts = basis.get("sourceSpanStarts")
+        source_ends = basis.get("sourceSpanEnds")
+        source_unit_id = str(basis.get("sourceContentUnitId") or "")
+        source_units = [
+            source
+            for source in sources_by_article.get(source_id, [])
+            if str(source.get("contentUnitId") or "") == source_unit_id
+        ]
+        if source_starts is None and source_ends is None and len(source_units) == 1:
+            recovered = _recover_reference_occurrences(
+                [str(value or "").strip() for value in citation_texts],
+                str(source_units[0].get("text") or ""),
+            )
+            citation_texts = [item[0] for item in recovered]
+            source_starts = [item[1] for item in recovered]
+            source_ends = [item[2] for item in recovered]
+        source_text = ""
+        removed_parent_chars = 0
+        if not (
+            isinstance(source_starts, list)
+            and isinstance(source_ends, list)
+            and len(source_starts) == len(citation_texts)
+            and len(source_ends) == len(citation_texts)
+            and len(source_units) == 1
+        ):
+            raise ValueError(
+                "REFERENCES source offsets are incomplete or source Content Unit "
+                f"is missing: {basis.get('graphEdgeId')}"
+            )
+        source_text = str(source_units[0].get("text") or "")
+        parent_id = str(source_units[0].get("parentContentUnitId") or "")
+        if parent_id:
+            parent_units = [
+                source
+                for source in sources_by_article.get(source_id, [])
+                if str(source.get("contentUnitId") or "") == parent_id
+            ]
+            if len(parent_units) > 1:
+                raise ValueError(
+                    "REFERENCES parent Content Unit is duplicated: "
+                    f"{basis.get('graphEdgeId')}"
+                )
+            if parent_units:
+                source_text, removed_parent_chars = (
+                    without_repeated_parent_context_with_offset(
+                        source_text,
+                        str(parent_units[0].get("text") or "").strip(),
+                    )
+                )
         occurrences: list[ReferenceOccurrence] = []
         for index, raw_text in enumerate(citation_texts):
             citation_text = str(raw_text or "").strip()
@@ -529,7 +579,17 @@ def candidates_from_graph_and_sources(
                 raise ValueError(
                     f"REFERENCES citation text is missing: {basis.get('graphEdgeId')}"
                 )
-            matching_span_ids = matching_evidence_span_ids(citation_text, source_spans)
+            raw_source_start = int(source_starts[index])
+            raw_source_end = int(source_ends[index])
+            source_start = raw_source_start - removed_parent_chars
+            source_end = raw_source_end - removed_parent_chars
+            matching_span_ids = matching_evidence_span_ids_at_source_offsets(
+                citation_text,
+                source_spans,
+                source_text=source_text,
+                source_start=source_start,
+                source_end=source_end,
+            )
             if not matching_span_ids:
                 raise ValueError(
                     "REFERENCES citation cannot be mapped to source Article spans: "
@@ -541,6 +601,8 @@ def candidates_from_graph_and_sources(
                     "occurrenceIndex": index,
                     "citationText": citation_text,
                     "sourceContentUnitId": basis.get("sourceContentUnitId"),
+                    "sourceStart": raw_source_start,
+                    "sourceEnd": raw_source_end,
                 }
             )
             occurrences.append(
@@ -548,6 +610,12 @@ def candidates_from_graph_and_sources(
                     occurrence_hash=occurrence_hash,
                     citation_text=citation_text,
                     source_content_unit_id=str(basis.get("sourceContentUnitId") or ""),
+                    source_start=raw_source_start,
+                    source_end=raw_source_end,
+                    source_prefix=source_text[
+                        max(0, source_start - 120) : source_start
+                    ],
+                    source_suffix=source_text[source_end : source_end + 120],
                     source_span_ids=tuple(matching_span_ids),
                 )
             )
@@ -566,6 +634,31 @@ def candidates_from_graph_and_sources(
             )
         )
     return tuple(sorted(candidates, key=lambda item: item.candidate_key))
+
+
+def _recover_reference_occurrences(
+    citation_texts: list[str], source_text: str
+) -> list[tuple[str, int, int]]:
+    """旧Graphの引用文から全ての原文位置を復元する。意味は推測しない。"""
+
+    recovered: list[tuple[str, int, int]] = []
+    seen: set[tuple[int, int]] = set()
+    for citation_text in citation_texts:
+        if not citation_text:
+            continue
+        search_from = 0
+        while True:
+            start = source_text.find(citation_text, search_from)
+            if start < 0:
+                break
+            end = start + len(citation_text)
+            if (start, end) not in seen:
+                seen.add((start, end))
+                recovered.append((citation_text, start, end))
+            search_from = start + 1
+            if len(recovered) > 32:
+                raise ValueError("REFERENCES occurrence recovery exceeded 32 matches")
+    return sorted(recovered, key=lambda item: (item[1], item[2], item[0]))
 
 
 def audit_classification_materialization(

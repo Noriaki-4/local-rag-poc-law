@@ -438,6 +438,72 @@ def matching_evidence_span_ids(
     return matched_span_ids
 
 
+def matching_evidence_span_ids_at_source_offsets(
+    occurrence: str,
+    spans: dict[str, str],
+    *,
+    source_text: str,
+    source_start: int,
+    source_end: int,
+) -> list[str]:
+    """元Content Unit上の位置を使い、同文言の別出現を混ぜずにspanへ対応する。"""
+
+    if not 0 <= source_start < source_end <= len(source_text):
+        return []
+    normalized_occurrence = re.sub(r"\s+", "", occurrence)
+    normalized_source = re.sub(r"\s+", "", source_text)
+    normalized_start = len(re.sub(r"\s+", "", source_text[:source_start]))
+    normalized_end = len(re.sub(r"\s+", "", source_text[:source_end]))
+    if (
+        not normalized_occurrence
+        or normalized_source[normalized_start:normalized_end]
+        != normalized_occurrence
+    ):
+        return []
+
+    normalized_parts: list[tuple[str, int, int]] = []
+    article_text = ""
+    for span_id, text in spans.items():
+        normalized_text = re.sub(r"\s+", "", text)
+        start = len(article_text)
+        article_text += normalized_text
+        normalized_parts.append((span_id, start, len(article_text)))
+
+    occurrence_range: tuple[int, int] | None = None
+    radius = max(32, len(normalized_occurrence))
+    while radius <= max(len(normalized_source), 32) * 2:
+        context_start = max(0, normalized_start - radius)
+        context_end = min(len(normalized_source), normalized_end + radius)
+        context = normalized_source[context_start:context_end]
+        matches: list[int] = []
+        search_from = 0
+        while context:
+            match_start = article_text.find(context, search_from)
+            if match_start < 0:
+                break
+            matches.append(match_start)
+            search_from = match_start + 1
+        if len(matches) == 1:
+            article_occurrence_start = matches[0] + normalized_start - context_start
+            occurrence_range = (
+                article_occurrence_start,
+                article_occurrence_start + len(normalized_occurrence),
+            )
+            break
+        if context_start == 0 and context_end == len(normalized_source):
+            break
+        radius *= 2
+
+    if occurrence_range is None:
+        return []
+    occurrence_start, occurrence_end = occurrence_range
+    return [
+        span_id
+        for span_id, start, end in normalized_parts
+        if start < occurrence_end and end > occurrence_start
+    ]
+
+
 def article_texts_from_sources(
     article_ids: list[str], sources: list[dict[str, Any]]
 ) -> dict[str, ArticleText]:
@@ -480,14 +546,16 @@ def article_texts_from_sources(
     return output
 
 
-def _without_repeated_parent_context(text: str, parent_text: str) -> str:
+def without_repeated_parent_context_with_offset(
+    text: str, parent_text: str
+) -> tuple[str, int]:
     """検索用子chunkに再掲された親本文だけを構造情報に基づいて除く。
 
     法令中に偶然同じ文が現れる場合を消さないよう、直近親chunkの完全な先頭一致だけを
     対象にする。Paragraph chunkの表示番号だけがItem chunkでは省かれる形式にも対応する。
     """
     if not parent_text:
-        return text
+        return text, 0
     candidates = [parent_text]
     without_paragraph_number = re.sub(
         r"^\s*(?:[0-9０-９]+|[一二三四五六七八九十百千]+)\s*",
@@ -499,10 +567,16 @@ def _without_repeated_parent_context(text: str, parent_text: str) -> str:
         candidates.append(without_paragraph_number)
     for context in sorted(candidates, key=len, reverse=True):
         if text == context:
-            return ""
+            return "", len(text)
         if text.startswith(context):
-            return text[len(context) :].lstrip()
-    return text
+            remainder = text[len(context) :]
+            stripped = remainder.lstrip()
+            return stripped, len(context) + len(remainder) - len(stripped)
+    return text, 0
+
+
+def _without_repeated_parent_context(text: str, parent_text: str) -> str:
+    return without_repeated_parent_context_with_offset(text, parent_text)[0]
 
 
 def _natural_id_key(value: str) -> tuple[tuple[int, int | str], ...]:

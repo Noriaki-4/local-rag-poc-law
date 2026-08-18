@@ -61,10 +61,16 @@ class ReferenceOccurrence(LegalGraphModel):
     occurrence_hash: str = Field(min_length=1, max_length=128)
     citation_text: str = Field(min_length=1)
     source_content_unit_id: str = Field(min_length=1, max_length=500)
+    source_start: int = Field(ge=0)
+    source_end: int = Field(gt=0)
+    source_prefix: str = Field(max_length=160)
+    source_suffix: str = Field(max_length=160)
     source_span_ids: tuple[str, ...] = Field(min_length=1)
 
     @model_validator(mode="after")
     def validate_span_ids(self) -> ReferenceOccurrence:
+        if self.source_end <= self.source_start:
+            raise ValueError("reference source end must be after start")
         if len(self.source_span_ids) != len(set(self.source_span_ids)):
             raise ValueError("reference source span IDs must be unique")
         return self

@@ -10,6 +10,7 @@ from app.legal_relation_classifier import (
     batch_relation_items,
     build_relation_classification_prompt,
     matching_evidence_span_ids,
+    matching_evidence_span_ids_at_source_offsets,
     relation_classification_request_chars,
     relation_classification_timeout,
     relation_classification_json_schema,
@@ -229,6 +230,22 @@ def test_reference_occurrence_maps_every_repeated_location() -> None:
         "to::span-1",
         "to::span-2",
     ]
+
+
+def test_reference_occurrence_offsets_select_only_the_intended_repetition() -> None:
+    spans = {
+        "article::span-1": "第九十八条の規定により通知する。",
+        "article::span-2": "第九十八条の規定にかかわらず変更する。",
+    }
+    source_text = "第九十八条の規定にかかわらず変更する。"
+
+    assert matching_evidence_span_ids_at_source_offsets(
+        "第九十八条",
+        spans,
+        source_text=source_text,
+        source_start=0,
+        source_end=len("第九十八条"),
+    ) == ["article::span-2"]
 
 
 def test_decisive_verdict_requires_reference_occurrence_mapping() -> None:

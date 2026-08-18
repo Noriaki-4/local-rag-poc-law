@@ -23,6 +23,7 @@ from .legal_ontology import (
     UNVERIFIED_ASSERTION_CONFIDENCE,
     resolve_authority_type,
 )
+from .legal_relation_classifier import without_repeated_parent_context_with_offset
 from .legal_relation_resolver import assess_implements, classify_reference_kind
 from .opensearch_client import OpenSearchClient
 
@@ -1497,6 +1498,9 @@ def _reference_edges(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     edges = []
     for document_id, scoped_documents in law_documents.items():
+        documents_by_id = {
+            str(document["contentUnitId"]): document for document in scoped_documents
+        }
         # 前条・次条の隣接は本則・附則をまたがないよう sectionKey ごとに並べる。
         section_article_ids: dict[str, list[str]] = {}
         for document in scoped_documents:
@@ -1517,7 +1521,15 @@ def _reference_edges(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
             source_article_id = document.get("articleContentUnitId") or document.get("parentContentUnitId") or source_id
             ids = section_article_ids[section_key]
             index = section_index[section_key][source_article_id]
-            text = str(document.get("text") or "")
+            raw_text = str(document.get("text") or "")
+            parent = documents_by_id.get(str(document.get("parentContentUnitId") or ""))
+            if parent is None:
+                text = raw_text
+                source_offset = 0
+            else:
+                text, source_offset = without_repeated_parent_context_with_offset(
+                    raw_text, str(parent.get("text") or "").strip()
+                )
             targets = set(_explicit_article_reference_ids(document_id, text)) & main_article_ids
             if "前条" in text and index > 0:
                 targets.add(ids[index - 1])
@@ -1533,6 +1545,7 @@ def _reference_edges(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     target_id,
                     previous_target_id=ids[index - 1] if index > 0 else None,
                     next_target_id=ids[index + 1] if index + 1 < len(ids) else None,
+                    source_offset=source_offset,
                 )
                 edges.append(
                     {
@@ -1565,6 +1578,7 @@ def _reference_occurrences(
     *,
     previous_target_id: str | None,
     next_target_id: str | None,
+    source_offset: int = 0,
 ) -> list[tuple[str, int, int, str]]:
     occurrences: list[tuple[str, int, int, str]] = []
     for match in ARTICLE_REFERENCE_PATTERN.finditer(text):
@@ -1573,7 +1587,12 @@ def _reference_occurrences(
         ):
             continue
         occurrences.append(
-            (match.group(0), match.start(), match.end(), "article_reference")
+            (
+                match.group(0),
+                match.start() + source_offset,
+                match.end() + source_offset,
+                "article_reference",
+            )
         )
     for token, adjacent_target, method in (
         ("前条", previous_target_id, "previous_article"),
@@ -1582,12 +1601,21 @@ def _reference_occurrences(
         if adjacent_target != target_id:
             continue
         for match in re.finditer(token, text):
-            occurrences.append((token, match.start(), match.end(), method))
+            occurrences.append(
+                (token, match.start() + source_offset, match.end() + source_offset, method)
+            )
     if occurrences:
         return occurrences
     # 構造的には解決済みでも引用位置を復元できない場合は、参照元Content Unitを
     # 監査対象として残す。意味predicateはここから推測しない。
-    return [(text[:500], 0, min(len(text), 500), "content_unit_fallback")]
+    return [
+        (
+            text[:500],
+            source_offset,
+            source_offset + min(len(text), 500),
+            "content_unit_fallback",
+        )
+    ]
 
 
 def _incorporation_edges(
@@ -1678,6 +1706,11 @@ def _delegation_graph_artifacts(
         for document in documents
         if document.get("docType") == "law"
     }
+    documents_by_id = {
+        str(document["contentUnitId"]): document
+        for document in documents
+        if document.get("docType") == "law"
+    }
     document_titles = {
         str(document["documentId"]): str(document.get("title") or "")
         for document in documents
@@ -1720,7 +1753,15 @@ def _delegation_graph_artifacts(
         ).split("-paragraph-", 1)[0]
         if lower_article_id not in available_articles:
             continue
-        text = str(document.get("text") or "")
+        raw_text = str(document.get("text") or "")
+        parent = documents_by_id.get(str(document.get("parentContentUnitId") or ""))
+        if parent is None:
+            text = raw_text
+            source_offset = 0
+        else:
+            text, source_offset = without_repeated_parent_context_with_offset(
+                raw_text, str(parent.get("text") or "").strip()
+            )
         referenced_parent_articles = _prefixed_article_references_with_context(
             parent_document_id,
             text,
@@ -1739,10 +1780,19 @@ def _delegation_graph_artifacts(
                     known_authority_titles=tuple(document_titles.values()),
                 )
             )
-        contexts_by_parent: dict[str, list[str]] = {}
-        for parent_article_id, reference_context in referenced_parent_articles:
+        contexts_by_parent: dict[str, list[tuple[str, int, int]]] = {}
+        for (
+            parent_article_id,
+            reference_context,
+            local_reference_start,
+            local_reference_end,
+        ) in referenced_parent_articles:
             contexts_by_parent.setdefault(parent_article_id, []).append(
-                reference_context
+                (
+                    reference_context,
+                    local_reference_start + source_offset,
+                    local_reference_end + source_offset,
+                )
             )
         for parent_article_id, reference_contexts in contexts_by_parent.items():
             if parent_article_id not in available_articles:
@@ -1752,11 +1802,10 @@ def _delegation_graph_artifacts(
             )
             if reference_edge_id not in seen:
                 seen.add(reference_edge_id)
-                reference_context_values = list(
-                    dict.fromkeys(
-                        context[:240] for context in reference_contexts
-                    )
-                )[:4]
+                reference_occurrences = [
+                    (context[:240], start, min(end, start + 240))
+                    for context, start, end in reference_contexts[:4]
+                ]
                 edges.append(
                     {
                         "graphEdgeId": reference_edge_id,
@@ -1767,8 +1816,10 @@ def _delegation_graph_artifacts(
                         "referenceKind": REFERENCE_KIND_PARENT_LAW_REFERENCE,
                         "relationSource": "subordinate_law_parent_reference",
                         "relationConfidence": 0.95,
-                        "citationText": reference_context_values[0],
-                        "citationTexts": reference_context_values,
+                        "citationText": reference_occurrences[0][0],
+                        "citationTexts": [item[0] for item in reference_occurrences],
+                        "sourceSpanStarts": [item[1] for item in reference_occurrences],
+                        "sourceSpanEnds": [item[2] for item in reference_occurrences],
                         "targetResolutionMethod": "parent_authority_reference",
                         "publishStatus": "published",
                         "isLatest": True,
@@ -1787,7 +1838,7 @@ def _delegation_graph_artifacts(
                     child_authority_type=authority_types.get(lower_document_id),
                     same_family=True,
                 )
-                for reference_context in reference_contexts
+                for reference_context, _, _ in reference_contexts
             ]
             assessment = max(
                 assessments,
@@ -1799,7 +1850,7 @@ def _delegation_graph_artifacts(
             )
             assertion = assertions.get(assertion_id)
             reference_context_values = list(
-                dict.fromkeys(context[:240] for context in reference_contexts)
+                dict.fromkeys(context[:240] for context, _, _ in reference_contexts)
             )[:4]
             if assertion is None:
                 assertions[assertion_id] = {
@@ -1892,13 +1943,13 @@ def _prefixed_article_references_with_context(
     *,
     expected_authority_title: str | None = None,
     known_authority_titles: tuple[str, ...] = (),
-) -> list[tuple[str, str]]:
+) -> list[tuple[str, str, int, int]]:
     """親Article IDと、その参照を含む局所文脈を返す。
 
     条全体を使うと、別の項号への単純参照と委任文言を誤って結合してしまうため、
     参照位置から文末または閉じ括弧までに限定する。
     """
-    references: list[tuple[str, str]] = []
+    references: list[tuple[str, str, int, int]] = []
     for match in pattern.finditer(text):
         if not _relative_reference_targets_expected_authority(
             text,
@@ -1927,7 +1978,9 @@ def _prefixed_article_references_with_context(
             position = text.find("）", match.end(), context_end)
             if position >= 0:
                 context_end = min(context_end, position + 1)
-        references.append((article_id, text[match.start():context_end]))
+        references.append(
+            (article_id, text[match.start():context_end], match.start(), context_end)
+        )
     return references
 
 

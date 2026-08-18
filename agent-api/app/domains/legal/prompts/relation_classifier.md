@@ -4,6 +4,7 @@
 入力の意味:
 - referenceSourceArticleはREFERENCESを書いたArticleです。
 - referenceTargetArticleはREFERENCESが指すArticleです。
+- referenceOccurrencesのsourceStart/sourceEndはsourceContentUnitId内の引用位置、sourcePrefix/sourceSuffixは引用直前・直後の原文です。同じcitationTextが繰り返される場合は、この位置文脈で今回の出現を区別してください。
 - この物理方向は、意味関係のSUBJECT / OBJECT方向を意味しません。
 - Article本文中の別の参照へ判断対象を移さないでください。
 

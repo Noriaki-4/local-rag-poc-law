@@ -56,6 +56,72 @@ def test_reference_edges_include_explicit_and_previous_article():
     assert all(edge["edgeType"] == "REFERENCES" for edge in edges)
 
 
+def test_reference_edges_ignore_parent_reference_repeated_in_child_chunk():
+    article_id = "law-test-article-108"
+    paragraph_id = f"{article_id}-paragraph-1"
+    item_id = f"{paragraph_id}-item-9"
+    parent_text = "1 第九十八条に規定する手続を行う。"
+    repeated_parent = "第九十八条に規定する手続を行う。"
+    documents = [
+        _document("98", "第九十八条 手続を定める。"),
+        _document("108", "第百八条 報告を定める。"),
+        {
+            **_document("108", parent_text),
+            "contentUnitId": paragraph_id,
+            "articleContentUnitId": article_id,
+            "parentContentUnitId": article_id,
+        },
+        {
+            **_document("108", f"{repeated_parent}\n九 独自の規定。"),
+            "contentUnitId": item_id,
+            "articleContentUnitId": article_id,
+            "parentContentUnitId": paragraph_id,
+        },
+    ]
+
+    edges = _reference_edges(documents)
+
+    assert not any(edge["fromGraphNodeId"] == item_id for edge in edges)
+
+
+def test_reference_edges_keep_child_own_reference_and_raw_offsets():
+    article_id = "law-test-article-108"
+    paragraph_id = f"{article_id}-paragraph-1"
+    item_id = f"{paragraph_id}-item-9"
+    parent_text = "1 第九十八条に規定する手続を行う。"
+    repeated_parent = "第九十八条に規定する手続を行う。"
+    child_text = f"{repeated_parent}\n九 第九十七条の規定に従う。"
+    documents = [
+        _document("97", "第九十七条 手続を定める。"),
+        _document("98", "第九十八条 手続を定める。"),
+        _document("108", "第百八条 報告を定める。"),
+        {
+            **_document("108", parent_text),
+            "contentUnitId": paragraph_id,
+            "articleContentUnitId": article_id,
+            "parentContentUnitId": article_id,
+        },
+        {
+            **_document("108", child_text),
+            "contentUnitId": item_id,
+            "articleContentUnitId": article_id,
+            "parentContentUnitId": paragraph_id,
+        },
+    ]
+
+    edge = next(
+        edge
+        for edge in _reference_edges(documents)
+        if edge["fromGraphNodeId"] == item_id
+    )
+
+    assert edge["toGraphNodeId"] == "law-test-article-97"
+    assert edge["sourceSpanStarts"] == [child_text.rindex("第九十七条")]
+    assert edge["sourceSpanEnds"] == [
+        child_text.rindex("第九十七条") + len("第九十七条")
+    ]
+
+
 def test_delegation_edges_reverse_subordinate_law_parent_references():
     parent = _document("5", "第五条 政令で定めるものを除く。")
     subordinate = {
@@ -98,6 +164,40 @@ def test_delegation_edges_reverse_subordinate_law_parent_references():
             "unverified",
         )
     ]
+
+
+def test_delegation_edges_do_not_assign_parent_reference_to_repeated_child():
+    parent_law = _document("5", "第五条 内閣府令で定める事項を定める。")
+    subordinate_article_id = "law-order-article-2"
+    paragraph_id = f"{subordinate_article_id}-paragraph-1"
+    item_id = f"{paragraph_id}-item-1"
+    paragraph_text = "1 法第五条に規定する事項を定める。"
+    repeated_parent = "法第五条に規定する事項を定める。"
+    paragraph = {
+        **_document("2", paragraph_text),
+        "documentId": "law-order",
+        "contentUnitId": paragraph_id,
+        "articleContentUnitId": subordinate_article_id,
+        "parentContentUnitId": subordinate_article_id,
+    }
+    item = {
+        **_document("2", f"{repeated_parent}\n一 独自の事項。"),
+        "documentId": "law-order",
+        "contentUnitId": item_id,
+        "articleContentUnitId": subordinate_article_id,
+        "parentContentUnitId": paragraph_id,
+    }
+
+    # 順序に依存せず、子chunkの再掲ではなく所有元Paragraphを引用元にする。
+    edges = _delegation_edges(
+        [parent_law, item, paragraph],
+        {"law-test": "law-test", "law-order": "law-test"},
+    )
+
+    edge = next(edge for edge in edges if edge["toGraphNodeId"] == "law-test-article-5")
+    assert edge["sourceContentUnitId"] == paragraph_id
+    assert edge["sourceSpanStarts"] == [2]
+    assert edge["sourceSpanEnds"] == [len(paragraph_text)]
 
 
 def test_delegation_edges_do_not_resolve_other_laws_douhou_as_parent_law():

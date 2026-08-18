@@ -5,6 +5,7 @@
 - referenceSourceArticleはREFERENCESを書いたArticleです。
 - referenceTargetArticleはREFERENCESが指すArticleです。
 - referenceOccurrencesは今回分類した原文参照です。
+- 同じcitationTextが複数ある場合、sourceStart/sourceEndとsourcePrefix/sourceSuffixで、成立判断に使った出現のreferenceOccurrenceHashを選んでください。
 - establishedPredicatesだけが成立済みの意味関係です。
 
 方向:

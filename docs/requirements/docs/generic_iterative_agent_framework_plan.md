@@ -1,6 +1,6 @@
 # シンプルな汎用反復型エージェント基盤 実装計画
 
-> 更新日: 2026-08-18
+> 更新日: 2026-08-19
 >
 > 本書を新しい実装ロードマップの正本とする。
 > 人間向けの概念図と処理イメージは、対になる
@@ -19,7 +19,7 @@
 |---|---|---|
 | Phase 0 | 一部完了 | 代表2問の現行baseline、説明付きstatus契約、生成schema・Prompt用語集のfixture |
 | Phase 1 | 一部実装 | `CycleRecord / StepRecord`、discriminator付きCommand、型付きstatusと遷移の一元化、再開契約 |
-| Phase 2 | 非同期分類jobまで実装 | 新5 predicate fixture・実データRun、Hypothesis別selector、旧自動Graph経路の撤去 |
+| Phase 2 | 非同期分類jobとLuna評価まで実装 | Luna判定JSONLの検証import・全件Run、Hypothesis別selector、旧自動Graph経路の撤去 |
 | Phase 3 | 未評価 | 新契約に基づくtrace、再開、入力増加、latencyの完了条件 |
 | Phase 4 | 未完了 | 新経路による代表2問の合格、既定経路切替、旧試作の撤去 |
 
@@ -40,6 +40,11 @@
   `REFERENCES / EXPLAINS`だけを作り、旧`APPLIED_BY / MENTIONS / RelationAssertion`を生成しない。
   新しい5 predicate契約、候補単位checkpoint、再開可能CLI、Neo4j保存、publish監査は実装済みである。
   実データの再seed・分類と検索時selectorへの接続はまだ行っていない。
+- 現行CLIのOllama `gemma4:e4b`経路はローカル契約試験用であり、手動監査14件の5 predicate完全一致が
+  4/14だったため、全件publish用の品質経路には採用しない。正本分類はCodexサブスクリプション内の
+  `gpt-5.6-luna`をWorker / Reviewerの両方に使い、候補を複数ペアへ分割して並列実行する。
+  既存14件と新規20件でこの方式を確認済みだが、判定JSONLを`ClassificationRun`へ取り込む
+  検証importは未実装である。詳しい比較結果と運用手順は[RUNBOOK](../../../RUNBOOK.md)を正とする。
 - 旧`legal-relation-classifier-v8`は、schema version 7の旧`IMPLEMENTS`候補を
   `implements / reference_only / uncertain`へ分類する移行用機能である。
   本書の5 predicate、`ClassificationRun`、`SUBJECT / OBJECT / CLASSIFIED_IN`を備えた
@@ -60,7 +65,8 @@
 2. 仮説検証を小さく繰り返し、1 Cycle内で複数のaction-observation stepを実行する。
 3. 汎用基盤と検索対象のDomain Packを分離する。
 4. 仮説、検索scope、関連性、根拠、完了はSolverが判断し、プログラムは実行事実と構造契約だけを扱う。
-5. LLMの登場人物はSolverと任意Reviewerだけにし、Projector等を独立Agentにしない。
+5. 回答AgentのLLM登場人物はSolverと任意Reviewerだけにし、Projector等を独立Agentにしない。
+   オフラインRelation分類のWorker / Reviewerは回答Agentの登場人物へ含めない。
 6. CaseStoreを案件状態の唯一の正本とし、Solverは安定IDを使った変更差分だけを返す。
 7. Graph探索は案件内Graph、frontier、展開済みscopeで管理し、LLMには未評価・再評価差分と短い台帳を渡す。
 8. status、Command、Tool、Model Profileは型付き契約を正本とし、PromptとProvider schemaを同期する。
@@ -89,7 +95,7 @@
 - Unit of Workや疑似DB transaction
 - EventJournalを正本にするイベントソーシング
 - Projector、Scheduler、Integrator等のサービス分割
-- サブエージェント
+- 回答Agent内のサブエージェント（オフライン意味分類のWorker / Reviewer並列ペアは別処理）
 - 書込みを含む並列実行
 - SQL生成
 - 自動的な法的判断
@@ -621,23 +627,34 @@ LLM分類の完了を待たず終了する。その後の非同期jobは、決�
 
 - 原文上の参照元・参照先Article全文。各本文は候補内に閉じ、`<articleId>::span-N`で一意に識別する
 - 同じ候補へ結び付く全`REFERENCES`と、同じ引用がArticle内に複数回現れる場合を含む全参照箇所
-- 各参照箇所の`citationText`、参照を書いたcontent unit、basis edge、対応span ID群
+- 各参照箇所の`citationText`、参照を書いたcontent unit、basis edge、対応span ID群、content unit内の
+  `sourceStart / sourceEnd`、引用直前・直後の`sourcePrefix / sourceSuffix`。同じ引用文言が同一span内で
+  反復しても、LLMは位置と局所文脈から出現を区別する
 - law family、authority type、snapshot・content hash
 
 複数targetを同じ判断へ束ねず、候補生成元のheuristic、旧`suggestedType / referenceKind`を正解候補として
-Promptへ出さない。意味分類は5 predicateを同時提示せず、同じ候補をpredicateごとの5回の専門判定へ
-分ける。各回はpredicate固有の二つの必要条件と`finding`だけをLLMへ返させる。例えば
-`INCORPORATES`は`explicitApplicationLanguage / targetRuleApplied`、`USES_DEFINITION`は
-`targetDefinesTerm / sourceUsesSameTerm`を使う。Programは二条件とfindingの真理値整合だけを検証し、
-本文から条件値を決めない。内部`candidateKey`は1候補・1呼出しではLLMへ提示・エコーさせず、
-呼出元が既知の候補へ機械的に付与する。複数predicateは独立に成立でき、一方の成立を他方の根拠へ流用しない。
+Promptへ出さない。Luna Workerは1候補の5 predicateを同じ呼出しで比較する。各predicateについて固有の
+二必要条件と`finding`を独立に返し、1件以上が`established`なら同じ回答内で
+`referenceOccurrenceHash / subjectArticleId / objectArticleId /
+referenceSourceSupportingSpanId / referenceTargetSupportingSpanId`も返す。例えば`INCORPORATES`は
+`explicitApplicationLanguage / targetRuleApplied`、`USES_DEFINITION`は
+`targetDefinesTerm / sourceUsesSameTerm`を使う。複数predicateは同時に成立でき、一方の成立を
+他方の根拠へ流用しない。非成立・不確実な関係へ意味方向や根拠を作らせない。
 
-1件以上が`established`の場合だけ、同じ候補と成立predicate一覧を第二段階の根拠付与LLMへ渡す。
-根拠付与LLMはpredicateを追加・削除せず、`referenceOccurrenceHash / subjectArticleId / objectArticleId /
-referenceSourceSupportingSpanId / referenceTargetSupportingSpanId`を成立predicateごとに返す。根拠spanは
-原文`REFERENCES`の物理方向で選び、ProgramはLLMが選んだ意味方向へ機械的に対応付ける。非成立・不確実な関係へ
-意味方向や根拠を作らせない。
+Luna ReviewerはWorkerの全回答と同じ候補入力を受け取り、答えを知らない独立再分類ではなく、
+Workerの誤り・不足・根拠不整合を具体的に指摘する。`request_change`の場合は同じWorkerが指摘を参照して
+5 predicate全体を再確認し、差戻しは1回だけに制限する。同じReviewerが修正版を差分確認し、
+2回目も不合格なら自動再試行せず`unresolved`へ分離する。候補集合は複数のWorker / Reviewerペアへ
+分割して並列化できるが、1候補を異なるペアへ重複配布しない。
+
+Programは二条件とfindingの真理値整合、既知ID、成立predicateと根拠件数の対応だけを検証し、
+本文から条件値、predicate、意味方向を決めない。内部`candidateKey`はProgramが入力候補へ
+機械的に対応付け、LLMに未知IDを生成させない。
+
 候補の`referenceSourceArticle / referenceTargetArticle`は原文`REFERENCES`の物理方向だけを表す。
+新seedは同一法令参照と親法令参照の両経路で引用位置を保存する。位置を持たない旧Graphを分類する場合は、
+既知`citationText`の完全一致位置を決定的に全件復元し、意味を推測せず候補へ付与する。親本文が子chunkへ
+再掲された部分の引用は子content unit自身の参照として扱わない。
 意味上の`subjectArticleId / objectArticleId`は根拠付与LLMが入力中の2端点から選ぶ。
 Programはauthority階層や参照方向から意味方向を補完しない。1件以上`established`なら`CLASSIFIED`、
 成立なしで1件以上`uncertain`なら`UNCERTAIN`、
@@ -648,9 +665,9 @@ predicate enum、端点が入力内にあること、選択span IDが対応Artic
 件数だけを検証し、predicate・finding・方向を補正しない。
 `REFERENCE_ONLY / UNCERTAIN / FAILED`はRelationAssertionに変換せず、ClassificationRunの監査件数へ記録する。
 
-分類LLMは既定で1候補・1 predicate/意味判定呼出しとし、成立時だけ候補単位の根拠付与を1回行う。
-複数候補又は複数predicateの同時提示は、単件結果との判断不変性を対象modelのfixtureで確認したProfileだけが
-明示的に有効化できる。LLM入力単位とは別に候補単位の保存checkpointを持ち、
+分類LLMは既定で1候補・5 predicateのWorker呼出しとし、成立時の根拠選択も同じ構造化回答に含める。
+複数候補を1回のLLM入力へ束ねない。候補間の並列化は、互いに独立したWorker / Reviewerペアへ
+候補シャードを割り当てることで行う。LLM入力単位とは別に候補単位の保存checkpointを持ち、
 分類jobは`sourceSnapshotId + 参照元/参照先Article ID・content hash + basisEdgeId + 正規化した全reference occurrence hash + promptVersion + provider + model + reviewer model + graphSchemaVersion`で
 再開・cache可能にする。
 この組を正規化してhash化した`candidateKey`を分類入力の冪等キーとする。1候補から複数predicateが返り得るため、
@@ -1360,20 +1377,31 @@ limits:
   max_wall_time_sec: 180
 ```
 
-回答Agentとは別に動く非同期Relation分類jobは、次の独立Profileを使う。
+回答Agentとは別に行う正本Relation分類は、次のオペレーター実行Profileを使う。
+これはAgent APIの実行時Profileではなく、Codex skillが判定JSONLを作る際の固定契約である。
 
 ```yaml
-relation_classifier:
-  provider: ollama
-  model: gemma4:e4b
-  uncertain_reviewer_model: gemma4:e4b
+relation_adjudication:
+  execution: codex_subscription
+  worker_model: gpt-5.6-luna
+  reviewer_model: gpt-5.6-luna
+  reasoning_effort: high
+  predicates_per_candidate: 5
   candidates_per_model_call: 1
+  max_revision_rounds: 1
+  parallel_worker_reviewer_pairs: configurable
 ```
 
-`uncertain_reviewer_model`は最終回答を検査する6章の任意Reviewerではなく、一次分類が
-`UNCERTAIN`だった同一候補だけを再分類する用途名である。`candidates_per_model_call`の既定1は、
-Graph Reviewのpageサイズや1 Stepの本文取得数とは無関係である。分類modelはProfileで変更できるが、
-複数候補を同時提示する設定は対象modelの判断不変性fixtureを通過しない限り採用しない。
+Reviewerは最終回答を検査する6章の任意Reviewerではなく、オフライン意味分類専用である。
+`candidates_per_model_call`の1はGraph Reviewのpageサイズや1 Stepの本文取得数とは無関係である。
+複数ペアは候補シャードを並列処理するが、1回のLLM入力には1候補だけを含める。
+WorkerとReviewerのmodel、reasoning effort、差戻し上限、skill versionを成果物manifestへ記録する。
+API経由でLunaを呼ばず、Codexサブスクリプションのオペレーター実行とする。
+
+現行コードのOllama Profileは比較・契約試験用として残る。Gemmaは手動監査14件で5 predicate完全一致が
+4/14だったため、全件Runのpublishには使用しない。Luna方式は既存14件で14/14、新規20件で最終20/20を
+確認済みである。ただし、Luna出力を候補hash・snapshot・Pydantic契約で検証して
+`ClassificationRun`へ取り込むimportが完成するまでは、評価JSONLをpublish済みGraphとして扱わない。
 
 `solver_common.md`はresearchとintegrationの両方へ合成する。質問観点、法令階層・委任先追跡、
 Evidence利用、Cycle・Stepの意味、完了条件のようにサイクル間で変わらない規則を段階別Promptへ重複記載しない。
@@ -1788,7 +1816,8 @@ focusへ接続するNode・Link、直近ToolResult、新規・保持EvidenceをC
 - statusまたはCommandをfixtureへ追加したとき、Provider schema、Prompt用語集、遷移網羅性のいずれかが
   未定義なら契約テストが失敗する。
 - Relation分類fixtureとガイドfixtureをNeo4jへ書き込まず再実行でき、model、prompt version、
-  1候補・1 predicate/意味判定呼出し、タグ別結果が記録される。機能fixtureを全候補の母集団精度とは表現しない。
+  1候補・5 predicateのWorker判定、Reviewer判定、差戻し回数、タグ別結果が記録される。
+  機能fixtureを全候補の母集団精度とは表現しない。
 
 ### Phase 1: 最小Framework
 
@@ -1882,14 +1911,17 @@ Phase 2は、実装途中のschemaで全データを作り直さない。次の�
 1. 新Graph契約、型、Constraint、監査をfixtureへ実装する。この時点では既存の実データを更新しない。
 2. `/admin/seed`を決定的処理だけにし、1つの入力manifestから同じ`sourceSnapshotId`を持つ
    OpenSearch本文とNeo4jの構造・原文Relationを再構築できるようにする。
-3. 非同期Relation分類をseedから独立した再開可能CLIとして実装する。初期実装では常駐worker、queue、
-   schedulerを必須にせず、HTTP seed処理内からLLMを呼ばない。
-4. 小規模fixtureとdry-run、現行34件fixture、代表100候補の順で、schema整合、分類品質、失敗率、
-   checkpoint、所要時間を確認する。全候補の所要時間を再見積りする前に全件Runを開始しない。
+3. Relation分類をseedから独立させ、候補JSONLの再開可能exportと、Luna判定JSONLを
+   `ClassificationRun`へ取り込む再開可能importを実装する。常駐worker、queue、schedulerを必須にせず、
+   HTTP seed処理内からLLMを呼ばない。
+4. 構造監査済みfixture、既存14件、新規20件、代表100候補の順で、schema整合、Worker / Reviewer品質、
+   差戻し率、未解消率、checkpoint、所要時間を確認する。全候補の所要時間を再見積りする前に
+   全件Runを開始しない。旧34件fixtureはローカル実装の機能試験として残すが、5 predicateの受入判定に使わない。
 5. 検証環境の回答処理を止め、同じmanifestからOpenSearchとNeo4jを一度だけ再構築する。
    現行の破壊的seedを実行中に検索可能な状態とは扱わず、途中失敗時は不一致snapshotを公開しない。
-6. 新snapshotを対象に全件分類し、`building` RunへcheckpointとAssertionを保存する。全件監査に成功した
-   Runだけを`published`へ遷移させ、Caseは開始時にその`classificationRunId`を固定する。
+6. 新snapshotを対象に候補をexportし、Codex LunaのWorker / Reviewerペアで全件分類する。検証importで
+   `building` RunへcheckpointとAssertionを保存し、全件監査に成功したRunだけを`published`へ遷移させる。
+   Caseは開始時にその`classificationRunId`を固定する。
 7. publish済みRunを新しいLegal Tool Adapterへ接続し、代表2問を検証する。非同期分類完了前でも
    OpenSearchと原文`REFERENCES / EXPLAINS`は利用できるが、`semantic_assertion`はpublish済みRunが
    ある場合だけ利用する。
@@ -1911,20 +1943,20 @@ publishする別単位とする。Graph schema、抽出規則、入力データ�
   `APPLIED_BY / MENTIONS`を生成しない。項・号をArticleへ置換せず、
   Article単位の探索投影にも正確なContent Unit IDを残す。
 - `/admin/seed`はOpenSearch本文、構造、明示`REFERENCES / EXPLAINS`までを決定的に作り、LLM分類を待たず終了する。
-  端点ペア・basis・全参照箇所を持つ候補1件ずつを分類する再開可能な非同期jobを実装する。
+  端点ペア・basis・全参照箇所を持つ候補1件ずつをexportし、判定結果を取り込む再開可能な非同期jobを実装する。
   候補内に閉じた両Article全文と`<articleId>::span-N`を提示し、旧`suggestedType / referenceKind`を
-  正解ヒントとしてPromptへ出さない。5 predicateを1種類ずつ専門判定し、predicate固有の二必要条件と
-  findingを返させる。成立predicateだけ第二段階で方向と両端根拠spanを返させ、Programはfindingから
-  outcomeとAssertionを決定的に投影する。既知decision key・
+  正解ヒントとしてPromptへ出さない。Luna Workerは5 predicateを同時に比較し、predicate固有の二必要条件、
+  finding、成立時の方向と両端根拠spanを返す。Luna ReviewerはWorker回答を見て具体的に指摘し、
+  同じWorkerへの差戻しは1回だけ許す。ProgramはfindingからoutcomeとAssertionを決定的に投影する。既知decision key・
   predicate enum・端点・根拠span・snapshot・hash・件数だけを構造検証する。Programは分類結果を補正しない。
 - 分類結果を`ClassificationRun`へ集計し、完了Runだけ一括publishする。RelationAssertionを
   `SUBJECT / OBJECT / CLASSIFIED_IN`各1本で接続し、`basisEdgeId / supportingSpans / classificationRunId`を
   保存する。`candidateKey`と`assertionDedupeKey`を決定的に生成し、後者の一意制約で同一Run・候補・predicateの
   二重登録を防ぐ。再開時に同じkeyと同じpayloadがあれば処理済みとして再利用し、同じkeyでpayloadが違えば
   Runを失敗させて上書きしない。旧`fromArticleId / toArticleId / suggestedType / status`を新schemaの正本にしない。
-- 分類LLMは既定1候補・1 predicate/意味判定呼出しとし、保存checkpointは候補単位にする。複数候補又は
-  複数predicateのbatchは
-  単件との判断不変性を対象modelのfixtureで確認した場合だけProfileで明示的に有効化する。
+- 分類LLMは既定1候補・5 predicateのWorker判定とし、保存checkpointは候補単位にする。
+  複数候補を同じPromptへ入れず、候補シャードを独立したWorker / Reviewerペアへ割り当てて並列化する。
+  Reviewer差戻しは1候補につき最大1回とし、再差戻しは`unresolved`へ分離する。
 - Case開始時に`sourceSnapshotId / graphSchemaVersion / classificationRunId`を固定し、検索時案件判断は
   CaseStoreだけへ保存する。分類jobと検索時Solverの責務を混同しない。
 - OpenSearch・Graphの各ToolRequestを既知の`ExplorationIntent`へ結び付け、Solverが明示したHypothesis由来の
@@ -1974,9 +2006,10 @@ publishする別単位とする。Graph schema、抽出規則、入力データ�
   候補がtargetごとの別LLM入力になり、Programが全参照先へ同じpredicateを複製しない。
   同一候補内で同じ参照文字列が複数回現れるfixtureは全出現spanを提示し、最初の一致だけに固定しない。
   分類再開・cache・Run単位publishを確認する。
-- 2候補又は複数predicateを同じPromptへ入れると結果が変わるfixtureで既定Profileが
-  1候補・1 predicate/意味判定呼出しを維持し、
+- 2候補を同じPromptへ入れると結果が変わるfixtureで、既定Profileが1候補・5 predicateの入力単位を維持し、
   Article ID付きspanが候補間で衝突せず、保存checkpointから再開できる。
+- Workerの誤りをReviewerが指摘するfixtureで、同じWorkerが指摘を参照して1回だけ全5 predicateを再確認し、
+  同じReviewerが差分を確認する。2回目も不合格なら再実行せず`unresolved`になる。
 - Provider schemaで各predicateが固有名の二必要条件とfindingを持ち、条件とfindingの不整合を拒否する。
   非成立・不確実時は方向・根拠を要求せず、成立predicateだけ根拠付与schemaへ渡ることを確認する。
   Programの決定的投影が`CLASSIFIED / REFERENCE_ONLY / UNCERTAIN`の3経路で本文の意味を補完しないことを確認する。
@@ -2033,7 +2066,8 @@ publishする別単位とする。Graph schema、抽出規則、入力データ�
 
 - logical model callとtransport retryを分けて計測する。
 - 非同期Relation分類は候補ごとのmodel latency、一次`UNCERTAIN`率、再分類回数、checkpoint保存時間、
-  再開skip件数を記録する。最初に代表100件を1候補・1 predicate/意味判定呼出しで測り、全候補の所要時間を再見積りしてから
+  Worker / Reviewer別の判定時間、差戻し率、未解消率、再開skip件数を記録する。最初に代表100件を
+  1候補・5 predicateのWorker判定と必要なReviewer判定で測り、全候補の所要時間を再見積りしてから
   全Runを開始する。速度のためにProgramがpredicateを補完したり、未評価候補を処理済みにしない。
 - cycle phase・goal・strategy、step番号・phase、frontier、探索Node/Link/depth、model用途、Tool時間を構造化ログとAPI traceへ出す。
 - 秘匿情報が通常ログへ出ないことをテストする。

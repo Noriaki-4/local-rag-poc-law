@@ -24,6 +24,7 @@ TARGET_ARTICLE_ID = "law-act-article-1"
 
 
 def _rows():
+    citation = "法第一条に基づき対象を定める。"
     return [
         {
             "basis": {
@@ -31,8 +32,10 @@ def _rows():
                 "sourceContentUnitId": SOURCE_ARTICLE_ID,
                 "sourceSnapshotId": SNAPSHOT_ID,
                 "graphSchemaVersion": 9,
-                "citationText": "法第一条に基づき対象を定める。",
-                "citationTexts": ["法第一条に基づき対象を定める。"],
+                "citationText": citation,
+                "citationTexts": [citation],
+                "sourceSpanStarts": [0],
+                "sourceSpanEnds": [len(citation)],
             },
             "referenceSourceArticle": {
                 "graphNodeId": SOURCE_ARTICLE_ID,
@@ -189,6 +192,142 @@ def test_candidate_keeps_reference_direction_separate_from_semantic_direction():
     assert candidate.reference_target.article_id == TARGET_ARTICLE_ID
     assert decision.assertions[0].subject_article_id == TARGET_ARTICLE_ID
     assert decision.assertions[0].object_article_id == SOURCE_ARTICLE_ID
+
+
+def test_candidate_uses_content_unit_offsets_for_repeated_citation() -> None:
+    parent_id = f"{SOURCE_ARTICLE_ID}-paragraph-1"
+    item_id = f"{parent_id}-item-9"
+    parent_text = "1 第九十八条に規定する手続を行う。"
+    repeated_parent = "第九十八条に規定する手続を行う。"
+    item_own_text = "九 第九十八条の規定にかかわらず変更する。"
+    item_text = f"{repeated_parent}\n{item_own_text}"
+    citation = "第九十八条"
+    own_start = item_text.rindex(citation)
+    rows = _rows()
+    rows[0]["basis"].update(
+        {
+            "sourceContentUnitId": item_id,
+            "citationText": citation,
+            "citationTexts": [citation],
+            "sourceSpanStarts": [own_start],
+            "sourceSpanEnds": [own_start + len(citation)],
+        }
+    )
+    sources = [
+        {
+            "contentUnitId": parent_id,
+            "articleContentUnitId": SOURCE_ARTICLE_ID,
+            "parentContentUnitId": SOURCE_ARTICLE_ID,
+            "text": parent_text,
+            "sourceSnapshotId": SNAPSHOT_ID,
+            "articleContentHash": "hash-order-2",
+        },
+        {
+            "contentUnitId": item_id,
+            "articleContentUnitId": SOURCE_ARTICLE_ID,
+            "parentContentUnitId": parent_id,
+            "text": item_text,
+            "sourceSnapshotId": SNAPSHOT_ID,
+            "articleContentHash": "hash-order-2",
+        },
+        _sources()[1],
+    ]
+
+    candidate = candidates_from_graph_and_sources(
+        rows,
+        sources,
+        source_snapshot_id=SNAPSHOT_ID,
+        graph_schema_version=9,
+        provider="ollama",
+        model="gemma4:e4b",
+        reviewer_model="gemma4:e4b",
+    )[0]
+
+    assert candidate.reference_occurrences[0].source_span_ids == (
+        f"{SOURCE_ARTICLE_ID}::span-2",
+    )
+    assert candidate.reference_occurrences[0].source_start == own_start
+    assert candidate.reference_occurrences[0].source_end == own_start + len(citation)
+    assert candidate.reference_occurrences[0].source_prefix == "九"
+    assert candidate.reference_occurrences[0].source_suffix.startswith(
+        "の規定にかかわらず"
+    )
+
+
+def test_candidate_rejects_reference_from_removed_parent_context() -> None:
+    parent_id = f"{SOURCE_ARTICLE_ID}-paragraph-1"
+    item_id = f"{parent_id}-item-9"
+    parent_text = "1 第九十八条に規定する手続を行う。"
+    repeated_parent = "第九十八条に規定する手続を行う。"
+    item_text = f"{repeated_parent}\n九 独自の規定。"
+    citation = "第九十八条"
+    rows = _rows()
+    rows[0]["basis"].update(
+        {
+            "sourceContentUnitId": item_id,
+            "citationText": citation,
+            "citationTexts": [citation],
+            "sourceSpanStarts": [0],
+            "sourceSpanEnds": [len(citation)],
+        }
+    )
+    sources = [
+        {
+            "contentUnitId": parent_id,
+            "articleContentUnitId": SOURCE_ARTICLE_ID,
+            "parentContentUnitId": SOURCE_ARTICLE_ID,
+            "text": parent_text,
+            "sourceSnapshotId": SNAPSHOT_ID,
+            "articleContentHash": "hash-order-2",
+        },
+        {
+            "contentUnitId": item_id,
+            "articleContentUnitId": SOURCE_ARTICLE_ID,
+            "parentContentUnitId": parent_id,
+            "text": item_text,
+            "sourceSnapshotId": SNAPSHOT_ID,
+            "articleContentHash": "hash-order-2",
+        },
+        _sources()[1],
+    ]
+
+    with pytest.raises(ValueError, match="cannot be mapped"):
+        candidates_from_graph_and_sources(
+            rows,
+            sources,
+            source_snapshot_id=SNAPSHOT_ID,
+            graph_schema_version=9,
+            provider="ollama",
+            model="gemma4:e4b",
+            reviewer_model="gemma4:e4b",
+        )
+
+
+def test_candidate_recovers_all_repeated_occurrences_from_legacy_edge() -> None:
+    citation = "法第一条に基づき対象を定める。"
+    source_text = f"前段。{citation}中段。{citation}後段。"
+    rows = _rows()
+    rows[0]["basis"].pop("sourceSpanStarts")
+    rows[0]["basis"].pop("sourceSpanEnds")
+    sources = _sources()
+    sources[0]["text"] = source_text
+
+    candidate = candidates_from_graph_and_sources(
+        rows,
+        sources,
+        source_snapshot_id=SNAPSHOT_ID,
+        graph_schema_version=9,
+        provider="ollama",
+        model="gemma4:e4b",
+        reviewer_model="gemma4:e4b",
+    )[0]
+
+    assert len(candidate.reference_occurrences) == 2
+    assert [
+        occurrence.source_start for occurrence in candidate.reference_occurrences
+    ] == [source_text.index(citation), source_text.rindex(citation)]
+    assert candidate.reference_occurrences[0].source_prefix == "前段。"
+    assert candidate.reference_occurrences[1].source_prefix.endswith("中段。")
 
 
 def test_unknown_semantic_endpoint_is_rejected_without_program_correction():

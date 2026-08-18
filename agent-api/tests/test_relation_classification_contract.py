@@ -72,6 +72,10 @@ def _candidate(
                 occurrence_hash=occurrence_hash,
                 citation_text="法第一条",
                 source_content_unit_id=object_.article_id,
+                source_start=0,
+                source_end=4,
+                source_prefix="",
+                source_suffix="の事項を定める。",
                 source_span_ids=(object_.spans[0].span_id,),
             )
             for occurrence_hash in occurrence_order

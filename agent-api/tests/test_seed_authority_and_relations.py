@@ -171,6 +171,10 @@ class TestGraphNodeProperties:
             REFERENCE_KIND_PARENT_LAW_REFERENCE
         )
         assert reference["citationText"] == "法第五条に規定する対象を定める。"
+        assert reference["sourceSpanStarts"] == [0]
+        assert reference["sourceSpanEnds"] == [
+            len("法第五条に規定する対象を定める。")
+        ]
         assert not any(
             node.get("nodeType") == "RelationAssertion" for node in nodes
         )

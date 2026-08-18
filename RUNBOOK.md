@@ -222,23 +222,35 @@ Run publish監査まで実装済みである。実データは再seed済みだ�
 関係する候補だけ両端Article本文で評価し、その案件判断はCaseStoreだけへ保存する。プログラムは
 既知ID、predicate enum、端点、根拠span、snapshot・hash・件数だけを検証し、法的意味を補正しない。
 
-オフライン分類は検索・回答用のLLM providerと分離し、既定でローカルOllamaの
-`gemma4:e4b`を使う。分類単位はArticleペア全体に存在し得る任意の関係ではなく、
+オフライン分類は検索・回答用のLLM providerと分離する。現行CLIのローカル動作確認用既定値は
+Ollamaの`gemma4:e4b`だが、この経路を全件意味分類の品質承認済み経路とは扱わない。
+全件登録用の意味判定は、Codexサブスクリプション内の`gpt-5.6-luna`を
+Worker / Reviewerの両方に使うオペレーター実行とする。
+[OpenAI公式モデル説明](https://developers.openai.com/api/docs/models/gpt-5.6-luna)では、
+Lunaは高速・大量処理向けのモデルとされている。実行時はCodexのローカル
+`legal-relation-adjudicator` skillの入出力契約に従い、リポジトリの分類候補JSONLを読み、
+監査可能な判定JSONLを返す。
+API経由では実行せず、Agent APIへLunaのmodel IDや認証を組み込まない。
+
+分類単位はArticleペア全体に存在し得る任意の関係ではなく、
 候補の`sourceText` / `sourceTexts`が示す参照箇所群である。Article本文はその文脈として使う。
 OpenSearchの子チャンクが親チャンク本文を再掲する場合は、`parentContentUnitId`で
 直接の親子と確認できた先頭部分だけを除き、重複のないArticle全文を復元する。
 Article本文は決定的なspan ID付きでLLMへ渡し、LLMは判断根拠とするspan IDを選ぶ。
 自由記述の引用文は求めず、プログラムは選ばれたIDが対応Articleに存在することだけを検証する。
-5種類は同時に判定せず、候補ごとに1 predicateずつ5回の専門判定を行う。各判定はpredicate固有の
-二つの必要条件とfindingだけを返す。内部`candidateKey`は1候補・1呼出しではLLMにエコーさせず、
-呼出元が既知の候補へ機械的に付与する。成立したpredicateがある場合だけ、別の根拠付与呼出しで
-`referenceOccurrenceHash / subjectArticleId / objectArticleId /
-referenceSourceSupportingSpanId / referenceTargetSupportingSpanId`を選ぶ。根拠spanは原文参照の
-物理方向で選び、プログラムがLLMの選んだSUBJECT / OBJECT方向へ機械的に対応付ける。プログラムは
-条件とfinding、既知ID、件数の整合を検証してoutcomeと
-保存対象Assertionへ決定的に投影するだけで、predicate・条件値・finding・方向・根拠を補正しない。
-既定の`RELATION_CLASSIFIER_CONTEXT_TOKENS=131072`は、既定モデル`gemma4:e4b`の
-context上限に合わせ、長いArticleを黙って切り捨てないための値である。
+Luna Workerは5 predicateを同じ候補について一度に比較し、それぞれ固有の二必要条件とfinding、
+成立時の根拠IDを返す。複数predicateは独立に成立できる。ReviewerはWorkerの回答と同じ候補本文を受け取り、
+誤りを具体的に指摘する。差戻しは1回だけとし、同じWorkerが指摘を参照して全5分類を再確認した後、
+同じReviewerが差分を最終確認する。処理量は候補を複数のWorker / Reviewerペアへ分割して並列化する。
+プログラムは条件とfinding、既知ID、件数の整合を検証してoutcomeと保存対象Assertionへ決定的に投影するだけで、
+predicate・条件値・finding・方向・根拠を補正しない。
+
+現行`classify_legal_relations.py`のOllama経路は、1候補をpredicateごとの5回と根拠付与に分ける実装のままである。
+これはローカル契約試験と比較baselineには使えるが、LunaのWorker / Reviewer成果をGraphへ登録するimport経路ではない。
+全件実行前に、Luna判定JSONLを同じPydantic契約・候補hash・snapshotで検証して`ClassificationRun`へ取り込む
+再開可能importを実装する。import完成前はLunaの評価結果を`published`扱いしない。
+
+`RELATION_CLASSIFIER_CONTEXT_TOKENS=131072`はOllama経路で長いArticleを黙って切り捨てないための上限である。
 
 新schemaの候補数とsnapshot整合だけを確認し、LLM・Neo4j更新を行わないdry-run:
 
@@ -247,7 +259,7 @@ OLLAMA_BASE_URL=http://localhost:11434 \
 python3 scripts/classify_legal_relations.py --limit 10
 ```
 
-小規模分類を実行してcheckpointを保存し、Runを`building`のまま検査する場合:
+Ollama経路の小規模分類を実行してcheckpointを保存し、Runを`building`のまま検査する場合:
 
 ```bash
 OLLAMA_BASE_URL=http://localhost:11434 \
@@ -333,6 +345,33 @@ fixtureはfine-tuning用データではなく、参照解決器と分類器を�
 接続した1件、法律を参照する文脈を施行令の自己参照にした2件である。意味分類側では、
 `INCORPORATES`の過剰成立と`IMPLEMENTS`の見落としが主に残った。したがって、Graphの
 参照先修正だけで分類精度が解決するとは扱わない。
+
+#### GemmaからLunaへ切り替えた理由（2026-08-19）
+
+`gemma4:e4b`を不採用にした理由は、ローカルモデル一般が法令を扱えないからではなく、
+このレポで必要な「構造監査済みArticleペアについて5 predicateを独立評価し、引用出現と両端spanを
+根拠として固定する」という受入条件を安定して満たさなかったためである。
+
+- 旧34件の34/34は、明示的な委任文言を中心とした機能試験であり、5 predicateの実務的な識別能力を示さない。
+- 参照先が正しかった手動監査14件では、Gemmaの5 predicate完全一致は4/14だった。
+- 主な誤りは、`IMPLEMENTS`と単なる親法令カテゴリー利用の混同、`INCORPORATES`の過剰成立、
+  `USES_DEFINITION`の見落とし、参照文言と根拠spanの対応不安定であった。
+- 本則・附則の誤接続、親本文が子chunkへ再掲される問題、同じ引用文言の複数出現を区別できない問題は
+  モデル精度と分離して構造側で修正した。これらをGemmaの失敗として数えていない。
+
+構造修正後は、Codex `gpt-5.6-luna`を同じモデルのWorker / Reviewerペアとして使用した。
+ReviewerはWorkerの回答を見たうえで誤りと根拠を指摘し、Workerの差戻し対応は1回だけに制限した。
+既存14件の回帰は最終14/14、新規20件は2ペア（11件と9件）で並列実行し、初回の3件を
+1回の差戻しで修正して最終20/20、未解消0件となった。新規20件はさらに人手相当の全件監査を行い、
+確定fixture
+`docs/requirements/samples/eval/legal_relation_parallel_20_adjudicated_fixture.jsonl`と全件一致した。
+
+したがって、現時点の採用判断は次のとおりである。
+
+- Gemma経路: ローカルの契約・速度・比較試験用。全件Runをpublishする品質経路には使わない。
+- Luna経路: Codexサブスクリプション内で一度だけ正本データを作るWorker / Reviewer方式。
+- モデル出力はそのまま信用せず、構造監査、Reviewer、1回だけの差戻し、確定fixtureとの照合を通す。
+- 法令snapshotまたは分類契約が変わらない限り、確定済み`candidateKey`を再分類しない。
 
 ガイド6文書について、OpenSearch検索、明示`EXPLAINS`、遷移先Article全文取得を
 実データで検査する場合は次を実行する。LLMとClaude APIは使わず、Neo4jも更新しない。
