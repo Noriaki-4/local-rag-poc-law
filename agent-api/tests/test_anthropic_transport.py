@@ -9,6 +9,51 @@ from app.llm import (
 from app.models import AnswerRequest, Citation
 
 
+def test_ollama_transport_applies_classifier_context_and_disables_thinking(
+    monkeypatch,
+) -> None:
+    captured: dict = {}
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "response": '{"ok":true}',
+                "prompt_eval_count": 10,
+                "eval_count": 5,
+                "done_reason": "stop",
+            }
+
+    def fake_post(url, *, json, timeout):
+        captured.update({"url": url, "payload": json, "timeout": timeout})
+        return FakeResponse()
+
+    monkeypatch.setattr("app.llm.requests.post", fake_post)
+    client = LLMClient(
+        provider="ollama",
+        ollama_num_ctx=32768,
+        ollama_think=False,
+    )
+
+    client._ollama_json(
+        "prompt",
+        {
+            "type": "object",
+            "properties": {"ok": {"type": "boolean"}},
+            "required": ["ok"],
+            "additionalProperties": False,
+        },
+        "gemma4:e4b",
+        30,
+    )
+
+    assert captured["payload"]["options"]["num_ctx"] == 32768
+    assert captured["payload"]["think"] is False
+    assert captured["payload"]["model"] == "gemma4:e4b"
+
+
 def test_anthropic_529_is_retried_with_same_payload(monkeypatch) -> None:
     responses = [
         SimpleNamespace(status_code=529),
@@ -166,6 +211,47 @@ def test_anthropic_health_checks_models_and_reports_haiku_effective_effort(
     ]
     assert health["researchEffort"]["stageEffective"] is None
     assert health["researchEffort"]["integrationEffective"] is None
+
+
+def test_anthropic_health_does_not_check_local_classifier_models(
+    monkeypatch,
+) -> None:
+    requested_urls: list[str] = []
+
+    def fake_get(url, *, headers, timeout):
+        requested_urls.append(url)
+        return SimpleNamespace(ok=True)
+
+    monkeypatch.setattr("app.llm.settings.anthropic_api_key", "test-key")
+    for setting_name in (
+        "answer_model",
+        "reviewer_model",
+        "planner_model",
+        "evaluator_model",
+        "llm_research_stage_model",
+        "llm_research_integration_model",
+    ):
+        monkeypatch.setattr(
+            f"app.llm.settings.{setting_name}", "claude-main-test"
+        )
+    monkeypatch.setattr(
+        "app.llm.settings.relation_classifier_provider", "ollama"
+    )
+    monkeypatch.setattr(
+        "app.llm.settings.relation_classifier_model", "gemma4:e4b"
+    )
+    monkeypatch.setattr(
+        "app.llm.settings.relation_classifier_reviewer_model", "gemma4:e4b"
+    )
+    monkeypatch.setattr("app.llm.requests.get", fake_get)
+
+    health = LLMClient(provider="anthropic")._anthropic_health()
+
+    assert health["ok"] is True
+    assert requested_urls == [
+        "https://api.anthropic.com/v1/models/claude-main-test"
+    ]
+    assert health["relationClassifierProvider"] == "ollama"
 
 
 def test_anthropic_health_rejects_unavailable_model_without_raw_error(

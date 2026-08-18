@@ -171,16 +171,36 @@ class Settings:
     llm_research_integration_model = (
         os.getenv("LLM_RESEARCH_INTEGRATION_MODEL") or llm_research_model
     )
-    # RelationAssertionの分類はseedとは分離したオフライン処理で行う。一次分類には探索用の
-    # 軽量モデル、uncertainだけを再検討するReviewerにはReviewerモデルを既定利用する。
+    # RelationAssertionの分類はseedとは分離したオフライン処理で行う。検索・回答用の
+    # providerがAnthropicでも、分類だけローカルOllamaへ分離できるよう専用providerを持つ。
+    relation_classifier_provider = os.getenv(
+        "RELATION_CLASSIFIER_PROVIDER", "ollama"
+    ).lower()
     relation_classifier_model = (
-        os.getenv("RELATION_CLASSIFIER_MODEL") or llm_research_stage_model
+        os.getenv("RELATION_CLASSIFIER_MODEL")
+        or (
+            "gemma4:e4b"
+            if relation_classifier_provider == "ollama"
+            else llm_research_stage_model
+        )
     )
     relation_classifier_reviewer_model = (
-        os.getenv("RELATION_CLASSIFIER_REVIEWER_MODEL") or reviewer_model
+        os.getenv("RELATION_CLASSIFIER_REVIEWER_MODEL")
+        or (
+            relation_classifier_model
+            if relation_classifier_provider == "ollama"
+            else reviewer_model
+        )
+    )
+    relation_classifier_context_tokens = max(
+        4096,
+        min(
+            int(os.getenv("RELATION_CLASSIFIER_CONTEXT_TOKENS", "131072")),
+            131072,
+        ),
     )
     relation_classifier_batch_size = max(
-        1, min(int(os.getenv("RELATION_CLASSIFIER_BATCH_SIZE", "8")), 8)
+        1, min(int(os.getenv("RELATION_CLASSIFIER_BATCH_SIZE", "1")), 8)
     )
     relation_classifier_batch_chars = max(
         4000,

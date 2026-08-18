@@ -163,6 +163,20 @@ Shadow modeで計算した `shadowRerankerArticleCompleteHit` /
 > **答え合わせ専用**であり、システムには問題文と選択肢しか渡さない。`citationArticleHit`
 > は「システムが自力で引いた条文が、コンテキスト由来の gold条文と一致したか」を測る。
 
+### 2.2 RelationAssertion分類・ガイドナビゲーション
+
+自然言語QAの最終正答率とは別に、索引と探索部品を固定fixtureで切り分けて評価する。
+
+| 評価 | fixture | 判定主体 | 合格条件 |
+|---|---|---|---|
+| RelationAssertion分類 | `legal_relation_classifier_fixture.jsonl` | 法的意味は分類LLM。プログラムは既知ID・件数・根拠spanだけ検証 | 期待`implements / reference_only`との一致。府令、施行令→府令、複数参照箇所をタグ別にも集計 |
+| ガイドナビゲーション | `guidance_navigation_fixture.jsonl` | 検索・Graph・本文取得の決定的検査 | 期待ガイドが検索上位にあり、明示`EXPLAINS`集合が一致し、遷移先Article全文を取得できる |
+
+分類LLMへはRelationAssertionごとに両Article全文を提示する。候補間干渉を避けるため、
+精度評価の既定は1候補/LLM呼出しとする。ガイドの期待Article IDや法令関係のgoldは
+検索時のAgentへ渡さず、評価後の照合にだけ使う。ガイド本文だけで
+RelationAssertionや法的結論を確定した場合は不合格とする。
+
 ## 3. Trace ログ
 
 すべてのパターンで共通ログを出す。

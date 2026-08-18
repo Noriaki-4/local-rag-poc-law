@@ -276,8 +276,16 @@ class EvidenceEvaluationPayload(BaseModel):
 class LLMClient:
     supports_iterative_research = True
 
-    def __init__(self) -> None:
-        self.provider = settings.llm_provider.lower()
+    def __init__(
+        self,
+        *,
+        provider: str | None = None,
+        ollama_num_ctx: int | None = None,
+        ollama_think: bool | None = None,
+    ) -> None:
+        self.provider = (provider or settings.llm_provider).lower()
+        self.ollama_num_ctx = ollama_num_ctx
+        self.ollama_think = ollama_think
 
     def health(self) -> dict[str, Any]:
         if self.provider == "anthropic":
@@ -344,21 +352,24 @@ class LLMClient:
             )
             response.raise_for_status()
             models = [model["name"] for model in response.json().get("models", [])]
-            return {
-                "provider": "ollama",
-                "ok": all(
-                    model in models
-                    for model in {
-                        settings.answer_model,
-                        settings.reviewer_model,
-                        settings.planner_model,
-                        settings.evaluator_model,
-                        settings.llm_research_stage_model,
-                        settings.llm_research_integration_model,
+            required_models = {
+                settings.answer_model,
+                settings.reviewer_model,
+                settings.planner_model,
+                settings.evaluator_model,
+                settings.llm_research_stage_model,
+                settings.llm_research_integration_model,
+            }
+            if settings.relation_classifier_provider == "ollama":
+                required_models.update(
+                    {
                         settings.relation_classifier_model,
                         settings.relation_classifier_reviewer_model,
                     }
-                ),
+                )
+            return {
+                "provider": "ollama",
+                "ok": all(model in models for model in required_models),
                 "baseUrl": settings.ollama_base_url,
                 "answerModel": settings.answer_model,
                 "reviewerModel": settings.reviewer_model,
@@ -369,6 +380,9 @@ class LLMClient:
                     settings.llm_research_integration_model
                 ),
                 "researchModel": settings.llm_research_model,
+                "relationClassifierProvider": (
+                    settings.relation_classifier_provider
+                ),
                 "relationClassifierModel": settings.relation_classifier_model,
                 "relationClassifierReviewerModel": (
                     settings.relation_classifier_reviewer_model
@@ -385,6 +399,9 @@ class LLMClient:
                 "researchStageModel": settings.llm_research_stage_model,
                 "researchIntegrationModel": (
                     settings.llm_research_integration_model
+                ),
+                "relationClassifierProvider": (
+                    settings.relation_classifier_provider
                 ),
                 "relationClassifierModel": settings.relation_classifier_model,
                 "relationClassifierReviewerModel": (
@@ -405,26 +422,31 @@ class LLMClient:
                 "researchIntegrationModel": (
                     settings.llm_research_integration_model
                 ),
+                "relationClassifierProvider": (
+                    settings.relation_classifier_provider
+                ),
                 "relationClassifierModel": settings.relation_classifier_model,
                 "relationClassifierReviewerModel": (
                     settings.relation_classifier_reviewer_model
                 ),
                 "reasonCode": "anthropic_api_key_missing",
             }
-        models = tuple(
-            dict.fromkeys(
-                (
-                    settings.answer_model,
-                    settings.reviewer_model,
-                    settings.planner_model,
-                    settings.evaluator_model,
-                    settings.llm_research_stage_model,
-                    settings.llm_research_integration_model,
+        configured_models = [
+            settings.answer_model,
+            settings.reviewer_model,
+            settings.planner_model,
+            settings.evaluator_model,
+            settings.llm_research_stage_model,
+            settings.llm_research_integration_model,
+        ]
+        if settings.relation_classifier_provider == "anthropic":
+            configured_models.extend(
+                [
                     settings.relation_classifier_model,
                     settings.relation_classifier_reviewer_model,
-                )
+                ]
             )
-        )
+        models = tuple(dict.fromkeys(configured_models))
         checks = []
         try:
             for model in models:
@@ -469,6 +491,7 @@ class LLMClient:
                 settings.llm_research_integration_model
             ),
             "researchModel": settings.llm_research_model,
+            "relationClassifierProvider": settings.relation_classifier_provider,
             "relationClassifierModel": settings.relation_classifier_model,
             "relationClassifierReviewerModel": (
                 settings.relation_classifier_reviewer_model
@@ -1330,15 +1353,21 @@ class LLMClient:
         timeout_sec: int,
     ) -> tuple[str, int, int | None, int | None, str | None]:
         started = perf_counter()
+        options: dict[str, Any] = {"temperature": 0, "top_p": 1}
+        if self.ollama_num_ctx is not None:
+            options["num_ctx"] = self.ollama_num_ctx
+        payload: dict[str, Any] = {
+            "model": model,
+            "prompt": prompt,
+            "format": schema,
+            "stream": False,
+            "options": options,
+        }
+        if self.ollama_think is not None:
+            payload["think"] = self.ollama_think
         response = requests.post(
             f"{settings.ollama_base_url.rstrip('/')}/api/generate",
-            json={
-                "model": model,
-                "prompt": prompt,
-                "format": schema,
-                "stream": False,
-                "options": {"temperature": 0, "top_p": 1},
-            },
+            json=payload,
             timeout=timeout_sec,
         )
         response.raise_for_status()

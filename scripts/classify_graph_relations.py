@@ -11,6 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "agent-api"))
 
+from app.config import settings  # noqa: E402
 from app.graph_client import GraphClient  # noqa: E402
 from app.legal_relation_classifier import (  # noqa: E402
     LegalRelationClassificationService,
@@ -36,7 +37,19 @@ def main() -> int:
         service = LegalRelationClassificationService(
             graph,
             OpenSearchClient(),
-            LLMClient(),
+            LLMClient(
+                provider=settings.relation_classifier_provider,
+                ollama_num_ctx=(
+                    settings.relation_classifier_context_tokens
+                    if settings.relation_classifier_provider == "ollama"
+                    else None
+                ),
+                ollama_think=(
+                    False
+                    if settings.relation_classifier_provider == "ollama"
+                    else None
+                ),
+            ),
         )
         report = service.run(limit=args.limit, dry_run=not args.apply)
     finally:

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -20,8 +21,9 @@ from .legal_ontology import (
     RELATION_STATUS_LLM_UNCERTAIN,
 )
 
-RELATION_CLASSIFIER_PROMPT_VERSION = "legal-relation-classifier-v1"
+RELATION_CLASSIFIER_PROMPT_VERSION = "legal-relation-classifier-v8"
 RelationVerdict = Literal["implements", "reference_only", "uncertain"]
+EVIDENCE_SPAN_MAX_CHARS = 400
 
 
 @dataclass(frozen=True)
@@ -44,35 +46,54 @@ class RelationClassificationItem:
 def relation_classification_json_schema(
     assertion_ids: list[str],
 ) -> dict[str, Any]:
+    decision_schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "verdict",
+            "delegationFinding",
+            "implementationFinding",
+            "fromSupportingSpanId",
+            "toSupportingSpanId",
+            "reason",
+        ],
+        "properties": {
+            "verdict": {
+                "type": "string",
+                "enum": ["implements", "reference_only", "uncertain"],
+            },
+            "delegationFinding": {
+                "type": "string",
+                "enum": [
+                    "explicit_same_matter",
+                    "not_explicit_same_matter",
+                    "uncertain",
+                ],
+            },
+            "implementationFinding": {
+                "type": "string",
+                "enum": [
+                    "fulfills_delegation",
+                    "does_not_fulfill_delegation",
+                    "uncertain",
+                ],
+            },
+            "fromSupportingSpanId": {"type": "string", "maxLength": 300},
+            "toSupportingSpanId": {"type": "string", "maxLength": 300},
+            "reason": {"type": "string", "maxLength": 800},
+        },
+    }
     return {
         "type": "object",
         "additionalProperties": False,
         "required": ["decisions"],
         "properties": {
             "decisions": {
-                "type": "array",
-                "minItems": len(assertion_ids),
-                "maxItems": len(assertion_ids),
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": [
-                        "assertionId",
-                        "verdict",
-                        "fromSupportingQuote",
-                        "toSupportingQuote",
-                        "reason",
-                    ],
-                    "properties": {
-                        "assertionId": {"type": "string", "enum": assertion_ids},
-                        "verdict": {
-                            "type": "string",
-                            "enum": ["implements", "reference_only", "uncertain"],
-                        },
-                        "fromSupportingQuote": {"type": "string", "maxLength": 500},
-                        "toSupportingQuote": {"type": "string", "maxLength": 500},
-                        "reason": {"type": "string", "maxLength": 800},
-                    },
+                "type": "object",
+                "additionalProperties": False,
+                "required": assertion_ids,
+                "properties": {
+                    assertion_id: decision_schema for assertion_id in assertion_ids
                 },
             }
         },
@@ -85,31 +106,56 @@ def build_relation_classification_prompt(
     reviewer: bool = False,
     primary_decisions: dict[str, dict[str, Any]] | None = None,
 ) -> str:
-    articles = {
-        article.article_id: article.text
-        for item in items
-        for article in (item.from_article, item.to_article)
-    }
-    candidates = [
-        {
-            "assertionId": str(item.assertion["assertionId"]),
-            "suggestedType": str(item.assertion.get("suggestedType") or ""),
-            "candidateSource": str(item.assertion.get("assertionSource") or ""),
-            "candidateSourceText": str(item.assertion.get("sourceText") or ""),
-            "fromArticleId": item.from_article.article_id,
-            "toArticleId": item.to_article.article_id,
-            **(
+    candidates = []
+    for item in items:
+        assertion_id = str(item.assertion["assertionId"])
+        raw_occurrences = _reference_occurrence_texts(item.assertion)
+        from_spans = article_evidence_spans(item.from_article)
+        to_spans = article_evidence_spans(item.to_article)
+        reference_occurrences = []
+        for occurrence in raw_occurrences:
+            occurrence_article_id = "unknown"
+            matching_from_span_ids = matching_evidence_span_ids(
+                occurrence, from_spans
+            )
+            matching_to_span_ids = matching_evidence_span_ids(occurrence, to_spans)
+            in_from = bool(matching_from_span_ids)
+            in_to = bool(matching_to_span_ids)
+            if in_from != in_to:
+                occurrence_article_id = (
+                    item.from_article.article_id
+                    if in_from
+                    else item.to_article.article_id
+                )
+            reference_occurrences.append(
                 {
-                    "primaryDecision": (primary_decisions or {}).get(
-                        str(item.assertion["assertionId"])
-                    )
+                    "text": occurrence,
+                    "articleId": occurrence_article_id,
+                    "matchingFromSpanIds": matching_from_span_ids,
+                    "matchingToSpanIds": matching_to_span_ids,
                 }
-                if reviewer
-                else {}
-            ),
-        }
-        for item in items
-    ]
+            )
+        candidates.append(
+            {
+                "decisionKey": assertion_id,
+                "referenceOccurrences": reference_occurrences,
+                "fromArticle": {
+                    "articleId": item.from_article.article_id,
+                    "spans": from_spans,
+                },
+                "toArticle": {
+                    "articleId": item.to_article.article_id,
+                    "spans": to_spans,
+                },
+                **(
+                    {
+                        "primaryDecision": (primary_decisions or {}).get(assertion_id)
+                    }
+                    if reviewer
+                    else {}
+                ),
+            }
+        )
     role = (
         "あなたは法令関係分類のReviewerです。一次判断がuncertainだった候補を独立に再検討します。"
         if reviewer
@@ -121,19 +167,46 @@ def build_relation_classification_prompt(
 判定基準:
 - implements: fromArticleが下位法令へ事項を委任し、
   toArticleがその委任事項を具体化している。
+- implementsには、fromArticleに「政令で定める」「内閣府令で定める」
+  「必要な技術的読替えは政令で定める」等の委任があり、その同じ事項を
+  toArticleが定めることを必要とする。
 - reference_only: 参照・関連はあるが、提示本文から上記の具体化関係までは確認できない。
+- toArticleが用語定義、適用対象の列挙、認可済みであることの条件、権限委任の
+  対象範囲としてfromArticleを使うだけならreference_onlyとする。
 - uncertain: 本文不足、複数の読みが成り立つ、又は提示本文だけでは安全に区別できない。
 - 候補生成元、suggestedType、ガイド文だけを根拠にimplementsへしない。
+- 分類対象はArticleペアに存在し得る任意の関係ではなく、各候補の
+  referenceOccurrencesが表す明示参照である。複数ある場合も、同じArticleペアの
+  一つの候補に紐づく参照箇所群として全件を評価する。Article全文は、それらの
+  参照箇所の意味を確認する文脈として使い、同じArticle内の別の参照・委任へ
+  判断対象を移さない。
+- 複数のreferenceOccurrencesのうち少なくとも一つについて、同じ事項の明示的委任と
+  その具体化を両本文から確認できればimplementsとする。見出しや定義的な参照が別に
+  含まれていても、それだけを理由にreference_onlyへしない。どの参照にも二条件が
+  揃わなければreference_only、提示本文だけでは区別できなければuncertainとする。
+- referenceOccurrencesが断片又は見出しでも、同じ事項についてfromArticleが委任し、
+  toArticleが具体化していることを両本文から確認する。別の事項の委任は根拠にしない。
+- matchingToSpanIdsがある場合、toSupportingSpanIdはそのいずれかにする。
+  指定参照と別のspanにある委任・定義・列挙を根拠に使わない。
+- delegationFindingは、fromSupportingSpanIdが指す文言が、指定参照と同じ事項を
+  下位法令へ明示的に委任するかの判断である。
+- implementationFindingは、toSupportingSpanIdが指す参照箇所が、その同じ委任事項を
+  実際に具体化するかの判断である。
+- implementsはdelegationFinding=explicit_same_matterかつ
+  implementationFinding=fulfills_delegationの場合だけとする。
+- reference_onlyは参照を確認できるが、上記2条件の少なくとも一方が成立しない場合とする。
 - 学習済み知識や質問文を根拠に補わず、提示されたArticle本文だけで判断する。
-- implements/reference_onlyでは、判断を支える短い原文引用を両Articleから一つずつ返す。
-- uncertainでは引用を空文字にできる。
-- assertionIdを変更・追加・省略せず、JSONだけを返す。
+- Article本文は各候補のfromArticle/toArticle内に閉じて示す。他候補のArticleや判断を
+  当該候補へ流用しない。
+- spanIdはArticle IDを含む一意なIDである。末尾のspan番号だけを返さない。
+- implements/reference_onlyでは、判断を支えるspanIdを両Articleから一つずつ返す。
+  fromSupportingSpanIdにはfromArticle、toSupportingSpanIdにはtoArticleのspanIdを使う。
+- uncertainでは両SupportingSpanIdを空文字にできる。spanのtextを書き写さない。
+- decisionsはdecisionKeyをそのままキーにしたobjectとする。キーを変更・追加・省略せず、
+  各valueに判定を返す。JSONだけを返す。
 
 候補:
 {json.dumps(candidates, ensure_ascii=False)}
-
-Article本文（候補のfromArticleId/toArticleIdで参照する）:
-{json.dumps(articles, ensure_ascii=False)}
 """
 
 
@@ -143,7 +216,7 @@ def batch_relation_items(
     max_items: int,
     max_chars: int,
 ) -> list[list[RelationClassificationItem]]:
-    """同じ親Articleを近接させつつ、件数と文字数の上限だけを決定的に守る。"""
+    """同じ親Articleを近接させつつ、件数と実request長の上限だけを守る。"""
     ordered = sorted(
         items,
         key=lambda item: (
@@ -153,29 +226,51 @@ def batch_relation_items(
     )
     batches: list[list[RelationClassificationItem]] = []
     current: list[RelationClassificationItem] = []
-    current_chars = 0
-    current_articles: set[str] = set()
     for item in ordered:
-        item_articles = (item.from_article, item.to_article)
-        item_chars = 1000 + sum(
-            len(article.text)
-            for article in item_articles
-            if article.article_id not in current_articles
-        )
+        proposed = [*current, item]
         if current and (
-            len(current) >= max_items or current_chars + item_chars > max_chars
+            len(current) >= max_items
+            or relation_classification_request_chars(proposed) > max_chars
         ):
             batches.append(current)
-            current = []
-            current_chars = 0
-            current_articles = set()
-            item_chars = 1000 + sum(len(article.text) for article in item_articles)
-        current.append(item)
-        current_chars += item_chars
-        current_articles.update(article.article_id for article in item_articles)
+            current = [item]
+        else:
+            current = proposed
     if current:
         batches.append(current)
     return batches
+
+
+def relation_classification_request_chars(
+    items: list[RelationClassificationItem],
+    *,
+    reviewer: bool = False,
+    primary_decisions: dict[str, dict[str, Any]] | None = None,
+) -> int:
+    """providerへ渡すpromptとstructured-output schemaの直列化後文字数。"""
+    ids = [str(item.assertion["assertionId"]) for item in items]
+    prompt = build_relation_classification_prompt(
+        items,
+        reviewer=reviewer,
+        primary_decisions=primary_decisions,
+    )
+    schema_text = json.dumps(
+        relation_classification_json_schema(ids),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return len(prompt) + len(schema_text)
+
+
+def relation_classification_timeout(
+    request_chars: int,
+    *,
+    base_timeout_sec: int,
+    batch_chars: int,
+) -> int:
+    """通常batchに対する相対量だけで長い単件のtransport timeoutを延長する。"""
+    multiplier = max(1, math.ceil(request_chars / max(1, batch_chars)))
+    return min(600, base_timeout_sec * multiplier)
 
 
 def validate_relation_decisions(
@@ -185,38 +280,77 @@ def validate_relation_decisions(
     """LLMの意味判断は変更せず、既知ID・一意性・原文引用の存在だけを検査する。"""
     by_id = {str(item.assertion["assertionId"]): item for item in items}
     raw_decisions = payload.get("decisions") if isinstance(payload, dict) else None
-    if not isinstance(raw_decisions, list):
-        raw_decisions = []
+    if isinstance(raw_decisions, dict):
+        decision_entries = list(raw_decisions.items())
+    elif isinstance(raw_decisions, list):
+        # v1応答を読み取る互換経路。現行schemaはobjectだけを要求する。
+        decision_entries = [
+            (str(raw.get("assertionId") or ""), raw)
+            for raw in raw_decisions
+            if isinstance(raw, dict)
+        ]
+    else:
+        decision_entries = []
     seen: set[str] = set()
     valid: dict[str, dict[str, str]] = {}
-    for raw in raw_decisions:
+    for assertion_id, raw in decision_entries:
         if not isinstance(raw, dict):
             continue
-        assertion_id = str(raw.get("assertionId") or "")
         if assertion_id not in by_id or assertion_id in seen:
             continue
         seen.add(assertion_id)
         verdict = str(raw.get("verdict") or "")
-        from_quote = str(raw.get("fromSupportingQuote") or "").strip()
-        to_quote = str(raw.get("toSupportingQuote") or "").strip()
+        delegation_finding = str(raw.get("delegationFinding") or "")
+        implementation_finding = str(raw.get("implementationFinding") or "")
+        from_span_id = str(raw.get("fromSupportingSpanId") or "").strip()
+        to_span_id = str(raw.get("toSupportingSpanId") or "").strip()
         reason = str(raw.get("reason") or "").strip()
         item = by_id[assertion_id]
+        from_spans = article_evidence_spans(item.from_article)
+        to_spans = article_evidence_spans(item.to_article)
+        reference_occurrences = _reference_occurrence_texts(item.assertion)
+        occurrence_matches = [
+            matching_evidence_span_ids(occurrence, to_spans)
+            for occurrence in reference_occurrences
+        ]
+        occurrence_span_ids = {
+            span_id for matches in occurrence_matches for span_id in matches
+        }
+        occurrences_mapped = bool(reference_occurrences) and all(
+            occurrence_matches
+        )
         if verdict not in {"implements", "reference_only", "uncertain"}:
             verdict = "uncertain"
+        finding_contract_valid = (
+            verdict != "implements"
+            or (
+                delegation_finding == "explicit_same_matter"
+                and implementation_finding == "fulfills_delegation"
+            )
+        ) and (
+            verdict != "reference_only"
+            or delegation_finding == "not_explicit_same_matter"
+            or implementation_finding == "does_not_fulfill_delegation"
+        )
         if verdict != "uncertain" and (
-            not from_quote
-            or not to_quote
-            or from_quote not in item.from_article.text
-            or to_quote not in item.to_article.text
+            from_span_id not in from_spans
+            or to_span_id not in to_spans
+            or not occurrences_mapped
+            or to_span_id not in occurrence_span_ids
+            or not finding_contract_valid
         ):
             verdict = "uncertain"
-            reason = "LLMが返した根拠引用を提示本文内で確認できなかった"
-            from_quote = ""
-            to_quote = ""
+            reason = "LLM応答の根拠span又は判定間の構造契約を確認できなかった"
+            from_span_id = ""
+            to_span_id = ""
         valid[assertion_id] = {
             "verdict": verdict,
-            "fromSupportingQuote": from_quote,
-            "toSupportingQuote": to_quote,
+            "delegationFinding": delegation_finding,
+            "implementationFinding": implementation_finding,
+            "fromSupportingSpanId": from_span_id,
+            "toSupportingSpanId": to_span_id,
+            "fromSupportingQuote": from_spans.get(from_span_id, ""),
+            "toSupportingQuote": to_spans.get(to_span_id, ""),
             "reason": reason,
         }
     for assertion_id in by_id:
@@ -224,6 +358,10 @@ def validate_relation_decisions(
             assertion_id,
             {
                 "verdict": "uncertain",
+                "delegationFinding": "uncertain",
+                "implementationFinding": "uncertain",
+                "fromSupportingSpanId": "",
+                "toSupportingSpanId": "",
                 "fromSupportingQuote": "",
                 "toSupportingQuote": "",
                 "reason": "LLM応答に既知のassertionIdが一意に含まれなかった",
@@ -232,10 +370,78 @@ def validate_relation_decisions(
     return valid
 
 
+def _reference_occurrence_texts(assertion: dict[str, Any]) -> list[str]:
+    source_texts = assertion.get("sourceTexts")
+    if not isinstance(source_texts, list):
+        source_texts = []
+    return list(
+        dict.fromkeys(
+            str(value).strip()
+            for value in [assertion.get("sourceText"), *source_texts]
+            if str(value or "").strip()
+        )
+    )
+
+
+def article_evidence_spans(article: ArticleText) -> dict[str, str]:
+    """Article本文をLLMが選択できる安定spanへ分ける。
+
+    文やチャンク境界の判定は決定的に行い、関係の意味は判断しない。
+    """
+    parts = []
+    for line in article.text.splitlines():
+        for sentence in re.split(r"(?<=[。！？])", line.strip()):
+            sentence = sentence.strip()
+            while sentence:
+                parts.append(sentence[:EVIDENCE_SPAN_MAX_CHARS])
+                sentence = sentence[EVIDENCE_SPAN_MAX_CHARS:]
+    return {
+        f"{article.article_id}::span-{index}": text
+        for index, text in enumerate(parts, start=1)
+    }
+
+
+def matching_evidence_span_ids(
+    occurrence: str,
+    spans: dict[str, str],
+) -> list[str]:
+    """参照文を含む連続spanを返す。
+
+    span境界や元chunk間の改行をまたぐ参照も、空白差だけを無視して位置対応する。
+    法的な関係の意味は分類しない。
+    """
+    normalized_occurrence = re.sub(r"\s+", "", occurrence)
+    if not normalized_occurrence:
+        return []
+    normalized_parts: list[tuple[str, int, int]] = []
+    article_text = ""
+    for span_id, text in spans.items():
+        normalized_text = re.sub(r"\s+", "", text)
+        start = len(article_text)
+        article_text += normalized_text
+        normalized_parts.append((span_id, start, len(article_text)))
+    matched_span_ids: list[str] = []
+    search_from = 0
+    while True:
+        match_start = article_text.find(normalized_occurrence, search_from)
+        if match_start < 0:
+            break
+        match_end = match_start + len(normalized_occurrence)
+        for span_id, start, end in normalized_parts:
+            if (
+                start < match_end
+                and end > match_start
+                and span_id not in matched_span_ids
+            ):
+                matched_span_ids.append(span_id)
+        search_from = match_start + 1
+    return matched_span_ids
+
+
 def article_texts_from_sources(
     article_ids: list[str], sources: list[dict[str, Any]]
 ) -> dict[str, ArticleText]:
-    """OpenSearchの条チャンクを安定順で連結し、Article単位の分類入力へする。"""
+    """OpenSearchの条チャンクから重複のないArticle全文を復元する。"""
     grouped: dict[str, list[dict[str, Any]]] = {
         article_id: [] for article_id in article_ids
     }
@@ -252,17 +458,51 @@ def article_texts_from_sources(
             str(chunk.get("contentUnitId") or f"__missing__-{index}"): chunk
             for index, chunk in enumerate(chunks)
         }
-        parts = [
-            str(chunk.get("text") or "").strip()
-            for _, chunk in sorted(
-                unique_chunks.items(),
-                key=lambda pair: _natural_id_key(pair[0]),
-            )
-            if str(chunk.get("text") or "").strip()
-        ]
+        parts: list[str] = []
+        for _content_unit_id, chunk in sorted(
+            unique_chunks.items(),
+            key=lambda pair: _natural_id_key(pair[0]),
+        ):
+            text = str(chunk.get("text") or "").strip()
+            if not text:
+                continue
+            parent_id = str(chunk.get("parentContentUnitId") or "")
+            parent = unique_chunks.get(parent_id)
+            if parent is not None:
+                text = _without_repeated_parent_context(
+                    text,
+                    str(parent.get("text") or "").strip(),
+                )
+            if text:
+                parts.append(text)
         if parts:
             output[article_id] = ArticleText(article_id, "\n".join(parts))
     return output
+
+
+def _without_repeated_parent_context(text: str, parent_text: str) -> str:
+    """検索用子chunkに再掲された親本文だけを構造情報に基づいて除く。
+
+    法令中に偶然同じ文が現れる場合を消さないよう、直近親chunkの完全な先頭一致だけを
+    対象にする。Paragraph chunkの表示番号だけがItem chunkでは省かれる形式にも対応する。
+    """
+    if not parent_text:
+        return text
+    candidates = [parent_text]
+    without_paragraph_number = re.sub(
+        r"^\s*(?:[0-9０-９]+|[一二三四五六七八九十百千]+)\s*",
+        "",
+        parent_text,
+        count=1,
+    )
+    if without_paragraph_number and without_paragraph_number != parent_text:
+        candidates.append(without_paragraph_number)
+    for context in sorted(candidates, key=len, reverse=True):
+        if text == context:
+            return ""
+        if text.startswith(context):
+            return text[len(context) :].lstrip()
+    return text
 
 
 def _natural_id_key(value: str) -> tuple[tuple[int, int | str], ...]:
@@ -295,6 +535,12 @@ def classification_record(
         "status": status,
         "classificationVerdict": verdict,
         "classificationReason": decision["reason"],
+        "classificationDelegationFinding": decision["delegationFinding"],
+        "classificationImplementationFinding": decision[
+            "implementationFinding"
+        ],
+        "fromSupportingSpanId": decision["fromSupportingSpanId"],
+        "toSupportingSpanId": decision["toSupportingSpanId"],
         "fromSupportingQuote": decision["fromSupportingQuote"],
         "toSupportingQuote": decision["toSupportingQuote"],
         "fromArticleHash": item.from_article.content_hash,
@@ -447,12 +693,21 @@ class LegalRelationClassificationService:
             reviewer=reviewer,
             primary_decisions=primary_decisions,
         )
+        schema = relation_classification_json_schema(ids)
+        request_chars = len(prompt) + len(
+            json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
+        )
+        timeout_sec = relation_classification_timeout(
+            request_chars,
+            base_timeout_sec=settings.relation_classifier_timeout_sec,
+            batch_chars=settings.relation_classifier_batch_chars,
+        )
         result = self.llm.generate_structured_json(
             prompt=prompt,
-            schema=relation_classification_json_schema(ids),
+            schema=schema,
             model=model,
             max_tokens=settings.relation_classifier_max_tokens,
-            timeout_sec=settings.relation_classifier_timeout_sec,
+            timeout_sec=timeout_sec,
         )
         return (
             validate_relation_decisions(items, result.payload),

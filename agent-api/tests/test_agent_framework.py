@@ -43,7 +43,7 @@ from app.agent_framework.state import (
     Evidence,
     FinalAnswer,
     GraphCandidateReview,
-    GraphWorkItemAssessment,
+    GraphFrontierDecision,
     Hypothesis,
     ReviewFinding,
     ReviewResult,
@@ -366,7 +366,8 @@ def test_solver_can_explicitly_start_three_research_cycles() -> None:
     assert state.run_status == "completed"
     assert state.research_cycle_count == 3
     assert len(model.solver_contexts) == 4
-    assert model.solver_contexts[-1].finalize_only is True
+    assert model.solver_contexts[-1].finalize_only is False
+    assert model.solver_contexts[-1].remaining_research_cycles == 1
     assert model.solver_contexts[-1].material_evidence_ids == {
         "e_r1",
         "e_r2",
@@ -840,19 +841,29 @@ def test_new_graph_candidates_use_dedicated_solver_profile() -> None:
         context: SolverContext,
         _: ModelCallProfile,
     ) -> SolverDecision:
+        frontiers = context.graph_review_batch.candidates
         return SolverDecision(
             next="continue",
             next_focus_work_item_ids=("w1",),
             graph_candidate_review=GraphCandidateReview(
                 graph_request_ids=context.required_graph_review_request_ids,
-                selected_article_ids=("law-order-article-2",),
-                work_item_assessments=(
-                        GraphWorkItemAssessment(
-                            work_item_id="w1",
-                            relevant_article_ids=("law-order-article-2",),
-                            selected_article_ids=("law-order-article-2",),
-                            reason="作業に対応する具体化規定を確認する",
-                    ),
+                reviewed_link_ids=tuple(
+                    dict.fromkeys(
+                        link.link_id
+                        for frontier in frontiers
+                        for link in frontier.links
+                    )
+                ),
+                frontier_decisions=tuple(
+                    GraphFrontierDecision(
+                        frontier_item_id=frontier.frontier_item_id,
+                        article_id=frontier.article_id,
+                        work_item_id=frontier.work_item_id,
+                        hypothesis_id=frontier.hypothesis_id,
+                        action="select",
+                        reason="作業に対応する具体化規定を確認する",
+                    )
+                    for frontier in frontiers
                 ),
                 reason="具体化規定の候補本文を確認する",
             ),
@@ -1143,7 +1154,7 @@ def test_solver_can_repair_structural_contract() -> None:
     assert model.solver_contexts[0].contract_feedback is None
     feedback = model.solver_contexts[1].contract_feedback
     assert feedback is not None
-    assert "open work item" in feedback.violation
+    assert "open WorkItem" in feedback.violation
     assert feedback.previous_decision.tool_requests == (invalid_request,)
     assert [item.purpose for item in trace.model_calls] == [
         "research",
@@ -1359,7 +1370,7 @@ def test_contradicted_basis_requires_solver_impact_decision() -> None:
         evidence=(evidence,),
     )
     incomplete = SolverDecision(
-        next="finalize",
+        next="continue",
         update=CaseUpdate(
             update_hypotheses=(
                 HypothesisUpdate(
@@ -1369,7 +1380,15 @@ def test_contradicted_basis_requires_solver_impact_decision() -> None:
                 ),
             )
         ),
-        answer=FinalAnswer(text="反証された", citation_ids=("e1",)),
+        next_focus_work_item_ids=("child",),
+        tool_requests=(
+            ToolRequest(
+                request_id="r-impact",
+                work_item_id="child",
+                tool_name="search",
+                purpose="反証後の影響を確認する",
+            ),
+        ),
     )
 
     with pytest.raises(ContractViolation, match="impact decisions"):
@@ -1377,7 +1396,7 @@ def test_contradicted_basis_requires_solver_impact_decision() -> None:
             state,
             incomplete,
             limits=AgentLimits(),
-            known_tool_names=(),
+            known_tool_names=("search",),
             material_evidence_ids=("e1",),
             finalize_only=False,
         )
@@ -1525,7 +1544,7 @@ def test_delta_keeps_untouched_work_and_revalidates_updates() -> None:
         ),
     )
     invalid = SolverDecision(
-        next="finalize",
+        next="continue",
         update=CaseUpdate(
             update_work_items=(
                 WorkItemUpdate(
@@ -1535,7 +1554,15 @@ def test_delta_keeps_untouched_work_and_revalidates_updates() -> None:
                 ),
             )
         ),
-        answer=FinalAnswer(text="回答"),
+        next_focus_work_item_ids=("w2",),
+        tool_requests=(
+            ToolRequest(
+                request_id="r-invalid-update",
+                work_item_id="w2",
+                tool_name="search",
+                purpose="別系統を確認する",
+            ),
+        ),
     )
 
     with pytest.raises(ContractViolation, match="schema"):
@@ -1543,7 +1570,7 @@ def test_delta_keeps_untouched_work_and_revalidates_updates() -> None:
             state,
             invalid,
             limits=AgentLimits(),
-            known_tool_names=(),
+            known_tool_names=("search",),
             material_evidence_ids=(),
             finalize_only=False,
         )
@@ -1695,6 +1722,24 @@ def test_context_separates_grounding_evidence_from_fetchable_article_ids() -> No
         case_id="case-1",
         question="質問",
         research_cycle_count=1,
+        work_items=(WorkItem(work_item_id="w1", question="関連条文を確認する"),),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h1",
+                work_item_id="w1",
+                statement="関連する下位法令がある",
+            ),
+        ),
+        tool_requests=(
+            ToolRequest(
+                request_id="r1",
+                work_item_id="w1",
+                tool_name="legal_graph_neighbors",
+                arguments={"article_ids": ["law-a-article-1"]},
+                purpose="1ホップを確認する",
+                hypothesis_ids=("h1",),
+            ),
+        ),
         evidence=(
             Evidence(
                 evidence_id="law-a-article-1-paragraph-1",
@@ -1709,7 +1754,21 @@ def test_context_separates_grounding_evidence_from_fetchable_article_ids() -> No
             Evidence(
                 evidence_id="graph-nav-1",
                 source_ref="neo4j:relation",
-                content="検索候補",
+                content=json.dumps(
+                    {
+                        "seedArticleId": "law-a-article-1",
+                        "neighborArticleId": "order-a-article-2",
+                        "relations": [
+                            {
+                                "kind": "formal_relation",
+                                "edgeType": "REFERENCES",
+                                "direction": "from_subject",
+                                "status": "unverified",
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
                 created_cycle=1,
                 metadata={
                     "fromArticleId": "law-a-article-1",
@@ -1741,10 +1800,7 @@ def test_context_separates_grounding_evidence_from_fetchable_article_ids() -> No
 
     assert context.grounding_evidence_ids == ("law-a-article-1-paragraph-1",)
     assert context.navigation_evidence_ids == ()
-    assert context.fetchable_article_ids == (
-        "law-a-article-1",
-        "order-a-article-2",
-    )
+    assert context.fetchable_article_ids == ("order-a-article-2",)
     assert tuple(item.evidence_id for item in context.evidence_manifest) == (
         "law-a-article-1-paragraph-1",
     )
@@ -1753,7 +1809,7 @@ def test_context_separates_grounding_evidence_from_fetchable_article_ids() -> No
         "law-a-article-1-paragraph-1",
     )
     assert context.recent_tool_results[0].evidence_count == 2
-    assert context.recent_tool_results[0].graph_catalog_projected is True
+    assert context.recent_tool_results[0].graph_projection_updated is True
 
 
 def test_context_keeps_all_graph_candidates_outside_material_limit() -> None:
@@ -1871,19 +1927,18 @@ def test_context_keeps_all_graph_candidates_outside_material_limit() -> None:
     assert context.omitted_evidence_ids == ()
     assert context.navigation_evidence_ids == ()
     assert context.required_graph_review_request_ids == ("graph-request",)
-    assert context.required_graph_review_work_item_ids == ("w1", "w2")
+    assert {
+        item.work_item_id for item in context.graph_review_batch.candidates
+    } == {"w1", "w2"}
     assert "law-ordinance-article-2_5" in context.fetchable_article_ids
-    catalog = context.graph_candidate_catalog
-    assert tuple(item.article_id for item in catalog.articles) == (
-        "law-act-article-27_2",
-        "law-ordinance-article-2_5",
-    )
-    assert catalog.articles[0].title == "金融商品取引法"
-    assert catalog.articles[0].content_status == "succeeded"
-    assert catalog.articles[1].heading == "第二条の五"
-    assert catalog.articles[1].content_status == "not_requested"
-    assert len(catalog.links) == 1
-    link = catalog.links[0]
+    frontiers = context.graph_review_batch.candidates
+    assert len(frontiers) == 2
+    assert {item.article_id for item in frontiers} == {
+        "law-ordinance-article-2_5"
+    }
+    assert {item.heading for item in frontiers} == {"第二条の五"}
+    assert {item.content_status for item in frontiers} == {"not_requested"}
+    link = frontiers[0].links[0]
     assert link.seed_article_id == "law-act-article-27_2"
     assert link.candidate_article_id == "law-ordinance-article-2_5"
     assert link.work_item_ids == ("w1", "w2")
@@ -1906,24 +1961,31 @@ def test_context_keeps_all_graph_candidates_outside_material_limit() -> None:
     )
     assert graph_result.evidence_ids == ()
     assert graph_result.evidence_count == 1
-    assert graph_result.graph_catalog_projected is True
+    assert graph_result.graph_projection_updated is True
 
+    frontiers = context.graph_review_batch.candidates
+    frontier = frontiers[0]
     pending_review = GraphCandidateReview(
         graph_request_ids=("graph-request",),
-        selected_article_ids=(),
-        work_item_assessments=(
-            GraphWorkItemAssessment(
-                work_item_id="w1",
-                relevant_article_ids=("law-ordinance-article-2_5",),
-                selected_article_ids=(),
-                reason="本文未取得の関連候補を後続stepへ残す",
-            ),
-            GraphWorkItemAssessment(
-                work_item_id="w2",
-                relevant_article_ids=(),
-                selected_article_ids=(),
-                reason="関連候補はない",
-            ),
+        reviewed_link_ids=tuple(
+            dict.fromkeys(
+                link.link_id for item in frontiers for link in item.links
+            )
+        ),
+        frontier_decisions=tuple(
+            GraphFrontierDecision(
+                frontier_item_id=item.frontier_item_id,
+                article_id=item.article_id,
+                work_item_id=item.work_item_id,
+                hypothesis_id=item.hypothesis_id,
+                action="defer" if item == frontier else "reject",
+                reason=(
+                    "本文未取得の関連候補を後続stepへ残す"
+                    if item == frontier
+                    else "この作業には関連しない"
+                ),
+            )
+            for item in frontiers
         ),
         reason="未取得frontierが残る",
     )
@@ -1936,18 +1998,23 @@ def test_context_keeps_all_graph_candidates_outside_material_limit() -> None:
         remaining_wall_time_sec=60,
         finalize_only=False,
     )
-    assert pending_context.required_graph_review_request_ids == ("graph-request",)
+    assert pending_context.required_graph_review_request_ids == ()
+    assert any(
+        item.frontier_item_id == frontier.frontier_item_id
+        and item.review_status == "relevant_deferred"
+        for item in pending_context.graph_review_ledger
+    )
 
     revised_review = pending_review.model_copy(
         update={
-            "work_item_assessments": (
-                GraphWorkItemAssessment(
-                    work_item_id="w1",
-                    relevant_article_ids=(),
-                    selected_article_ids=(),
-                    reason="追加本文により候補は不要と再評価した",
+            "frontier_decisions": (
+                pending_review.frontier_decisions[0].model_copy(
+                    update={
+                        "action": "reject",
+                        "reason": "追加本文により候補は不要と再評価した",
+                    }
                 ),
-                pending_review.work_item_assessments[1],
+                *pending_review.frontier_decisions[1:],
             ),
             "reason": "未取得frontierは残らない",
         }
@@ -1964,6 +2031,11 @@ def test_context_keeps_all_graph_candidates_outside_material_limit() -> None:
         finalize_only=False,
     )
     assert revised_context.required_graph_review_request_ids == ()
+    assert any(
+        item.frontier_item_id == frontier.frontier_item_id
+        and item.review_status == "rejected"
+        for item in revised_context.graph_review_ledger
+    )
 
 
 def test_graph_review_persists_llm_selection_without_duplicate_fetch_request() -> None:
@@ -1981,12 +2053,14 @@ def test_graph_review_persists_llm_selection_without_duplicate_fetch_request() -
     )
     selection = GraphCandidateReview(
         graph_request_ids=("graph-request",),
-        selected_article_ids=("law-ordinance-article-10",),
-        work_item_assessments=(
-            GraphWorkItemAssessment(
+        reviewed_link_ids=("link-1",),
+        frontier_decisions=(
+            GraphFrontierDecision(
+                frontier_item_id="frontier-1",
+                article_id="law-ordinance-article-10",
                 work_item_id="w1",
-                relevant_article_ids=("law-ordinance-article-10",),
-                selected_article_ids=("law-ordinance-article-10",),
+                hypothesis_id="h1",
+                action="select",
                 reason="手続の具体化規定を確認する",
             ),
         ),
@@ -2004,24 +2078,44 @@ def test_graph_review_persists_llm_selection_without_duplicate_fetch_request() -
         material_evidence_ids=(),
         fetchable_article_ids=("law-ordinance-article-10",),
         required_graph_review_request_ids=("graph-request",),
-        required_graph_review_work_item_ids=("w1",),
         graph_candidate_article_ids=("law-ordinance-article-10",),
+        graph_review_frontiers={
+            "frontier-1": ("law-ordinance-article-10", "w1", "h1")
+        },
+        graph_review_link_ids=("link-1",),
+        graph_selectable_frontiers={
+            "frontier-1": ("law-ordinance-article-10", "w1", "h1")
+        },
         graph_review_fetch_tool_name="fetch_articles",
         tool_list_argument_limits={("fetch_articles", "article_ids"): 4},
         finalize_only=False,
     )
 
-    assert updated.graph_candidate_reviews == (selection,)
+    assert updated.graph_candidate_reviews == (
+        selection.model_copy(update={"reviewed_cycle": 1}),
+    )
 
     with pytest.raises(ContractViolation, match="graph_candidate_review"):
         apply_solver_decision(
             state,
-            SolverDecision(next="finalize", answer=FinalAnswer(text="回答")),
+            SolverDecision(
+                next="continue",
+                next_focus_work_item_ids=("w1",),
+                tool_requests=(
+                    ToolRequest(
+                        request_id="r-missing-review",
+                        work_item_id="w1",
+                        tool_name="fetch_articles",
+                        arguments={"article_ids": ["law-ordinance-article-10"]},
+                        purpose="候補本文を確認する",
+                        hypothesis_ids=("h1",),
+                    ),
+                ),
+            ),
             limits=AgentLimits(),
             known_tool_names={"fetch_articles"},
             material_evidence_ids=(),
             required_graph_review_request_ids=("graph-request",),
-            required_graph_review_work_item_ids=("w1",),
             graph_candidate_article_ids=("law-ordinance-article-10",),
             graph_review_fetch_tool_name="fetch_articles",
             finalize_only=False,
@@ -2050,8 +2144,14 @@ def test_graph_review_persists_llm_selection_without_duplicate_fetch_request() -
             material_evidence_ids=(),
             fetchable_article_ids=("law-ordinance-article-10",),
             required_graph_review_request_ids=("graph-request",),
-            required_graph_review_work_item_ids=("w1",),
             graph_candidate_article_ids=("law-ordinance-article-10",),
+            graph_review_frontiers={
+                "frontier-1": ("law-ordinance-article-10", "w1", "h1")
+            },
+            graph_review_link_ids=("link-1",),
+            graph_selectable_frontiers={
+                "frontier-1": ("law-ordinance-article-10", "w1", "h1")
+            },
             graph_review_fetch_tool_name="fetch_articles",
             finalize_only=False,
         )
@@ -2112,7 +2212,7 @@ def test_finalize_requires_solver_declared_basis_evidence_in_citations() -> None
         )
 
 
-def test_graph_review_cannot_defer_declared_relevant_article_with_unused_capacity() -> None:
+def test_graph_review_must_decide_every_frontier_in_the_current_batch() -> None:
     state = CaseState(
         case_id="case-1",
         question="質問",
@@ -2129,49 +2229,49 @@ def test_graph_review_cannot_defer_declared_relevant_article_with_unused_capacit
     deferred = "law-ordinance-article-12"
     review = GraphCandidateReview(
         graph_request_ids=("graph-request",),
-        selected_article_ids=(first,),
-        work_item_assessments=(
-            GraphWorkItemAssessment(
+        reviewed_link_ids=("link-1", "link-2"),
+        frontier_decisions=(
+            GraphFrontierDecision(
+                frontier_item_id="frontier-1",
+                article_id=first,
                 work_item_id="w1",
-                relevant_article_ids=(first, deferred),
-                selected_article_ids=(first,),
+                hypothesis_id="h1",
+                action="select",
                 reason="手続の具体化候補を確認する",
             ),
         ),
         reason="手続候補を確認する",
     )
-    request = ToolRequest(
-        request_id="fetch-target",
-        work_item_id="w1",
-        tool_name="fetch_articles",
-        arguments={"article_ids": [first]},
-        purpose="候補本文を確認する",
-        hypothesis_ids=("h1",),
-    )
-
-    with pytest.raises(ContractViolation, match="fetch capacity unused"):
+    with pytest.raises(ContractViolation, match="decide every batch Frontier"):
         apply_solver_decision(
             state,
             SolverDecision(
                 next="continue",
                 next_focus_work_item_ids=("w1",),
                 graph_candidate_review=review,
-                tool_requests=(request,),
             ),
             limits=AgentLimits(),
             known_tool_names={"fetch_articles"},
             material_evidence_ids=(),
             fetchable_article_ids=(first, deferred),
             required_graph_review_request_ids=("graph-request",),
-            required_graph_review_work_item_ids=("w1",),
             graph_candidate_article_ids=(first, deferred),
+            graph_review_frontiers={
+                "frontier-1": (first, "w1", "h1"),
+                "frontier-2": (deferred, "w1", "h1"),
+            },
+            graph_review_link_ids=("link-1", "link-2"),
+            graph_selectable_frontiers={
+                "frontier-1": (first, "w1", "h1"),
+                "frontier-2": (deferred, "w1", "h1"),
+            },
             graph_review_fetch_tool_name="fetch_articles",
             tool_list_argument_limits={("fetch_articles", "article_ids"): 4},
             finalize_only=False,
         )
 
 
-def test_graph_review_relevant_ids_may_include_already_fetched_article() -> None:
+def test_graph_review_selection_is_bound_to_frontier_identity() -> None:
     state = CaseState(
         case_id="case-1",
         question="質問",
@@ -2184,16 +2284,17 @@ def test_graph_review_relevant_ids_may_include_already_fetched_article() -> None
             ),
         ),
     )
-    fetched = "law-act-article-27_3"
     candidate = "law-ordinance-article-10"
     review = GraphCandidateReview(
         graph_request_ids=("graph-request",),
-        selected_article_ids=(candidate,),
-        work_item_assessments=(
-            GraphWorkItemAssessment(
+        reviewed_link_ids=("link-1",),
+        frontier_decisions=(
+            GraphFrontierDecision(
+                frontier_item_id="frontier-1",
+                article_id=candidate,
                 work_item_id="w1",
-                relevant_article_ids=(fetched, candidate),
-                selected_article_ids=(candidate,),
+                hypothesis_id="h1",
+                action="select",
                 reason="親規定と具体化規定が関係する",
             ),
         ),
@@ -2209,17 +2310,23 @@ def test_graph_review_relevant_ids_may_include_already_fetched_article() -> None
         limits=AgentLimits(),
         known_tool_names={"fetch_articles"},
         material_evidence_ids=(),
-        fetchable_article_ids=(fetched, candidate),
+        fetchable_article_ids=(candidate,),
         required_graph_review_request_ids=("graph-request",),
-        required_graph_review_work_item_ids=("w1",),
         graph_candidate_article_ids=(candidate,),
-        graph_known_article_ids=(fetched, candidate),
+        graph_known_article_ids=(candidate,),
+        graph_review_frontiers={"frontier-1": (candidate, "w1", "h1")},
+        graph_review_link_ids=("link-1",),
+        graph_selectable_frontiers={
+            "frontier-1": (candidate, "w1", "h1")
+        },
         graph_review_fetch_tool_name="fetch_articles",
         tool_list_argument_limits={("fetch_articles", "article_ids"): 1},
         finalize_only=False,
     )
 
-    assert updated.graph_candidate_reviews == (review,)
+    assert updated.graph_candidate_reviews == (
+        review.model_copy(update={"reviewed_cycle": 1}),
+    )
 
 
 def test_graph_catalog_normalizes_articles_and_preserves_every_relation_path() -> None:
@@ -2322,15 +2429,15 @@ def test_graph_catalog_normalizes_articles_and_preserves_every_relation_path() -
         finalize_only=False,
     )
 
-    catalog = context.graph_candidate_catalog
-    assert len(catalog.articles) == 3
-    assert sum(item.article_id == candidate_id for item in catalog.articles) == 1
-    assert len(catalog.links) == 2
-    assert {item.seed_article_id for item in catalog.links} == {
+    assert len(context.graph_review_batch.candidates) == 1
+    candidate = context.graph_review_batch.candidates[0]
+    assert candidate.article_id == candidate_id
+    assert len(candidate.links) == 2
+    assert {item.seed_article_id for item in candidate.links} == {
         "law-order-article-7",
         "law-act-article-27_2",
     }
-    assert {item.relations[0]["edgeType"] for item in catalog.links} == {
+    assert {item.relations[0]["edgeType"] for item in candidate.links} == {
         "REFERENCES",
         "IMPLEMENTS",
     }
@@ -2342,12 +2449,8 @@ def test_graph_catalog_normalizes_articles_and_preserves_every_relation_path() -
         result["evidence_ids"] == []
         for result in serialized["recent_tool_results"]
     )
-    assert "sourceId" not in json.dumps(serialized["graph_candidate_catalog"])
-    assert set(context.fetchable_article_ids) == {
-        "law-order-article-7",
-        "law-act-article-27_2",
-        candidate_id,
-    }
+    assert "sourceId" not in json.dumps(serialized["graph_review_batch"])
+    assert set(context.fetchable_article_ids) == {candidate_id}
 
 
 def test_required_dependency_decision_must_cover_open_work_and_reference_action() -> None:
@@ -2734,7 +2837,7 @@ def test_structural_validation_rejects_unknown_focus_basis_and_parent_cycle() ->
         apply_solver_decision(
             CaseState(case_id="case-1", question="質問"),
             SolverDecision(
-                next="finalize",
+                next="continue",
                 update=CaseUpdate(
                     add_work_items=(
                         WorkItem(
@@ -2744,10 +2847,18 @@ def test_structural_validation_rejects_unknown_focus_basis_and_parent_cycle() ->
                         ),
                     )
                 ),
-                answer=answer,
+                next_focus_work_item_ids=("w1",),
+                tool_requests=(
+                    ToolRequest(
+                        request_id="r-basis",
+                        work_item_id="w1",
+                        tool_name="search",
+                        purpose="基礎仮説を確認する",
+                    ),
+                ),
             ),
             limits=limits,
-            known_tool_names=(),
+            known_tool_names=("search",),
             material_evidence_ids=(),
             finalize_only=False,
         )
@@ -2763,9 +2874,20 @@ def test_structural_validation_rejects_unknown_focus_basis_and_parent_cycle() ->
     with pytest.raises(ContractViolation, match="cycle"):
         apply_solver_decision(
             cyclic,
-            SolverDecision(next="finalize", answer=answer),
+            SolverDecision(
+                next="continue",
+                next_focus_work_item_ids=("w1",),
+                tool_requests=(
+                    ToolRequest(
+                        request_id="r-cycle",
+                        work_item_id="w1",
+                        tool_name="search",
+                        purpose="循環を検査する",
+                    ),
+                ),
+            ),
             limits=limits,
-            known_tool_names=(),
+            known_tool_names=("search",),
             material_evidence_ids=(),
             finalize_only=False,
         )

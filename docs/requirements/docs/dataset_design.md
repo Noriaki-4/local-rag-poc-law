@@ -110,6 +110,18 @@ normalized:   A / B / C / D
 | 2 | Retrieved Context | e-Govから事前取得・登録した法令本文インデックスを検索 | ○ |
 | 3 | Agentic Retrieved Context | クエリ分解 + Vector + Graph | ○ |
 
+### 3.1 補助fixture
+
+評価fixtureも検索対象へ投入せず、採点にだけ使う。
+
+| fixture | 対象 | 入力に使う正本 | 検査内容 |
+|---|---|---|---|
+| `legal_relation_classifier_fixture.jsonl` | 法律・政令・府令間の未確認RelationAssertion | Neo4jの候補IDとOpenSearchの両Article全文 | ローカルLLMによる`implements / reference_only`分類 |
+| `guidance_navigation_fixture.jsonl` | 外部ガイド6文書 | manifest、OpenSearchガイドchunk、Neo4jの明示`EXPLAINS` | ガイド検索、明示関係だけのGraph遷移、遷移先Article全文取得 |
+
+ガイドfixtureの期待Article IDは回答LLMへ渡さない。ガイド本文は法令本文ではなく、
+`EXPLAINS`も明示注釈のある場合だけ条文取得の索引として使う。
+
 ## 4. 原本保管のみのマニュアル
 
 条例制定・改正業務マニュアルの原本サンプルは、将来検討用に保管する。

@@ -218,6 +218,77 @@ CaseStoreへ保存する。プログラムは候補ID・両端Article ID・関�
 表全体の直積ではなく同じ行の条文同士だけを候補にする。`scripts/classify_graph_relations.py`は
 索引処理ではなく、検索時方式との比較評価を行う場合だけ使う任意ツールである。
 
+オフライン分類は検索・回答用のLLM providerと分離し、既定でローカルOllamaの
+`gemma4:e4b`を使う。分類単位はArticleペア全体に存在し得る任意の関係ではなく、
+候補の`sourceText` / `sourceTexts`が示す参照箇所群である。Article本文はその文脈として使う。
+OpenSearchの子チャンクが親チャンク本文を再掲する場合は、`parentContentUnitId`で
+直接の親子と確認できた先頭部分だけを除き、重複のないArticle全文を復元する。
+Article本文は決定的なspan ID付きでLLMへ渡し、LLMは判断根拠とするspan IDを選ぶ。
+自由記述の引用文は求めず、プログラムは選ばれたIDが対応Articleに存在することだけを検証する。
+既定の`RELATION_CLASSIFIER_CONTEXT_TOKENS=131072`は、既定モデル`gemma4:e4b`の
+context上限に合わせ、長いArticleを黙って切り捨てないための値である。
+
+最初は少量のdry-runで入力取得とLLM応答を確認する。
+
+```bash
+OLLAMA_BASE_URL=http://localhost:11434 \
+RELATION_CLASSIFIER_PROVIDER=ollama \
+RELATION_CLASSIFIER_MODEL=gemma4:e4b \
+RELATION_CLASSIFIER_REVIEWER_MODEL=gemma4:e4b \
+python3 scripts/classify_graph_relations.py --limit 10
+```
+
+結果をNeo4jの既存`RelationAssertion`ノードへ登録する場合だけ
+`--apply`を付ける。入力Articleのhash、prompt version、modelが同じ分類済み候補は
+再実行時にskipする。更新はbatchごとに確定するため、途中失敗後も続きから再開できる。
+
+```bash
+OLLAMA_BASE_URL=http://localhost:11434 \
+RELATION_CLASSIFIER_PROVIDER=ollama \
+RELATION_CLASSIFIER_MODEL=gemma4:e4b \
+RELATION_CLASSIFIER_REVIEWER_MODEL=gemma4:e4b \
+python3 scripts/classify_graph_relations.py --limit 10 --apply
+```
+
+`--apply`が更新するのは分類結果、両Articleのhash、model、prompt provenanceであり、
+正式なArticle間エッジは作らない。LLMが関係の意味を判断し、プログラムは
+既知decision keyの過不足と、根拠span IDが提示Articleに存在することだけを検証する。
+
+府令を含む34件の固定fixtureで現在の分類精度を評価する場合は次を実行する。
+評価用Graph代理が更新をメモリに捕捉するため、Neo4jは更新されない。
+
+```bash
+OLLAMA_BASE_URL=http://localhost:11434 \
+RELATION_CLASSIFIER_PROVIDER=ollama \
+RELATION_CLASSIFIER_MODEL=gemma4:e4b \
+RELATION_CLASSIFIER_REVIEWER_MODEL=gemma4:e4b \
+python3 scripts/evaluate_legal_relation_classifier.py
+```
+
+既定の`RELATION_CLASSIFIER_BATCH_SIZE=1`は、ローカル小型モデルが同時提示された別候補の
+本文・意味判断を混同しないための精度優先値である。2以上は速度比較用の明示設定とする。
+特定fixtureだけを再現する場合は`--fixture-id`を複数回指定できる。
+
+ガイド6文書について、OpenSearch検索、明示`EXPLAINS`、遷移先Article全文取得を
+実データで検査する場合は次を実行する。LLMとClaude APIは使わず、Neo4jも更新しない。
+
+```bash
+python3 scripts/evaluate_guidance_navigation.py
+```
+
+2026-08-18の旧30件`gemma4:e4b`評価では、自由記述の引用を使った旧契約が3/30、
+span ID選択へ修正した初期契約が19/30だった。参照文がspan境界をまたぐ場合も位置対応し、
+長文用contextとtimeoutを適用したv7契約は24/30（80%）だった。内訳は
+`implements` 13/15、`reference_only` 11/15で、残る誤りには「下位法令が親条文を
+権限委任の対象として列挙すること」と「親条文自身の委任を下位法令が実施すること」の
+混同がある。
+v8ではspan IDをArticle ID付きで一意化し、Article本文を候補内へ閉じ、1候補ずつ判断する。
+追加した府令4件は、法律→府令の正例・負例、施行令→府令、複数参照箇所を含む。
+同日の`gemma4:e4b`によるv8全34件評価は34/34だった（一次`uncertain` 1件を同モデルの
+Reviewerが再検討）。府令タグは法律→府令3/3、施行令→府令1/1、公開買付け3/3である。
+このfixtureは明確な文言の候補を選んだ機能試験であり、全4,323候補の正確な
+正答率推定には使わない。現時点で全候補の一括登録は行わない。
+
 ### 日本語Analyzer索引
 
 既存`legal-rag-content`を削除せず、Kuromoji＋NFKCとbigramのmulti-fieldを持つ

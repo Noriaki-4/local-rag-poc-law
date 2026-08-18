@@ -149,10 +149,13 @@ confidence値や文言検出だけで、プログラムが`IMPLEMENTS`を確定�
 関係も同じ型へ保存する。ガイドの表は同じ行に現れる法律Articleと施行令Articleだけを組にし、
 表全体の参照集合の直積は作らない。
 
-seed後の別ジョブは、両端Article全文をHaikuへ渡して`implements / reference_only / uncertain`へ
-分類し、`uncertain`だけをSonnet Reviewerへ渡す。プログラムは既知ID・件数・引用が入力本文に
-存在することだけを検証し、関係の意味を補正しない。分類結果には本文SHA-256、provider、一次・
-Reviewerモデル、prompt version、引用、分類時刻を保存する。本文またはpromptが変われば失効する。
+seed後の別ジョブは、両端Article全文を分類専用LLMへ渡して
+`implements / reference_only / uncertain`へ分類し、`uncertain`だけを分類専用Reviewerで再検討する。
+既定は両方ともローカルOllamaの`gemma4:e4b`とするが、同一provider内で別modelを指定できる。
+Article本文は決定的なspan ID付きで提示し、LLMは根拠spanを選択する。プログラムは
+既知ID・件数・根拠span IDが対応Articleに存在することだけを検証し、関係の意味を補正しない。
+分類結果には本文SHA-256、provider、一次・Reviewerモデル、prompt version、選択spanの原文、
+分類時刻を保存する。本文またはpromptが変われば失効する。
 
 `expand_graph`は正式Graph経路、`llm_classified_implements`、未分類／`llm_classified_uncertain`を
 区別する。分類済み`implements`は検索ナビゲーションに利用できるが、正式エッジ、根拠充足、
