@@ -212,9 +212,11 @@ OpenSearch index と Neo4j graph を作り直す。レスポンスの`sourceSnap
 `proposedPredicate`を持つ未確認`RelationAssertion`として別の`ClassificationRun`へ登録する。
 完了・監査済みRunだけを`published`にし、検索はCase開始時にpublish済みRunを固定する。
 
-現時点では、新しい型、冪等キー、Neo4j Constraint、seed境界まで実装済みで、新しい非同期CLIと
-Run publishは次の実装段階である。旧`scripts/classify_graph_relations.py --apply`はschema version 7の
-既存`RelationAssertion`を更新する移行用処理なので、schema version 8の再seed後には実行しない。
+現時点では、新しい型、冪等キー、Neo4j Constraint、候補単位checkpoint、再開可能CLI、
+Run publish監査まで実装済みである。実データは再seed済みだが、新5 predicate分類は小規模な
+未公開Runで契約を検証中であり、全件Runとpublishはまだ実行していない。
+旧`scripts/classify_graph_relations.py --apply`はschema version 7の
+既存`RelationAssertion`を更新する移行用処理なので、schema version 9の再seed後には実行しない。
 
 非同期分類後もRelationAssertionは正式なArticle間Relationへ昇格させない。検索時Solverが質問に
 関係する候補だけ両端Article本文で評価し、その案件判断はCaseStoreだけへ保存する。プログラムは
@@ -227,8 +229,48 @@ OpenSearchの子チャンクが親チャンク本文を再掲する場合は、`
 直接の親子と確認できた先頭部分だけを除き、重複のないArticle全文を復元する。
 Article本文は決定的なspan ID付きでLLMへ渡し、LLMは判断根拠とするspan IDを選ぶ。
 自由記述の引用文は求めず、プログラムは選ばれたIDが対応Articleに存在することだけを検証する。
+5種類は同時に判定せず、候補ごとに1 predicateずつ5回の専門判定を行う。各判定はpredicate固有の
+二つの必要条件とfindingだけを返す。成立したpredicateがある場合だけ、別の根拠付与呼出しで
+`referenceOccurrenceHash / subjectArticleId / objectArticleId / subjectSupportingSpanId /
+objectSupportingSpanId`を選ぶ。プログラムは条件とfinding、既知ID、件数の整合を検証してoutcomeと
+保存対象Assertionへ決定的に投影するだけで、predicate・条件値・finding・方向・根拠を補正しない。
 既定の`RELATION_CLASSIFIER_CONTEXT_TOKENS=131072`は、既定モデル`gemma4:e4b`の
 context上限に合わせ、長いArticleを黙って切り捨てないための値である。
+
+新schemaの候補数とsnapshot整合だけを確認し、LLM・Neo4j更新を行わないdry-run:
+
+```bash
+OLLAMA_BASE_URL=http://localhost:11434 \
+python3 scripts/classify_legal_relations.py --limit 10
+```
+
+小規模分類を実行してcheckpointを保存し、Runを`building`のまま検査する場合:
+
+```bash
+OLLAMA_BASE_URL=http://localhost:11434 \
+RELATION_CLASSIFIER_PROVIDER=ollama \
+RELATION_CLASSIFIER_MODEL=gemma4:e4b \
+RELATION_CLASSIFIER_REVIEWER_MODEL=gemma4:e4b \
+python3 scripts/classify_legal_relations.py --limit 10 --apply
+```
+
+中断した`building` Runは、最初の出力・ログにあるIDを指定して再開する。同じ候補の
+`ClassificationCheckpoint`は再度LLMへ送らない。
+
+```bash
+OLLAMA_BASE_URL=http://localhost:11434 \
+RELATION_CLASSIFIER_PROVIDER=ollama \
+RELATION_CLASSIFIER_MODEL=gemma4:e4b \
+RELATION_CLASSIFIER_REVIEWER_MODEL=gemma4:e4b \
+python3 scripts/classify_legal_relations.py \
+  --limit 10 \
+  --run-id classification-run-... \
+  --apply
+```
+
+`--apply`だけではpublishしない。新5 predicate fixtureと対象scopeの品質確認後、同じ`--run-id`へ
+`--apply --publish`を明示した場合だけRunを公開する。全件Runの前に、
+10件、34件の旧移行baseline、新5 predicate fixture、代表100候補の順で品質と時間を確認する。
 
 府令を含む34件の固定fixtureで現在の分類精度を評価する場合は次を実行する。
 これは旧二値分類の移行baselineであり、新5 predicateの受入れ評価ではない。
@@ -245,6 +287,21 @@ python3 scripts/evaluate_legal_relation_classifier.py
 既定の`RELATION_CLASSIFIER_BATCH_SIZE=1`は、ローカル小型モデルが同時提示された別候補の
 本文・意味判断を混同しないための精度優先値である。2以上は速度比較用の明示設定とする。
 特定fixtureだけを再現する場合は`--fixture-id`を複数回指定できる。
+
+新5 predicateの回帰fixtureを、Neo4jへ書き込まず実データで評価する場合:
+
+```bash
+OLLAMA_BASE_URL=http://localhost:11434 \
+RELATION_CLASSIFIER_PROVIDER=ollama \
+RELATION_CLASSIFIER_MODEL=gemma4:e4b \
+RELATION_CLASSIFIER_REVIEWER_MODEL=gemma4:e4b \
+python3 scripts/evaluate_legal_relation_5predicate.py
+```
+
+2026-08-18のv16では、民法618条→617条の`INCORPORATES`、603条→602条の
+`REFERENCE_ONLY`、619条→622条の2の`USES_DEFINITION`かつ非`EXCEPTION_TO`を3/3で確認した。
+これは観測済み誤分類の回帰fixtureであり、5 predicate全体の受入fixtureや全4,323候補の精度評価を
+代替しない。
 
 ガイド6文書について、OpenSearch検索、明示`EXPLAINS`、遷移先Article全文取得を
 実データで検査する場合は次を実行する。LLMとClaude APIは使わず、Neo4jも更新しない。
@@ -862,7 +919,7 @@ version 5以前とは評価項目が異なるため直接比較しない。
 
 `HAS_CONTENT_UNIT / REFERENCES / EXPLAINS`とsnapshot情報はseed時に生成するため、この変更を
 既存環境へ反映するにはagent-apiをbuild後、OpenSearchとNeo4jを同じ`/admin/seed`で再構築する。
-Neo4jだけを更新しない。Graph schema version 8では、意味関係は後続のpublish済み
+Neo4jだけを更新しない。Graph schema version 9では、意味関係は後続のpublish済み
 `ClassificationRun`から取得し、正式なArticle間Relationとしては保存しない。
 Graph展開は上位ノードごとに少数ずつ取得した後、質問との語句被覆と接続先法令の多様性で
 経路を選び、一つの条文や一つの法令の参照先だけで `AGENT_MAX_GRAPH_PATHS` を

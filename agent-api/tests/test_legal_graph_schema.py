@@ -1,10 +1,13 @@
 from app.domains.legal.graph_schema import (
+    CHECKPOINT_OUTCOME_RUN_COUNT_FIELD,
     NEO4J_SCHEMA_STATEMENTS,
     PHYSICAL_RELATION_TYPES,
+    ClassificationCheckpointOutcome,
     ClassificationRunPhase,
     GraphDirection,
     GraphSearchMode,
     ProposedPredicate,
+    RelationClassificationOutcome,
 )
 
 
@@ -20,6 +23,20 @@ def test_graph_vocabularies_match_the_new_contract() -> None:
         "building",
         "published",
         "failed",
+    }
+    assert {item.value for item in ClassificationCheckpointOutcome} == {
+        "classified",
+        "reference_only",
+        "uncertain",
+        "failed",
+    }
+    assert {item.value for item in RelationClassificationOutcome} == {
+        "classified",
+        "reference_only",
+        "uncertain",
+    }
+    assert set(CHECKPOINT_OUTCOME_RUN_COUNT_FIELD) == {
+        item.value for item in ClassificationCheckpointOutcome
     }
     assert {item.value for item in GraphDirection} == {
         "from_subject",
@@ -55,5 +72,7 @@ def test_schema_has_all_required_uniqueness_constraints_and_indexes() -> None:
     assert "n.assertionId IS UNIQUE" in schema
     assert "n.assertionDedupeKey IS UNIQUE" in schema
     assert "n.classificationRunId IS UNIQUE" in schema
+    assert "n.checkpointId IS UNIQUE" in schema
     assert "n.proposedPredicate" in schema
     assert "n.sourceSnapshotId" in schema
+    assert "ClassificationCheckpoint" in schema

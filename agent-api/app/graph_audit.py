@@ -100,7 +100,7 @@ def _seed_contract_violations(
 
     violations: list[dict[str, Any]] = []
     deterministic_node_types = PHYSICAL_NODE_LABELS.difference(
-        {"RelationAssertion", "ClassificationRun"}
+        {"RelationAssertion", "ClassificationRun", "ClassificationCheckpoint"}
     )
     for node in nodes:
         node_id = node.get("graphNodeId")

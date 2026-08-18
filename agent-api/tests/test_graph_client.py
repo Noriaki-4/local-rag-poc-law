@@ -74,7 +74,7 @@ class TestBatchTraversal:
     ) -> None:
         graph, recorder = client
         graph.ensure_legal_graph_schema()
-        assert "classification_run_snapshot_id" in recorder["query"]
+        assert "classification_checkpoint_run_id" in recorder["query"]
 
     def test_seed_nodes_uses_unwind_batch(
         self, client: tuple[GraphClient, dict[str, Any]]

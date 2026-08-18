@@ -201,15 +201,23 @@ flowchart LR
     両端Article全文)] --> C
     C --> P[Article ID付きspanへ変換]
     P --> L[Relation Classifier LLM
-    1候補/呼出し]
-    L --> V[ID・enum・span・hashだけ構造検証]
-    V --> R[(building ClassificationRun)]
+    1候補・1 predicate/意味判定
+    固有の二必要条件とfindingを判断]
+    L -->|成立predicateだけ| G[Grounding LLM
+    方向・参照箇所・両端spanを選択]
+    L -->|成立なし| D[Programがfindingから
+    outcome・Assertionを決定的に投影]
+    G --> D
+    D --> V[ID・enum・span・hashだけ構造検証]
+    V --> CP[(候補ごとのCheckpoint)]
+    CP --> R[(building ClassificationRun)]
     R -->|全scope完了| PUB[published Run]
     PUB --> A[未確認RelationAssertionとして検索可能]
 ```
 
 複数候補を同じPromptへ束ねない。保存checkpointのbatchとLLM入力のbatchは別であり、1候補ずつでも
-再開できる。
+再開できる。LLMは5関係のfinding・方向・両端根拠を一度に判断する。Programは法的意味を補わず、
+成立したassessmentだけをRelationAssertionへ写す。
 
 ## 9. 共有法令Graphの形
 
@@ -223,6 +231,7 @@ flowchart LR
     RA[RelationAssertion] -->|SUBJECT| A1
     RA -->|OBJECT| A2
     RA -->|CLASSIFIED_IN| CR[ClassificationRun]
+    CP[ClassificationCheckpoint] -. classificationRunId<br/>物理Relationなし .-> CR
 ```
 
 `IMPLEMENTS / INCORPORATES / USES_DEFINITION / EXCEPTION_TO / OVERRIDES`は物理Edgeではなく、

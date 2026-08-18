@@ -19,7 +19,7 @@
 |---|---|---|
 | Phase 0 | 一部完了 | 代表2問の現行baseline、説明付きstatus契約、生成schema・Prompt用語集のfixture |
 | Phase 1 | 一部実装 | `CycleRecord / StepRecord`、discriminator付きCommand、型付きstatusと遷移の一元化、再開契約 |
-| Phase 2 | 決定的seedまで実装 | 5 predicate非同期分類Run、publish監査、Hypothesis別selector、旧自動Graph経路の撤去 |
+| Phase 2 | 非同期分類jobまで実装 | 新5 predicate fixture・実データRun、Hypothesis別selector、旧自動Graph経路の撤去 |
 | Phase 3 | 未評価 | 新契約に基づくtrace、再開、入力増加、latencyの完了条件 |
 | Phase 4 | 未完了 | 新経路による代表2問の合格、既定経路切替、旧試作の撤去 |
 
@@ -36,9 +36,10 @@
   Hypothesis別selector、`from_subject / to_subject`、5 predicateの新Graph契約ではない。
 - 現行CaseStateはWorkItem、Hypothesis、Evidence、Graph review履歴を保持するが、
   本書の`ExplorationState / CycleRecord / StepRecord`と説明付きstatus契約は未実装である。
-- schema version 8のseedは、同じsnapshotのOpenSearch本文とNeo4jの構造・
+- schema version 9のseedは、同じsnapshotのOpenSearch本文とNeo4jの構造・
   `REFERENCES / EXPLAINS`だけを作り、旧`APPLIED_BY / MENTIONS / RelationAssertion`を生成しない。
-  新しい5 predicate契約、冪等キー、Neo4j Constraintは実装済みだが、非同期Runの保存・publishは未実装である。
+  新しい5 predicate契約、候補単位checkpoint、再開可能CLI、Neo4j保存、publish監査は実装済みである。
+  実データの再seed・分類と検索時selectorへの接続はまだ行っていない。
 - 旧`legal-relation-classifier-v8`は、schema version 7の旧`IMPLEMENTS`候補を
   `implements / reference_only / uncertain`へ分類する移行用機能である。
   本書の5 predicate、`ClassificationRun`、`SUBJECT / OBJECT / CLASSIFIED_IN`を備えた
@@ -546,7 +547,8 @@ CaseStoreの探索履歴や案件判断をNeo4jへ保存しない。同じArticl
 | `Paragraph` | 項 | `contentUnitId`, `documentId`, `parentContentUnitId`, `paragraphNumber`, `sourceSnapshotId`, `contentHash` |
 | `Item` | 号 | `contentUnitId`, `documentId`, `parentContentUnitId`, `itemNumber`, `sourceSnapshotId`, `contentHash` |
 | `RelationAssertion` | 非同期LLMが生成した未確認の意味関係候補 | `assertionId`, `candidateKey`, `assertionDedupeKey`, `proposedPredicate`, `basisEdgeId`, `sourceContentUnitId`, `subjectSupportingSpanId`, `objectSupportingSpanId`, `subjectSupportingQuote`, `objectSupportingQuote`, `referenceOccurrenceHash`, `sourceSnapshotId`, `sourceRevisionId`, `classificationRunId`, `classifiedAt`, `graphSchemaVersion` |
-| `ClassificationRun` | snapshot単位の非同期意味分類Run | `classificationRunId`, `phase`, `sourceSnapshotId`, `graphSchemaVersion`, `model`, `promptVersion`, `candidatesPerModelCall`, `inputCount`, `processedCount`, `assertionCount`, `referenceOnlyCount`, `uncertainCount`, `failedCount`, `scopeHash`, `publishedAt` |
+| `ClassificationRun` | snapshot単位の非同期意味分類Run | `classificationRunId`, `phase`, `sourceSnapshotId`, `graphSchemaVersion`, `provider`, `model`, `reviewerModel`, `promptVersion`, `candidatesPerModelCall`, `inputCount`, `processedCount`, `classifiedCandidateCount`, `assertionCount`, `referenceOnlyCount`, `uncertainCount`, `failedCount`, `scopeHash`, `publishedAt` |
+| `ClassificationCheckpoint` | 1候補の保存済み実行結果。法的意味関係ではない | `checkpointId`, `classificationRunId`, `candidateKey`, `outcome`, `decisionPayloadJson`, `decisionPayloadHash`, `assertionCount`, `errorCode`, `processedAt`, `sourceSnapshotId`, `graphSchemaVersion` |
 
 `Article`を項・号の代用labelにしない。Graph探索をArticle単位へ投影する場合も、元の
 `Paragraph / Item.contentUnitId`と親`Article.contentUnitId`を両方保持する。本文はOpenSearchを正本とし、
@@ -615,28 +617,51 @@ predicateと向きを次に固定する。
 
 `/admin/seed`はOpenSearch本文、構造Node、`HAS_CONTENT_UNIT / REFERENCES / EXPLAINS`までを作り、
 LLM分類の完了を待たず終了する。その後の非同期jobは、決定的抽出で得た参照を端点ペアとbasisへ
-正規化し、`RelationClassificationCandidate` 1件ごとに次を1つのLLM入力として扱う。
+正規化し、`RelationClassificationCandidate` 1件ごとに次を同じ入力scopeとして扱う。
 
-- 1組のsubject/object Article全文。各本文は候補内に閉じ、`<articleId>::span-N`で一意に識別する
+- 原文上の参照元・参照先Article全文。各本文は候補内に閉じ、`<articleId>::span-N`で一意に識別する
 - 同じ候補へ結び付く全`REFERENCES`と、同じ引用がArticle内に複数回現れる場合を含む全参照箇所
 - 各参照箇所の`citationText`、参照を書いたcontent unit、basis edge、対応span ID群
 - law family、authority type、snapshot・content hash
 
 複数targetを同じ判断へ束ねず、候補生成元のheuristic、旧`suggestedType / referenceKind`を正解候補として
-Promptへ出さない。LLMは全参照箇所と両端本文を対応付けて0件以上のRelationAssertionを返す。
-Programは既知decision key、predicate enum、端点が入力内にあること、選択span IDが対応Articleと
-参照箇所へ属すること、snapshot・hash・件数だけを検証し、predicateを補正しない。
+Promptへ出さない。意味分類は5 predicateを同時提示せず、同じ候補をpredicateごとの5回の専門判定へ
+分ける。各回はpredicate固有の二つの必要条件と`finding`だけをLLMへ返させる。例えば
+`INCORPORATES`は`explicitApplicationLanguage / targetRuleApplied`、`USES_DEFINITION`は
+`targetDefinesTerm / sourceUsesSameTerm`を使う。Programは二条件とfindingの真理値整合だけを検証し、
+本文から条件値を決めない。複数predicateは独立に成立でき、一方の成立を他方の根拠へ流用しない。
+
+1件以上が`established`の場合だけ、同じ候補と成立predicate一覧を第二段階の根拠付与LLMへ渡す。
+根拠付与LLMはpredicateを追加・削除せず、`referenceOccurrenceHash / subjectArticleId / objectArticleId /
+subjectSupportingSpanId / objectSupportingSpanId`を成立predicateごとに返す。非成立・不確実な関係へ
+意味方向や根拠を作らせない。
+候補の`referenceSourceArticle / referenceTargetArticle`は原文`REFERENCES`の物理方向だけを表す。
+意味上の`subjectArticleId / objectArticleId`は根拠付与LLMが入力中の2端点から選ぶ。
+Programはauthority階層や参照方向から意味方向を補完しない。1件以上`established`なら`CLASSIFIED`、
+成立なしで1件以上`uncertain`なら`UNCERTAIN`、
+全件`not_established`なら`REFERENCE_ONLY`と機械的に投影し、`established`のassessmentだけを
+RelationAssertionへ写す。
+これは意味判断ではなく、重複する状態を持たないための決定的投影である。Programは既知decision key、
+predicate enum、端点が入力内にあること、選択span IDが対応Articleと参照箇所へ属すること、snapshot・hash・
+件数だけを検証し、predicate・finding・方向を補正しない。
 `REFERENCE_ONLY / UNCERTAIN / FAILED`はRelationAssertionに変換せず、ClassificationRunの監査件数へ記録する。
 
-分類LLMは既定で1候補/呼出しとする。複数候補の同時提示は、単件結果との判断不変性を対象modelのfixtureで
-確認したProfileだけが明示的に有効化できる。LLM入力単位とは別に保存checkpointを持ち、
-分類jobは`sourceSnapshotId + subject/object Article ID・content hash + basisEdgeId + 正規化した全reference occurrence hash + promptVersion + model + graphSchemaVersion`で
+分類LLMは既定で1候補・1 predicate/意味判定呼出しとし、成立時だけ候補単位の根拠付与を1回行う。
+複数候補又は複数predicateの同時提示は、単件結果との判断不変性を対象modelのfixtureで確認したProfileだけが
+明示的に有効化できる。LLM入力単位とは別に候補単位の保存checkpointを持ち、
+分類jobは`sourceSnapshotId + 参照元/参照先Article ID・content hash + basisEdgeId + 正規化した全reference occurrence hash + promptVersion + provider + model + reviewer model + graphSchemaVersion`で
 再開・cache可能にする。
 この組を正規化してhash化した`candidateKey`を分類入力の冪等キーとする。1候補から複数predicateが返り得るため、
 RelationAssertionの物理重複キーは候補だけにせず、
 `assertionDedupeKey = hash(classificationRunId + candidateKey + proposedPredicate)`とする。
 同じRun・候補・predicateを異なる`assertionId`で二重登録せず、別predicateと別Runは区別する。
-結果は`phase=building`のRunへ書き、入力scopeを処理し終えたRunだけ`phase=published`へ一括publishする。
+結果は候補単位の`ClassificationCheckpoint`とともに`phase=building`のRunへ書き、入力scopeを処理し終えたRunだけ`phase=published`へ一括publishする。
+分類CLIは`building`を既定とし、新5 predicate fixtureと対象scopeの品質確認後に明示した`--publish`だけが
+publish遷移を要求できる。構造監査の成功だけで自動publishしない。
+Assertionを作らない`REFERENCE_ONLY / UNCERTAIN / FAILED`もcheckpointを持つため、中断再開時に
+処理済み候補を再呼出ししない。checkpointは実行記録であり、Graph探索の法的関係として使わない。
+checkpointの`decisionPayloadJson`には5 predicateの固有条件とfinding、成立時の根拠付与結果を保存し、
+`decisionPayloadHash`との一致を監査する。これにより`REFERENCE_ONLY`を含む誤分類を事後に追跡できる。
 継続不能なRunは`phase=failed`とする。このphaseはProgram内部の実行事実でありSolverへ判断させない。
 Case開始時に最新のpublish済み
 `classificationRunId`を固定し、そのCaseの全Graph検索へ渡す。`uncertainCount`または`failedCount`が0でない場合は
@@ -679,11 +704,13 @@ UNIQUE GraphNode.graphNodeId
 UNIQUE RelationAssertion.assertionId
 UNIQUE RelationAssertion.assertionDedupeKey
 UNIQUE ClassificationRun.classificationRunId
+UNIQUE ClassificationCheckpoint.checkpointId
 INDEX  GraphNode.documentId
 INDEX  Document.authorityType
 INDEX  RelationAssertion.proposedPredicate
 INDEX  RelationAssertion.classificationRunId
 INDEX  ClassificationRun.sourceSnapshotId
+INDEX  ClassificationCheckpoint.classificationRunId
 ```
 
 seed監査では、Node/Relationの端点型、dangling relation、重複`graphEdgeId`、`MENTIONS / APPLIED_BY`が0件、
@@ -710,6 +737,7 @@ statusは「実行事実」と「意味判断」を分離する。同じ文字�
 | Run | `running / completed / failed / cancelled` | プログラム |
 | ToolResult | `succeeded / failed / timeout` | プログラム |
 | ClassificationRun phase | `building / published / failed` | プログラム |
+| ClassificationCheckpoint outcome | `classified / reference_only / uncertain / failed` | LLM（`failed`のみプログラムの実行失敗） |
 | Cycle phase | `planned / running / completed` | プログラム |
 | Step phase | `planned / observed / completed` | プログラム |
 | Resource本文 | `not_requested / pending / succeeded / failed / timeout` | プログラム |
@@ -1546,7 +1574,7 @@ Promptだけを先行させて現行SolverContextに存在しない値をLLMへ�
 | `solver_graph_review.md` | `remaining_fetch_capacity=0`なら新たにselectせず、関連候補をdeferしてCycle終了判断へ戻す。Graph Reviewから直接次Cycleの法的方針を決めない。 |
 | `solver_integration.md` | Cycle上限に達したら、直前までのToolResultを評価し、Hypothesis・WorkItem・Evidence・Graph ledgerを整理した後に、finalizeまたは次Cycleへの構造化引継ぎを返す。次Cycleのgoal・strategyは返さない。 |
 | `solver_integration.md` | Cycle境界でactiveな`relevant_deferred`全件を`carry_forward / no_longer_needed / unresolved_at_limit`のいずれかへ明示し、黙って破棄しない。`start_next_cycle`では次Cycle計画やToolRequestを返さない。 |
-| `relation_classifier.md` | 1回の入力を1つの端点ペア・basis・全参照出現へ限定する。両端Article全文、Article ID付きspan、既知decision keyだけを提示し、候補生成時のheuristic、旧`suggestedType / referenceKind`を出さない。返却するpredicate、SUBJECT / OBJECTの根拠span、`REFERENCE_ONLY / UNCERTAIN`の意味を定義する。 |
+| `relation_classifier.md` / `relation_grounder.md` | 同じ候補を1 predicateずつ専門判定し、predicate固有の二必要条件とfindingを返す。成立predicateだけを別の根拠付与応答へ渡し、方向・参照箇所・両端spanを選ぶ。Programは意味を補完せず、条件整合・既知ID・件数だけを検証する。 |
 | Provider schema | Review判断対象は現在のbatch、本文取得へ選べるIDはbatchの候補とledgerの`relevant_deferred`、再試行時の`selected + failed/timeout`に制限する。選択上限は`min(3, remaining_fetch_capacity)`とする。`rejected`は新Link差分でbatchへ再提示された場合を除き同じHypothesisで再選択させず、別Hypothesisへの`frontier_re_adoptions`はledgerの既知Nodeと既知のopen WorkItem・Hypothesisだけを許可する。候補の関連性や優先度はschemaまたはProgramで補正しない。 |
 | Provider schema | Deferred解消はledgerの既知IDだけを許可する。Programは全件性と次動作との矛盾だけを拒否し、関連性・必要性を補正しない。 |
 | Provider schema | Graph Reviewモードで必ず空になるre-adoption、deferred解消、answerは空配列またはnullの簡易schemaとし、未使用の動的enumをコンパイルさせない。 |
@@ -1668,6 +1696,7 @@ agent-api/app/
 │           ├── solver_integration.md
 │           ├── solver_graph_review.md
 │           ├── relation_classifier.md
+│           ├── relation_grounder.md
 │           └── reviewer.md
 │
 └── adapters/
@@ -1756,7 +1785,7 @@ focusへ接続するNode・Link、直近ToolResult、新規・保持EvidenceをC
 - statusまたはCommandをfixtureへ追加したとき、Provider schema、Prompt用語集、遷移網羅性のいずれかが
   未定義なら契約テストが失敗する。
 - Relation分類fixtureとガイドfixtureをNeo4jへ書き込まず再実行でき、model、prompt version、
-  1候補/呼出し、タグ別結果が記録される。機能fixtureを全候補の母集団精度とは表現しない。
+  1候補・1 predicate/意味判定呼出し、タグ別結果が記録される。機能fixtureを全候補の母集団精度とは表現しない。
 
 ### Phase 1: 最小Framework
 
@@ -1873,7 +1902,7 @@ publishする別単位とする。Graph schema、抽出規則、入力データ�
   内部page sizeとArticle取得上限を分離し、全件取得後だけToolResult・contentを`succeeded`にする。
   途中失敗・timeout・0件取得では部分Evidenceをcommitせず、Article単位で再試行可能にする。
 - 5.1.3のNeo4j物理定義を実装する。`:GraphNode`に`Document`、`Article`、`Paragraph`、`Item`、
-  `RelationAssertion`、`ClassificationRun`の型別labelを付け、物理Relationは`HAS_CONTENT_UNIT`、
+  `RelationAssertion`、`ClassificationRun`、`ClassificationCheckpoint`の型別labelを付け、物理Relationは`HAS_CONTENT_UNIT`、
   `REFERENCES`、`EXPLAINS`、RelationAssertion用`SUBJECT / OBJECT / CLASSIFIED_IN`だけを生成する。
   `IMPLEMENTS / INCORPORATES / USES_DEFINITION / EXCEPTION_TO / OVERRIDES`は`proposedPredicate`に保存し、
   `APPLIED_BY / MENTIONS`を生成しない。項・号をArticleへ置換せず、
@@ -1881,14 +1910,17 @@ publishする別単位とする。Graph schema、抽出規則、入力データ�
 - `/admin/seed`はOpenSearch本文、構造、明示`REFERENCES / EXPLAINS`までを決定的に作り、LLM分類を待たず終了する。
   端点ペア・basis・全参照箇所を持つ候補1件ずつを分類する再開可能な非同期jobを実装する。
   候補内に閉じた両Article全文と`<articleId>::span-N`を提示し、旧`suggestedType / referenceKind`を
-  正解ヒントとしてPromptへ出さない。既知decision key・predicate enum・端点・根拠span・snapshot・hash・
-  件数の構造検証後にRelationAssertionを作る。Programは分類結果を補正しない。
+  正解ヒントとしてPromptへ出さない。5 predicateを1種類ずつ専門判定し、predicate固有の二必要条件と
+  findingを返させる。成立predicateだけ第二段階で方向と両端根拠spanを返させ、Programはfindingから
+  outcomeとAssertionを決定的に投影する。既知decision key・
+  predicate enum・端点・根拠span・snapshot・hash・件数だけを構造検証する。Programは分類結果を補正しない。
 - 分類結果を`ClassificationRun`へ集計し、完了Runだけ一括publishする。RelationAssertionを
   `SUBJECT / OBJECT / CLASSIFIED_IN`各1本で接続し、`basisEdgeId / supportingSpans / classificationRunId`を
   保存する。`candidateKey`と`assertionDedupeKey`を決定的に生成し、後者の一意制約で同一Run・候補・predicateの
   二重登録を防ぐ。再開時に同じkeyと同じpayloadがあれば処理済みとして再利用し、同じkeyでpayloadが違えば
   Runを失敗させて上書きしない。旧`fromArticleId / toArticleId / suggestedType / status`を新schemaの正本にしない。
-- 分類LLMは既定1候補/呼出しとし、保存checkpointはLLM入力単位から分離する。複数候補batchは
+- 分類LLMは既定1候補・1 predicate/意味判定呼出しとし、保存checkpointは候補単位にする。複数候補又は
+  複数predicateのbatchは
   単件との判断不変性を対象modelのfixtureで確認した場合だけProfileで明示的に有効化する。
 - Case開始時に`sourceSnapshotId / graphSchemaVersion / classificationRunId`を固定し、検索時案件判断は
   CaseStoreだけへ保存する。分類jobと検索時Solverの責務を混同しない。
@@ -1939,8 +1971,12 @@ publishする別単位とする。Graph schema、抽出規則、入力データ�
   候補がtargetごとの別LLM入力になり、Programが全参照先へ同じpredicateを複製しない。
   同一候補内で同じ参照文字列が複数回現れるfixtureは全出現spanを提示し、最初の一致だけに固定しない。
   分類再開・cache・Run単位publishを確認する。
-- 2候補を同じPromptへ入れると結果が変わるfixtureで既定Profileが1候補/呼出しを維持し、
+- 2候補又は複数predicateを同じPromptへ入れると結果が変わるfixtureで既定Profileが
+  1候補・1 predicate/意味判定呼出しを維持し、
   Article ID付きspanが候補間で衝突せず、保存checkpointから再開できる。
+- Provider schemaで各predicateが固有名の二必要条件とfindingを持ち、条件とfindingの不整合を拒否する。
+  非成立・不確実時は方向・根拠を要求せず、成立predicateだけ根拠付与schemaへ渡ることを確認する。
+  Programの決定的投影が`CLASSIFIED / REFERENCE_ONLY / UNCERTAIN`の3経路で本文の意味を補完しないことを確認する。
 - 現行34件の二値fixtureは旧`IMPLEMENTS`候補の移行baselineとして扱う。新schemaの受入れでは
   5 predicateそれぞれの正例・負例、`REFERENCE_ONLY`、`UNCERTAIN`、法令・政令・府省令・ガイドを含むfixtureを
   追加する。複数候補batchを有効化する場合は、候補順の入替えと単件実行の双方で判断が変わらないことも確認する。
@@ -1994,7 +2030,7 @@ publishする別単位とする。Graph schema、抽出規則、入力データ�
 
 - logical model callとtransport retryを分けて計測する。
 - 非同期Relation分類は候補ごとのmodel latency、一次`UNCERTAIN`率、再分類回数、checkpoint保存時間、
-  再開skip件数を記録する。最初に代表100件を1候補/呼出しで測り、全候補の所要時間を再見積りしてから
+  再開skip件数を記録する。最初に代表100件を1候補・1 predicate/意味判定呼出しで測り、全候補の所要時間を再見積りしてから
   全Runを開始する。速度のためにProgramがpredicateを補完したり、未評価候補を処理済みにしない。
 - cycle phase・goal・strategy、step番号・phase、frontier、探索Node/Link/depth、model用途、Tool時間を構造化ログとAPI traceへ出す。
 - 秘匿情報が通常ログへ出ないことをテストする。

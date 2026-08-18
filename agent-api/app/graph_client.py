@@ -1,4 +1,5 @@
 import re
+from datetime import datetime
 from typing import Any
 
 from neo4j import GraphDatabase
@@ -406,6 +407,376 @@ class GraphClient:
         """
         with self.driver.session() as session:
             session.run(query, records=records).consume()
+
+    def classification_source_state(self) -> dict[str, Any]:
+        """決定的seedのArticleが共有するsnapshotとschemaを返す。"""
+
+        query = """
+        MATCH (article:Article)
+        WITH collect(DISTINCT article.sourceSnapshotId) AS snapshots,
+             collect(DISTINCT article.graphSchemaVersion) AS schemaVersions,
+             count(article) AS articleCount
+        OPTIONAL MATCH ()-[reference:REFERENCES]->()
+        RETURN snapshots, schemaVersions, articleCount,
+               count(reference) AS referenceCount,
+               collect(DISTINCT reference.sourceSnapshotId) AS referenceSnapshots,
+               collect(DISTINCT reference.graphSchemaVersion) AS referenceSchemaVersions
+        """
+        with self.driver.session() as session:
+            record = session.run(query).single()
+        if record is None:
+            raise RuntimeError("classification source graph is unavailable")
+        snapshots = [str(value) for value in record["snapshots"] if value]
+        schema_versions = [int(value) for value in record["schemaVersions"] if value is not None]
+        if len(snapshots) != 1 or len(schema_versions) != 1:
+            raise RuntimeError(
+                "classification source graph must contain exactly one snapshot and schema version"
+            )
+        reference_snapshots = [
+            str(value) for value in record["referenceSnapshots"] if value
+        ]
+        reference_schema_versions = [
+            int(value)
+            for value in record["referenceSchemaVersions"]
+            if value is not None
+        ]
+        if reference_snapshots and reference_snapshots != snapshots:
+            raise RuntimeError("REFERENCES snapshot does not match Article snapshot")
+        if reference_schema_versions and reference_schema_versions != schema_versions:
+            raise RuntimeError("REFERENCES schema does not match Article schema")
+        return {
+            "sourceSnapshotId": snapshots[0],
+            "graphSchemaVersion": schema_versions[0],
+            "articleCount": int(record["articleCount"]),
+            "referenceCount": int(record["referenceCount"]),
+        }
+
+    def reference_candidates_for_classification(
+        self,
+        *,
+        source_snapshot_id: str,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """REFERENCESの物理方向と両端Articleを、意味判断せず候補化する。"""
+
+        query = """
+        MATCH (sourceUnit:GraphNode)-[basis:REFERENCES]->(targetUnit:GraphNode)
+        WHERE basis.sourceSnapshotId = $sourceSnapshotId
+        OPTIONAL MATCH (sourceAncestor:Article)-[:HAS_CONTENT_UNIT*1..2]->(sourceUnit)
+        WITH sourceUnit, targetUnit, basis,
+             CASE WHEN sourceUnit.nodeType = 'Article'
+                  THEN sourceUnit ELSE sourceAncestor END AS sourceArticle
+        OPTIONAL MATCH (targetAncestor:Article)-[:HAS_CONTENT_UNIT*1..2]->(targetUnit)
+        WITH sourceUnit, targetUnit, basis, sourceArticle,
+             CASE WHEN targetUnit.nodeType = 'Article'
+                  THEN targetUnit ELSE targetAncestor END AS targetArticle
+        WHERE sourceArticle IS NOT NULL
+          AND targetArticle IS NOT NULL
+          AND sourceArticle.graphNodeId <> targetArticle.graphNodeId
+        RETURN DISTINCT
+          properties(basis) AS basis,
+          properties(sourceArticle) AS referenceSourceArticle,
+          properties(targetArticle) AS referenceTargetArticle
+        ORDER BY basis.graphEdgeId
+        """
+        parameters: dict[str, Any] = {"sourceSnapshotId": source_snapshot_id}
+        if limit is not None:
+            query += "\nLIMIT $limit"
+            parameters["limit"] = max(1, limit)
+        with self.driver.session() as session:
+            return [dict(record) for record in session.run(query, **parameters)]
+
+    def create_or_resume_classification_run(
+        self, record: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Runを一度だけ作り、既存なら上書きせず返す。"""
+
+        run_id = str(record["classificationRunId"])
+        with self.driver.session() as session:
+            existing = session.run(
+                "MATCH (run:ClassificationRun {classificationRunId: $runId}) "
+                "RETURN properties(run) AS run",
+                runId=run_id,
+            ).single()
+            if existing is not None:
+                return dict(existing["run"])
+            properties = {
+                **record,
+                "graphNodeId": run_id,
+                "nodeType": "ClassificationRun",
+            }
+            created = session.run(
+                """
+                CREATE (run:GraphNode:ClassificationRun {
+                  graphNodeId: $runId,
+                  classificationRunId: $runId
+                })
+                SET run += $properties
+                RETURN properties(run) AS run
+                """,
+                runId=run_id,
+                properties=properties,
+            ).single()
+            return dict(created["run"])
+
+    def classification_checkpoints(
+        self, classification_run_id: str
+    ) -> list[dict[str, Any]]:
+        query = """
+        MATCH (checkpoint:ClassificationCheckpoint {
+          classificationRunId: $classificationRunId
+        })
+        RETURN properties(checkpoint) AS checkpoint
+        ORDER BY checkpoint.candidateKey
+        """
+        with self.driver.session() as session:
+            return [
+                dict(record["checkpoint"])
+                for record in session.run(
+                    query, classificationRunId=classification_run_id
+                )
+            ]
+
+    def save_classification_checkpoint(
+        self,
+        *,
+        checkpoint: dict[str, Any],
+        assertions: list[dict[str, Any]],
+    ) -> bool:
+        """1候補の結果とAssertion群を同じtransactionで冪等保存する。"""
+
+        run_id = str(checkpoint["classificationRunId"])
+        checkpoint_id = str(checkpoint["checkpointId"])
+
+        def persist(transaction: Any) -> bool:
+            run_record = transaction.run(
+                "MATCH (run:ClassificationRun {classificationRunId: $runId}) "
+                "RETURN properties(run) AS run",
+                runId=run_id,
+            ).single()
+            if run_record is None:
+                raise RuntimeError("classification run does not exist")
+            run = dict(run_record["run"])
+            if str(run.get("phase")) != "building":
+                raise RuntimeError("classification run is not building")
+            existing = transaction.run(
+                "MATCH (checkpoint:ClassificationCheckpoint {checkpointId: $checkpointId}) "
+                "RETURN properties(checkpoint) AS checkpoint",
+                checkpointId=checkpoint_id,
+            ).single()
+            if existing is not None:
+                saved = dict(existing["checkpoint"])
+                comparable = (
+                    "classificationRunId",
+                    "candidateKey",
+                    "outcome",
+                    "decisionPayloadHash",
+                    "decisionPayloadJson",
+                    "assertionCount",
+                )
+                if any(saved.get(key) != checkpoint.get(key) for key in comparable):
+                    raise RuntimeError(
+                        "classification checkpoint payload conflicts with persisted result"
+                    )
+                return False
+
+            for assertion in assertions:
+                basis = transaction.run(
+                    """
+                    MATCH ()-[reference:REFERENCES {graphEdgeId: $basisEdgeId}]->()
+                    WHERE reference.sourceSnapshotId = $sourceSnapshotId
+                    RETURN count(reference) AS count
+                    """,
+                    basisEdgeId=assertion["basisEdgeId"],
+                    sourceSnapshotId=assertion["sourceSnapshotId"],
+                ).single()
+                if basis is None or int(basis["count"]) != 1:
+                    raise RuntimeError("assertion basis REFERENCES edge is unavailable")
+
+            checkpoint_properties = {
+                **checkpoint,
+                "graphNodeId": checkpoint_id,
+                "nodeType": "ClassificationCheckpoint",
+            }
+            transaction.run(
+                """
+                CREATE (checkpoint:GraphNode:ClassificationCheckpoint {
+                  graphNodeId: $checkpointId,
+                  checkpointId: $checkpointId
+                })
+                SET checkpoint += $properties
+                """,
+                checkpointId=checkpoint_id,
+                properties=checkpoint_properties,
+            ).consume()
+
+            for assertion in assertions:
+                assertion_id = str(assertion["assertionId"])
+                assertion_properties = {
+                    **assertion,
+                    "graphNodeId": assertion_id,
+                    "nodeType": "RelationAssertion",
+                }
+                result = transaction.run(
+                    """
+                    MATCH (run:ClassificationRun {classificationRunId: $runId})
+                    MATCH (subject:Article {graphNodeId: $subjectArticleId})
+                    MATCH (object:Article {graphNodeId: $objectArticleId})
+                    CREATE (assertion:GraphNode:RelationAssertion {
+                      graphNodeId: $assertionId,
+                      assertionId: $assertionId,
+                      assertionDedupeKey: $assertionDedupeKey
+                    })
+                    SET assertion += $properties
+                    CREATE (assertion)-[:SUBJECT {
+                      graphEdgeId: $subjectEdgeId,
+                      edgeType: 'SUBJECT',
+                      sourceSnapshotId: $sourceSnapshotId,
+                      graphSchemaVersion: $graphSchemaVersion
+                    }]->(subject)
+                    CREATE (assertion)-[:OBJECT {
+                      graphEdgeId: $objectEdgeId,
+                      edgeType: 'OBJECT',
+                      sourceSnapshotId: $sourceSnapshotId,
+                      graphSchemaVersion: $graphSchemaVersion
+                    }]->(object)
+                    CREATE (assertion)-[:CLASSIFIED_IN {
+                      graphEdgeId: $runEdgeId,
+                      edgeType: 'CLASSIFIED_IN',
+                      sourceSnapshotId: $sourceSnapshotId,
+                      graphSchemaVersion: $graphSchemaVersion
+                    }]->(run)
+                    RETURN assertion.assertionId AS assertionId
+                    """,
+                    runId=run_id,
+                    subjectArticleId=assertion["subjectArticleId"],
+                    objectArticleId=assertion["objectArticleId"],
+                    assertionId=assertion_id,
+                    assertionDedupeKey=assertion["assertionDedupeKey"],
+                    properties=assertion_properties,
+                    subjectEdgeId=f"edge-{assertion_id}-subject",
+                    objectEdgeId=f"edge-{assertion_id}-object",
+                    runEdgeId=f"edge-{assertion_id}-classified-in-{run_id}",
+                    sourceSnapshotId=assertion["sourceSnapshotId"],
+                    graphSchemaVersion=assertion["graphSchemaVersion"],
+                ).single()
+                if result is None:
+                    raise RuntimeError("assertion endpoints are unavailable")
+
+            # package初期化時のGraphClient循環importを避け、実行時に契約正本を読む。
+            from .domains.legal.graph_schema import (
+                CHECKPOINT_OUTCOME_RUN_COUNT_FIELD,
+            )
+
+            outcome_counter = CHECKPOINT_OUTCOME_RUN_COUNT_FIELD[
+                str(checkpoint["outcome"])
+            ]
+            # counter名は固定mapからだけ選び、LLM出力をCypherへ埋め込まない。
+            transaction.run(
+                f"""
+                MATCH (run:ClassificationRun {{classificationRunId: $runId}})
+                SET run.processedCount = run.processedCount + 1,
+                    run.{outcome_counter} = run.{outcome_counter} + 1,
+                    run.assertionCount = run.assertionCount + $assertionCount
+                """,
+                runId=run_id,
+                assertionCount=len(assertions),
+            ).consume()
+            return True
+
+        with self.driver.session() as session:
+            return bool(session.execute_write(persist))
+
+    def classification_run_materialization(
+        self, classification_run_id: str
+    ) -> dict[str, Any]:
+        """publish監査用にRun、checkpoint、Assertion端点を取得する。"""
+
+        with self.driver.session() as session:
+            run_record = session.run(
+                "MATCH (run:ClassificationRun {classificationRunId: $runId}) "
+                "RETURN properties(run) AS run",
+                runId=classification_run_id,
+            ).single()
+            checkpoints = [
+                dict(record["checkpoint"])
+                for record in session.run(
+                    """
+                    MATCH (checkpoint:ClassificationCheckpoint {
+                      classificationRunId: $runId
+                    })
+                    RETURN properties(checkpoint) AS checkpoint
+                    ORDER BY checkpoint.candidateKey
+                    """,
+                    runId=classification_run_id,
+                )
+            ]
+            assertions = [
+                {
+                    "assertion": dict(record["assertion"]),
+                    "subjects": list(record["subjects"]),
+                    "objects": list(record["objects"]),
+                    "runs": list(record["runs"]),
+                    "basisCount": int(record["basisCount"]),
+                }
+                for record in session.run(
+                    """
+                    MATCH (assertion:RelationAssertion {
+                      classificationRunId: $runId
+                    })
+                    OPTIONAL MATCH (assertion)-[:SUBJECT]->(subject:Article)
+                    OPTIONAL MATCH (assertion)-[:OBJECT]->(object:Article)
+                    OPTIONAL MATCH (assertion)-[:CLASSIFIED_IN]->(run:ClassificationRun)
+                    OPTIONAL MATCH ()-[basis:REFERENCES]->()
+                    WHERE basis.graphEdgeId = assertion.basisEdgeId
+                    RETURN properties(assertion) AS assertion,
+                           collect(DISTINCT subject.graphNodeId) AS subjects,
+                           collect(DISTINCT object.graphNodeId) AS objects,
+                           collect(DISTINCT run.classificationRunId) AS runs,
+                           count(DISTINCT basis) AS basisCount
+                    ORDER BY assertion.assertionId
+                    """,
+                    runId=classification_run_id,
+                )
+            ]
+        return {
+            "run": dict(run_record["run"]) if run_record is not None else None,
+            "checkpoints": checkpoints,
+            "assertions": assertions,
+        }
+
+    def publish_classification_run(
+        self, classification_run_id: str, *, published_at: datetime
+    ) -> dict[str, Any]:
+        query = """
+        MATCH (run:ClassificationRun {classificationRunId: $runId})
+        WHERE run.phase = 'building' AND run.processedCount = run.inputCount
+        SET run.phase = 'published', run.publishedAt = $publishedAt
+        RETURN properties(run) AS run
+        """
+        with self.driver.session() as session:
+            record = session.run(
+                query,
+                runId=classification_run_id,
+                publishedAt=published_at,
+            ).single()
+        if record is None:
+            raise RuntimeError("only a complete building classification run can publish")
+        return dict(record["run"])
+
+    def fail_classification_run(
+        self, classification_run_id: str, *, error_code: str
+    ) -> None:
+        with self.driver.session() as session:
+            session.run(
+                """
+                MATCH (run:ClassificationRun {classificationRunId: $runId})
+                WHERE run.phase = 'building'
+                SET run.phase = 'failed', run.errorCode = $errorCode
+                """,
+                runId=classification_run_id,
+                errorCode=error_code,
+            ).consume()
 
     def edge_inventory(self) -> dict[str, int]:
         """seed済みエッジ種別と件数。ドキュメント・コードとの一致検査に使う(§6.3-13)。"""

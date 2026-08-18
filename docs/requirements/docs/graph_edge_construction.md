@@ -3,7 +3,7 @@
 ## 1. 目的
 
 法令Graphでは、プログラムが決定的に確認できる構造・原文・来歴と、LLMが本文から分類する
-法的意味を分離する。本書はGraph schema version 8のseed構築仕様を定める。法的意味分類と
+法的意味を分離する。本書はGraph schema version 9のseed構築仕様を定める。法的意味分類と
 検索時の扱いは
 [`generic_iterative_agent_framework_plan.md`](generic_iterative_agent_framework_plan.md)を正とする。
 
@@ -17,7 +17,7 @@
 | Neo4j Node | `Document / Article / Paragraph / Item` |
 | Neo4j Relation | `HAS_CONTENT_UNIT / REFERENCES / EXPLAINS` |
 
-`RelationAssertion / ClassificationRun / SUBJECT / OBJECT / CLASSIFIED_IN`はseed後の非同期分類jobが
+`RelationAssertion / ClassificationRun / ClassificationCheckpoint / SUBJECT / OBJECT / CLASSIFIED_IN`はseed後の非同期分類jobが
 作る。`IMPLEMENTS / INCORPORATES / USES_DEFINITION / EXCEPTION_TO / OVERRIDES`は物理Relationに
 せず、`RelationAssertion.proposedPredicate`へ保存する。`APPLIED_BY / MENTIONS`は生成しない。
 
@@ -85,8 +85,12 @@ Neo4jだけを再seedする経路は設けない。
 ## 6. 非同期分類との境界
 
 非同期jobはpublish済みseedの`sourceSnapshotId`を固定し、原文`REFERENCES`と両端Article全文から
-分類候補を作る。分類LLMが返した5 predicate、参照箇所、両端spanを既知IDとして構造検証し、
+分類候補を作る。原文上の参照元・参照先と意味上のSUBJECT・OBJECTを区別する。LLMは1 predicateずつ
+固有の二必要条件を判定し、成立predicateだけ別の根拠付与呼出しでSUBJECT・OBJECT、参照箇所、両端spanを
+選ぶ。Programは条件整合と既知IDを構造検証し、
 `building`の`ClassificationRun`へ保存する。プログラムはpredicateを推測・補正しない。
 
+Assertionを作らない`reference_only / uncertain / failed`を含め、各候補の完了結果を
+`ClassificationCheckpoint`へ保存する。これにより中断再開時に処理済み候補を再度LLMへ送らない。
 全候補の処理と監査が完了したRunだけを`published`にする。旧snapshotの分類結果を新snapshotへ
 流用せず、Graph schema、抽出規則、法令・ガイド入力の変更時は両ストアの再seed後に再分類する。

@@ -23,6 +23,39 @@ class ClassificationRunPhase(StrEnum):
     FAILED = "failed"
 
 
+class ClassificationCheckpointOutcome(StrEnum):
+    """候補単位checkpointの結果。failedだけはProgramの実行失敗。"""
+
+    CLASSIFIED = "classified"
+    REFERENCE_ONLY = "reference_only"
+    UNCERTAIN = "uncertain"
+    FAILED = "failed"
+
+
+class RelationClassificationOutcome(StrEnum):
+    """LLMが候補ごとに返す分類結果。"""
+
+    CLASSIFIED = "classified"
+    REFERENCE_ONLY = "reference_only"
+    UNCERTAIN = "uncertain"
+
+
+class PredicateFinding(StrEnum):
+    """LLMが各意味predicateについて返す成立性判断。"""
+
+    ESTABLISHED = "established"
+    NOT_ESTABLISHED = "not_established"
+    UNCERTAIN = "uncertain"
+
+
+CHECKPOINT_OUTCOME_RUN_COUNT_FIELD = {
+    ClassificationCheckpointOutcome.CLASSIFIED.value: "classifiedCandidateCount",
+    ClassificationCheckpointOutcome.REFERENCE_ONLY.value: "referenceOnlyCount",
+    ClassificationCheckpointOutcome.UNCERTAIN.value: "uncertainCount",
+    ClassificationCheckpointOutcome.FAILED.value: "failedCount",
+}
+
+
 class GraphDirection(StrEnum):
     """検索起点がRelationAssertionのどちら側かを表す。"""
 
@@ -46,6 +79,7 @@ PHYSICAL_NODE_LABELS = frozenset(
         "Item",
         "RelationAssertion",
         "ClassificationRun",
+        "ClassificationCheckpoint",
     }
 )
 
@@ -72,6 +106,8 @@ NEO4J_SCHEMA_STATEMENTS = (
     "FOR (n:RelationAssertion) REQUIRE n.assertionDedupeKey IS UNIQUE",
     "CREATE CONSTRAINT classification_run_id_unique IF NOT EXISTS "
     "FOR (n:ClassificationRun) REQUIRE n.classificationRunId IS UNIQUE",
+    "CREATE CONSTRAINT classification_checkpoint_id_unique IF NOT EXISTS "
+    "FOR (n:ClassificationCheckpoint) REQUIRE n.checkpointId IS UNIQUE",
     "CREATE INDEX graph_node_document_id IF NOT EXISTS "
     "FOR (n:GraphNode) ON (n.documentId)",
     "CREATE INDEX document_authority_type IF NOT EXISTS "
@@ -82,10 +118,14 @@ NEO4J_SCHEMA_STATEMENTS = (
     "FOR (n:RelationAssertion) ON (n.classificationRunId)",
     "CREATE INDEX classification_run_snapshot_id IF NOT EXISTS "
     "FOR (n:ClassificationRun) ON (n.sourceSnapshotId)",
+    "CREATE INDEX classification_checkpoint_run_id IF NOT EXISTS "
+    "FOR (n:ClassificationCheckpoint) ON (n.classificationRunId)",
 )
 
 
 __all__ = [
+    "CHECKPOINT_OUTCOME_RUN_COUNT_FIELD",
+    "ClassificationCheckpointOutcome",
     "ClassificationRunPhase",
     "GraphDirection",
     "GraphSearchMode",
@@ -93,4 +133,6 @@ __all__ = [
     "PHYSICAL_NODE_LABELS",
     "PHYSICAL_RELATION_TYPES",
     "ProposedPredicate",
+    "PredicateFinding",
+    "RelationClassificationOutcome",
 ]
