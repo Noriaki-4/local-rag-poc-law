@@ -19,6 +19,7 @@ PREDICATE_ORDER = (
     "EXCEPTION_TO",
     "OVERRIDES",
 )
+FINDINGS = {"established", "not_established", "uncertain"}
 
 
 def _load_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -63,6 +64,97 @@ def _jsonl(records: list[dict[str, Any]]) -> str:
     )
 
 
+def _validate_semantic_decision(
+    packet: dict[str, Any],
+    decision: dict[str, Any],
+) -> None:
+    """Validate IDs and output algebra without changing a meaning judgment."""
+
+    basis_id = str(packet["basisEdgeId"])
+    if decision.get("candidateKey") != packet.get("candidateKey"):
+        raise ValueError(f"semantic candidateKey mismatch: {basis_id}")
+    if decision.get("basisEdgeId") != basis_id:
+        raise ValueError(f"semantic basisEdgeId mismatch: {basis_id}")
+    if decision.get("adjudicationStatus") != "accepted":
+        raise ValueError(f"gold semantic decision must be accepted: {basis_id}")
+
+    assessments = decision.get("predicateAssessments")
+    if not isinstance(assessments, dict) or set(assessments) != set(
+        PREDICATE_ORDER
+    ):
+        raise ValueError(f"semantic decision must assess all five predicates: {basis_id}")
+    established: set[str] = set()
+    for predicate in PREDICATE_ORDER:
+        assessment = assessments[predicate]
+        if not isinstance(assessment, dict) or set(assessment) != {
+            "firstCondition",
+            "secondCondition",
+            "finding",
+        }:
+            raise ValueError(f"invalid predicate assessment shape: {basis_id} {predicate}")
+        first = assessment["firstCondition"]
+        second = assessment["secondCondition"]
+        finding = assessment["finding"]
+        if {first, second, finding} - FINDINGS:
+            raise ValueError(f"unknown predicate finding: {basis_id} {predicate}")
+        expected = (
+            "established"
+            if first == second == "established"
+            else "not_established"
+            if "not_established" in {first, second}
+            else "uncertain"
+        )
+        if finding != expected:
+            raise ValueError(
+                f"predicate finding violates condition algebra: {basis_id} {predicate}"
+            )
+        if finding == "uncertain":
+            raise ValueError(
+                f"accepted gold decision cannot remain uncertain: {basis_id} {predicate}"
+            )
+        if finding == "established":
+            established.add(predicate)
+
+    source = packet["referenceSourceArticle"]
+    target = packet["referenceTargetArticle"]
+    source_id = str(source["articleId"])
+    target_id = str(target["articleId"])
+    endpoints = {source_id, target_id}
+    target_span_ids = {str(span["spanId"]) for span in target["spans"]}
+    occurrences = {
+        str(item["occurrenceHash"]): item for item in packet["referenceOccurrences"]
+    }
+    assertions = decision.get("assertions")
+    if not isinstance(assertions, list):
+        raise ValueError(f"semantic assertions must be a list: {basis_id}")
+    asserted = [str(item.get("proposedPredicate")) for item in assertions]
+    if len(asserted) != len(set(asserted)) or set(asserted) != established:
+        raise ValueError(f"established predicates and assertions must match: {basis_id}")
+    for assertion in assertions:
+        predicate = str(assertion["proposedPredicate"])
+        occurrence_hash = str(assertion["referenceOccurrenceHash"])
+        occurrence = occurrences.get(occurrence_hash)
+        if occurrence is None:
+            raise ValueError(f"unknown assertion occurrence: {basis_id} {predicate}")
+        subject_id = str(assertion["subjectArticleId"])
+        object_id = str(assertion["objectArticleId"])
+        if {subject_id, object_id} != endpoints:
+            raise ValueError(
+                f"assertion must use both known Article endpoints: {basis_id} {predicate}"
+            )
+        if (
+            assertion["referenceSourceSupportingSpanId"]
+            not in occurrence["sourceSpanIds"]
+        ):
+            raise ValueError(
+                f"unknown physical source grounding span: {basis_id} {predicate}"
+            )
+        if assertion["referenceTargetSupportingSpanId"] not in target_span_ids:
+            raise ValueError(
+                f"unknown physical target grounding span: {basis_id} {predicate}"
+            )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--artifacts-dir", type=Path, required=True)
@@ -70,6 +162,8 @@ def main() -> int:
     parser.add_argument("--audit-output", type=Path, required=True)
     parser.add_argument("--dataset-manifest-output", type=Path, required=True)
     parser.add_argument("--guidance-fixture", type=Path, required=True)
+    parser.add_argument("--manual-structure-adjudications", type=Path, required=True)
+    parser.add_argument("--manual-adjudications", type=Path, required=True)
     args = parser.parse_args()
 
     artifacts = args.artifacts_dir.resolve()
@@ -84,6 +178,13 @@ def main() -> int:
     semantic_unresolved = _index(
         _load_glob(artifacts, "shard-??-unresolved.jsonl"),
         label="unresolved semantics",
+    )
+    manual_adjudications = _index(
+        _load_jsonl(args.manual_adjudications), label="manual adjudications"
+    )
+    manual_structure_adjudications = _index(
+        _load_jsonl(args.manual_structure_adjudications),
+        label="manual structure adjudications",
     )
     initial_reviews = _index(
         _load_glob(artifacts, "shard-??-review-initial.jsonl"),
@@ -101,12 +202,18 @@ def main() -> int:
     packet_ids = {str(packet["basisEdgeId"]) for packet in packets}
     if set(structure) != packet_ids or set(fixture_ids) != packet_ids:
         parser.error("legal packet, manifest, and structural decisions must match")
+    if not set(manual_adjudications).issubset(packet_ids):
+        parser.error("manual adjudication contains an unknown basisEdgeId")
+    if not set(manual_structure_adjudications).issubset(packet_ids):
+        parser.error("manual structure adjudication contains an unknown basisEdgeId")
 
     fixtures: list[dict[str, Any]] = []
     audit_records: list[dict[str, Any]] = []
     for packet in packets:
         basis_id = str(packet["basisEdgeId"])
-        structural = structure[basis_id]
+        original_structural = structure[basis_id]
+        manual_structural = manual_structure_adjudications.get(basis_id)
+        structural = manual_structural or original_structural
         structural_status = str(structural["structuralStatus"])
         if structural_status == "valid_pair":
             resolution_status = "resolved"
@@ -120,22 +227,37 @@ def main() -> int:
 
         semantic = approved.get(basis_id)
         dispute = semantic_unresolved.get(basis_id)
+        manual = manual_adjudications.get(basis_id)
         if structural_status != "valid_pair":
             semantic_status = "not_applicable"
             predicates: list[str] | None = None
             annotation = str(structural["note"])
             semantic = None
             dispute = None
+            manual = None
+            adjudication_source = "gpt_5_6_sol_full_manual_gold_2026_08_19"
+        elif manual is not None:
+            semantic_status = "codex_verified"
+            semantic = manual["semanticDecision"]
+            try:
+                _validate_semantic_decision(packet, semantic)
+            except ValueError as exc:
+                parser.error(str(exc))
+            established = {
+                str(assertion["proposedPredicate"])
+                for assertion in semantic.get("assertions", [])
+            }
+            predicates = [value for value in PREDICATE_ORDER if value in established]
+            annotation = str(manual["annotationBasis"])
+            adjudication_source = "gpt_5_6_sol_full_manual_gold_2026_08_19"
         elif dispute is not None:
-            semantic_status = "unresolved_after_single_revision"
-            predicates = None
-            annotation = (
-                "WorkerとReviewerが1回の差し戻し後も一致しないため、"
-                "意味ラベルを教師値に採用しない。"
-            )
-            semantic = None
+            parser.error(f"unresolved semantic decision has no manual adjudication: {basis_id}")
         elif semantic is not None and semantic.get("adjudicationStatus") == "accepted":
-            semantic_status = "reviewer_approved"
+            semantic_status = "codex_verified"
+            try:
+                _validate_semantic_decision(packet, semantic)
+            except ValueError as exc:
+                parser.error(str(exc))
             established = {
                 str(assertion["proposedPredicate"])
                 for assertion in semantic.get("assertions", [])
@@ -146,7 +268,8 @@ def main() -> int:
                 if predicates
                 else "全5述語を同時評価し、成立predicateなし。"
             )
-            annotation += "Worker判定をReviewerが承認し、Codexが横断監査した。"
+            annotation += "Codex GPT-5.6 SolがArticleペアと引用文脈を確認して確定した。"
+            adjudication_source = "gpt_5_6_sol_full_manual_gold_2026_08_19"
         else:
             parser.error(f"valid pair lacks approved or unresolved semantics: {basis_id}")
 
@@ -161,7 +284,7 @@ def main() -> int:
             "expectedSemanticStatus": semantic_status,
             "expectedPredicates": predicates,
             "annotationBasis": annotation,
-            "adjudicationSource": "codex_manual_audit_luna_worker_reviewer_2026_08_19",
+            "adjudicationSource": adjudication_source,
         }
         fixtures.append(fixture)
         audit_records.append(
@@ -169,10 +292,21 @@ def main() -> int:
                 "fixtureId": fixture["fixtureId"],
                 "basisEdgeId": basis_id,
                 "structuralDecision": structural,
+                "originalStructuralDecision": (
+                    original_structural if manual_structural is not None else None
+                ),
+                "manualStructureAdjudication": manual_structural,
                 "semanticDecision": semantic,
                 "semanticDispute": dispute,
+                "manualFinalAdjudication": manual,
                 "initialReview": initial_reviews.get(basis_id),
                 "finalDifferentialReview": final_reviews.get(basis_id),
+                "finalGoldAudit": {
+                    "ownerModel": "gpt-5.6-sol",
+                    "status": "verified",
+                    "structureReviewed": True,
+                    "meaningReviewed": structural_status == "valid_pair",
+                },
             }
         )
 
@@ -228,15 +362,30 @@ def main() -> int:
             "establishedPredicateCounts": predicate_counts,
         },
         "adjudication": {
-            "workerModel": "gpt-5.6-luna",
-            "reviewerModel": "gpt-5.6-luna",
-            "maximumRevisionCount": 1,
-            "finalAudit": "Codex cross-shard manual audit",
+            "answerKeyModel": "gpt-5.6-sol",
+            "answerKeyAuditScope": "94 legal relation cases and 6 guidance cases",
+            "answerKeyVerifiedCaseCount": len(fixtures) + len(guidance),
+            "semanticVerifiedPairCount": sum(
+                fixture["expectedSemanticStatus"] == "codex_verified"
+                for fixture in fixtures
+            ),
+            "priorLunaArtifactsRetainedForAudit": True,
+            "manualStructureCorrectionCount": len(
+                manual_structure_adjudications
+            ),
+            "manualSemanticCorrectionCount": len(manual_adjudications),
+            "finalAudit": "Codex full 100-case manual audit",
             "meaningJudgmentByProgram": False,
         },
     }
     if len(fixtures) != 94 or len(guidance) != 6 or dataset_manifest["caseCount"] != 100:
         parser.error("dataset must contain 94 legal and 6 guidance cases")
+    if any(
+        fixture["expectedResolutionStatus"] == "resolved"
+        and fixture["expectedPredicates"] is None
+        for fixture in fixtures
+    ):
+        parser.error("every resolved pair must have a final semantic teacher label")
 
     _atomic_write(args.legal_fixture_output, _jsonl(fixtures))
     _atomic_write(args.audit_output, _jsonl(audit_records))

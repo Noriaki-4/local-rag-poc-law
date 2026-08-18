@@ -29,28 +29,31 @@
       "article_reference": 18
     },
     "resolutionStatusCounts": {
-      "resolved": 72,
-      "unresolved": 14,
+      "resolved": 73,
+      "unresolved": 13,
       "not_reference": 8
     },
     "semanticStatusCounts": {
-      "reviewer_approved": 71,
-      "unresolved_after_single_revision": 1,
-      "not_applicable": 22
+      "codex_verified": 73,
+      "not_applicable": 21
     },
     "establishedPredicateCounts": {
       "IMPLEMENTS": 9,
-      "USES_DEFINITION": 12,
-      "INCORPORATES": 3,
-      "EXCEPTION_TO": 2,
-      "OVERRIDES": 1
+      "USES_DEFINITION": 25,
+      "INCORPORATES": 5,
+      "EXCEPTION_TO": 5,
+      "OVERRIDES": 2
     }
   },
   "adjudication": {
-    "workerModel": "gpt-5.6-luna",
-    "reviewerModel": "gpt-5.6-luna",
-    "maximumRevisionCount": 1,
-    "finalAudit": "Codex cross-shard manual audit",
+    "answerKeyModel": "gpt-5.6-sol",
+    "answerKeyAuditScope": "94 legal relation cases and 6 guidance cases",
+    "answerKeyVerifiedCaseCount": 100,
+    "semanticVerifiedPairCount": 73,
+    "priorLunaArtifactsRetainedForAudit": true,
+    "manualStructureCorrectionCount": 1,
+    "manualSemanticCorrectionCount": 17,
+    "finalAudit": "Codex full 100-case manual audit",
     "meaningJudgmentByProgram": false
   }
 }

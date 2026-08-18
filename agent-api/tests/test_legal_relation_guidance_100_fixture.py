@@ -45,14 +45,13 @@ def test_legal_fixture_covers_reference_structure_and_all_predicates():
         "article_reference": 18,
     }
     assert Counter(item["expectedResolutionStatus"] for item in legal) == {
-        "resolved": 72,
-        "unresolved": 14,
+        "resolved": 73,
+        "unresolved": 13,
         "not_reference": 8,
     }
     assert Counter(item["expectedSemanticStatus"] for item in legal) == {
-        "reviewer_approved": 71,
-        "unresolved_after_single_revision": 1,
-        "not_applicable": 22,
+        "codex_verified": 73,
+        "not_applicable": 21,
     }
     assert Counter(
         predicate
@@ -60,34 +59,37 @@ def test_legal_fixture_covers_reference_structure_and_all_predicates():
         for predicate in (item["expectedPredicates"] or [])
     ) == {
         "IMPLEMENTS": 9,
-        "USES_DEFINITION": 12,
-        "INCORPORATES": 3,
-        "EXCEPTION_TO": 2,
-        "OVERRIDES": 1,
+        "USES_DEFINITION": 25,
+        "INCORPORATES": 5,
+        "EXCEPTION_TO": 5,
+        "OVERRIDES": 2,
     }
     assert sum("-suppl-" in item["referenceSourceArticleId"] for item in legal) == 22
 
 
-def test_only_reviewer_approved_valid_pairs_have_semantic_teacher_labels():
+def test_every_resolved_pair_has_a_codex_verified_semantic_teacher_label():
     legal = _load_jsonl(LEGAL_FIXTURE)
     audits = {
         item["basisEdgeId"]: item for item in _load_jsonl(AUDIT_FIXTURE)
     }
 
     assert set(audits) == {item["basisEdgeId"] for item in legal}
+    assert {
+        item["adjudicationSource"] for item in legal
+    } == {"gpt_5_6_sol_full_manual_gold_2026_08_19"}
     for item in legal:
         audit = audits[item["basisEdgeId"]]
+        assert audit["finalGoldAudit"] == {
+            "ownerModel": "gpt-5.6-sol",
+            "status": "verified",
+            "structureReviewed": True,
+            "meaningReviewed": item["expectedResolutionStatus"] == "resolved",
+        }
         semantic_status = item["expectedSemanticStatus"]
-        if semantic_status == "reviewer_approved":
+        if semantic_status == "codex_verified":
             assert item["expectedResolutionStatus"] == "resolved"
             assert item["expectedPredicates"] is not None
             assert audit["semanticDecision"]["adjudicationStatus"] == "accepted"
-            assert audit["semanticDispute"] is None
-        elif semantic_status == "unresolved_after_single_revision":
-            assert item["expectedResolutionStatus"] == "resolved"
-            assert item["expectedPredicates"] is None
-            assert audit["semanticDecision"] is None
-            assert audit["semanticDispute"] is not None
         else:
             assert item["expectedResolutionStatus"] in {
                 "not_reference",
@@ -96,15 +98,42 @@ def test_only_reviewer_approved_valid_pairs_have_semantic_teacher_labels():
             assert item["expectedPredicates"] is None
             assert audit["semanticDecision"] is None
 
+    manually_resolved = [
+        audit
+        for audit in audits.values()
+        if audit["manualFinalAdjudication"] is not None
+    ]
+    assert len(manually_resolved) == 17
+    disputed = [
+        audit for audit in manually_resolved if audit["semanticDispute"] is not None
+    ]
+    assert len(disputed) == 1
+    assert disputed[0]["semanticDecision"]["assertions"][0][
+        "proposedPredicate"
+    ] == "INCORPORATES"
+
+    manually_structured = [
+        audit
+        for audit in audits.values()
+        if audit["manualStructureAdjudication"] is not None
+    ]
+    assert len(manually_structured) == 1
+    assert manually_structured[0]["originalStructuralDecision"] is not None
+    assert manually_structured[0]["structuralDecision"]["structuralStatus"] == "valid_pair"
+
 
 def test_manifest_records_human_judgment_boundary():
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
 
     assert manifest["adjudication"] == {
-        "workerModel": "gpt-5.6-luna",
-        "reviewerModel": "gpt-5.6-luna",
-        "maximumRevisionCount": 1,
-        "finalAudit": "Codex cross-shard manual audit",
+        "answerKeyModel": "gpt-5.6-sol",
+        "answerKeyAuditScope": "94 legal relation cases and 6 guidance cases",
+        "answerKeyVerifiedCaseCount": 100,
+        "semanticVerifiedPairCount": 73,
+        "priorLunaArtifactsRetainedForAudit": True,
+        "manualStructureCorrectionCount": 1,
+        "manualSemanticCorrectionCount": 17,
+        "finalAudit": "Codex full 100-case manual audit",
         "meaningJudgmentByProgram": False,
     }
     assert manifest["coverage"]["sourceLawFamilyCount"] == 13

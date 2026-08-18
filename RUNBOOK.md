@@ -375,15 +375,30 @@ ReviewerはWorkerの回答を見たうえで誤りと根拠を指摘し、Worker
 
 論理シャードは20件ずつ5本である。利用可能なagent slotがCoordinatorを含め4だったため、
 物理実行は最大3並列とし、完了した枠へ残りを投入した。法令94件は意味分類前に全件を構造監査し、
-最終的に`resolved=72 / unresolved=14 / not_reference=8`となった。構造valid 72件のうち、
-Luna Worker / Reviewerが71件を承認した。1件は1回の差戻し後も判断が一致しなかったため、
-`unresolved_after_single_revision`として`expectedPredicates: null`を維持した。多数決やプログラムによる
-意味ラベル補完は行っていない。
+最終的に`resolved=73 / unresolved=13 / not_reference=8`となった。法令94件とガイド6件は
+Codex GPT-5.6 Solが全件を個別確認し、正解データの最終所有者となる。以前のLuna Worker /
+Reviewer成果は作業履歴としてauditに残すが、正解の根拠にはしない。差戻し後も不一致だった
+1件は、範囲指定された準用の対象に第114条の13が含まれるため、Codexの全文監査で
+`INCORPORATES`と確定した。プログラムに意味ラベルを補完させていない。
+また、金融商品取引法施行令第1条の7の3第5号が、同令第2条の12の2で範囲を定めた
+有価証券を使う1件は、従来の成立なしを見直して`USES_DEFINITION`と確定した。
+さらに、改正命令の附則が明示する「改正後の企業内容等の開示に関する内閣府令第三条」を、
+改正命令自身の第三条として扱っていた1件を修正した。正しい本則第三条とのペアについて、
+施行日前後の適用を分ける経過措置の全文を確認し、`INCORPORATES`、`EXCEPTION_TO`、`OVERRIDES`を確定した。
+全resolvedペアについて定義文言も横断確認し、定義条文が将来の利用条文を列挙する物理参照では、
+`USES_DEFINITION`の意味方向が物理`REFERENCES`と逆になることを明示した。正解生成プログラムは
+候補抽出にだけ使い、述語の追加・削除やSUBJECT / OBJECTの選択には使っていない。
 
-成立predicateは`IMPLEMENTS=9`、`INCORPORATES=3`、`USES_DEFINITION=12`、
-`EXCEPTION_TO=2`、`OVERRIDES=1`で、成立なしの負例も含む。Codexの横断監査では、構造監査が見逃した
+成立predicateは`IMPLEMENTS=9`、`INCORPORATES=5`、`USES_DEFINITION=25`、
+`EXCEPTION_TO=5`、`OVERRIDES=2`で、成立なしの負例も含む。Codexの横断監査では、構造監査が見逃した
 「医療法第一条の二」を薬機法第一条の二へ接続した1件を`unresolved`へ修正した。Workerが
 `needs_resolution`で停止したため、この誤接続に意味ラベルは付いていない。
+
+確定した正解を伏せたLunaの再評価結果は次のとおりである。構造監査は`89/94`。構造正解上の
+resolved 73件に対する意味分類は、Worker初回がstatusと成立predicateの完全一致`51/73`（69.9%）、
+Reviewerと1回だけの差戻し後が`57/73`（78.1%）だった。後者では72件がReviewer承認、1件が未解消で、
+SUBJECT / OBJECTまで含む完全一致は`56/73`（76.7%）である。ガイド6件は意味5分類の対象ではなく、
+専用の決定的評価で`6/6`だった。この結果から、現行Luna方式を無監査で全件publishする精度には達していない。
 
 成果物は次の3ファイルを正本とする。
 
@@ -401,7 +416,8 @@ agent-api/.venv/bin/pytest -q \
 ```
 
 Graphの参照解決を修正した後は、次で94件の構造正解と照合する。2026-08-19時点の
-現行Graphは`72/94`で、正解上`not_reference`または`unresolved`の22件がまだ接続済みである。
+現行Graphは`73/94`である。正解上`not_reference`または`unresolved`の
+21件がまだ接続済みであり、接続対象にしてはならない。
 合格条件は`94/94`とする。このコマンドは意味分類やGraph更新を行わない。
 
 ```bash
@@ -413,8 +429,8 @@ agent-api/.venv/bin/python \
 したがって、現時点の採用判断は次のとおりである。
 
 - Gemma経路: ローカルの契約・速度・比較試験用。全件Runをpublishする品質経路には使わない。
-- Luna経路: Codexサブスクリプション内で一度だけ正本データを作るWorker / Reviewer方式。
-- モデル出力はそのまま信用せず、構造監査、Reviewer、1回だけの差戻し、確定fixtureとの照合を通す。
+- Luna経路: Codexサブスクリプション内で、確定済み正解を見せずに並列実行する評価対象。
+- Luna出力は正解生成に使わず、Codexが全件確認したfixtureと照合する。
 - 法令snapshotまたは分類契約が変わらない限り、確定済み`candidateKey`を再分類しない。
 
 ガイド6文書について、OpenSearch検索、明示`EXPLAINS`、遷移先Article全文取得を
