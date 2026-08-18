@@ -1,0 +1,966 @@
+{
+  "fixtureCount": 94,
+  "teacherData": {
+    "adjudicationSource": "codex_manual_review_2026-08-18",
+    "resolutionStatusCounts": {
+      "not_reference": 8,
+      "resolved": 72,
+      "unresolved": 14
+    },
+    "predicateLabeledCount": 71
+  },
+  "structuralResolution": {
+    "correctCount": 72,
+    "results": [
+      {
+        "fixtureId": "legal-relation-100-001",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-323AC0000000025-article-21",
+        "actualReferenceSourceArticleId": "law-420M60000002078-article-10_2",
+        "actualReferenceTargetArticleId": "law-323AC0000000025-article-21",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、IMPLEMENTSが成立。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-002",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-323AC0000000025-article-29_2",
+        "actualReferenceSourceArticleId": "law-405M50000040014-article-16",
+        "actualReferenceTargetArticleId": "law-323AC0000000025-article-29_2",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-003",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-340CO0000000321-article-26_4",
+        "actualReferenceSourceArticleId": "law-419M60000002059-article-12",
+        "actualReferenceTargetArticleId": "law-340CO0000000321-article-26_4",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、IMPLEMENTSが成立。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-004",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-340CO0000000321-article-13",
+        "actualReferenceSourceArticleId": "law-402M50000040038-article-19",
+        "actualReferenceTargetArticleId": "law-340CO0000000321-article-13",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-005",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-323AC0000000025-article-24",
+        "actualReferenceSourceArticleId": "law-348M50000040005-article-18_2_2",
+        "actualReferenceTargetArticleId": "law-323AC0000000025-article-24",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、USES_DEFINITIONが成立。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-006",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-323AC0000000025-article-32",
+        "actualReferenceSourceArticleId": "law-419M60000002052-article-38_2",
+        "actualReferenceTargetArticleId": "law-323AC0000000025-article-32",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、IMPLEMENTS, USES_DEFINITIONが成立。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-007",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-323AC0000000025-article-27_22_2",
+        "actualReferenceSourceArticleId": "law-340CO0000000321-article-13",
+        "actualReferenceTargetArticleId": "law-323AC0000000025-article-27_22_2",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-008",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-335AC0000000145-article-13_3",
+        "actualReferenceSourceArticleId": "law-336M50000100001-article-69",
+        "actualReferenceTargetArticleId": "law-335AC0000000145-article-13_3",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-009",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-340CO0000000321-article-1_4",
+        "actualReferenceSourceArticleId": "law-405M50000040014-article-10_2",
+        "actualReferenceTargetArticleId": "law-340CO0000000321-article-1_4",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、IMPLEMENTSが成立。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-010",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-323AC0000000025-article-24",
+        "actualReferenceSourceArticleId": "law-419M60000002059-article-55_7",
+        "actualReferenceTargetArticleId": "law-323AC0000000025-article-24",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、USES_DEFINITIONが成立。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-011",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-323AC0000000025-article-27_30_2",
+        "actualReferenceSourceArticleId": "law-402M50000040038-article-1",
+        "actualReferenceTargetArticleId": "law-323AC0000000025-article-27_30_2",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、USES_DEFINITIONが成立。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-012",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-323AC0000000025-article-27",
+        "actualReferenceSourceArticleId": "law-348M50000040005-article-11",
+        "actualReferenceTargetArticleId": "law-323AC0000000025-article-27",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-013",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-323AC0000000025-article-63_3",
+        "actualReferenceSourceArticleId": "law-419M60000002052-article-201",
+        "actualReferenceTargetArticleId": "law-323AC0000000025-article-63_3",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-014",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-323AC0000000025-article-29",
+        "actualReferenceSourceArticleId": "law-340CO0000000321-article-16_4_2",
+        "actualReferenceTargetArticleId": "law-323AC0000000025-article-29",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-015",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-335AC0000000145-article-68_2_4",
+        "actualReferenceSourceArticleId": "law-336M50000100001-article-228_10_9",
+        "actualReferenceTargetArticleId": "law-335AC0000000145-article-68_2_4",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、IMPLEMENTSが成立。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-016",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-340CO0000000321-article-9_3",
+        "actualReferenceSourceArticleId": "law-402M50000040038-article-9",
+        "actualReferenceTargetArticleId": "law-340CO0000000321-article-9_3",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、IMPLEMENTS, USES_DEFINITIONが成立。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-017",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-340CO0000000321-article-1_3_4",
+        "actualReferenceSourceArticleId": "law-348M50000040005-article-1",
+        "actualReferenceTargetArticleId": "law-340CO0000000321-article-1_3_4",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-018",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-340CO0000000321-article-16_11",
+        "actualReferenceSourceArticleId": "law-419M60000002052-article-127_2",
+        "actualReferenceTargetArticleId": "law-340CO0000000321-article-16_11",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、IMPLEMENTSが成立。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-019",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-323AC0000000025-article-27_3",
+        "actualReferenceSourceArticleId": "law-340CO0000000321-article-14_3_8",
+        "actualReferenceTargetArticleId": "law-323AC0000000025-article-27_3",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、USES_DEFINITIONが成立。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-020",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-335AC0000000145-article-13_2_2",
+        "actualReferenceSourceArticleId": "law-336M50000100001-article-34_3",
+        "actualReferenceTargetArticleId": "law-335AC0000000145-article-13_2_2",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、IMPLEMENTSが成立。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-021",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-323AC0000000025-article-24_7",
+        "actualReferenceSourceArticleId": "law-348M50000040005-article-19_7",
+        "actualReferenceTargetArticleId": "law-323AC0000000025-article-24_7",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、IMPLEMENTS, USES_DEFINITIONが成立。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-022",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-323AC0000000025-article-44_3",
+        "actualReferenceSourceArticleId": "law-419M60000002052-suppl-0-article-16",
+        "actualReferenceTargetArticleId": "law-323AC0000000025-article-44_3",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-023",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-403AC0000000090-article-55",
+        "actualReferenceSourceArticleId": "law-403AC0000000090-article-60",
+        "actualReferenceTargetArticleId": "law-403AC0000000090-article-55",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-024",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-417M60000002017-article-1_8",
+        "actualReferenceSourceArticleId": "law-417M60000002017-article-1_3",
+        "actualReferenceTargetArticleId": "law-417M60000002017-article-1_8",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-025",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-340CO0000000321-article-41_2",
+        "actualReferenceSourceArticleId": "law-340CO0000000321-article-38",
+        "actualReferenceTargetArticleId": "law-340CO0000000321-article-41_2",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-026",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-419M60000002052-article-278",
+        "actualReferenceSourceArticleId": "law-419M60000002052-article-277",
+        "actualReferenceTargetArticleId": "law-419M60000002052-article-278",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-027",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-336M50000100001-article-228_10_3",
+        "actualReferenceSourceArticleId": "law-336M50000100001-article-228_9",
+        "actualReferenceTargetArticleId": "law-336M50000100001-article-228_10_3",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-028",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-335AC0000000145-article-68_7",
+        "actualReferenceSourceArticleId": "law-335AC0000000145-article-69",
+        "actualReferenceTargetArticleId": "law-335AC0000000145-article-68_7",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-029",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-323AC0000000025-article-66_25",
+        "actualReferenceSourceArticleId": "law-323AC0000000025-article-64_7",
+        "actualReferenceTargetArticleId": "law-323AC0000000025-article-66_25",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-030",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-340CO0000000321-article-1_8_2",
+        "actualReferenceSourceArticleId": "law-340CO0000000321-article-1_4",
+        "actualReferenceTargetArticleId": "law-340CO0000000321-article-1_8_2",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-031",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-419M60000002052-article-153",
+        "actualReferenceSourceArticleId": "law-419M60000002052-article-154",
+        "actualReferenceTargetArticleId": "law-419M60000002052-article-153",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、USES_DEFINITIONが成立。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-032",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-336M50000100001-article-114_13",
+        "actualReferenceSourceArticleId": "law-336M50000100001-article-114_16",
+        "actualReferenceTargetArticleId": "law-336M50000100001-article-114_13",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "WorkerとReviewerが1回の差し戻し後も一致しないため、意味ラベルを教師値に採用しない。"
+      },
+      {
+        "fixtureId": "legal-relation-100-033",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-335AC0000000145-article-62",
+        "actualReferenceSourceArticleId": "law-335AC0000000145-article-84",
+        "actualReferenceTargetArticleId": "law-335AC0000000145-article-62",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-034",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-323AC0000000025-article-32_2",
+        "actualReferenceSourceArticleId": "law-323AC0000000025-article-200",
+        "actualReferenceTargetArticleId": "law-323AC0000000025-article-32_2",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-035",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-336M50000100001-article-213",
+        "actualReferenceSourceArticleId": "law-336M50000100001-article-228",
+        "actualReferenceTargetArticleId": "law-336M50000100001-article-213",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、INCORPORATESが成立。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-036",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-335AC0000000145-article-40_4",
+        "actualReferenceSourceArticleId": "law-335AC0000000145-article-69",
+        "actualReferenceTargetArticleId": "law-335AC0000000145-article-40_4",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-037",
+        "passed": false,
+        "expectedResolutionStatus": "unresolved",
+        "expectedReferenceTargetArticleId": null,
+        "actualReferenceSourceArticleId": "law-323AC0000000025-article-166",
+        "actualReferenceTargetArticleId": "law-323AC0000000025-article-165",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "第百六十五条は明示された会社法の条文であり、現ターゲットの金融商品取引法ではない。会社法側の候補がないため解決不能。"
+      },
+      {
+        "fixtureId": "legal-relation-100-038",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-336M50000100001-article-9",
+        "actualReferenceSourceArticleId": "law-336M50000100001-article-34_3",
+        "actualReferenceTargetArticleId": "law-336M50000100001-article-9",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、INCORPORATESが成立。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-039",
+        "passed": false,
+        "expectedResolutionStatus": "not_reference",
+        "expectedReferenceTargetArticleId": null,
+        "actualReferenceSourceArticleId": "law-405M50000040014-suppl-18-article-4",
+        "actualReferenceTargetArticleId": "law-405M50000040014-article-4",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "出現箇所は補則第四条の見出し番号そのもので、他の条文を指す参照ではない。"
+      },
+      {
+        "fixtureId": "legal-relation-100-040",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-419M60000002052-suppl-0-article-50",
+        "actualReferenceSourceArticleId": "law-419M60000002052-suppl-0-article-51",
+        "actualReferenceTargetArticleId": "law-419M60000002052-suppl-0-article-50",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-041",
+        "passed": false,
+        "expectedResolutionStatus": "unresolved",
+        "expectedReferenceTargetArticleId": null,
+        "actualReferenceSourceArticleId": "law-335AC0000000145-article-1_5",
+        "actualReferenceTargetArticleId": "law-335AC0000000145-article-1_2",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "明示された医療法第一条の二への参照であり、現対象の薬機法第一条の二とは異なる。医療法側の候補がないため解決不能。"
+      },
+      {
+        "fixtureId": "legal-relation-100-042",
+        "passed": false,
+        "expectedResolutionStatus": "unresolved",
+        "expectedReferenceTargetArticleId": null,
+        "actualReferenceSourceArticleId": "law-348M50000040005-article-1",
+        "actualReferenceTargetArticleId": "law-348M50000040005-article-2",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "第二条は連結財務諸表規則の明示された条文であり、現ターゲットの開示府令ではない。該当法令の候補がないため解決不能。"
+      },
+      {
+        "fixtureId": "legal-relation-100-043",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-419M60000002059-article-49",
+        "actualReferenceSourceArticleId": "law-419M60000002059-article-9_3",
+        "actualReferenceTargetArticleId": "law-419M60000002059-article-49",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-044",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-420M60000002078-article-5",
+        "actualReferenceSourceArticleId": "law-420M60000002078-article-8",
+        "actualReferenceTargetArticleId": "law-420M60000002078-article-5",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、USES_DEFINITIONが成立。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-045",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-429M60000002054-article-11",
+        "actualReferenceSourceArticleId": "law-429M60000002054-article-2",
+        "actualReferenceTargetArticleId": "law-429M60000002054-article-11",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-046",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-340CO0000000321-article-2_12_2",
+        "actualReferenceSourceArticleId": "law-340CO0000000321-article-1_7_3",
+        "actualReferenceTargetArticleId": "law-340CO0000000321-article-2_12_2",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-047",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-419M60000002052-article-310",
+        "actualReferenceSourceArticleId": "law-419M60000002052-article-295",
+        "actualReferenceTargetArticleId": "law-419M60000002052-article-310",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-048",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-323AC0000000025-article-106_3",
+        "actualReferenceSourceArticleId": "law-323AC0000000025-article-106_6",
+        "actualReferenceTargetArticleId": "law-323AC0000000025-article-106_3",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-049",
+        "passed": false,
+        "expectedResolutionStatus": "unresolved",
+        "expectedReferenceTargetArticleId": null,
+        "actualReferenceSourceArticleId": "law-340CO0000000321-article-29_3",
+        "actualReferenceTargetArticleId": "law-340CO0000000321-article-2",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "「投資信託及び投資法人に関する法律第二条」という明示的な別法参照だが、該当候補がカタログにない。"
+      },
+      {
+        "fixtureId": "legal-relation-100-050",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-419M60000002052-article-198",
+        "actualReferenceSourceArticleId": "law-419M60000002052-article-9",
+        "actualReferenceTargetArticleId": "law-419M60000002052-article-198",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-051",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-323AC0000000025-article-130",
+        "actualReferenceSourceArticleId": "law-323AC0000000025-article-173",
+        "actualReferenceTargetArticleId": "law-323AC0000000025-article-130",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-052",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-340CO0000000321-article-33_14_8",
+        "actualReferenceSourceArticleId": "law-340CO0000000321-article-33_14_2",
+        "actualReferenceTargetArticleId": "law-340CO0000000321-article-33_14_8",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-053",
+        "passed": false,
+        "expectedResolutionStatus": "unresolved",
+        "expectedReferenceTargetArticleId": null,
+        "actualReferenceSourceArticleId": "law-419M60000002052-article-123",
+        "actualReferenceTargetArticleId": "law-419M60000002052-article-2",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "『投資信託及び投資法人に関する法律第二条』という明示的な法令名の参照だが、その法令の候補がカタログにない。"
+      },
+      {
+        "fixtureId": "legal-relation-100-054",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-335AC0000000145-suppl-40-article-37",
+        "actualReferenceSourceArticleId": "law-335AC0000000145-suppl-40-article-38",
+        "actualReferenceTargetArticleId": "law-335AC0000000145-suppl-40-article-37",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-055",
+        "passed": false,
+        "expectedResolutionStatus": "unresolved",
+        "expectedReferenceTargetArticleId": null,
+        "actualReferenceSourceArticleId": "law-348M50000040005-suppl-106-article-2",
+        "actualReferenceTargetArticleId": "law-348M50000040005-article-3",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "改正後法令の第三条は改正令側の条文スコープで解すべきだが、その条文が候補カタログにない。"
+      },
+      {
+        "fixtureId": "legal-relation-100-056",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-405M50000040014-article-11",
+        "actualReferenceSourceArticleId": "law-405M50000040014-suppl-86-article-28",
+        "actualReferenceTargetArticleId": "law-405M50000040014-article-11",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、INCORPORATESが成立。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-057",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-419M60000002052-article-230_2",
+        "actualReferenceSourceArticleId": "law-419M60000002052-suppl-75-article-2",
+        "actualReferenceTargetArticleId": "law-419M60000002052-article-230_2",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、EXCEPTION_TOが成立。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-058",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-336M50000100001-article-15_3",
+        "actualReferenceSourceArticleId": "law-336M50000100001-suppl-328-article-3",
+        "actualReferenceTargetArticleId": "law-336M50000100001-article-15_3",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-059",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-340CO0000000321-article-16_18",
+        "actualReferenceSourceArticleId": "law-340CO0000000321-article-43",
+        "actualReferenceTargetArticleId": "law-340CO0000000321-article-16_18",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-060",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-403AC0000000090-article-13",
+        "actualReferenceSourceArticleId": "law-403AC0000000090-article-23",
+        "actualReferenceTargetArticleId": "law-403AC0000000090-article-13",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、EXCEPTION_TOが成立。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-061",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-335AC0000000145-article-68_2",
+        "actualReferenceSourceArticleId": "law-335AC0000000145-article-50",
+        "actualReferenceTargetArticleId": "law-335AC0000000145-article-68_2",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-062",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-419M60000002052-article-80",
+        "actualReferenceSourceArticleId": "law-419M60000002052-article-79",
+        "actualReferenceTargetArticleId": "law-419M60000002052-article-80",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-063",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-323AC0000000025-article-2",
+        "actualReferenceSourceArticleId": "law-323AC0000000025-article-35",
+        "actualReferenceTargetArticleId": "law-323AC0000000025-article-2",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-064",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-403AC0000000090-article-16",
+        "actualReferenceSourceArticleId": "law-403AC0000000090-article-23",
+        "actualReferenceTargetArticleId": "law-403AC0000000090-article-16",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、OVERRIDESが成立。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-065",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-335AC0000000145-article-23_2_7",
+        "actualReferenceSourceArticleId": "law-335AC0000000145-article-23_2_13",
+        "actualReferenceTargetArticleId": "law-335AC0000000145-article-23_2_7",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-066",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-419M60000002052-article-149_2",
+        "actualReferenceSourceArticleId": "law-419M60000002052-article-150",
+        "actualReferenceTargetArticleId": "law-419M60000002052-article-149_2",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-067",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-323AC0000000025-article-33_2",
+        "actualReferenceSourceArticleId": "law-323AC0000000025-article-33",
+        "actualReferenceTargetArticleId": "law-323AC0000000025-article-33_2",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-068",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-335AC0000000145-article-42",
+        "actualReferenceSourceArticleId": "law-335AC0000000145-article-61",
+        "actualReferenceTargetArticleId": "law-335AC0000000145-article-42",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-069",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-336M50000100001-suppl-346-article-3",
+        "actualReferenceSourceArticleId": "law-336M50000100001-suppl-346-article-4",
+        "actualReferenceTargetArticleId": "law-336M50000100001-suppl-346-article-3",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-070",
+        "passed": false,
+        "expectedResolutionStatus": "unresolved",
+        "expectedReferenceTargetArticleId": null,
+        "actualReferenceSourceArticleId": "law-340CO0000000321-suppl-86-article-1",
+        "actualReferenceTargetArticleId": "law-340CO0000000321-article-35",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "附則グループ内の第三十五条参照だが、同グループの対象条文が候補カタログにない。"
+      },
+      {
+        "fixtureId": "legal-relation-100-071",
+        "passed": false,
+        "expectedResolutionStatus": "not_reference",
+        "expectedReferenceTargetArticleId": null,
+        "actualReferenceSourceArticleId": "law-419M60000002052-suppl-0-article-16",
+        "actualReferenceTargetArticleId": "law-419M60000002052-article-16",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "補則第十六条の見出し・自身の条番号であり、他の条文を指す参照ではない。"
+      },
+      {
+        "fixtureId": "legal-relation-100-072",
+        "passed": false,
+        "expectedResolutionStatus": "unresolved",
+        "expectedReferenceTargetArticleId": null,
+        "actualReferenceSourceArticleId": "law-335AC0000000145-suppl-53-article-1",
+        "actualReferenceTargetArticleId": "law-335AC0000000145-article-60",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "附則（令和五年法律第六三号）の列挙中の第六十条は改正法自身の条文であり、現行薬機法第六十条ではない。改正法条文の候補がないため解決不能。"
+      },
+      {
+        "fixtureId": "legal-relation-100-073",
+        "passed": false,
+        "expectedResolutionStatus": "not_reference",
+        "expectedReferenceTargetArticleId": null,
+        "actualReferenceSourceArticleId": "law-323AC0000000025-suppl-84-article-104",
+        "actualReferenceTargetArticleId": "law-323AC0000000025-article-104",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "出現箇所は附則第百四条の当該規定自身の条番号ラベルであり、他規定への参照ではない。"
+      },
+      {
+        "fixtureId": "legal-relation-100-074",
+        "passed": false,
+        "expectedResolutionStatus": "unresolved",
+        "expectedReferenceTargetArticleId": null,
+        "actualReferenceSourceArticleId": "law-340CO0000000321-suppl-86-article-14",
+        "actualReferenceTargetArticleId": "law-340CO0000000321-article-1",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "「金融機関の信託業務の兼営等に関する法律第一条」という明示的な別法参照だが、該当候補がカタログにない。"
+      },
+      {
+        "fixtureId": "legal-relation-100-075",
+        "passed": false,
+        "expectedResolutionStatus": "unresolved",
+        "expectedReferenceTargetArticleId": null,
+        "actualReferenceSourceArticleId": "law-419M60000002052-suppl-17-article-1",
+        "actualReferenceTargetArticleId": "law-419M60000002052-article-33",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "附則中の改正令第三十三条への参照だが、改正令側の条文が候補カタログにない。"
+      },
+      {
+        "fixtureId": "legal-relation-100-076",
+        "passed": false,
+        "expectedResolutionStatus": "unresolved",
+        "expectedReferenceTargetArticleId": null,
+        "actualReferenceSourceArticleId": "law-335AC0000000145-suppl-53-article-1",
+        "actualReferenceTargetArticleId": "law-335AC0000000145-article-31",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "改正法令の附則で列挙された第三十一条は改正元の改正法令側の条文を指すが、その条文が候補カタログにない。"
+      },
+      {
+        "fixtureId": "legal-relation-100-077",
+        "passed": false,
+        "expectedResolutionStatus": "unresolved",
+        "expectedReferenceTargetArticleId": null,
+        "actualReferenceSourceArticleId": "law-348M50000040005-article-2_9",
+        "actualReferenceTargetArticleId": "law-348M50000040005-article-2",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "第二条は明示された資金決済に関する法律の条文であり、現ターゲットの開示府令ではない。該当法令の候補がないため解決不能。"
+      },
+      {
+        "fixtureId": "legal-relation-100-078",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-336M50000100001-article-1_2",
+        "actualReferenceSourceArticleId": "law-336M50000100001-article-15_11",
+        "actualReferenceTargetArticleId": "law-336M50000100001-article-1_2",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、USES_DEFINITIONが成立。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-079",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-419M60000002052-article-9",
+        "actualReferenceSourceArticleId": "law-419M60000002052-article-21",
+        "actualReferenceTargetArticleId": "law-419M60000002052-article-9",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-080",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-335AC0000000145-article-23_2_23",
+        "actualReferenceSourceArticleId": "law-335AC0000000145-article-23_8",
+        "actualReferenceTargetArticleId": "law-335AC0000000145-article-23_2_23",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-081",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-323AC0000000025-article-166",
+        "actualReferenceSourceArticleId": "law-323AC0000000025-article-178",
+        "actualReferenceTargetArticleId": "law-323AC0000000025-article-166",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、USES_DEFINITIONが成立。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-082",
+        "passed": false,
+        "expectedResolutionStatus": "unresolved",
+        "expectedReferenceTargetArticleId": null,
+        "actualReferenceSourceArticleId": "law-336M50000100001-article-228_10_10",
+        "actualReferenceTargetArticleId": "law-336M50000100001-article-60",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "第六十条は明示された高圧ガス保安法の条文であり、現ターゲットの施行規則ではない。高圧ガス保安法側の候補がないため解決不能。"
+      },
+      {
+        "fixtureId": "legal-relation-100-083",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-419M60000002052-article-157",
+        "actualReferenceSourceArticleId": "law-419M60000002052-article-166",
+        "actualReferenceTargetArticleId": "law-419M60000002052-article-157",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-084",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-335AC0000000145-article-23_2_5",
+        "actualReferenceSourceArticleId": "law-335AC0000000145-article-23_2_6_3",
+        "actualReferenceTargetArticleId": "law-335AC0000000145-article-23_2_5",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-085",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-323AC0000000025-article-40_6",
+        "actualReferenceSourceArticleId": "law-323AC0000000025-article-200",
+        "actualReferenceTargetArticleId": "law-323AC0000000025-article-40_6",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-086",
+        "passed": false,
+        "expectedResolutionStatus": "unresolved",
+        "expectedReferenceTargetArticleId": null,
+        "actualReferenceSourceArticleId": "law-419M60000002052-article-117",
+        "actualReferenceTargetArticleId": "law-419M60000002052-article-68",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "明示された金融商品取引所等に関する内閣府令第六十八条であり、現対象府令の第六十八条とは異なるが候補がない。"
+      },
+      {
+        "fixtureId": "legal-relation-100-087",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-335AC0000000145-article-83_6",
+        "actualReferenceSourceArticleId": "law-335AC0000000145-article-83_8",
+        "actualReferenceTargetArticleId": "law-335AC0000000145-article-83_6",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-088",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-323AC0000000025-article-57_12",
+        "actualReferenceSourceArticleId": "law-323AC0000000025-article-57_18",
+        "actualReferenceTargetArticleId": "law-323AC0000000025-article-57_12",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、USES_DEFINITIONが成立。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-089",
+        "passed": true,
+        "expectedResolutionStatus": "resolved",
+        "expectedReferenceTargetArticleId": "law-336M50000100001-article-140",
+        "actualReferenceSourceArticleId": "law-336M50000100001-suppl-381-article-2",
+        "actualReferenceTargetArticleId": "law-336M50000100001-article-140",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "全5述語を同時評価し、成立predicateなし。Worker判定をReviewerが承認し、Codexが横断監査した。"
+      },
+      {
+        "fixtureId": "legal-relation-100-090",
+        "passed": false,
+        "expectedResolutionStatus": "not_reference",
+        "expectedReferenceTargetArticleId": null,
+        "actualReferenceSourceArticleId": "law-402M50000040038-suppl-63-article-19",
+        "actualReferenceTargetArticleId": "law-402M50000040038-article-19",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "抽出された第十九条は当該附則条文自身の見出しラベルであり、他条文への参照ではない。"
+      },
+      {
+        "fixtureId": "legal-relation-100-091",
+        "passed": false,
+        "expectedResolutionStatus": "not_reference",
+        "expectedReferenceTargetArticleId": null,
+        "actualReferenceSourceArticleId": "law-419M60000002052-suppl-119-article-1",
+        "actualReferenceTargetArticleId": "law-419M60000002052-article-1",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "補則第一条の見出し・自身の条番号であり、他の条文を指す参照ではない。"
+      },
+      {
+        "fixtureId": "legal-relation-100-092",
+        "passed": false,
+        "expectedResolutionStatus": "not_reference",
+        "expectedReferenceTargetArticleId": null,
+        "actualReferenceSourceArticleId": "law-419M60000002059-suppl-20-article-1",
+        "actualReferenceTargetArticleId": "law-419M60000002059-article-1",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "抽出された第一条は附則第一条そのものの条番号見出しであり、他の条文を参照していない。"
+      },
+      {
+        "fixtureId": "legal-relation-100-093",
+        "passed": false,
+        "expectedResolutionStatus": "not_reference",
+        "expectedReferenceTargetArticleId": null,
+        "actualReferenceSourceArticleId": "law-348M50000040005-suppl-46-article-1",
+        "actualReferenceTargetArticleId": "law-348M50000040005-article-1",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "出現箇所は附則第一条の当該規定自身の条番号ラベルであり、他規定への参照ではない。"
+      },
+      {
+        "fixtureId": "legal-relation-100-094",
+        "passed": false,
+        "expectedResolutionStatus": "not_reference",
+        "expectedReferenceTargetArticleId": null,
+        "actualReferenceSourceArticleId": "law-405M50000040014-suppl-36-article-1",
+        "actualReferenceTargetArticleId": "law-405M50000040014-article-1",
+        "currentGraphMatchesRecordedBaseline": true,
+        "annotationBasis": "出現箇所は補則第一条の見出し番号そのもので、他の条文を指す参照ではない。"
+      }
+    ]
+  },
+  "semanticClassification": {
+    "executed": false,
+    "eligibleCount": 0,
+    "correctCount": 0,
+    "results": []
+  },
+  "neo4jUpdated": false,
+  "provider": null,
+  "model": null
+}

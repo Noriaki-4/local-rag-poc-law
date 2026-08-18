@@ -1,0 +1,59 @@
+{
+  "caseCount": 100,
+  "legalCaseCount": 94,
+  "guidanceCaseCount": 6,
+  "shardCaseCounts": [
+    20,
+    20,
+    20,
+    20,
+    20
+  ],
+  "legalCountsByReferenceKind": {
+    "parent_law_reference": 22,
+    "application": 18,
+    "definition": 18,
+    "exception": 18,
+    "article_reference": 18
+  },
+  "legalCountsBySourceDocument": {
+    "law-420M60000002078": 2,
+    "law-405M50000040014": 2,
+    "law-419M60000002059": 3,
+    "law-402M50000040038": 3,
+    "law-348M50000040005": 6,
+    "law-419M60000002052": 13,
+    "law-340CO0000000321": 9,
+    "law-336M50000100001": 9,
+    "law-419M60000002052-suppl-0": 3,
+    "law-403AC0000000090": 3,
+    "law-417M60000002017": 1,
+    "law-335AC0000000145": 10,
+    "law-323AC0000000025": 10,
+    "law-405M50000040014-suppl-18": 1,
+    "law-429M60000002054": 1,
+    "law-335AC0000000145-suppl-40": 1,
+    "law-348M50000040005-suppl-106": 1,
+    "law-405M50000040014-suppl-86": 1,
+    "law-419M60000002052-suppl-75": 1,
+    "law-336M50000100001-suppl-328": 1,
+    "law-336M50000100001-suppl-346": 1,
+    "law-340CO0000000321-suppl-86": 2,
+    "law-335AC0000000145-suppl-53": 2,
+    "law-323AC0000000025-suppl-84": 1,
+    "law-419M60000002052-suppl-17": 1,
+    "law-336M50000100001-suppl-381": 1,
+    "law-402M50000040038-suppl-63": 1,
+    "law-419M60000002052-suppl-119": 1,
+    "law-419M60000002059-suppl-20": 1,
+    "law-348M50000040005-suppl-46": 1,
+    "law-405M50000040014-suppl-36": 1
+  },
+  "supplementaryProvisionCaseCount": 22,
+  "legalCountsByStructuralStatus": {
+    "valid_pair": 73,
+    "not_reference": 8,
+    "unresolved": 13
+  },
+  "semanticAdjudicationCaseCount": 73
+}

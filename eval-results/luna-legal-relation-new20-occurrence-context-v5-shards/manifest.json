@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "sourcePacket": "/Users/nt/projects/local-rag-poc-law/eval-results/luna-legal-relation-new20-occurrence-context-v5.jsonl",
+  "sourcePacketSha256": "26e0c804a6d246a60b010b5a9c523485b6c77c070bdc89460021ff1104cedaa5",
+  "candidateCount": 11,
+  "shardCount": 2,
+  "shards": [
+    {
+      "shardId": "shard-0000",
+      "file": "shard-0000.jsonl",
+      "candidateCount": 1,
+      "inputCharacters": 52949,
+      "sha256": "1197df1ea0dc78553b3f4fae0a8a61eb0fee88f802eb0b158e8bd9d898772c76",
+      "candidateKeys": [
+        "5cb716dd32c822e3de7ac956d42485aebc81c7acade571415a4d51bd338cab2e"
+      ],
+      "basisEdgeIds": [
+        "edge-law-323AC0000000025-article-28-paragraph-3-references-article-2"
+      ]
+    },
+    {
+      "shardId": "shard-0001",
+      "file": "shard-0001.jsonl",
+      "candidateCount": 10,
+      "inputCharacters": 50879,
+      "sha256": "7c3c58ba9a17399eb01f7614f34b2d3267808eba0326535af93bd03697236f12",
+      "candidateKeys": [
+        "f35462b752eb8ffe90272f022e7388b5773bd3241f948d7dd57961d12c1c24eb",
+        "86dbb8e8aaa90cd1e9573ac1f135eb45d70ac3e17fc4ab4c3e8eaa28c1218426",
+        "ffb5c1794a772c08e58c661613a59e1309590ec7584ad82d33b4ecf7501630eb",
+        "4c7a2f2520368fdacbd836009c728a868e526479688c71b2f7e11ec4fd8cb286",
+        "02a2321f0a01b8e5658c20aede4ad8d0ffb3d529eabc5fdd7f560cd33b4c6e91",
+        "1d5b48950487c036249b06eacb704f2f16126c9dd5810e2f43684a71f3ce35bb",
+        "a64cd713682042bdc40aba7f1a83be1323932d3258ae729bfa26db80039ea6f4",
+        "5a755974b4e5d4e30b2f3c50508d2cb468884d11d8098f60488dbde9b5ffe649",
+        "43806ffcd580a0fe46efcb0b626c7f015b167c8a82e0232f2f9f1a0e145ae168",
+        "2cbab52f866c5bf037291d3a7712dd99ed253b7653c425177902b80896ded7ac"
+      ],
+      "basisEdgeIds": [
+        "edge-law-335AC0000000145-article-86-paragraph-1-references-article-28",
+        "edge-law-323AC0000000025-article-198-paragraph-1-references-article-102_14",
+        "edge-law-336M50000100001-article-232-references-article-220_3",
+        "edge-law-335AC0000000145-article-68_19-references-article-68_17",
+        "edge-law-323AC0000000025-article-173-paragraph-1-item-3-references-article-2_3",
+        "edge-law-323AC0000000025-article-45-references-article-37_2",
+        "edge-law-336M50000100001-article-163-paragraph-2-references-article-175",
+        "edge-law-336M50000100001-article-137_27-paragraph-2-references-article-137_21",
+        "edge-law-335AC0000000145-article-53-references-article-44",
+        "edge-law-323AC0000000025-article-172_9-references-article-27_31"
+      ]
+    }
+  ]
+}
