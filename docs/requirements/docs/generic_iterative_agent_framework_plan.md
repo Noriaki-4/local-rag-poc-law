@@ -3,326 +3,66 @@
 > 更新日: 2026-08-18
 >
 > 本書を新しい実装ロードマップの正本とする。
-> `llm_research_case_store_implementation_plan.md`は現行経路の移行元を説明する資料、
-> `llm_directed_legal_retrieval.md`は現行実装の挙動を説明する資料としてのみ参照する。
->
-> 本計画の作成時点では、現行回答経路は変更していない。未接続の`agent_core`試作を
-> Phase完了とは数えず、新しいPhase 0から評価と移行を開始する。
+> 人間向けの概念図と処理イメージは、対になる
+> [`generic_iterative_agent_framework_plan_visual.md`](generic_iterative_agent_framework_plan_visual.md)を参照する。
+> 図解側は理解補助であり、契約・完了条件が食い違う場合は本書を正とする。
+> 過去の実装計画やProfile変更履歴は本書へ残さない。現在のコードから目標仕様へ移すために
+> 必要な差分、実装順、完了条件だけを記載する。
 
-## 実装状況（2026-08-17）
+## 実装状況（2026-08-18）
 
-- Phase 0: 新契約のfixtureと意味判断境界の単体テストは完了。現行2問の実測baseline採取は未実施。
-- Phase 1: `agent_framework`、薄い`InMemoryCaseStore`、用途別Profile、read-only Toolの上限制御付き
-  並列実行、保持Evidence、反証時の明示的な影響判断、任意Reviewerは実装済み。ただし現行コードの
-  `research_cycle_count`は初回ToolでCycle 1となり、Solverが`start_next_cycle=true`を返した時だけ
-  後続Cycleへ進む。一方、`CycleRecord`・`StepRecord`、Cycle累計の本文取得数・Tool数・時間の
-  境界は未実装で、`max_tool_requests_per_cycle`も1 Decisionの上限として検証されている。
-  本書4.1・5.1.2の最大4 Cycle、1 Cycle本文4件、予算到達前のCycle終了契約へ直すまで
-  Phase 1のサイクル部分は未完了とする。
-- Phase 2: 法令Domain Pack、Article単位OpenSearch Tool、入出力双方向のNeo4j候補Tool、
-  条文本文取得Tool、既存provider共通structured JSON Model Adapter、明示検証用
-  `/answer/framework`、`/answer`用Feature Flagを実装済み。Legal Profile v10では、Solverが
-  `fetch_articles`に選んだArticle IDだけを1ホップGraphへ自動転記し、成功済み起点を重複展開しない。
-  Graph ToolはSolverから隠し、関係種別・方向の意味評価と次の本文取得先選択はSolverへ残す。
-  現行ProfileはGraph取得時に`REFERENCES / IMPLEMENTS / APPLIED_BY`を固定指定しており、
-  本書4.0のHypothesis別`ExplorationIntent`で検索scope自体を絞る機能は未実装である。
-  本書5.1.3のNeo4j物理定義も未実装で、現行RelationAssertionは端点IDと旧statusをプロパティに持ち、
-  `SUBJECT / OBJECT`接続、`sourceSnapshotId`、`MENTIONS`排除、OpenSearchとのsnapshot整合監査は未対応である。
-  非同期LLM分類、`ClassificationRun`、5種の`proposedPredicate`、分類Runを固定したGraph検索も未実装である。
-  ただし案件内の探索Node、複数の発見Link、frontier、本文取得状態、Graph展開範囲、hopを保存する
-  構造は未実装である。Feature Flagの既定値はOFF。
-- Phase 2準備（現行Graph向けRelationAssertion分類）: seedと分離した任意のローカルOllama分類経路を
-  `legal-relation-classifier-v8`として実装済み。現行の`IMPLEMENTS`候補1件ごとに、紐付く全参照箇所と
-  両端Article全文を候補内へ閉じ、`<articleId>::span-N`の一意な根拠IDでE4Bへ提示する。
-  候補生成時の`suggestedType / assertionSource`は分類Promptへ出さず、LLM応答は既知decision key、
-  根拠spanの所属、参照箇所との位置対応、件数・hashだけをProgramが検証する。複数候補を同じLLM入力へ
-  入れると、単件では正解する権限委任対象列挙2件を`implements`へ誤分類する再現結果があったため、
-  既定を1候補/LLM呼出しに変更した。2件以上は速度比較用の明示設定に限る。
-  `gemma4:e4b`の機能fixtureは府令4件を加えた34/34、ガイド実データは6文書6/6、非APIテストは
-  671件成功。これは現行二値分類の機能確認であり、5種`proposedPredicate`、`ClassificationRun`、
-  `SUBJECT / OBJECT / CLASSIFIED_IN`を備えた本書5.1.3の完了を意味しない。Neo4j全4,323候補への
-  v8登録は未実施で、直近実測から24〜36時間を見込む。
-- Phase 3以降: 未完了。新Frameworkの最小traceはあるが、ログ・性能の完了条件は未評価。
-- Phase 4予備評価: Article候補の先頭chunkだけを返して施行令7条1項9号を隠していた検索投影を修正。
-  第1位Articleは取得済み一致箇所を重複圧縮して最大5000文字、他候補は最大400文字、ガイドは
-  上位2件とし、並列Tool結果をround-robinでSolverへ渡す。Reviewer OFF・全Haikuの公開買付け問題は、
-  修正途中の2回がprotocol_error、最終回は2 cycleで8/11。法27条の2・施行令7条と4回答要点は
-  到達したが、Graph呼出しは0回で、公開買付府令2条の5・10条は未到達。検索候補には施行令7条
-  1項9号と府令への委任が表示されており、残課題はSolverが明示された委任をGraph探索へ結び付けず、
-  府令未確認をlimitationsへ残したままfinalizeしたことである。
-- Phase 4追加評価: Legal Profile v3で`lower_law` DependencyDecisionを導入した。最初の実測は
-  従来同様8/11で、委任元本文を委任先確認済みとする粗い`resolved`が原因だったため、依存元Evidence、
-  `discover_source / assess_source / discover_target / fetch_target`、対象Article、別法令本文の来歴を契約へ追加した。
-  その後の実測では、一括fetchの検証が厳しすぎる問題と、内包JSONの必須欄欠落が契約修復を迂回して
-  `model_protocol`になる問題を検出した。一括Request中の委任先ArticleをDecision側で明示する方式へ直し、
-  内包JSONの構造不足はAgentLoopの契約修復へ渡すよう修正済み。API実測3回の上限後に直したため、
-  最終修正版による品質点の再計測は未実施。非APIテストは618件成功している。
-- Phase 4再評価: Legal Profile v5ではDependencyDecisionをProviderの直接構造化配列へ変更し、
-  必要種別・対象WorkItem・必要件数をSolverContextとschemaへ明示した。未知Article IDの契約修復も追加。
-  Reviewer OFF・全Haikuの公開買付け問題は2 cycleで完走し8/11。法律・施行令と主要4回答要点は取得したが、
-  Graph呼出しは0回で、公開買付府令2条の5・10条は未取得だった。Solverは対象範囲を`not_required`、
-  手続を施行令本文で`resolved`とする一方、limitationsへ内閣府令確認の必要性を記載しており、
-  残課題は輸送・参照契約ではなく同一SolverDecision内の意味的一貫性である。非APIテストは620件成功。
-- Phase 4 Prompt再評価: Legal Profile v6以降でIntegrationを「取得評価、下位規範監査、追加調査、
-  終了整合監査、終了」の順序付き手順へ変更し、明示的に求められた観点を「概要には上位法令で十分」
-  として`not_required`にすること、目的・総則条項を委任先本文の代理にすることを禁止した。v6は2 cycleで
-  完走したが8/11、Graph 0回、府令文書の第1条だけを取得し府令2条の5・10条は未取得。v7/v8では
-  DependencyDecisionのsource/target重複違反で停止した。多段委任では中間Articleが前段のtargetかつ
-  後段のsourceになり得るが、現行のWorkItem単位1レコード契約はこれを表現できない。残課題はPromptではなく、
-  依存関係を1 WorkItem 1件へ集約し、source/target重複を一律拒否する契約設計である。
-- Phase 4 v9/v10再評価: `fetch_articles`に1ホップGraphを自動連動し、下位法令の未確認状態を
-  WorkItem・Hypothesis・gapsへ統合して、Legal Profileから重複するDependencyDecision要求を外した。
-  非APIテストは623件成功。Reviewer OFF・全Haikuの公開買付け問題を3回実行したが、1回目と3回目は
-  `tool_requests_json`内でHaikuが検索本文の条番号から未知Article IDを生成し、契約修復後も残したため
-  cycle 1でprotocol_error、2回目は旧DependencyDecisionのsource不足でcycle 2に停止した。
-  3回とも本文取得前に停止したため、自動Graphの実API確認と9/11形式の品質採点には未到達。
-  検索結果自体には施行令7条、公開買付府令2条の5・10条、法27条の3が含まれていた。
-  次の課題はPrompt追加ではなく、`tool_requests_json`内のArticle ID選択をProvider schemaの既知ID enumへ
-  移し、LLMが一覧外IDを構造上返せない輸送契約にすることである。
-- Legal Profile v11: LLMへ入出力される契約値を監査し、WorkItem、Hypothesis、反証影響、
-  ToolResult、最終化、Evidence区分、任意DependencyDecisionの語彙をProvider共通Solver契約へ集約した。
-  法務PromptにはGraph候補の`kind`、`status`、`referenceKind`、来歴項目の意味を追加し、
-  `llm_classified_implements`を正式関係と誤認せず両端本文で判断することを明記した。
-  `run_status`等の実行制御値はSolverContextへ渡らず、Reviewerの`accept / revise`は既存Promptで定義済み。
-  非APIテストは623件成功。
-- Legal Profile v14: CaseStateのGraph navigation EvidenceとToolResultを監査用の正本として維持したまま、
-  SolverContextではGraph端点をArticle IDごと1件の`graph_candidate_catalog.articles`、全発見経路を
-  `graph_candidate_catalog.links`へ正規化した。Graph navigationのJSON・Evidence ID・監査来歴は
-  manifest、ToolResultのEvidence ID、navigation・omitted ID一覧へ重複表示しない。
-  同一Articleの重複表示だけを除き、起点、関係種別、方向、status、WorkItem・Hypothesisとの対応は
-  Linkごとに保持する。候補の関連性と本文取得対象はSolverが判断する。
-  実データ投影で153件のGraph navigationを139 Article・153 Linkとして保持し、非APIテスト627件に成功した。
-- Legal Profile v15: 正規化Articleの`content_status`全値を共通Promptに定義した。検索本文中の条番号や
-  documentIdからArticle IDを組み立てることを禁止し、対応IDが`fetchable_article_ids`にない参照先は
-  法令名・条番号・確認事項をqueryにした`legal_search`で発見し直す手順を明記した。
-  通常Decisionと契約修復Decisionの両方で、`fetch_articles`の全IDを一覧と完全一致で自己確認する。
-- Legal Profile v16: `search_navigation`の本文抜粋を次のTool選択専用とし、Hypothesis判定、
-  WorkItemの解決、最終回答の根拠に使わないことを明記した。別の根拠で検証する適用要件、
-  数値基準、例外、義務・手続を束ねず、各主張を直接支えるgrounding Evidenceと照合してから
-  finalizeする。特定条文の内容はそのArticle本文で確認し、別ArticleやGraph候補で代用しない。
-- Legal Profile v17: 同じDecisionで取得する既知Article IDは、WorkItemが異なっても12個以内なら
-  1つのfetch_articlesへ統合する。論点別にRequestを分けて自動1ホップGraphの候補投影を重複させず、
-  Requestのwork_item_idに主対象、hypothesis_idsに検証対象全件を指定する。
-- Legal Profile v18: Graph探索の上限を1ホップに固定した。起点Articleの本文取得にだけ
-  自動Graph取得を連動し、`neighborArticleId`として発見済みのArticleは本文取得のみを行う。
-  Graph候補Articleからは再展開せず、その先が必要な場合はSolverが`legal_search`で別起点を発見する。
-- Legal Profile v19: 1回の`fetch_articles.article_ids`を最大4個にした。プログラムは5個以上を
-  選別・切捨てせず契約違反とし、Solverが未確認の命題に直接必要な4個以下を選び直す。
-  4個は取得目標ではなく上限であり、残りの候補はCaseStateへ保持する。
-- Legal Profile v20: 新しいGraph候補が投影された場合、通常の統合・完了判断より先に同一Solverの
-  `graph_selection`モードを呼び、`GraphCandidateReview`へ対象Graph ToolResult、選択Article、理由を保存する。
-  プログラムはReviewの存在、既知ID、件数、1件の`fetch_articles`との完全一致だけを検証し、
-  法的関連性を判断しない。現行Neo4jデータでも法令名を提示できるよう、Articleの`title`がない場合は
-  Documentノードの`title`をGraph queryで補い、将来のseedではArticleにも`title`を保存する。
-- Legal Profile v20実測: Reviewer OFF・全Haikuの公開買付け問題は3 cycleで完走したが8/11。
-  Graph選別は施行令3件だけを選び、公開買付府令2条の5・10条を選ばなかった。一括本文取得の自動Graphが
-  主対象WorkItem IDを全Linkへ付けていたため、Solverが適用要件の作業だけを優先したことが原因だった。
-- Legal Profile v21: Graph LinkのWorkItemは、集約Requestの全Hypothesisから所属WorkItemを機械的に復元する。
-  本文を再掲しない選別用Contextで、Solverは全Article見出しとLinkをopen WorkItemごとに評価し、
-  `work_item_assessments`を各WorkItemへ1件必須で返す。選択Articleの和集合だけを最大4件取得する。
-  一覧外Article ID等の契約違反は、プログラムが補正せずSolverへ最大2回差し戻す。
-- Legal Profile v22: v21実測では各WorkItemの評価欄があっても、Solverが一般条項を1つのWorkItemへ
-  選んだ後、他の範囲・例外・手続もその条項から足りると推測して8/11で終了した。各WorkItemについて
-  本文が回答に影響し得る全候補`relevant_article_ids`と今回取得する`selected_article_ids`を分離し、
-  直接具体化する下位規範と一般条項を比較してから最大4件を選ぶ。プログラムは既知候補か、選択が
-  関連候補に含まれるか、全体の選択との集合整合、取得件数だけを検証し、関連性は判定しない。
-- Legal Profile v23: 同じArticleがOpenSearch候補とGraph候補の両方で発見された場合、検索による
-  depth 0起点をGraph由来depth 1で上書きしない。Graph候補選別後の本文取得は新Cycleではなく同じ
-  Cycleの後続stepとして実行し、新たな1ホップ候補を同じCycleで再評価できるようにする。また、
-  resolved WorkItemのbasis HypothesisにSolver自身が指定したEvidenceを最終回答のcitationから落とす
-  参照不整合を契約違反として同じSolverへ差し戻す。プログラムは法的十分性を判定しない。
-- Legal Profile v24: v23実測は2 cycleで10/11となり、残る府令10条をSolver自身がWI-004の理由で
-  次回確認対象と明記しながら`relevant_article_ids`へ入れず、取得枠を3/4で空けた。理由に完全一致の
-  既知・未取得Article IDを書いた場合の関連候補欄との参照整合と、Solver宣言済み関連候補が残る場合に
-  取得枠を空けないことを検証する。関連性の判定や候補追加はプログラムでは行わない。
-- Legal Profile v25: v24実測で、理由欄のArticle ID照合が`article-27_2`を短い
-  `article-27`への言及とも解釈する前方一致バグを検出した。IDの後続文字境界まで照合し、完全な
-  既知IDへの言及だけを関連候補欄との参照整合対象にする。
-- Legal Profile v26: Graph Articleの法的関連性と本文取得状態を分離する。`relevant_article_ids`は
-  取得済みを含む既知Graph Articleを許可し、`selected_article_ids`と未使用取得枠の検証対象だけを
-  `content_status=not_requested`に限定する。取得済みの関連条文を再掲しただけで停止または再取得しない。
-- Legal Profile v27: v26実測では府令2条の5・10条をSolverが関連候補へ入れたが、先に別の4件を
-  取得した後で未取得frontierが再投影されず9/11で終了した。Graph ToolResultごとの最新Reviewを正本にし、
-  Solver宣言済みの関連候補に`not_requested`が残る間は同じCycleの後続`graph_selection` stepを要求する。
-  新しい本文を見たSolverが関連性を再評価して候補を外すことは許し、過去Reviewを固定判断にしない。
-- Legal Profile v28: v27実測では未取得frontierによる2回目の`graph_selection`へ進んだが、Haikuが
-  3回とも`graph_candidate_review=null`を返した。Provider structured-output schemaを呼出しモードに
-  合わせ、required Graph reviewがある場合はReview object、ない場合はnullだけを許可する。これは
-  候補の意味判断ではなく、呼出しモードと出力形式の構造整合である。
-- Legal Profile v29: v28実測では検索、絞り込み検索、本文取得を各Cycleとして数え、Graph候補到着時に
-  3 Cycle上限へ達した。`SolverDecision.start_next_cycle`を追加し、初回ToolでCycle 1を開始した後、通常の
-  action-observationは同じCycleで反復する。作業分解・仮説・探索方針を仕切り直すとSolverが明示した時だけ
-  次Cycleを開始する。Graph選別は常に同じCycleのstepであり、プログラムは再計画の要否を判定しない。
-- Legal Profile v30: v29実測では同じDecisionに4つの`fetch_articles`が分かれ、同じArticleの重複取得と
-  Requestごとの自動Graphが候補・入力・所要時間を増幅した。1 DecisionのArticle本文取得を重複なしの
-  1 Requestへ限定し、違反時はSolverへ差し戻す。4件超をプログラムが統合・選別・切捨てしない。
-- Legal Profile v31: v30実測ではHaikuが取得済みArticleを`selected_article_ids`へ入れ、2回の修復でも
-  直らなかった。Graph ReviewのProvider schemaで、`relevant_article_ids`は全既知Graph ID、
-  `selected_article_ids`は`content_status=not_requested`の既知IDだけを列挙可能にする。関連性の意味判断は
-  Solverのまま、プログラムは取得状態から許容ID集合を投影する。
-- Legal Profile v32: v31ログで、残り58秒から最終回答用45秒を除いた13秒のGraph選別がAnthropic
-  read timeoutになったことを確認した。open WorkItemが取得上限4件以内なら、Solverが未取得関連候補を
-  宣言した各WorkItemから最低1件を選ぶ構造整合を追加する。関連候補は各WorkItem最大12件、理由は短文化し、
-  Graph選別出力を最大4096 tokenとして、1観点への偏りと後続step数を抑える。候補の意味選択はSolverが行う。
-- Legal Profile v33: v32実測で、複数WorkItemに共通するArticleが全体では選択済みでも、各
-  `work_item_assessments[].selected_article_ids`へ重複記載されないことを未代表と誤判定した。各WorkItemの
-  `relevant_article_ids`と全体`selected_article_ids`の交差でbatch内の代表性を検証する。
-- Legal Profile v34: v33実測では自由文reasonに現れたIDと`relevant_article_ids`の照合が2回の修復後も
-  停止原因になった。自由文を構造データとして再解釈する暫定検証を削除し、関連・選択・frontierのID判断は
-  structured fieldだけを正本とする。reasonは監査説明であり制御入力にしない。
-- Legal Profile v35: v34実測では4 WorkItemを1 batchで最低1件ずつ代表させる制約をHaikuがWI-004だけ
-  満たせず、修復反復の停止原因になった。この配分制約は意味選択へ踏み込みすぎるため削除し、偏りは
-  Solverが宣言した未取得関連候補を同じCycleの後続stepへ残すfrontierで扱う。
-- Legal Profile v36: v35では最初のGraph選別で府令2条の5を取得した後、再選別がProvider schema違反で
-  停止した。関連候補12件・reason文字数の出力schema制限を撤回し、短文化はPrompt指示へ戻す。
-  取得対象4件上限、未取得ID enum、frontier継続は維持する。
-- Legal Profile v37: v36実測ではGraph Reviewの選択IDと、JSON文字列内に重複記述するfetch requestの
-  IDが一致せず停止した。`selected_article_ids`を唯一の正本にし、Graph選別は`tool_requests=[]`を返す。
-  AgentLoopは選択ID・順序を変更せず本文取得Toolへ機械転記し、法的な候補選択は行わない。
-- Legal Profile v38: v37実測ではfrontier再選別が同じGraph request IDを再度Reviewした際、旧状態検証の
-  全履歴一意制約で停止した。Review単体内のID一意性は維持し、時系列Review間の同一request参照を許可する。
-  履歴は全件保持し、frontier制御にはrequestごとの最新Reviewを使う。
-- Legal Profile v38実測: Reviewer OFF・全HaikuでCycle 1のままTool 12回、本文16条を取得し、
-  4回目のGraph候補選別呼出しが残り約15秒でprovider timeoutとなった。
-  `max_tool_requests_per_cycle=4`は実際には1 Solver Decisionあたりの上限で、自動Graph Toolと
-  後続Decisionを含むCycle累計を制限していなかった。Graph選別も、本文取得対象は最大4件だが、
-  累積したGraph catalogと過去の未取得frontierを毎回再入力し、入力が約5万から約14.9万tokenへ
-  増えた。未来のSolver時間を予約しても、中間呼出しの予算由来timeoutをCycle終了へ変換せず
-  Run全体を`provider_error`にした。この結果から、Cycle累計の本文取得上限、4 Cycle上限、
-  予算到達前のCycle終了判断、Graph差分Reviewを同じ修正単位で導入する。
-- Legal Profile v39実装（未検証）: `max_research_cycles=4`、Cycle累計の本文取得4件、Graph Reviewの選択3件、
-  新規・未評価・再採用・新Link差分の`graph_review_batch`、評価済みfrontierの短い`graph_review_ledger`を導入する。
-  全Node・Link・Review履歴はCaseStoreに保持し、過去の全詳細をLLMへ再送しない。Cycle境界前に
-  終了判断時間を予約し、予算由来の中間timeoutは`cycle_step_timeout`としてCycle終了判断へ渡す。
-  状態型・Context・Provider schema・Prompt・Profile version・設定は実装へ反映済み。検証は利用者指示により
-  未実施で、既存fixtureの新契約への更新と非APIテスト・実モデル評価は次の作業とする。
-- Legal Profile v45: v44の公開買付け実測では、Cycle 1の本文取得枠消費後に未評価Graph候補が残ったが、
-  Solverが全WorkItemをclosedへ修復し、limitationsでは関連府令未確認と記載したまま8/11でfinalizeした。
-  契約修復Promptから「全open WorkItemを閉じる」という近道を除き、未確認事項・gaps・limitationsを保って
-  通常判断へ戻すよう変更した。Cycle境界の未評価Graph候補群には`UnreviewedGraphResolution`を必須とし、
-  `review_next_cycle / no_longer_needed / unresolved_at_limit`と次動作の構造整合だけをProgramが検証する。
-  `answer.limitations`は未確認事項専用とし、対応するopen WorkItemとunresolved Hypothesisの既知IDを
-  `unresolved_work_item_ids / unresolved_hypothesis_ids`へ必須化した。次Cycleを開始可能な通常finalizeでは
-  未解決scopeを許さず、上限時はWorkItemを偽ってclosedにせず限定回答として保持できる。
-- Legal Profile v46: v45実測は、未知Evidence ID、未評価Graph方針欠落、open WorkItem finalizeが
-  fail-fast検証で順番に1件ずつ現れ、3回の契約試行を使い切って停止した。Cycle境界で
-  `remaining_unreviewed_count > 0`ならProvider schemaから`unreviewed_graph_resolution=null`を除外する。
-  同一Decisionの未知Article ID、未知Evidence ID、未評価Graph方針欠落、open WorkItem finalizeを
-  構造preflightでまとめて差し戻す。open-finalize違反の修復時に次Cycleを開始可能なら、Provider schemaを
-  `next=continue / start_next_cycle=true / answer=null / tool_requests=[]`へ限定し、未評価Graph候補があれば
-  `review_next_cycle`を必須にする。Programは法的必要性を判定せず、既知IDと状態遷移の矛盾だけを扱う。
-- Legal Profile v47: v46実測では、open WorkItemの修復時に、一度修復済みだった未知Evidence IDを
-  Solverが再生成した。open-finalize違反まで到達した直前Decisionの`CaseUpdate`は、それ以前の検査を
-  通過済みなので、修復呼出しのProvider schemaで単一候補として維持する。修復対象はCycle遷移と
-  未評価Graph候補の扱いに限定し、ProgramはEvidenceの意味やWorkItemの完了状態を変更しない。
-- Legal Profile v48: v47実測では、初回Decisionが追加したWorkItem・HypothesisのIDと、同じDecisionの
-  focus・ToolRequestが参照したIDに表記ずれが生じた。focus、ToolのWorkItem、ToolのHypothesisを
-  構造preflightで同時に検査して一括差し戻しし、修復呼出しのfocus候補を直前Decisionに実在する
-  open WorkItemへschema制限する。Programは参照先を選ばず、Solverが既知候補から選択する。
-- Legal Profile v49: v48実測では、open-finalize修復で検証済み`CaseUpdate`全体を長いJSON文字列enumとして
-  再出力させた結果、Anthropic輸送が`invalid_json`になった。修復呼出しは`update_json={}`だけを返し、
-  Adapterが直前Solver Decisionの`CaseUpdate`を同一内容のまま復元する。LLMの意味判断を変更せず、
-  冗長な再出力と再生成による参照破損を防ぐ。
+この節は変更履歴ではなく、12章の完了条件に対する差分だけを示す。個別のProfile version、
+不具合修正、実測結果はGit履歴、[RUNBOOK](../../../RUNBOOK.md)、
+[評価設計](evaluation_design.md)を参照し、本書へ時系列に追記しない。
 
-Phase 1の契約テストは`agent-api/tests/test_agent_framework.py`を正本とする。
+| Phase | 状況 | 未完了の中心 |
+|---|---|---|
+| Phase 0 | 一部完了 | 代表2問の現行baseline、説明付きstatus契約、生成schema・Prompt用語集のfixture |
+| Phase 1 | 一部実装 | `CycleRecord / StepRecord`、discriminator付きCommand、型付きstatusと遷移の一元化、再開契約 |
+| Phase 2 | 移行用縦切りまで実装 | Hypothesis別`ExplorationIntent`、新Neo4j schema、5 predicate分類Run、snapshot整合、旧自動Graph経路の撤去 |
+| Phase 3 | 未評価 | 新契約に基づくtrace、再開、入力増加、latencyの完了条件 |
+| Phase 4 | 未完了 | 新経路による代表2問の合格、既定経路切替、旧試作の撤去 |
+
+現在利用できるものと目標仕様を混同しない。
+
+- `agent_framework`、`InMemoryCaseStore`、用途別Model Profile、read-only Tool並列実行、
+  任意Reviewer、法令Tool Adapter、Feature Flag付き経路は存在する。
+- Reviewerの既定値は無効で、新経路のFeature Flagも既定では無効である。
+- 現行Legal Profileは本文取得に旧Graph検索を自動連動し、
+  `REFERENCES / IMPLEMENTS / APPLIED_BY`を固定指定する。本書が目標とする
+  Hypothesis別selector、`from_subject / to_subject`、5 predicateの新Graph契約ではない。
+- 現行CaseStateはWorkItem、Hypothesis、Evidence、Graph review履歴を保持するが、
+  本書の`ExplorationState / CycleRecord / StepRecord`と説明付きstatus契約は未実装である。
+- seedから分離した`legal-relation-classifier-v8`は、旧`IMPLEMENTS`候補を
+  `implements / reference_only / uncertain`へ分類する移行用機能である。
+  本書の5 predicate、`ClassificationRun`、`SUBJECT / OBJECT / CLASSIFIED_IN`を備えた
+  新Graph schemaの完成を意味しない。全候補への分類結果登録も実施していない。
+
+実装済みかどうかはコードとテスト、品質値は評価成果物を正とする。本節とコードが食い違う場合は、
+本節へ新しい履歴を足さず、差分表を更新する。
 
 ## 1. 決定事項
 
 本計画では、次を確定事項とする。
 
 1. Codex型の反復ループを維持する。
-2. 仮説検証を小さく繰り返す。
-3. 汎用基盤と法令検索ドメインを分離する。
-4. 意味判断はLLMが行い、プログラムは実行と機械的検証だけを行う。
-5. 判断主体は`Solver`と、任意の`Reviewer`だけにする。
-6. `Projector`、`Integrator`、`Explorer`、`Answerer`を独立した登場人物にしない。
-7. 調査サイクルは固定回数を必ず実行せず、通常1〜2回、最大4回とする。
-8. 1 Cycleで本文取得できるResourceは累計4件までとし、上限または時間境界で
-   Cycleを閉じ、そのCycleの結果と次の探索方針をSolverが評価する。
-9. Graph候補はCaseStoreに全件保持するが、Graph ReviewのLLM入力は新規・未評価候補、
-   仮説変更で再採用した候補、既評価候補へ追加された新Linkの詳細差分と、全評価済み候補の
-   短い台帳に限る。
-10. Reviewerはオプションとし、**デフォルトでは無効**にする。
-11. 現在はDBを使わない。初期実装は単一プロセス用の`InMemoryCaseStore`とする。
-12. SQL生成は別プロジェクトでの応用例であり、このリポジトリでは実装しない。
-13. 案件内の作業分解は、最上位から下位まで`WorkItem`という名称で統一する。
-14. SolverはCaseState全体を再生成せず、安定IDを使った変更差分だけを返す。
-15. 1サイクル内で、仮説に必要な探索を複数のaction-observation stepとして反復し、
-    全結果を評価してからサイクルを閉じる。
-16. Legal Profileでは、Solverが`ExplorationIntent`で明示した既知Articleだけを起点として、
-    同じcycleで最大1ホップのGraph検索を行う。本文取得だけを理由に全predicate・全modeを自動取得しない。
-17. 1サイクルはTool実行回や1ホップではなく、1つの仮説・探索方針に対する
-    上限付きの仮説検証単位とする。根拠を探し切るか、本文取得・step・時間のいずれかの
-    Cycle上限に達した時点で必ず結果を評価し、完了または更新した方針で次Cycleへ進む。
-18. 本書の`Graph Review`は独立Agentや任意の`Reviewer`ではなく、SolverがGraph候補の
-    関連性と本文取得順を判断するモードを指す。Reviewerを無効にしてもGraph Reviewは実行できる。
-19. 再帰探索は純粋な木にせず、案件内探索Graph、frontier、展開済み集合、CycleRecordで管理する。
-20. LLMへ提示または出力させるstatus・judgment・actionの全値は、許容値だけでなく意味と決定主体をPromptに定義する。
-21. Legal ProfileのGraph最大hopは`1`に固定し、OpenSearch起点を深さ0として数える。
-22. 各検索は対象WorkItemと、原則として1件以上のHypothesis、その検証に必要な検索範囲を表す
-    `ExplorationIntent`へ結び付ける。具体的Hypothesisをまだ立てられない初回候補発見だけは、
-    理由を明示したWorkItem単位のIntentを許可する。
-    Legal ProfileのGraph検索は、Solverが明示した起点、検索mode、意味predicateまたは原文関係、方向、
-    必要な構造filterだけを取得し、Programが未指定の意味predicateを追加しない。
-23. LegalRuleMLはNeo4jの物理schemaとして採用せず、法的な意味仮説と原文、Context、出典、時間を
-    追跡可能に分離するための参照モデルとして利用する。
-24. Legal ProfileがLLMへ示すGraph方向は`from_subject / to_subject`の2値に統一する。
-    `from_subject`は関係のSUBJECT（Neo4jのfrom側）からOBJECT（to側）へ辿る方向、
-    `to_subject`はOBJECT（to側）からSUBJECT（from側）へ辿る方向である。旧称の
-    `outgoing / incoming`はPrompt、Provider schema、ToolResult、CaseStoreの新規データで使用しない。
-    Neo4jには方向表示値を保存せず、既存のfrom/toと検索起点からTool Adapterが決定する。
-25. `MENTIONS`はLegal Graphから排除する。単に文中へ登場しただけの法令・条文をNeo4jのRelation、
-    Graph探索selector、直接本文取得、根拠充足に使用しない。ガイドと条文の明示的な対応は
-    `EXPLAINS`として扱い、通常の言及本文は特別なGraph関係へ変換せずOpenSearchの原文として検索する。
-26. Legal Profileの`fetch_articles`は、指定した各ArticleについてOpenSearchに登録済みの全本文チャンクを
-    取得する。Articleあたりの取得件数上限を契約に設けず、内部page sizeで安定順に反復取得する。
-    全pageを取得できた場合だけcontentとToolResultを`succeeded`にし、途中失敗・timeout・対象0件を
-    部分成功へ変換しない。1 ToolRequestと1 Cycleで選べるArticle数の上限は維持する。
-27. Neo4jは共有される法令構造・原文上の関係・未確認RelationAssertionだけを保持する。
-    案件固有のWorkItem、Hypothesis、ExplorationIntent、DiscoveryLink、frontier、Evidence採否は
-    CaseStoreに保持し、Neo4jへ書き戻さない。RelationAssertionは`SUBJECT / OBJECT`で両端Articleへ、
-    `CLASSIFIED_IN`でClassificationRunへ接続し、
-    存在自体を未確認候補として扱う。検索時Solverの案件判断で正式Relationへ自動昇格させない。
-28. Graph schemaまたは法令・ガイドの入力を変更した場合は、同一の入力snapshotからOpenSearchとNeo4jを
-    両方再構築する。Neo4jだけを再seedして本文とGraphのrevisionをずらさない。seed manifestと監査で
-    schema version、`sourceSnapshotId`、取得できる場合のsource revision、Document・Article ID、
-    content hashの対応を確認する。
-29. `/admin/seed`は本文、構造、原文上の明示参照までを決定的に投入し、LLM意味分類の完了を待たない。
-    意味分類はsnapshot単位の再開可能な非同期jobとし、完了した`ClassificationRun`を一括publishする。
-30. 意味関係は物理Edgeとして重複生成せず、`RelationAssertion.proposedPredicate`へ
-    `IMPLEMENTS / INCORPORATES / USES_DEFINITION / EXCEPTION_TO / OVERRIDES`のいずれか1つを保存する。
-    `APPLIED_BY`は新Graphへ生成せず、準用・読み替えは`INCORPORATES`で表す。
-31. `REFERENCES.referenceKind`の旧ヒューリスティック値を法的意味の検索条件に使用しない。
-    原文Edgeは引用箇所と抽出来歴を保持し、意味分類は引用元・引用先本文を読む非同期LLMが行う。
-32. Caseは`sourceSnapshotId / graphSchemaVersion / classificationRunId`を固定する。検索途中に新しい分類Runが
-    publishされても同一Caseへ混在させず、分類漏れと「意味関係なし」を同一視しない。
-33. 通常のGraph検索は1件の意味predicateと1方向を指定したRelationAssertion検索を基本とする。
-    生の`REFERENCES/to_subject`は高fan-inになりやすいため通常QAの既定経路にせず、明示参照の
-    `from_subject`または十分に限定された監査用途だけで使用する。
-34. 非同期意味分類の論理単位は、1組の端点とそれに結び付く参照箇所群を持つ
-    `RelationClassificationCandidate` 1件とする。複数targetや無関係なArticleを同じLLM判断へ束ねない。
-    1候補の複数参照箇所は省略せず同じ候補内で評価し、両Article本文も候補内に閉じて提示する。
-    根拠span IDは`<articleId>::span-N`として候補間・Article間で一意にし、局所的な`span-1`を使わない。
-35. 分類LLMの既定は1候補/呼出しとする。複数候補batchは、対象modelで単件との判断不変性をfixtureで
-    確認した場合だけProfileで明示的に有効化できる。分類の保存batch・再開checkpointはLLM入力batchと
-    分離し、1候補ずつでも途中結果を失わない。候補抽出時のheuristic、旧`suggestedType`、
-    `referenceKind`を分類LLMへの正解ヒントとして提示しない。
+2. 仮説検証を小さく繰り返し、1 Cycle内で複数のaction-observation stepを実行する。
+3. 汎用基盤と検索対象のDomain Packを分離する。
+4. 仮説、検索scope、関連性、根拠、完了はSolverが判断し、プログラムは実行事実と構造契約だけを扱う。
+5. LLMの登場人物はSolverと任意Reviewerだけにし、Projector等を独立Agentにしない。
+6. CaseStoreを案件状態の唯一の正本とし、Solverは安定IDを使った変更差分だけを返す。
+7. Graph探索は案件内Graph、frontier、展開済みscopeで管理し、LLMには未評価・再評価差分と短い台帳を渡す。
+8. status、Command、Tool、Model Profileは型付き契約を正本とし、PromptとProvider schemaを同期する。
+9. Reviewerは任意かつ既定無効、初期CaseStoreはインメモリ、同一Runのproviderは1つとする。
+10. 法令Graphの物理定義、探索上限、非同期Relation分類は5章と7章、実装順は12章を正とする。
+11. SQL生成、DB永続化、サブエージェントは初期実装の対象外とする。
 
 ## 2. 目的と非目的
 
 ### 2.1 目的
 
-検索対象に依存しない、次のエージェントループを実装する。
-
-```text
-作業を分解する
-  → 仮説を立てる
-  → 仮説を検証する行動を選ぶ
-  → ツール結果を観察する
-  → 仮説・作業構造を更新する
-  → 必要な範囲だけ繰り返す
-  → 根拠付きの成果を返す
-```
+検索対象に依存せず、作業分解、Hypothesis作成、検証行動、Tool結果の観察、状態更新、
+完了判定、根拠付き成果返却を反復するエージェントループを実装する。
 
 法令検索は、このループを最初に接続して評価する業務ドメインである。
 
@@ -347,556 +87,51 @@ Phase 1の契約テストは`agent-api/tests/test_agent_framework.py`を正本�
 
 ## 3. 全体構成
 
-```text
-CaseStore（Data Store）
-    │
-    ▼
-Projector ── AgentView（Input）──→ Solver（LLM）
-    ▲                                  │
-    │                                  ▼
-    │                         SolverDecision（Output）
-    │                                  │
-    │                                  ▼
-    │                              AgentLoop
-    │                         ┌────────┴────────┐
-    │                         │                 │
-    │                    状態差分を適用    検証済みToolRequest
-    │                         │                 │
-    └─────────────────────────┘                 ▼
-                                          Search Logic
-                                           │         │
-                                      検索実行   ToolResult
-                                           ▼         │
-                                OpenSearch / Neo4j   │
-                                   （Data Store）     │
-                                                     │
-                         CaseStore ◀─────────────────┘
-```
+構成図、1 Cycleの流れ、CaseStoreとAgentViewの関係は
+[対になる視覚ガイド](generic_iterative_agent_framework_plan_visual.md)へ分離する。本章は実装責務だけを定義する。
 
-`AgentLoop`は判断主体ではない。状態を読み、適切なProfileでLLMを呼び、
-出力を機械的に検証し、ツールを実行して結果を保存する。
+### 3.1 実行コンポーネント
 
-この図は検索時の中心経路を示す。`Input`と`Output`は登場人物ではなく、LLM呼出し境界の契約である。
-`Projector`も独立Agentや独立サービスではなく、`context.py`がCaseStoreから`AgentView`を組み立てる
-決定的な処理の呼称とする。任意の`Reviewer`は中心経路の後段で最終結果を検査し、既定では呼び出さない。
-
-### 3.1 5分類による整理
-
-| 分類 | 具体要素 | 一言で表す責務 |
+| コンポーネント | 種別 | 責務 |
 |---|---|---|
-| Data Store | `CaseStore` | 案件の作業・仮説・探索・Evidence・判断履歴を保存する案件内正本 |
-| Data Store | `OpenSearch` | 法令本文の検索と、Article全文取得に用いる共有データストア |
-| Data Store | `Neo4j` | 法令構造、原文上の関係、未確認RelationAssertionを保持する共有Graph |
-| Input | `Projector` → `AgentView` | CaseStoreから現在のLLM呼出しに必要な情報を決定的に投影する |
-| LLM | `Solver` | 作業分解、仮説、検索方針、候補の意味評価、完了判断、回答統合を行う |
-| Output | `SolverDecision` | Solverが決めた状態差分と次の行動を構造化して返す |
-| Search Logic | Legal Tool Adapter / `ToolResult` | Solverが指定した検索条件で固定検索を実行し、実行状態と取得物をCaseStoreへ戻す |
+| Solver | LLM | 作業分解、Hypothesis、検索scope、Evidence採否、Cycle継続・終了、最終回答を判断する |
+| Reviewer | 任意LLM | 最終回答案と根拠の不整合を指摘する。既定では無効 |
+| AgentLoop | Program | Model・Tool呼出し、予算、checkpoint、構造検証、CaseStore更新を行う |
+| Context Projector | Program | CaseStoreの正本から用途別AgentViewを決定的に生成する。独立Agentにはしない |
+| ModelPort | Port | provider差を隠し、用途別Profileで選んだmodelへ構造化入出力を提供する |
+| ToolPort | Port | Tool定義、権限、read-only・parallel-safe属性、実行結果を共通化する |
+| Legal Domain Pack | Domain | 法令Prompt、Evidence変換、検索selector、Graph語彙を提供する |
+| OpenSearch / Neo4j Adapter | Adapter | 固定されたTool契約を各backendへ変換する。自由queryをLLMへ開放しない |
+| CaseStore | Data Store | 案件状態、探索履歴、Evidence、Cycle・Step checkpointを保持する |
 
-境界を次のように固定する。
+Solverのresearch、integration、Graph Reviewは別Agentではなく、同じSolverの呼び出し用途である。
+Projector、Explorer、Integrator、Answerer、Schedulerを独立した登場人物として追加しない。
 
-- `Projector`は重要度・関連性を判断しない。保存済み情報を固定規則でjoin、重複排除、整形、page分割する。
-- `AgentView`は永続化しないread modelであり、CaseStoreの正本を置き換えない。
-- `Solver`だけが仮説、法的意味、候補の関連性、Evidence採否、調査完了を判断する。
-- Search Logicは未指定条件を補完せず、法的意味に基づく絞込みや順位付けを行わない。
-- `ToolResult`は取得結果であり、それだけでEvidence採用済みまたは仮説確認済みとは扱わない。
-- `AgentLoop`は`SolverDecision`を構造検証し、許可された処理を実行してCaseStoreへ適用する。
-- `AgentLoop`は5分類を接続する実行制御であり、LLMとは別の判断主体として数えない。
-- `Projector`はNeo4jやOpenSearchを直接読まない。検索結果は必ず`ToolResult`としてCaseStoreへ保存してから投影する。
+### 3.2 判断境界
 
-データの流れは次の一方向を基本とする。
+| 判断・処理 | 担当 |
+|---|---|
+| WorkItem分解、Hypothesis、検索語、Graph selector、候補の関連性、Evidence採否、完了判断 | Solver |
+| 最終回答の指摘と差戻し | Reviewer（有効時のみ） |
+| 既知ID、enum、件数、権限、予算、参照整合、status遷移、Tool実行事実 | Program |
+| 検索候補生成、本文取得、Graph scope実行 | Tool Adapter |
 
-```text
-OpenSearch / Neo4j
-        ↓ Search Logic
-     ToolResult
-        ↓
-     CaseStore ──→ Projector ──→ AgentView ──→ Solver
-        ▲                                      │
-        └──── AgentLoop ←── SolverDecision ────┘
-```
+Programは意味判断を補完しない。LLMの出力が構造契約に違反した場合は、既知の候補へ勝手に置換せず、
+契約修復または明示的な停止へ進む。
 
-### 3.2 責務
+### 3.3 Data Storeの責務
 
-| 主体 | 担当すること | 担当しないこと |
-|---|---|---|
-| Solver | 作業分解、仮説、意味評価、根拠選択、追加調査、完了判断、回答 | ツールの直接実行、存在しないIDの生成 |
-| Reviewer | 回答と根拠の整合確認、具体的な修正指摘 | ツール実行、後続経路の直接制御 |
-| AgentLoop | LLM呼び出し、状態更新、上限管理、ツール実行、再試行制御 | 法的関連性、十分性、重要度の判断 |
-| Tool Adapter | 検索・本文取得・Graph取得と実行結果の正規化 | 取得物の法的評価 |
-| CaseStore | CaseStateの保存と読出し | Prompt編集、意味判断、重要度選択 |
-| Domain Pack | 法令用Prompt、ツール定義、根拠表示形式 | 汎用ループの制御 |
-
-### 3.3 Data Store・Input・Outputの対応
-
-英語の型名・field名は実装上の識別子として残すが、人間向けの図、表、Prompt仕様では名前だけを並べない。
-初出箇所で「何を表すか」と「誰が決めるか」を日本語で併記する。同じfieldを後続の型定義で再掲するときは、
-本節またはstatus語彙への参照を付ける。
-
-#### 検索時
-
-```text
-Data Store: CaseStore
-案件の質問、作業、仮説、探索履歴、Evidence、過去のSolver判断を保存
-        │
-        ▼
-Input: AgentView
-Projectorが今回のSolver判断に必要な案件状態を読み取り専用で組み立てる
-        │
-        ▼
-LLM: Solver
-仮説、検索方針、候補の関連性、Evidence採否、完了を判断
-        │
-        ▼
-Output: SolverDecision
-案件状態の変更差分と、次に実行する検索要求を返す
-        │
-        ▼
-Search Logic: Legal Tool Adapter
-既知ID・allowlist・件数・depthを検証し、固定検索を実行
-        │
-        ├── OpenSearch: 内容検索とArticle全文取得
-        └── Neo4j: 既知Articleから関係候補を1ホップ取得
-        │
-        ▼
-Output: ToolResult
-検索の実行事実と取得候補を返す。関連性や根拠採用は確定しない
-        │
-        ▼
-Data Store: CaseStore
-ToolResult、候補catalog、探索Linkを保存し、次のAgentViewの正本にする
-```
-
-`AgentView`は次を意味する。
-
-```text
-AgentView（Solverへ渡す入力）
-│
-├─ question
-│   利用者の元の質問
-│
-├─ work_tree
-│   現在の階層WorkItemと、未解決・解決済み等の状態
-│
-├─ hypotheses
-│   Solverが立てた検証可能な仮説と、支持・反証・未解決の状態
-│
-├─ recent_tool_results
-│   直前に実行した検索の成功・失敗・タイムアウトと取得件数
-│
-├─ graph_review_batch
-│   今回Solverが関連性を評価する、新規または再評価対象のGraph候補
-│
-├─ material_evidence
-│   Solverが内容を読んで根拠採否を判断できるArticle本文
-│
-└─ budget
-    残りCycle、本文取得件数、step、時間の機械的な上限
-```
-
-`SolverDecision`は次を意味する。
-
-```text
-SolverDecision（Solverが返す出力）
-│
-├─ case_update
-│   WorkItem、Hypothesis、gap、Evidence採否等に対する変更差分
-│   内容はSolverが判断し、Programは既知IDと参照整合だけを検証する
-│
-├─ tool_requests
-│   次に実行するOpenSearch、Graph検索、Article全文取得の要求
-│   検索語、predicate、direction、構造filterはSolverが選ぶ
-│
-├─ frontier_decisions
-│   Graph候補を今回取得する、後へ回す、現在の仮説では不要とする判断
-│
-├─ next_action
-│   同じCycleを続ける、次Cycleで仕切り直す、回答を確定する、の選択
-│
-└─ final_answer
-    調査完了時の根拠付き回答。調査継続時は空にする
-```
-
-Graph検索の`ToolResult`は次を意味する。候補の詳細はCaseStoreのGraph catalogへ正規化し、
-Projectorは同じ内容を`recent_tool_results`と`graph_review_batch`へ重複表示しない。
-
-```text
-ToolResult（Search Logicが返す検索結果）
-│
-├─ status
-│   検索が成功・失敗・タイムアウトのどれだったか
-│   Search Logicが実行事実から決める
-│
-├─ candidate_article_ids
-│   指定された検索scope内で見つかった候補ArticleのID
-│   候補であって、質問との関連性やEvidence採用を意味しない
-│
-├─ relation_assertions
-│   Neo4jから取得した未確認の意味関係候補
-│
-│   ├─ proposed_predicate
-│   │   具体化、準用、定義利用、例外、優先関係のどの候補か
-│   │   非同期分類LLMが判断し、検索時Solverが両端本文で再評価する
-│   │
-│   ├─ subject_article_id / object_article_id
-│   │   関係の向きを構成するSUBJECT側とOBJECT側のArticle ID
-│   │
-│   ├─ basis_edge_id
-│   │   この意味候補の根拠となった原文上のREFERENCESのID
-│   │
-│   └─ supporting_spans
-│       非同期分類LLMが選んだSUBJECT・OBJECT両Articleの一意span IDと原文
-│       IDは`<articleId>::span-N`で、どの本文の根拠かを単独で識別できる
-│
-├─ classification_run_id
-│   どのpublish済み非同期分類Runから取得した候補かを示す版ID
-│   Case開始時にProgramが固定し、検索途中で切り替えない
-│
-└─ coverage
-    当該ClassificationRunの処理件数、判断不能件数、失敗件数
-    不完全な場合、候補がないことを意味関係の不存在と解釈しない
-```
-
-#### 非同期意味分類時
-
-```text
-Data Store: OpenSearch・Neo4j
-OpenSearchから両端Article本文、Neo4jから原文REFERENCESと端点・来歴を読む
-        │
-        ▼
-Input: Relation Classification Input
-1組の端点と、その候補に結び付く参照箇所群・両Article全文だけをLLMへ渡す
-        │
-        ▼
-LLM: Relation Classifier
-全参照箇所と両端本文を対応付け、意味predicateを判断
-        │
-        ▼
-Output: Relation Classification Output
-0件以上のRelationAssertion候補と、意味候補を作らない参照の分類結果を返す
-        │
-        ▼
-Program Validation
-既知端点、predicate enum、引用の存在、snapshot・hash・件数だけを検証
-        │
-        ▼
-Data Store: Neo4j
-RelationAssertionとClassificationRunを保存し、完了Runだけ一括publish
-```
-
-非同期分類のInputとOutputは次を意味する。
-
-```text
-Relation Classification Input（非同期分類LLMへの入力）
-│
-├─ decision_key
-│   Programが発行した候補ID。LLMは変更・追加・省略しない
-│
-├─ subject_article / object_article
-│   候補の両端Article全文。各本文は候補内に閉じ、他候補と共有表示しない
-│   本文は`<articleId>::span-N`をkeyとする安定したspan集合で示す
-│
-├─ reference_occurrences
-│   この端点ペアとbasisに結び付く全参照箇所
-│   各要素にbasis edge、引用文字列、参照を書いたcontent unit、対応span ID群を含む
-│
-├─ source_snapshot_id / content_hash
-│   両端それぞれについて、どの原文版を分類したかを固定する識別情報
-│
-└─ allowed_predicates
-    LLMが選択できる5つの意味関係と、その向きの日本語定義
-
-Relation Classification Output（非同期分類LLMの出力）
-│
-├─ assertions
-│   意味関係がある可能性があるとLLMが判断した候補
-│   decision key、subject、predicate、object、basis edge、両端の根拠span IDを含む
-│
-└─ outcomes
-    意味関係を作らない一般参照、判断不能、分類失敗の結果
-    Programはこれを意味Relationへ変換せず、ClassificationRunのcoverageへ集計する
-```
-
-同じ候補に見出し断片、定義的参照、実体規定等の複数箇所があっても、最初の一致だけを選ばず
-`reference_occurrences`へ全件入れる。どの箇所がどのpredicateを支えるかはLLMが判断する。
-Programは参照文字列の全出現位置を決定的にspanへ対応付けるが、法的意味や優先する箇所を決めない。
-候補生成元、旧`suggestedType`、source content unit全体から付けたheuristic分類はAgentViewへ出さない。
-
-Data Storeごとの入出力責務を次に固定する。
-
-| Data Store | 保存する入力 | 読み出す出力 | 保存しないもの |
+| Data Store | 保存する正本 | 読み出すもの | 保存しないもの |
 |---|---|---|---|
-| `OpenSearch` | 同一snapshotのArticle全chunkと検索用field | keyword・semantic検索候補、Article全文 | WorkItem、仮説、案件判断 |
-| `Neo4j` | 法令構造、原文REFERENCES、EXPLAINS、RelationAssertion、ClassificationRun | 既知Articleとの1ホップ関係候補と分類coverage | 質問ごとの関連性、Evidence採否、回答 |
-| `CaseStore` | WorkItem、Hypothesis、ToolResult、候補catalog、Evidence、SolverDecision | ProjectorがAgentViewを作るための案件状態 | 共有法令本文・共有Graphの正本 |
+| CaseStore | Case、WorkTree、Hypothesis、ExplorationState、Cycle・Step、ToolResult、Evidence、案件内判断 | AgentView生成に必要な案件状態 | 共有法令本文、共有Graph schema |
+| OpenSearch | snapshotに属する法令・ガイド本文と検索用index | 候補と指定Articleの全登録済み本文 | 案件ごとの関連性、Hypothesis、Evidence採否 |
+| Neo4j | 法令構造、原文`REFERENCES / EXPLAINS`、publish済みRelationAssertionとClassificationRun | 明示selectorに一致する1ホップ候補とcoverage | 案件ごとの判断、本文取得状態、回答 |
+
+非同期Relation分類は回答AgentのCaseStoreを使用しない。OpenSearch・Neo4jの固定snapshotから
+`RelationClassificationCandidate`を作り、分類Runのcheckpointと結果を専用jobとして保存する。
+分類入力・出力の正式契約は5.1.3、AgentViewとSolverDecisionは5.3、ToolResultは5.4を正とする。
 
 ## 4. 反復ループ
-
-### 4.0 人間向けの探索全体像
-
-本節は、後続の状態型・契約・上限を読む前に、探索がどのようにつながるかを理解するための概念図である。
-型や状態遷移の正確な仕様は4.1以降を正本とする。
-
-探索の中心は、質問全体を一度に検索することではない。SolverがWorkItemの未確認事項を選び、
-それを確かめる行動を実行し、取得本文をEvidenceとしてWorkItemとHypothesisを逐次更新する。
-
-```text
-┌─────────────────────────┐
-│ 利用者の質問             │
-└────────────┬────────────┘
-             ▼
-┌─────────────────────────┐
-│ Cycle開始: Solver        │
-│                         │
-│ ・元の質問を確認         │
-│ ・WorkItemを確認・分解   │
-│ ・Hypothesisを確認       │
-│ ・今回のfocusを決める    │
-└────────────┬────────────┘
-             ▼
-┌─────────────────────────┐
-│ 未確認事項・gapを選ぶ    │
-│ 「次に何を確かめるか」   │
-└────────────┬────────────┘
-             ▼
-       どう発見するか
-             │
-   ┌─────────┼─────────────────┐
-   │         │                 │
-   ▼         ▼                 ▼
-具体的な候補がある   内容から探す      関係から探す
-   │                 │                 │
-   │          ┌──────┴──────┐   ┌──────┴────────┐
-   │          │ OpenSearch  │   │ Neo4j Graph  │
-   │          │ keyword     │   │ 既知の起点    │
-   │          │ semantic    │   │ 関係種別・方向│
-   │          └──────┬──────┘   │ 1ホップ       │
-   │                 │          └──────┬────────┘
-   │                 ▼                 ▼
-   │          OpenSearch候補       Graph候補
-   │                 │                 │
-   └─────────────────┴────────┬────────┘
-                              ▼
-                    Solverが候補を選ぶ
-                              │
-                              ▼
-                 ┌──────────────────────┐
-                 │ OpenSearchから本文取得│
-                 └───────────┬──────────┘
-                             ▼
-                         本文Evidence
-                             │
-                             ▼
-                 ┌──────────────────────┐
-                 │ Solverが意味を評価   │
-                 │ ・Hypothesis更新     │
-                 │ ・WorkItem更新       │
-                 │ ・gaps更新           │
-                 │ ・frontier更新       │
-                 └───────────┬──────────┘
-                             ▼
-                      調査は完了したか
-                             │
-                 ┌───────────┴───────────┐
-                 │                       │
-                完了                    未完了
-                 │                       │
-                 ▼                       ▼
-          根拠付き回答を作成      同じ方針を続けられるか
-                                         │
-                             ┌───────────┴───────────┐
-                             │                       │
-                        続けられる              仕切り直す
-                        予算もある              または予算上限
-                             │                       │
-                             ▼                       ▼
-                      同じCycleで              現Cycleを閉じる
-                      次のgapを選ぶ                  │
-                             │                       ▼
-                             └──────────────→ 次Cycleを開始
-                                                   │
-                                                   ▼
-                                        引継ぎ済みCaseStateを読み、
-                                        分解・仮説・方針を再確認
-```
-
-3つの探索経路は、次のように使い分ける。
-
-| 状況 | 行動 |
-|---|---|
-| OpenSearchまたはGraphに具体的な候補Articleが既にある | その候補本文を取得する |
-| 制度名、用語、確認したい内容から新しい起点を探す | OpenSearchのkeyword・semantic検索を使う |
-| 取得済みArticleから委任先、参照先、準用先等の構造的な関係をたどる | 既知Articleを起点にNeo4jを1ホップ検索する |
-
-Article IDの既知・未知は、探索方法を決める意味判断ではない。本文取得では候補Article ID、
-Graph検索では起点Article IDが既知であることをProgramが実行前に検証する。OpenSearchはArticle IDが
-分からない状態から候補を発見できる。本文中に現れた条番号を、ProgramやSolverがArticle IDへ組み立てない。
-
-OpenSearchとNeo4jは本文の取得元を分担するものではない。OpenSearchは内容による候補発見とArticle本文取得、
-Neo4jは既知Article間の関係による候補発見を担当する。どちらから発見した候補も、本文はOpenSearchから取得する。
-
-```text
-                         Articleを発見する経路
-                                  │
-                    ┌─────────────┴─────────────┐
-                    ▼                           ▼
-              OpenSearch                     Neo4j
-        内容・用語から候補を探す       既知Articleとの関係から探す
-                    │                           │
-                    ▼                           ▼
-              Article候補                 Article候補
-                    └─────────────┬─────────────┘
-                                  ▼
-                            Solverが選択
-                                  ▼
-                      OpenSearchから本文取得
-                                  ▼
-                         grounding Evidence
-```
-
-検索候補とGraph候補はナビゲーション情報であり、それだけではHypothesisの支持・反証やWorkItemの解決に
-使わない。候補Article本文を取得し、Solverが内容を評価して初めてgrounding Evidenceとして利用できる。
-
-```text
-WorkItem: 解く必要がある個別の問い
-   │
-   └─ Hypothesis: 本文で検証できる命題
-          │
-          └─ 未確認のgap
-                 │
-                 ├─ OpenSearch / Graphで候補を発見
-                 ├─ Solverが候補を選択
-                 └─ 本文EvidenceでHypothesisを更新
-                                      │
-                                      └─ SolverがWorkItemを解決できるか判断
-```
-
-初期時点で検証可能な具体的命題がなければ、法令名・条文番号を推測したHypothesisを無理に作らず、
-WorkItemを起点にOpenSearchで候補を発見する。取得本文から委任・参照等が判明した時点で、
-その本文に基づくHypothesisとGraph探索を追加する。Graphでは起点、関係種別、方向をHypothesisに沿って扱い、
-到達先Articleやその内容を事前に決め打ちしない。
-
-Legal Profileの方向selectorは`from_subject / to_subject`だけを許可する。両方向を必要とする場合は
-この2値を明示的に列挙し、`all`や意味の曖昧な別名を使わない。`MENTIONS`はGraph候補発見に使用せず、
-ガイドとArticleの明示対応である`EXPLAINS`だけをLegal Graphの関係として扱う。
-
-#### 仮説スコープによる候補発見
-
-検索後に大量の候補を一括で選別するだけでなく、検索要求そのものを現在のWorkItem・Hypothesisへ限定する。
-Solverは「何を確かめるための検索か」と、使用する検索経路・selectorを`ExplorationIntent`として返す。
-Programは既知ID、許可されたselector、件数、権限、上限を検証してそのまま実行し、Hypothesisの文面から
-検索語、関係種別、方向、優先度を補完しない。
-
-```text
-WorkItem W1
-  └─ Hypothesis H1: 本文で検証する命題
-       └─ ExplorationIntent I1
-            ├─ objective: 今回確認する不足事項
-            ├─ OpenSearch
-            │    └─ query / keyword・semantic / 文書範囲
-            └─ Neo4j
-                 └─ 起点Article / mode / predicateまたは原文関係 / direction / 構造filter
-                              │
-                              ▼
-                    指定scope内の候補だけ取得
-                              │
-                              ▼
-                 Solverが本文取得対象を選び、意味を評価
-```
-
-役割と判断境界を含めた探索イメージは次のとおりである。
-
-```text
-┌──────────────────────────────────────────────────────────────┐
-│ Solver（LLM）                                                │
-│                                                              │
-│ WorkItem W1                                                  │
-│   └─ Hypothesis H1                                           │
-│        └─ gap: まだ本文で確認できていないこと                │
-│             │                                                │
-│             ▼                                                │
-│        ExplorationIntent I1                                  │
-│        ・何を確認するか                                      │
-│        ・OpenSearchかGraphか                                  │
-│        ・query / filter または relation selector             │
-└───────────────────────────┬──────────────────────────────────┘
-                            │ 意味判断済みの検索要求
-                            ▼
-======================= Program境界 ============================
-                            │
-             既知ID・allowlist・件数・depth・権限だけ検証
-                            │
-              ┌─────────────┴─────────────┐
-              ▼                           ▼
-┌────────────────────────┐   ┌──────────────────────────────┐
-│ OpenSearch             │   │ Neo4j                       │
-│ query / mode / filter  │   │ seed Article                │
-│                        │   │ mode / predicate / direction│
-│                        │   │ classification run / filter │
-└────────────┬───────────┘   └──────────────┬───────────────┘
-             │                               │
-             └─────────────┬─────────────────┘
-                           ▼
-                 scope内の候補Node・Link
-                           │
-                  Frontier(Node × H1)
-                           │
-======================= Program境界 ============================
-                           ▼
-┌──────────────────────────────────────────────────────────────┐
-│ Solver（LLM）                                                │
-│                                                              │
-│ 候補をselect / defer / reject                                │
-│        │                                                     │
-│        └─ selectしたArticle本文を取得                         │
-│                    │                                         │
-│                    ▼                                         │
-│             本文EvidenceでH1を評価                           │
-│               ├─ supported   → WorkItemの解決を検討          │
-│               ├─ contradicted→ H1前提の作業を見直す          │
-│               └─ unresolved  → 同Cycleで追加Intent、          │
-│                                  または次Cycleで仮説を再構成   │
-└──────────────────────────────────────────────────────────────┘
-```
-
-上段と下段のSolverが意味判断を担当し、中段のProgramはSolverが指定したscopeを変更せず実行する。
-Program境界をまたいだ時点でHypothesisが正しいと確定したわけではない。検索scopeは候補数を抑えるための
-仮説由来の制約であり、Hypothesisの支持・反証は取得したArticle本文を読んだ後にだけ決める。
-
-Legal Profileでは、Graphの意味predicateを空や`all`にして全種別を取得しない。
-Solverが現在のHypothesisから必要なpredicateを特定できない場合は、まずOpenSearchで起点または関係を示す
-本文を取得する。複数predicateが同じHypothesisの検証に必要なら、Solverが別々のselectorとして理由とともに
-明示する。例えば、委任・具体化は`IMPLEMENTS`、準用・読み替えは`INCORPORATES`、定義利用は
-`USES_DEFINITION`、例外は`EXCEPTION_TO`、優先関係は`OVERRIDES`を候補にできるが、この対応をProgramの
-固定ルールにはしない。明示参照そのものをたどる場合だけ`mode=explicit_reference`を使用する。
-
-OpenSearchも質問全文を毎回無条件に検索せず、SolverがHypothesisの未確認部分から作ったqueryと、必要な場合だけ
-文書・法令系統・authority type等のfilterを使う。ただしBM25、vector検索、Graph検索が返す各候補の法的関連性を
-検索エンジンが保証するわけではない。「仮説に沿った内容のみ検索する」とは、backendへ渡す探索範囲を
-Hypothesis由来の明示scopeへ限定することであり、返却候補を確認なしに根拠採用することではない。
-
-Hypothesisが反証された場合、その`ExplorationIntent`と取得結果は履歴として残すが、新Hypothesisへ自動転用しない。
-Solverが既存Nodeを新Hypothesisへ再採用するか、新しいselectorで検索し直す。これにより、最初の仮説が大きく
-外れた場合も、次Cycleで探索範囲を仕切り直せる。
-
-同じArticleがOpenSearchとGraph、または複数Hypothesisから発見されても、案件内では1つのNodeへ正規化する。
-発見経路はLinkとして全て残し、候補の意味判断は`Node × Hypothesis`のfrontierで分ける。本文は一度だけ取得し、
-複数Hypothesisから同じEvidenceを参照できる。
-
-```text
-OpenSearch ──────────────┐
-                         ├─→ 同じArticle Node ─→ 本文取得は1回
-Graph ───────────────────┘             │
-                                       ├─ Frontier(Node × H1)
-                                       └─ Frontier(Node × H2)
-```
-
-Graph最大hopが1の場合、深さ1の候補本文からさらに別規定の確認が必要になっても、そのNodeからGraphを
-再展開しない。Solverが本文中の法令名、条番号、確認事項を使ってOpenSearch検索を行い、発見したArticleを
-新しい深さ0の起点にする。Graph候補がないことだけを、関係する規定の不存在とは判断しない。
-
-各ToolResultは直後のSolver判断で評価し、WorkItem、Hypothesis、gap、frontierを差分更新する。
-Cycle末尾で全結果を初めて要約し直す構造にはしない。現Cycleを閉じた後、次Cycleの最初に保存済みの
-CaseStateを読み、元の質問、作業分解、仮説、未確認frontierを再確認して探索計画を立てる。
 
 ### 4.1 Solver判断と1サイクル
 
@@ -906,53 +141,26 @@ CaseStateを読み、元の質問、作業分解、仮説、未確認frontierを
 未評価のToolResultを残さずSolverの終了評価を通してCycleを閉じる。1回のToolRequest、
 1回のLLM呼び出し、1ホップのGraph展開をサイクルとは呼ばない。
 
-```text
-1サイクル
-  1. FocusするWorkItem・Hypothesisを選ぶ              Solver
-  2. Cycle goal、探索方針、完了・失敗条件を決める      Solver
-  3. 必要な間、action-observation stepを小さく反復する
-       a. 次に確かめることとToolRequestを決める        Solver
-       b. Step開始状態を保存する                       Program
-       c. Toolを実行しToolResult・Evidenceを保存する   Program
-       d. 結果を観察し仮説・frontierを更新する          Solver
-       e. 同じ方針を続けるか、Cycleを閉じるか判断する  Solver
-  4. 本文取得・step・Cycle時間のいずれかの上限前に新しいactionを止める Program
-  5. Cycle全体の結果をWorkItem・Hypothesisへ反映する   Solver
-  6. finalizeまたは次Cycleのgoal・strategy・引継ぎを決める Solver
-  7. CycleRecordを閉じ、cycle数を加算する              Program
-```
+1. Solverがfocus、Cycle goal、探索方針、完了・失敗条件を決める。
+2. SolverのToolRequest、Programによる保存・Tool実行、Solverによる観察と状態更新をStepとして反復する。
+3. Programが上限前に新しいactionを止め、SolverがCycle全体を評価する。
+4. Solverが`finalize`または次Cycleへの引継ぎを決める。次Cycleのgoal・strategyは次の`start_cycle`で決める。
+5. Programが`CycleRecord`を閉じた後にcycle数を加算する。
 
-各stepのSolver呼び出しは、現在のCycle goal、WorkTree、Hypothesis、探索frontier、直前の
-ToolResultとEvidenceを読み、直前stepの評価と次のいずれかを返す。
+各Solver呼び出しは、現在のCycle goal、WorkTree、Hypothesis、探索frontier、直前の
+ToolResultとEvidenceを読み、次のdiscriminator付きCommandのいずれかを返す。
 
+- `start_cycle`: Active Cycleがないとき、今回のgoal・strategy・完了条件を決めてCycleを開始する。
 - `continue_cycle`: 同じ仮説・探索方針のまま、次の検証用ToolRequestを返す。
 - `start_next_cycle`: 今回の方針では完了できない理由とCaseStateの変更差分を返し、
-  更新した仮説・方針で別Cycleを開始する。
+  現Cycleを閉じて次Cycleへ引き継ぐ。次Cycleの計画やToolRequestは返さない。
 - `finalize`: 必要な根拠を探し切ったと判断し、CaseStateの変更差分と根拠付き最終回答を返す。
 
 同じCycleの間は、OpenSearchで起点を発見し、起点本文と1ホップを取得し、LLMが選んだ隣接本文を取得する。
 隣接本文からGraphは再展開しない。新しいGraph候補の関連性と本文取得対象は
 各stepでSolverが判断し、プログラムが再帰的に自動選択しない。
 
-```text
-Cycle 1: 仮説H1・探索方針P1・本文取得累計0/4
-  Solver判断1 → OpenSearch
-  Solver判断2 → 結果を評価し、起点Article本文を予算内で取得
-  Solver判断3 → 新規Graph差分を評価し、関係する隣接Articleを選ぶ
-  Solver判断N
-    ├─ 根拠を探し切った                → finalize
-    ├─ 同じ方針で次の検証が必要で予算が残る → continue_cycle
-    └─ 方針変更またはCycle予算上限         → Cycleを評価しstart_next_cycle
-
-Cycle 2: 更新した仮説H2・探索方針P2
-  前CycleのEvidence・frontier・失敗理由を引き継いで再試行
-```
-
-公開買付け問題では、法27条の2・27条の3、施行令7条、公開買付府令2条の5・10条等の
-候補を1 Cycleで無理に一括取得しない。Cycle 1は本文取得累計4件以内で仮説と起点を評価し、
-未取得で関連ありと判断したfrontierは、Solverが引継ぎ対象と理由を選んでCycle 2以降へ渡す。
-初期分解・中心仮説・検索起点が誤っていれば置換し、方針が妥当でも本文取得上限へ達したら、
-同じ仮説を漫然と延長せず、取得結果と次Cycleで確かめる命題を明示してCycleを閉じる。
+処理イメージは[視覚ガイドの「1 Cycleの流れ」](generic_iterative_agent_framework_plan_visual.md#4-1-cycleの流れ)を参照する。
 
 `research_cycle_count`はTool終了時やstep終了時には増やさない。Cycle全体の評価差分が契約検証を通り、
 `CycleRecord`が`completed`になった時点で増やす。Tool成功後・評価前に停止した場合は同じCycleの
@@ -987,7 +195,8 @@ Reviewer無効時のSolver呼び出しは次の範囲になる。
 プログラムは各LLM・Tool実行前に、現Cycleを評価して閉じる時間、残りCycleの最小実行時間、
 最終回答時間を別々予約する。残り時間が現actionの実行予算と予約の合計を下回る場合、
 新しいGraph ReviewやToolを開始せず、`cycle_close_required=true`をSolverへ渡す。
-Solverは手元の結果を評価し、`finalize`または次Cycleのgoal・strategy・引継ぎfrontierを返す。
+Solverは手元の結果を評価し、`finalize`または次Cycleへの結果・未解決事項・frontierの引継ぎを返す。
+次Cycleを開始する場合は、その後の`start_cycle`呼出しでgoal・strategyを決める。
 予算によって短縮された中間LLM呼出しがtimeoutした場合は、実際のprovider障害と区別して
 `cycle_step_timeout`を保存し、予約時間でCycle終了判断へ進む。
 
@@ -1022,12 +231,11 @@ Solverは1回の`continue_cycle`で複数のToolRequestを返せる。
 停止理由と手元の根拠をSolverへ渡し、限定付き回答を含む最終判断をLLMへ求める。
 
 `cycle_budget_reached=true`または`cycle_step_limit_reached=true`でも残りCycle・総step・時間がある場合、
-Solverは現方針の結果と
-次Cycleで確かめる命題を示して`start_next_cycle`を選べる。仮説・探索方針の仕切り直しに加え、
+Solverは現方針の結果と未解決命題を引継ぎに示して`start_next_cycle`を選べる。仮説・探索方針の仕切り直しに加え、
 Cycleの本文取得枠が尽きても必要と判断した未取得Evidenceが残る場合も対象とする。単なるTool終了や
 Graph 1ホップ完了だけを理由にせず、取得済みEvidenceの評価と引き継ぐfrontierを明示する。
 Cycle回数、総step、全体時間のいずれかで新しいToolを実行できない場合だけ
-`finalize_only=true`とし、`continue_cycle / start_next_cycle`のToolRequestを禁止する。
+`finalize_only=true`とし、`start_cycle / continue_cycle / start_next_cycle`を禁止する。
 
 ## 5. 状態と契約
 
@@ -1052,12 +260,18 @@ class CaseState:
     tool_requests: list[ToolRequest]
     evidence: list[Evidence]
     tool_results: list[ToolResult]
-    dependency_decisions: list[DependencyDecision]
     focus_work_item_ids: list[str]
     retained_evidence_ids: list[str]
     final_answer: FinalAnswer | None
     review: ReviewResult | None
     stop_reason: str | None
+
+class FinalAnswer:
+    text: str
+    citation_evidence_ids: list[str]
+    limitations: list[str]
+    unresolved_work_item_ids: list[str]
+    unresolved_hypothesis_ids: list[str]
 ```
 
 Legal ProfileはCase作成時に同じsnapshotのOpenSearch・Neo4jと、publish済みClassificationRunを固定する。
@@ -1073,18 +287,6 @@ publish済みRunがない場合は`classification_run_id=None`とし、意味Ass
 `Case`は利用者の案件全体である。`parent_work_item_id=None`のWorkItemは案件直下の作業、
 子WorkItemは分解された下位作業、確認作業、個別の問いを表す。階層によって型や名称を変えず、
 固定階層数も設けない。
-
-```text
-Case
-├─ WorkItem W1
-│  ├─ WorkItem W1-1
-│  │  ├─ Hypothesis H1
-│  │  └─ Hypothesis H2
-│  └─ WorkItem W1-2
-└─ WorkItem W2
-   └─ WorkItem W2-1
-      └─ Hypothesis H3
-```
 
 ```python
 class WorkItem:
@@ -1120,38 +322,6 @@ ExplorationStateは情報源の発見・取得・展開を表す案件内Graph�
 
 探索対象は純粋な木にしない。同じResourceが検索と複数のGraph関係から発見されること、相互参照で
 循環することがあるため、Resourceは案件内で1 Nodeに正規化し、発見経路は複数Linkとしてすべて残す。
-
-```text
-Case
-├─ WorkTree                         問いの分解
-│  ├─ WorkItem W1
-│  │  ├─ Hypothesis H1
-│  │  └─ Hypothesis H2
-│  └─ WorkItem W2
-│     └─ Hypothesis H3
-│
-├─ ExplorationState                情報探索の正本
-│  ├─ nodes[resource_id]            同じ対象は1 Node
-│  ├─ links[link_id]                発見経路は複数保存
-│  ├─ frontier                     次にLLMが選べる未処理候補
-│  ├─ fetched_node_ids             nodesから導出する本文取得済み集合
-│  └─ expanded_scope_keys          expansionsから導出するGraph展開済み集合
-│
-└─ CycleRecord[]                   仮説・探索方針ごとの試行
-   └─ StepRecord[]                 action-observationごとのcheckpoint
-```
-
-同じArticleが複数経路から発見される例:
-
-```text
-OpenSearch ──L1──→ A ──L2──→ B ──L4──→ D
-                       └L3─→ C ──L5──→ D
-                                      └L6──→ A  （循環Linkは保存）
-
-nodes = {A, B, C, D}                 DとAを複製しない
-links = {L1, L2, L3, L4, L5, L6}    別経路と循環は失わない
-展開 = 各Node・各scopeを成功後1回       Link保存と再展開防止を分離する
-```
 
 最初に発見した親や最小hopから表示用の探索木を派生できるが、その木を正本にしない。
 法令GraphのLinkが既存Nodeへ戻ってもLinkは保存し、本文取得と同一scopeのGraph展開は重複実行しない。
@@ -1215,9 +385,7 @@ class ExpansionSlice:
     scope_key: str
     policy_version: str
     intent_ids: list[str]
-    relation_types: list[str]
-    directions: list[Literal["from_subject", "to_subject"]]
-    reference_kinds: list[str]
+    selector_scope: dict
     status: Literal["not_started", "pending", "partial", "complete", "failed", "timeout"]
     page_request_ids: list[str]
     next_cursor: str | None
@@ -1341,23 +509,6 @@ Graph ReviewのPromptに過去の評価済み候補と全Linkを毎回再提示�
   対応WorkItem・Hypothesis、`selected / relevant_deferred / rejected`、短い前回理由、content status、
   最終Review cycle/stepを含める。全Link詳細と過去のLLM生応答は含めない。
 
-```text
-CaseStore（正本: 全Node・Link・判断履歴）
-             |
-             +-- graph_review_batch
-             |     新規候補 / 再採用候補 / 新Link差分 + 判断に必要な関係情報
-             |
-             +-- graph_review_ledger
-                   全評価済み候補の短い最新状態
-                              |
-                              v
-                    SolverのGraph Review
-                    select <= 3 / defer / reject
-                              |
-                              v
-                 DecisionをCaseStoreへ追記し最新状態を更新
-```
-
 同じfrontierを再評価した場合も過去のFrontierDecisionは削除せず、ledgerには最新Decisionだけを投影する。
 `selected`はSolverが本文取得対象に選んだ意味判断であり、本文取得が成功した意味ではない。
 取得の成否は別の`content_status`で表す。
@@ -1369,20 +520,7 @@ CaseStore（正本: 全Node・Link・判断履歴）
 
 ### 5.1.3 共有法令Graph（Neo4j）の物理定義
 
-Neo4j、OpenSearch、CaseStoreの責務を次のように固定する。
-
-```text
-OpenSearch                         Neo4j
-法令・ガイド本文の正本             共有法令構造・原文明示参照
-Article全chunk取得                 非同期分類済みRelationAssertion
-        │                                │
-        └──────── Article ID ────────────┘
-                         │
-                         ▼
-CaseStore
-案件ごとのWorkItem / Hypothesis / ExplorationIntent /
-DiscoveryLink / frontier / Evidence / Solver判断
-```
+Neo4j、OpenSearch、CaseStoreの責務は3.3のData Store契約に従う。
 
 CaseStoreの探索履歴や案件判断をNeo4jへ保存しない。同じArticleを複数案件で共有しても、ある質問での
 関連・不関連、仮説支持・反証、RelationAssertionの案件内評価によって共有Graphを変更しない。
@@ -1436,26 +574,9 @@ RelationAssertionは「法令間にこの意味関係があり得る」という
 同じ根拠参照が複数箇所へ現れる場合は、分類入力で全出現を提示し、採用した両端span IDと原文を
 Assertionへ保存する。span IDは本文hashと組み合わせて解釈し、本文改訂後の別snapshotへ流用しない。
 
-```text
-(subject:Article)<-[:SUBJECT]-(assertion:RelationAssertion)-[:OBJECT]->(object:Article)
-
-意味上の候補:
-subject ── proposedPredicate ──> object
-```
-
-下位府令が親法律を明示参照した例は次のように分ける。
-
-```text
-原文上の事実:
-下位Article ──REFERENCES──> 親Article
-
-未確認の意味候補:
-RelationAssertion
-├─ SUBJECT → 親Article
-├─ proposedPredicate = IMPLEMENTS
-├─ OBJECT  → 下位Article
-└─ basisEdgeId → 上のREFERENCES
-```
+各RelationAssertionは`SUBJECT`と`OBJECT`を1本ずつ持ち、`proposedPredicate`は
+SUBJECTからOBJECTへ向く意味候補として解釈する。原文`REFERENCES`の向きとは独立であり、
+`basisEdgeId`で分類根拠となった原文Relationへ接続する。
 
 `SUBJECT / OBJECT`は端点の役割であり、契約当事者や法律上の主体・客体を意味しない。
 RelationAssertionに汎用`status=unverified`を重複保存せず、Nodeとして存在すること自体を未確認候補とする。
@@ -1471,14 +592,6 @@ predicateと向きを次に固定する。
 | `USES_DEFINITION` | 定義を利用する規定 | 定義を置く規定 | 利用条文 → 定義条文 |
 | `EXCEPTION_TO` | 例外・適用除外を定める規定 | 一般規定 | 施行令7条 → 金商法27条の2 |
 | `OVERRIDES` | 優先して適用される規定 | 排除・修正される規定 | 特則 → 一般則 |
-
-公開買付けの適用除外では、法的効果と具体化を別Assertionで表現できる。
-
-```text
-施行令7条 ── EXCEPTION_TO ──> 金商法27条の2
-施行令7条 ── IMPLEMENTS ────> 公開買付府令2条の5
-金商法27条の3 ─ IMPLEMENTS ─> 公開買付府令10条
-```
 
 非同期分類結果は共有候補にすぎない。検索時Solverが質問に関係する候補だけ両端Article全文で評価し、
 その案件判断をHypothesis・EvidenceとともにCaseStoreへ保存する。Neo4jのRelationAssertionを更新・削除したり、
@@ -1517,16 +630,8 @@ Graph ToolResultにcoverageを示し、Assertionがないことを「関係な�
 
 #### 検索時のArticle投影
 
-Graph Tool Adapterは、正確な端点とArticle単位の探索候補を同時に保持する。
-
-```text
-relation metadata
-├─ subjectContentUnitId / objectContentUnitId  正確な条・項・号
-├─ subjectArticleId / objectArticleId          親Article
-├─ mode / proposedPredicateまたは原文relation
-├─ basisEdgeId / supportingSpans / classificationRunId
-└─ direction: from_subject / to_subject
-```
+Graph Tool Adapterは、正確な端点Content Unit ID、親Article ID、mode、predicateまたは原文Relation、
+`basisEdgeId`、`supportingSpans`、`classificationRunId`、`from_subject / to_subject`を同時に保持する。
 
 frontierと本文取得はArticle単位にまとめても、どの項・号に記載された関係から発見したかを
 DiscoveryLinkのrelation metadataから失わない。Graph候補だけではEvidenceとせず、Article本文はOpenSearchの
@@ -1596,12 +701,12 @@ statusは「実行事実」と「意味判断」を分離する。同じ文字�
 | Frontier review | `unreviewed` | 新規`Node × Hypothesis`からプログラムが初期化 |
 | Frontier review | `selected / relevant_deferred / rejected` | Solver |
 | Cycle budget flag | `cycle_budget_reached / cycle_close_required / cycle_step_timeout` | プログラム |
-| Solverの次動作 | `continue_cycle / start_next_cycle / finalize` | Solver |
+| Solverの次動作 | `start_cycle / continue_cycle / start_next_cycle / finalize` | Solver |
 | WorkItem | `open / resolved / dropped` | Solver |
 | Hypothesis | `supported / contradicted / unresolved` | Solver |
 | Frontier action | `select / defer / reject` | Solver |
-| Deferred Frontier resolution | `fetch_next_cycle / carry_forward / no_longer_needed / unresolved_at_limit` | Solver |
-| 外部依存の確認 | `not_required / needs_action / resolved` | Solver |
+| Deferred Frontier resolution | `carry_forward / no_longer_needed / unresolved_at_limit` | Solver |
+| 未評価Graph候補の解消 | `carry_forward / no_longer_needed / unresolved_at_limit` | Solver |
 | Review | `accept / revise` | Reviewer |
 
 #### status契約の保守性
@@ -1611,20 +716,8 @@ validator、Loopを人手で同期する構造をなくすことである。す�
 まとめるのではなく、Run、Tool、Cycle、Step、WorkItem、Hypothesis、Frontier、Graph expansionごとに
 所有者を固定した小さい契約として定義する。
 
-```text
-対象ごとの説明付きstatus契約（正本）
-├─ code                  JSON・永続化で使う値
-├─ description           人間とLLMに示す意味
-├─ owner                 Program / Solver / Reviewer
-├─ persisted             CaseStoreへ保存するか
-├─ llm_visible           LLMへ見せるか
-└─ allowed transitions   当該対象の機械的な状態変更規則
-          │
-          ├─ Pydantic型・JSON Schema
-          ├─ 共通Promptのstatus用語集
-          ├─ 遷移検証
-          └─ 契約・網羅性テスト
-```
+対象ごとの正本は`code / description / owner / persisted / llm_visible / allowed_transitions`を持ち、
+Pydantic型、Provider schema、共通Prompt用語集、遷移検証、契約テストの生成元とする。
 
 実装では通常の型付きEnumを使い、アプリケーション内部のstatusを生文字列として持ち回らない。
 LLM応答、JSON、永続化backendの文字列は境界のPydanticモデルでEnumへ復元し、JSON・DBへ出すAdapterだけが
@@ -1659,20 +752,11 @@ statusを持つrecordは読み取り専用として扱い、変更は対象ご�
 Cycle上限等の複数recordにまたがる構造条件はCommand適用処理へ一度だけ記述する。Pydantic validatorは
 入力形状、適用処理は状態変更規則、Projectorはread model生成を担当し、同じ条件を重複実装しない。
 
-```text
-SolverCommand
-      │
-      ▼
-apply_case_command
-├─ 対象IDと現在statusを確認
-├─ 対象ごとの遷移表を参照
-├─ 複数record間の構造条件を検証
-├─ 新しいrecordを生成
-└─ CaseStoreへ適用
-```
+`apply_case_command`は、対象IDと現在status、対象別遷移表、複数record間の構造条件を検証し、
+新しいrecordを生成してCaseStoreへ適用する唯一の更新入口とする。
 
 `next`と`start_next_cycle`のように、1つの操作を複数フィールドの組合せで表さない。
-`ContinueCycle / StartNextCycle / Finalize`等のdiscriminator付きCommand unionを使い、Commandごとの必須欄を
+`StartCycle / ContinueCycle / StartNextCycle / Finalize`のdiscriminator付きCommand unionを使い、Commandごとの必須欄を
 型で分ける。プログラムはCommandの形式、既知ID、上限、許可された状態変更だけを検証し、どのCommandや
 意味statusを選ぶべきかは判断しない。
 
@@ -1724,14 +808,6 @@ status契約の生成と検証は次を満たす。
 チャンクである。Tool Adapterは各Article IDについて`contentUnitId`の安定順で総件数を確認し、内部page sizeで
 全pageを取得する。page sizeは1回のOpenSearch応答件数であり、Article本文の取得上限ではない。
 
-```text
-fetch_articles([A, B])
-  ├─ Aに属する全chunkをpage取得
-  └─ Bに属する全chunkをpage取得
-          ↓
-全Articleの全chunkが揃った場合だけsucceeded
-```
-
 Articleあたりの`max_chunks`を公開Tool契約・Profile上限として設けない。既存の
 `LLM_RESEARCH_MAX_CHUNKS_PER_ARTICLE`は新Frameworkの`fetch_articles`取得上限には使用しない。
 1回に選択できるArticle数、Cycle内で取得できる重複なしArticle数、Tool・Cycle時間、model context容量は
@@ -1750,8 +826,9 @@ Solverが決める意味status・action:
 
 | 対象・値 | 意味 |
 |---|---|
+| `start_cycle` | Active Cycleがない状態で、今回のgoal・strategy・完了条件を決めてCycleを開始する |
 | `continue_cycle` | 同じCycleの仮説・探索方針を維持し、次のaction-observation stepへ進む |
-| `start_next_cycle` | 現Cycleの方針を変更する必要、またはCycle予算境界を理由付きで評価して閉じ、次に検証する命題・方針で次Cycleを始める |
+| `start_next_cycle` | 現Cycleを理由付きで評価して閉じ、構造化した引継ぎを残す。次Cycleの計画は次の`start_cycle`で決める |
 | `finalize` | 必要な根拠を探し切ったと判断し、新しいToolを実行せず回答を確定する |
 | WorkItem `open` | 問いが未完了で、追加作業が必要 |
 | WorkItem `resolved` | 問いへ結論が出ており、`resolution`に結論を持つ |
@@ -1762,7 +839,6 @@ Solverが決める意味status・action:
 | Frontier `select` | この候補を次の仮説検証行動へ採用する |
 | Frontier `defer` | 現在の質問・Hypothesisに関連するが、今回の本文取得枠に入れず後続Cycle候補として保留する |
 | Frontier `reject` | 現在の質問・Hypothesisには関係しないと判断し、理由付きで候補から外す |
-| `fetch_next_cycle` | 保留候補を次Cycle最初の本文取得に含める |
 | `carry_forward` | 取得上限等によりactive候補のまま次Cycle以降へ保持する |
 | `no_longer_needed` | 後続Evidenceを踏まえ、質問への回答には不要と判断する |
 | `unresolved_at_limit` | 新しいCycleを開始できない上限時に未確認として残し、limitationsへ示す |
@@ -1804,17 +880,6 @@ class WorkItemImpactDecision:
     replacement_work_item_id: str | None
     drop_subtree: bool = False
 
-class DependencyDecision:
-    dependency_kind: str
-    work_item_id: str
-    status: Literal["not_required", "needs_action", "resolved"]
-    reason: str
-    source_evidence_ids: list[str]
-    action: Literal["discover_source", "assess_source", "discover_target", "fetch_target"] | None
-    action_request_id: str | None
-    target_article_ids: list[str]
-    evidence_ids: list[str]
-
 class CyclePlan:
     goal: str
     strategy: str
@@ -1833,31 +898,59 @@ class DeferredFrontierResolution:
     article_id: str
     work_item_id: str
     hypothesis_id: str | None
-    action: Literal["fetch_next_cycle", "carry_forward", "no_longer_needed", "unresolved_at_limit"]
+    action: Literal["carry_forward", "no_longer_needed", "unresolved_at_limit"]
     reason: str
 
-class SolverDecision:
-    next: Literal["continue_cycle", "start_next_cycle", "finalize"]
-    cycle_plan: CyclePlan | None
-    cycle_completion_reason: str | None
+class UnreviewedGraphResolution:
+    action: Literal["carry_forward", "no_longer_needed", "unresolved_at_limit"]
+    reason: str
+
+class CycleHandoff:
+    result_summary: str
+    unresolved_hypothesis_ids: list[str]
+    carried_frontier_ids: list[str]
+    failed_request_ids: list[str]
+
+class SolverCommandBase:
     update: CaseUpdate
     next_focus_work_item_ids: list[str]
     retain_evidence_ids: list[str]
     frontier_decisions: list[FrontierDecision]
     frontier_re_adoptions: list[FrontierReAdoption]
     deferred_frontier_resolutions: list[DeferredFrontierResolution]
+    unreviewed_graph_resolution: UnreviewedGraphResolution | None
+
+class StartCycleCommand(SolverCommandBase):
+    kind: Literal["start_cycle"]
+    cycle_plan: CyclePlan
     tool_requests: list[ToolRequest]
-    dependency_decisions: list[DependencyDecision]
-    answer: str | None
-    citation_ids: list[str]
-    limitations: list[str]
+
+class ContinueCycleCommand(SolverCommandBase):
+    kind: Literal["continue_cycle"]
+    tool_requests: list[ToolRequest]
+
+class StartNextCycleCommand(SolverCommandBase):
+    kind: Literal["start_next_cycle"]
+    cycle_completion_reason: str
+    handoff: CycleHandoff
+
+class FinalizeCommand(SolverCommandBase):
+    kind: Literal["finalize"]
+    cycle_completion_reason: str | None
+    answer: FinalAnswer
+
+SolverCommand = Annotated[
+    StartCycleCommand | ContinueCycleCommand | StartNextCycleCommand | FinalizeCommand,
+    Field(discriminator="kind"),
+]
 ```
 
 主な整合条件は次のとおり。
 
 - `CycleRecord`は同一Caseで同時に1件だけ`planned`または`running`になり、それより後のCycleを開始しない。
-- Active Cycleがない状態の`continue_cycle`では`cycle_plan`を必須とする。Active Cycleがない状態の
-  `start_next_cycle`は拒否し、Active Cycle内の`continue_cycle`では現在のgoal・strategyを別の意味へ上書きしない。
+- Active Cycleがない状態では`start_cycle`または`finalize`を許可し、Active Cycleがある状態では`start_cycle`を拒否する。
+  Active Cycleがない状態の`continue_cycle / start_next_cycle`も拒否する。
+  `continue_cycle`は現在のgoal・strategyを別の意味へ上書きしない。
 - `StepRecord planned → observed`は全ToolRequestに終端ToolResultが保存された場合だけ許可する。
 - `StepRecord observed → completed`はSolverのCaseUpdateとFrontierDecisionを適用した場合だけ許可する。
 - Active Cycleがある状態の`start_next_cycle`と`finalize`では`cycle_completion_reason`を必須とし、Cycle全体の
@@ -1875,23 +968,22 @@ class SolverDecision:
   `rejected`の候補を別Hypothesisへ自動転用しない。
 - `content_status`とExpansionSliceのstatusは対応するToolRequest・ToolResultからだけ更新し、
   SolverDecisionから変更させない。
-- `continue_cycle`では1件以上のToolRequestまたは、Profileが決定的なToolRequestへ変換できる
+- `start_cycle`と`continue_cycle`では1件以上のToolRequestまたは、Profileが決定的なToolRequestへ変換できる
   1件以上の`select` FrontierDecisionを持つ。Graph Reviewで選択がなく、未提示pageもない場合は
   通常integrationのCycle終了・追加検索・完了判断へ戻す。
-- `start_next_cycle`は現在Cycleを閉じる評価と次の`cycle_plan`を持つ。次Cycleの最初のToolRequestを
-  同じDecisionに含めてもよいが、保存上は前Cycleを閉じてから次Cycleと最初のStepを作る。
+- `start_next_cycle`は現在Cycleを閉じる評価と`CycleHandoff`を持ち、`cycle_plan`、ToolRequest、回答を持たない。
+  ProgramがCycleを閉じた後、次のSolver呼出しが`start_cycle`で新しい計画と最初のToolRequestを決める。
 - Cycle境界で未評価Graph候補だけを引き継ぐ場合は、ToolRequestなしの`start_next_cycle`を許す。
   次Cycleの取得枠を確立してから差分Graph Reviewを行い、枠0の状態で全候補へdeferを強制しない。
   `remaining_unreviewed_count > 0`のCycle境界では`UnreviewedGraphResolution`を必須とする。
-  `review_next_cycle`は`continue + start_next_cycle`、`no_longer_needed`は通常finalize、
+  `carry_forward`は`start_next_cycle`、`no_longer_needed`は通常finalize、
   `unresolved_at_limit`は次Cycle不能の限定finalizeだけに対応させる。候補の必要性はSolverが判断し、
   Programは候補数が残る事実、actionと次動作の組合せだけを検証する。
 - `start_next_cycle`または`finalize`では、本文未取得のactiveな`relevant_deferred`全件に
   `DeferredFrontierResolution`をちょうど1件ずつ持つ。Programは既知frontier・Article・WorkItem・Hypothesis
   の完全一致、全件性、actionと次動作の参照整合だけを検証し、法的な必要性や理由の妥当性は検証しない。
-- `fetch_next_cycle`は`start_next_cycle`と同じDecisionで選び、Programが既知Article IDを
-  次Cycle最初の一括本文取得へ機械転記する。Solverは同じToolRequestを二重指定しない。
-  `carry_forward`は`start_next_cycle`を必要とするが、同じDecisionの本文取得枠には含めずactive候補として残す。
+- `carry_forward`は`start_next_cycle`を必要とし、active候補として次Cycleへ残す。次Cycleの`start_cycle`で
+  Solverが他の引継ぎ情報と一緒に評価し、本文取得対象を選ぶ。Programは本文取得へ自動転記しない。
   `unresolved_at_limit`は新しいCycleを開始できない最終化時だけ許可し、limitationsを必須とする。
 - `finalize`ではToolRequestを持たず、回答を持つ。通常finalizeでは全WorkItemをclosedにし、
   `limitations / unresolved_work_item_ids / unresolved_hypothesis_ids`を空にする。上限等により次Cycleを
@@ -1905,13 +997,6 @@ class SolverDecision:
 - `supported`または`contradicted`のHypothesisは既知Evidence IDを1件以上参照する。
 - `next_focus_work_item_ids`は既知の`open` WorkItemだけを参照する。
 - `retain_evidence_ids`は既知Evidenceだけを参照し、Profileの件数上限を超えない。
-- Profileが外部依存種別を要求する場合、Tool実行後の各判断では、判断開始時に`open`だった
-  WorkItemごとに同種別のDependencyDecisionをちょうど1件持つ。
-- 全状態で、判断対象になった依存元の提示済みEvidence IDを`source_evidence_ids`へ持つ。
-- `needs_action`は`discover_source / assess_source / discover_target / fetch_target`と同じSolverDecision内の
-  ToolRequest IDを参照する。`fetch_target`は一括Request中の委任先を`target_article_ids`へ明示する。
-  `resolved`は確認済みの委任先Articleと、今回利用可能なgrounding Evidence IDを参照する。
-  `not_required`は依存元と不要理由だけを持つ。
 - LLMが参照できるのは、当該呼び出しへ提示されたIDだけとする。
 - 検証違反は`protocol_error`であり、プログラムが意味statusを書き換えて補正しない。
 
@@ -1932,14 +1017,9 @@ ToolRequestを追加する。観点が不足していた場合も、既存WorkIt
 `replace`は、WorkItemの`question`自体を別の意味へ変えなければ親の問いに寄与できない場合だけに使う。
 質問との無関係または重複が根拠から判明した場合だけ`drop`する。
 
-```text
-観察結果を評価する
-  ├─ 問いは有効で、仮説だけが外れた       → WorkItemをretainし、新Hypothesisを追加
-  ├─ 問いは有効で、探索方法だけが外れた   → WorkItemをretainし、ToolRequestを変更
-  ├─ 必要な観点が不足していた             → 子または兄弟WorkItemを追加
-  ├─ 問い自体を別の意味へ変える必要がある → 旧WorkItemをreplace
-  └─ 問いが無関係または重複               → WorkItemをdrop
-```
+問いが有効でHypothesisだけが外れた場合は`retain`して新Hypothesisを追加し、探索方法だけが外れた場合は
+ToolRequestを変更する。不足観点は子または兄弟WorkItemとして追加する。問い自体の意味を変える場合だけ
+`replace`し、無関係または重複の場合だけ`drop`する。
 
 親WorkItemを`replace`する場合、初期実装では旧部分木の子を新しい親へ付け替えない。Solverが旧部分木の
 各open WorkItemを明示的に`drop`するか、`drop_subtree=true`を返し、新しい親子WorkItemを別IDで作る。
@@ -2022,47 +1102,16 @@ Evidence本文に使える文字数はProfileの`max_material_evidence_chars`で
 文字数上限へ達する場合は`context_capacity_exceeded`を明示する。過去Evidenceをmanifestへ退避する処理と、
 新規Article本文の完全提示を混同しない。Solverが法的関連性を評価する前にProgramが項・号を選別しない。
 
-Graph navigation EvidenceはArticle IDごと1件の`graph_candidate_catalog.articles`と、
-起点から候補への全発見経路を保持する`graph_candidate_catalog.links`へ正規化し、
-CaseStoreで全件を正本として保持する。SolverContextはそこから`graph_review_batch`と
-`graph_review_ledger`を決定的に差分投影する。同じ候補を複数起点から発見した場合、
-Article情報は1件に正規化し、LinkはCaseStoreにすべて保持する。Review batchで評価対象になった
-Articleについては、その判断に必要な全Linkを同じbatchへ投影する。
+Graph navigationはExplorationStateのArticle NodeとDiscoveryLinkへ正規化し、CaseStoreで全件を正本として
+保持する。SolverContextはそこから`graph_review_batch`と`graph_review_ledger`を決定的に差分投影する。
+同じ候補を複数起点から発見した場合、Article Nodeは1件に正規化し、Linkはすべて保持する。
+Review batchで評価対象になったArticleについては、その判断に必要な全Linkを同じbatchへ投影する。
 Graph navigation EvidenceのJSON・Evidence IDは`material_evidence`、`evidence_manifest`、
 `recent_tool_results.evidence_ids`、`navigation_evidence_ids`、`omitted_evidence_ids`へ重複掲載しない。
-Graph ToolResultは実行status、件数、catalog投影済みであることだけをSolverへ示す。
+Graph ToolResultは実行status、件数、ExplorationStateへの投影済みであることだけをSolverへ示す。
 CaseStore上のEvidence、ToolResult、生成元・監査用の関係来歴は正本として完全に残す。
 
-```python
-class GraphCandidateCatalog:
-    articles: list[GraphCandidateArticle]  # 重複排除した候補Article一覧
-    links: list[GraphCandidateLink]        # 起点から候補を発見した全経路
-
-class GraphCandidateArticle:
-    article_id: str        # 候補Articleの既知ID
-    document_id: str | None  # 所属する法令・ガイド文書のID
-    title: str | None      # 文書名
-    heading: str | None    # 条文見出し
-    content_status: Literal["not_requested", "pending", "succeeded", "failed", "timeout"]  # Article全文の取得状態
-
-class GraphCandidateLink:
-    seed_article_id: str       # Graph検索の起点Article ID
-    candidate_article_id: str  # 発見した候補Article ID
-    work_item_ids: list[str]    # この発見経路を必要としたWorkItem
-    hypothesis_ids: list[str]   # この発見経路で検証するHypothesis
-    relations: list[dict]       # 関係mode、意味predicateまたは原文関係、向き、根拠、分類Run、来歴
-
-class SolverToolResult:
-    request_id: str       # 対応する既知ToolRequestのID
-    status: Literal["succeeded", "failed", "timeout"]  # Toolの実行結果
-    evidence_ids: list[str]       # 本文EvidenceのID。Graph navigation Evidence IDは載せない
-    evidence_count: int           # 生成した本文Evidenceの件数
-    graph_projection_updated: bool  # Graph候補がCaseStoreのcatalogへ反映されたか
-    error_code: str | None        # 失敗・timeout等の機械的な理由コード
-    elapsed_ms: int               # Tool実行時間
-```
-
-Articleの同一性は`article_id`、Linkの同一発見経路は
+Article Nodeの同一性は`article_id`、Linkの同一発見経路は
 `(seed_article_id, candidate_article_id)`を決定的な正規化単位とする。
 同じ組に複数のrelationがある場合は、`mode`、`proposedPredicate / rawRelation`、`direction`、
 `basisEdgeId`、`classificationRunId`、`sourceKind`の
@@ -2099,19 +1148,19 @@ WorkTree案内とCaseStoreには残る。
 各StepのToolResultは直後のSolver判断へ必ず渡す。最後の許可StepでもHypothesis、WorkTree、frontierを
 更新してからCycleを閉じ、未評価のToolResultを残したまま次Cycleまたは回答へ進まない。
 
-最初のCycle計画はresearch profileを使う。1回でもToolを実行した後のstep判断、次Cycleへの再計画、
+各Cycleの`start_cycle`はresearch profileを使う。Tool実行後のstep判断、Cycle終了判断、
 Reviewer差戻し後の判断はintegration profileを使い、直前結果の意味評価、状態更新、
-`continue_cycle / start_next_cycle / finalize`の選択を同じLLM呼び出しで行う。通常終了のためだけの
-独立Integrator呼び出しは設けない。上限到達時は同じintegration profileへ`finalize_only=true`を渡し、
-追加ToolRequestだけを禁止する。
+`continue_cycle / start_next_cycle / finalize`の選択を同じLLM呼び出しで行う。
+`start_next_cycle`後の次呼出しで、research profileが引継ぎを読んで新しいCycle計画を作る。
+通常終了のためだけの独立Integrator呼び出しは設けない。上限到達時はintegration profileへ
+`finalize_only=true`を渡し、追加ToolRequestだけを禁止する。
 
-`finalize`時は、Solver自身がすべてのWorkItemを`resolved`または`dropped`へ更新する。
-プログラムはopen WorkItemが残っていないことだけを検証し、どちらの状態にするか、未確認のまま
-終了してよいかは判断しない。Hypothesisは`unresolved`のままでもよく、そのgapsと回答への影響を
-Solverがresolutionおよびlimitationsへ明示する。
+通常の`finalize`では、Solver自身がすべてのWorkItemを`resolved`または`dropped`へ更新する。
+実行上限で新Cycleを開始できない限定`finalize`だけは、open WorkItemとunresolved Hypothesisを保持し、
+対応IDと回答への影響をlimitationsへ明示する。プログラムはどちらの意味状態にするかを判断せず、
+通常終了と限定終了それぞれの参照整合だけを検証する。
 
-下位法令・委任先の未確認事項は、通常のWorkItem、Hypothesis、gapsで管理する。
-Legal Profileでは`discover_source / assess_source / discover_target / fetch_target`の重複状態を要求しない。
+下位法令・委任先の未確認事項も、WorkItem、Hypothesis、gaps、ExplorationIntentで管理する。
 取得本文に質問へ関係する委任があれば、Solverは対応するHypothesisを`unresolved`、WorkItemを`open`の
 まま追加調査する。Graph結果だけでは根拠にせず、端点Articleを`fetch_articles`で取得して評価する。
 どの委任が質問に関係するか、どの本文で確認できたかはSolverが判断し、プログラムは既知ID、
@@ -2161,16 +1210,11 @@ Evidence IDとArticle IDは別の名前空間として扱う。Contextは、今�
 contentUnitIdとは別の`search-nav-*` Evidence IDを付ける。`fetch_articles`で取得した本文だけが
 `grounding_evidence_ids`へ入る。これは検索結果の法的関連性をコードが判断する規則ではなく、
 「候補検索」と「指定Article本文取得」というToolの取得段階を表す構造契約である。
-Graph navigationはEvidence IDをSolverへ再掲せず、`graph_candidate_catalog.articles[].article_id`と
-`links[].seed_article_id / candidate_article_id`から`fetchable_article_ids`を決定的に作る。
+Graph navigationはEvidence IDをSolverへ再掲せず、ExplorationStateのArticle Nodeと
+DiscoveryLinkの起点・候補Article IDから`fetchable_article_ids`を決定的に作る。
 
-Model出力は`next`、focus、保持ID、answerをproviderのstructured-output schemaへ直接載せる。
-複雑な`update`と`tool_requests`だけを別々のJSON文字列として輸送する。`dependency_decisions`は
-Provider structured-output schemaへ直接載せる。Integrationでは判断開始時にopenなWorkItem数を
-`minItems / maxItems`へ設定し、空配列や件数不足をProvider段階で拒否する。SolverContextにも
-`required_dependency_kind`と`required_dependency_work_item_ids`を明示する。
-SolverDecision全体、特に長いanswer本文は二重エンコードしない。Adapterが2項目を復元してからPydanticとAgentLoopの
-参照整合検証を適用する。これによりprovider grammarを小さく保ちつつ、長文のescape破損を避ける。
+Model出力はdiscriminator付きSolver Command全体をProviderのstructured-output schemaへ直接載せる。
+内部JSON文字列へ二重エンコードせず、Provider応答をPydanticで復元してからAgentLoopの参照整合検証を適用する。
 
 SolverDecisionが参照・件数・状態等の構造契約に違反した場合、そのDecisionはCaseStateへ適用せず、
 違反理由と直前Decisionを同じSolver profileへ1回だけ返す。Solverが意味判断を保ったまま構造を
@@ -2355,11 +1399,11 @@ research・integrationの両方へ必ず合成する。次の契約語彙には�
 - expansion not_startedはscope未要求、pendingは結果待ち、partialは未取得page/scopeあり、
   completeは当該scope取得完了、failed/timeoutは取得失敗・時間切れである。
   expansion completeは隣接Article本文の確認完了を意味しない。
-- next=continue_cycleはActive Cycleがなければcycle_planでCycle 1を開始し、Active Cycleがあれば
-  同じ仮説・探索方針で次stepへ進む。next=start_next_cycleは、現方針で完了できない理由または
-  Cycle予算境界を明示してCycleを閉じ、取得済み結果を評価した上で次に検証する命題・方針で
-  別Cycleを始める。
-  next=finalizeは必要な根拠を探し切ったと判断し、追加Toolなしで回答を確定する。
+- kind=start_cycleはActive Cycleがないとき、今回のgoal・strategy・完了条件と最初の行動を決める。
+  kind=continue_cycleはActive Cycleの仮説・探索方針を維持して次stepへ進む。
+  kind=start_next_cycleは、現方針で完了できない理由またはCycle予算境界を明示して現Cycleを閉じ、
+  結果と未解決事項だけを引き継ぐ。次Cycleの計画・ToolRequestは含めず、次の呼出しでstart_cycleを選ぶ。
+  kind=finalizeは必要な根拠を探し切った判断または実行上限での限定回答を、追加Toolなしで確定する。
 - WorkItem openは未完了、resolvedは問いへの結論あり、droppedは前提否定・重複・無関係による除外である。
   resolved/droppedは理由をresolutionへ書く。取得失敗だけをresolvedにしない。
 - WorkItemのquestionを変えずに親の問いへ引き続き寄与できるならretainする。仮説、検索語、検索先だけの誤りは
@@ -2375,7 +1419,7 @@ research・integrationの両方へ必ず合成する。次の契約語彙には�
 - graph_review_ledgerの評価済みNodeを新しいHypothesisの検証に使う場合は、
   frontier_re_adoptionsにNode・WorkItem・Hypothesis・理由を明示する。Programに自動転用を要求しない。
 - Cycle境界では、本文未取得のactiveなrelevant_deferred全件へdeferred_frontier_resolutionsを返す。
-  fetch_next_cycleは次Cycle最初の本文取得、carry_forwardは次Cycle以降への保持、no_longer_neededは回答に不要との意味判断、
+  carry_forwardは次Cycle以降への保持、no_longer_neededは回答に不要との意味判断、
   unresolved_at_limitは次Cycleを開始できない上限時の未確認を表す。Programは既知ID、全件性、
   actionと次動作の参照整合だけを検証し、どのactionが法的に妥当かは判断しない。
 - impact retainはWorkItemを維持して前提を差替え、replaceは旧WorkItemをdroppedにして新IDへ置換し、
@@ -2386,8 +1430,8 @@ research・integrationの両方へ必ず合成する。次の契約語彙には�
   必要と判断した未取得Evidenceが残る場合にstart_next_cycleを選ぶ。
 - cycle_budget_reached=true、cycle_step_limit_reached=true、またはcycle_close_required=trueなら、
   現Cycleに新しいToolRequestを追加しない。直前までのToolResultを評価し、WorkItem・Hypothesisを更新する。
-  完了できるならfinalize、未解決で残りCycle予算があるなら、次Cycleで確かめる命題、
-  更新したgoal・strategy、再採用するfrontierを明示してstart_next_cycleを選ぶ。
+  完了できるならfinalize、未解決で残りCycle予算があるなら、現Cycleの結果、次Cycleへ渡す命題、
+  再採用候補を明示してstart_next_cycleを選ぶ。次のgoal・strategyは次のstart_cycleで決める。
 - cycle_step_timeoutは中間呼出しがCycle予算で時間切れになった実行事実であり、仮説の否定、
   根拠の不存在、provider全体の障害を意味しない。予約済みのCycle終了判断で手元の結果を整理する。
 - finalize_only=falseなら必要な追加調査をcontinue_cycleでき、方針変更が必要ならstart_next_cycleを選べる。
@@ -2396,15 +1440,6 @@ research・integrationの両方へ必ず合成する。次の契約語彙には�
 - material_included=trueだけが本文提示済みである。falseはmanifest・探索構造だけで本文未提示である。
 - grounding_evidence_idsは意味判断・引用可能な本文、navigation_evidence_idsはGraph以外の候補発見専用、
   fetchable_resource_ids（Legalではfetchable_article_ids）は本文取得Toolへ完全一致で渡せる既知Resource IDである。
-```
-
-Profileが`required_dependency_kind`を設定した場合だけ、次の語彙を追加する。`null`のProfileへ
-未使用のDependency status・action説明を見せない。
-
-```text
-- dependency not_requiredは回答に不要、needs_actionは必要だが追加Toolが必要、resolvedは依存先本文まで確認済み。
-- discover_sourceは依存元候補の発見、assess_sourceは依存元本文の確認、discover_targetは依存先候補の発見、
-  fetch_targetは既知依存先本文の取得である。
 ```
 
 Legal Domain Packの共通Promptには次を追加する。
@@ -2458,7 +1493,7 @@ Legal Domain Packの共通Promptには次を追加する。
   `basisEdgeId / supportingSpans / classificationRunId`を確認し、両端本文で今回のHypothesisとの関係を判断する。
 - ClassificationRunのcoverageにuncertainまたはfailedがある場合、Assertionがないことを関係不存在と解釈しない。
 - relationSource、sourceId、derivedFromEdgeId等の生成元・監査用来歴はCaseStateに保持されるが、
-  SolverContextへは重複投影されない。Solverはcatalogに示された関係属性と取得本文で判断する。
+  SolverContextへは重複投影されない。SolverはGraph review batchに示された関係属性と取得本文で判断する。
 ```
 
 Reviewer Promptには`accept=指摘なし・findings空`、`revise=具体的findingsあり`を定義する。
@@ -2467,13 +1502,13 @@ status追加・名称変更時は5.2の説明付きstatus契約を変更する�
 同契約から生成し、手作業でenumと意味を同期しない。serialized valueを変更する場合はProfile versionだけでなく
 `contract_version`と既存Caseのmigrationまたは旧値読替えを同じ変更単位で追加する。
 
-### 7.4 Graph差分Review・Cycle予算に伴うPrompt変更
+### 7.4 Graph差分Review・Cycle予算のPrompt契約
 
 statusの値と基本定義は5.2の契約から共通Promptへ生成する。次表は自動生成するstatus用語集の重複ではなく、
 各処理モードで値をどう使うかという手順・業務上の制約である。コードと状態型の変更と同じcommitで更新し、
 Promptだけを先行させて現行SolverContextに存在しない値をLLMへ指示しない。
 
-| Prompt / schema | 必須変更 |
+| Prompt / schema | 必須の内容 |
 |---|---|
 | `solver_common.md` | Graph ReviewはSolverの処理モードであり、任意のReviewer Agentとは別であることを定義する。 |
 | `solver_common.md` | Cycleは最大4、1 Cycleの本文取得累計は4、Graph Review選択は最大3と定義する。`max_tool_requests_per_step`と本文取得累計を区別する。 |
@@ -2484,19 +1519,19 @@ Promptだけを先行させて現行SolverContextに存在しない値をLLMへ�
 | `solver_common.md` | 各検索を既知WorkItem・Hypothesis・ExplorationIntentへ結び付け、OpenSearchとGraphの明示selector、候補と根拠の違い、selectorをProgramへ補完させないことを定義する。 |
 | `solver_common.md` / `solver_graph_review.md` | RelationAssertionは`SUBJECT / OBJECT`で接続された未確認候補で、`proposedPredicate`は確定関係ではないと定義する。5 predicateの向き、`ClassificationRun` coverage、検索時の案件判断をNeo4jへ更新・昇格しないことも定義する。 |
 | `solver_research.md` / `solver_integration.md` | 未確認事項から検証目的と最小scopeを作る。Graphの関係種別を選べなければ全種別を要求せず、OpenSearchで根拠または起点を発見する。 |
-| `solver_graph_review.md` | 累積`graph_candidate_catalog`全件ではなく、`graph_review_batch`と`graph_review_ledger`だけを読む。`review_trigger`を解釈し、過去の詳細が再提示されないことを候補の不存在と解釈しない。 |
+| `solver_graph_review.md` | `graph_review_batch`と`graph_review_ledger`を読む。`review_trigger`を解釈し、過去の詳細が再提示されないことを候補の不存在と解釈しない。 |
 | `solver_graph_review.md` | 各batchの全候補をWorkItem・Hypothesis別に評価し、最大3件を`select`、関連する残りを`defer`、無関係と判断したものだけを`reject`する。 |
 | `solver_graph_review.md` | `remaining_fetch_capacity=0`なら新たにselectせず、関連候補をdeferしてCycle終了判断へ戻す。Graph Reviewから直接次Cycleの法的方針を決めない。 |
-| `solver_integration.md` | Cycle上限に達したら、直前までのToolResultを評価し、Hypothesis・WorkItem・Evidence・Graph ledgerを整理した後に、finalizeまたは次Cycleのgoal・strategy・再採用frontierを返す。 |
-| `solver_integration.md` | Cycle境界でactiveな`relevant_deferred`全件を`fetch_next_cycle / carry_forward / no_longer_needed / unresolved_at_limit`のいずれかへ明示し、黙って破棄しない。 |
+| `solver_integration.md` | Cycle上限に達したら、直前までのToolResultを評価し、Hypothesis・WorkItem・Evidence・Graph ledgerを整理した後に、finalizeまたは次Cycleへの構造化引継ぎを返す。次Cycleのgoal・strategyは返さない。 |
+| `solver_integration.md` | Cycle境界でactiveな`relevant_deferred`全件を`carry_forward / no_longer_needed / unresolved_at_limit`のいずれかへ明示し、黙って破棄しない。`start_next_cycle`では次Cycle計画やToolRequestを返さない。 |
 | `relation_classifier.md` | 1回の入力を1つの端点ペア・basis・全参照出現へ限定する。両端Article全文、Article ID付きspan、既知decision keyだけを提示し、候補生成時のheuristic、旧`suggestedType / referenceKind`を出さない。返却するpredicate、SUBJECT / OBJECTの根拠span、`REFERENCE_ONLY / UNCERTAIN`の意味を定義する。 |
 | Provider schema | Review判断対象は現在のbatch、本文取得へ選べるIDはbatchの候補とledgerの`relevant_deferred`、再試行時の`selected + failed/timeout`に制限する。選択上限は`min(3, remaining_fetch_capacity)`とする。`rejected`は新Link差分でbatchへ再提示された場合を除き同じHypothesisで再選択させず、別Hypothesisへの`frontier_re_adoptions`はledgerの既知Nodeと既知のopen WorkItem・Hypothesisだけを許可する。候補の関連性や優先度はschemaまたはProgramで補正しない。 |
 | Provider schema | Deferred解消はledgerの既知IDだけを許可する。Programは全件性と次動作との矛盾だけを拒否し、関連性・必要性を補正しない。 |
-| Provider schema | Graph Reviewモードで必ず空になるdependency、re-adoption、deferred解消、answerは空配列またはnullの簡易schemaとし、未使用の動的enumをコンパイルさせない。 |
+| Provider schema | Graph Reviewモードで必ず空になるre-adoption、deferred解消、answerは空配列またはnullの簡易schemaとし、未使用の動的enumをコンパイルさせない。 |
 | Provider schema | ExplorationIntentのWorkItem・Hypothesis・起点Articleは既知ID enum、Graph mode、predicateまたは原文relation、direction、構造filterはLegal Tool allowlistへ限定する。predicateは5種、directionは`from_subject / to_subject`だけを許可し、空・all・複数predicateの一括指定を許可しない。`APPLIED_BY / MENTIONS`をenumへ含めない。 |
 
-Prompt契約テストでは、旧の「累積catalogを毎回全件読む」「未取得関連候補がある限り
-同じCycleでReviewを繰り返す」「Graph Reviewごとに最大4件選ぶ」という指示が残っていないことも検査する。
+Prompt契約テストでは、共通Prompt、処理モード別Prompt、Provider schemaが上表と同じCommand、status、
+上限、Graph差分投影を使用することを検査する。
 
 ## 8. CaseStore
 
@@ -2629,33 +1664,17 @@ scripts/
 法令名、条文、ガイド、`IMPLEMENTS`、`REFERENCES`等を`agent_framework`へ置かない。
 OpenSearch、Neo4j、Anthropic等のSDKも`agent_framework`から直接importしない。
 
-## 11. 現行実装からの移行
+## 11. 現行コードからの切替
 
-### 11.1 扱い
+- 新経路はFeature Flagで有効化し、Phase 4の合格前に既定経路へしない。
+- 既存OpenSearch・Neo4j・本文取得はLegal Tool Adapterで利用し、法令固有ロジックをFrameworkへコピーしない。
+- 現行の自動Graph、旧Graph relation・方向・status、二重encodeされたSolver出力を互換契約として新設計へ持ち込まない。
+- 新経路が合格した後、参照を確認したうえで旧回答経路と未接続試作を別変更で削除する。
+- 切替中も同じ入力snapshotからOpenSearchとNeo4jを再構築し、旧Graphと新Graphを同一Caseへ混在させない。
 
-- `llm_research_loop.py`と`research_case_store.py`は、切替完了まで現行経路として保守する。
-- 未接続の`agent_core/`試作は拡張しない。
-- 新しい薄い縦切りが合格した後、参照がないことを確認して過剰な試作を削除する。
-- 現行経路を一度に書き換えず、Feature Flagで新旧を切り替える。
-- 移行中に法令検索ロジックを汎用基盤へコピーしない。Legal Tool Adapterで既存機能を包む。
-
-### 11.2 名称の整理
-
-| 現行名称 | 新しい扱い |
-|---|---|
-| Main / Answerer / Integrator | `Solver`のresearch/integrationモードへ統合 |
-| Explorer | Solverが返す複数ToolRequestへ統合 |
-| Reviewer | 任意のReviewerとして残す。既定無効 |
-| Projector | 独立Agent・独立サービスにはしない。`context.py`の決定的なAgentView投影処理として残す |
-| Scheduler | 廃止。SolverのToolRequestを上限内で実行 |
-| ResearchCheckpoint | `CycleRecord.steps`へ、action-observation単位の`StepRecord`として統合 |
-| ResearchCaseStore | 小さい`CaseStore`へ置換 |
-
-context組立ては、全WorkTree案内、現Cycleのgoal・strategy、直前Step、Graphの新規・再採用・新Link差分batch、
-評価済みfrontierの短いledger、focusへ接続するNode・Link、直近ToolResultの実行状態、
-新規Evidence、`retain_evidence_ids`を直列化する。Evidence本文は50,000文字を上限とする。
-全Graph Article・Link・Review履歴はCaseStoreに保持し、Promptに過去の詳細を重複入力しない。
-差分batchのpage分割は安定順の機械処理とし、関連性・優先度・再採用はSolverに選ばせる。
+Context Projectorは、全WorkTree案内、現Cycle、直前Step、Graph差分batch、評価済みfrontier ledger、
+focusへ接続するNode・Link、直近ToolResult、新規・保持EvidenceをCaseStoreから決定的に投影する。
+全Graph履歴をPromptへ重複表示せず、関連性・優先度・再採用はSolverに判断させる。
 
 ## 12. 実装Phase
 
@@ -2686,12 +1705,12 @@ context組立ては、全WorkTree案内、現Cycleのgoal・strategy、直前Ste
 
 完了条件:
 
-- v38で上限3 Cycleのう1 CycleにTool 12回・本文16条・累積Graph Reviewが集中した内訳を再現できる。
+- 現行baselineからCycle、Step、本文取得、Graph Review、LLM呼出し、latencyの比較可能な計測値を保存する。
 - 新契約で意味判断と機械的検証の境界をテストとして記述できる。
 - statusまたはCommandをfixtureへ追加したとき、Provider schema、Prompt用語集、遷移網羅性のいずれかが
   未定義なら契約テストが失敗する。
-- 現行v8 baselineをNeo4jへ書き込まず再実行でき、E4B 34/34とガイド6/6の実測条件、model、
-  prompt version、1候補/呼出しが記録される。34件は機能fixtureであり、全候補の母集団精度とは表現しない。
+- Relation分類fixtureとガイドfixtureをNeo4jへ書き込まず再実行でき、model、prompt version、
+  1候補/呼出し、タグ別結果が記録される。機能fixtureを全候補の母集団精度とは表現しない。
 
 ### Phase 1: 最小Framework
 
@@ -2701,7 +1720,7 @@ context組立ては、全WorkTree案内、現Cycleのgoal・strategy、直前Ste
   PydanticがEnumとの相互変換を行い、内部処理はEnumメンバーを参照する。
 - statusの直接代入を廃止し、対象ごとのCommandを`transitions.py`で適用して新しいrecordを作る。
   型付きstatusの読み取りは許可し、同じ意味を隠すだけの中間booleanを増やさない。
-- `ContinueCycle / StartNextCycle / Finalize`をdiscriminator付きCommand unionにし、複数フィールドの
+- `StartCycle / ContinueCycle / StartNextCycle / Finalize`をdiscriminator付きCommand unionにし、複数フィールドの
   組合せで次動作を表現しない。
 - Provider schemaと共通PromptのLLM-visible status用語集を説明付き契約から生成する。
   Domain Promptには処理モード固有の使用規則だけを残す。
@@ -2717,7 +1736,7 @@ context組立ては、全WorkTree案内、現Cycleのgoal・strategy、直前Ste
   本文取得数とは混同しない。
 - Cycleの本文取得・step・時間境界前に新しいactionを止め、予約したSolver呼出しで
   観察済み結果の評価とCycle終了を行う。
-- fake Modelとfake Toolで1 Cycle内の複数step、`continue_cycle / start_next_cycle / finalize`、
+- fake Modelとfake Toolで1 Cycle内の複数step、`start_cycle / continue_cycle / start_next_cycle / finalize`、
   Stepの`observed`からの再開をテストする。
 - read-only ToolRequestの上限制御付き並列実行を実装する。
 - 反証Hypothesisから影響WorkItemを列挙し、Solverの`retain / replace / drop`を適用する。
@@ -2736,7 +1755,7 @@ context組立ては、全WorkTree案内、現Cycleのgoal・strategy、直前Ste
 - Cycle 1で検索→起点本文→1ホップ→隣接本文を複数Stepとして継続し、必要根拠を探し切って`finalize`できる。
 - Tool実行やStep完了だけではcycle数が増えず、`start_next_cycle`または`finalize`でCycleを閉じた時だけ増える。
 - 1 Cycleの5件目の本文取得を実行前に拒否し、4件までの観察結果をSolverが評価して
-  `finalize`または次Cycleの計画を返す。
+  `finalize`または次Cycleへの引継ぎを返し、その後の`start_cycle`で次Cycleの計画を作る。
 - 最大4 Cycleへ到達するfixtureと、1〜3 Cycleで早期`finalize`するfixtureがともに通る。
 - Stepの`planned`では未完了Toolだけを実行し、`observed`では成功済みToolを再実行せず評価へ進む。
 - 最後の許可StepのToolResultが次のSolver判断へ渡され、評価されずに残らない。
@@ -2980,93 +1999,3 @@ SQLiteまたはPostgreSQL Adapterを1種類ずつ追加する。
 - 未取得本文や未確認Graph関係を最終根拠として自動採用しない。
 - Prompt全文、LLM生応答、法令本文、credentialを通常ログへ出さない。
 - 最大回数に達したことを、根拠不足という意味判断へ変換しない。
-
-## 15. 次の修正単位
-
-現行の新Frameworkを本計画へ戻す修正は、次の順で行う。
-
-### 修正0: status契約の保守性
-
-1. 現行のstatus、judgment、action、Commandと、型・Provider schema・Prompt・Projector・validator・Loopの
-   重複定義を棚卸しする。旧経路の互換処理と新Frameworkの正本を区別する。
-2. `state_contracts.py`へ対象別の説明付きstatus契約と小さい遷移表を定義する。巨大な共通Enumや
-   法令固有statusを汎用Frameworkへ持ち込まない。
-3. LLM出力をdiscriminator付きCommand unionへ変更し、`next + start_next_cycle`等の矛盾可能な組合せを廃止する。
-4. status-bearing recordを型付きにし、LLM・JSON・永続化境界でだけ文字列とEnumを変換する。
-5. statusの更新を`transitions.py`へ集約する。型付き読み取りは許可し、生文字列比較、直接代入、同じ条件の
-   複数実装を新Frameworkから除く。
-6. Pydantic型からProvider schemaの基礎を生成し、`llm_visible`な説明付き契約から共通Prompt用語集を生成する。
-   Domain Promptには各モードの使用方法だけを残す。
-7. status・Command追加時の遷移網羅性、Schema、Prompt用語集、JSON round-trip、未知値拒否、
-   `contract_version`とmigrationをClaude APIなしの契約テストへ追加する。
-8. 旧status文字列と手書きenumの参照がなくなったことを確認してから、互換変換と重複validatorを削除する。
-
-### 修正A: 汎用Cycle・探索契約
-
-1. `ExplorationState`、Node、Link、frontier、ExpansionSlice、CycleRecord、StepRecordを追加する。
-2. Tool終了時のcycle加算をやめ、Cycleの`planned → running → completed`と
-   Stepの`planned → observed → completed`を実装する。
-3. `continue_cycle`では同じCycleへStepを追加し、`start_next_cycle / finalize`で閉じた時だけ
-   `research_cycle_count`を増やす。
-4. `max_research_cycles`を4へ広げ、`max_fetched_resources_per_cycle=4`を追加する。
-   `max_tool_requests_per_cycle`は実際の検証単位に合わせ`max_tool_requests_per_step`へ改名する。
-5. `CycleRecord.fetched_resource_ids`で本文取得成功数を重複なしで数え、残り枠を超えるRequestは
-   実行前に拒否する。ProgramはArticle IDを切捨てない。
-6. Cycle終了、残りCycle、最終回答の時間を別々予約し、新しい中間呼出しを始める前に
-   `cycle_close_required`を判定する。予算由来timeoutは`cycle_step_timeout`としてCycle終了判断へ渡す。
-7. Stepの`observed`からToolを再実行せず評価へ進める。
-8. WorkTree、探索構造、現Cycleのgoal・strategy、直前Step、Evidence、Cycle予算をSolverContextへ投影する。
-9. 7.3の汎用status語彙と7.4のCycle予算語彙をresearch・integration Promptへ共通注入する。
-10. fake Model / fake Toolで1 Cycle内の分岐、合流、循環、再開、本文4件でのCycle終了、
-    4 Cycle上限、予算timeout後のCycle終了をテストする。
-
-### 修正B: Legal探索への接続
-
-1. `fetch_articles`をArticle全chunkの安定順page取得へ変更する。Articleあたりの取得件数上限を廃止し、
-   全page取得後だけToolResult・contentを`succeeded`にする。途中失敗・timeout・0件では部分Evidenceを
-   CaseStoreへcommitしない。新規取得Articleの全chunkを次のSolver判断へ一度提示する。
-2. 5.1.3のNeo4j schema、Relation、制約、監査を実装する。RelationAssertionを`SUBJECT / OBJECT`で
-   Articleへ、`CLASSIFIED_IN`でClassificationRunへ接続し、旧端点ID・statusだけのNodeを生成しない。
-   `APPLIED_BY / MENTIONS`を削除し、5つの意味predicateは物理Edgeでなく`proposedPredicate`へ保存する。
-   Graph schema versionを更新した`/admin/seed`でOpenSearchとNeo4jの構造・原文Relationを同じ入力snapshotから
-   両方再構築し、その後に再開可能な非同期LLM分類をRun単位でpublishする。
-3. OpenSearch候補を深さ0のNode・Link・frontierへ変換する。
-4. `ExplorationIntent`をLegal Tool契約へ接続し、OpenSearchはquery・filter、Graphは起点Article・
-   mode・1 predicateまたは原文relation・1 direction・構造filterをSolverの明示scopeどおり実行する。固定全種別の
-   自動Graph取得を廃止し、同じDecisionの本文取得とrelation Intentは同一Cycleの観察へまとめる。
-   Profileの`max_exploration_depth=1`に達したGraph候補Articleからの再展開を止める。
-   directionは`from_subject / to_subject`だけを許可し、Neo4jのfrom/toと起点から決定する。
-   `APPLIED_BY / MENTIONS`と旧`referenceKind`はLegal Toolの意味selectorに含めない。
-5. Graph候補をArticle Node・DiscoveryLink・ExpansionSliceへ変換し、全件をCaseStoreに保持する。
-   正確なsubject/object Content Unit IDと親Article IDをrelation metadataへ残す。
-6. 複数経路の同一Articleを1 Nodeへ統合し、Linkは失わない。
-7. `graph_review_batch`に新規`unreviewed`・再採用候補・既評価候補の新Link差分と必要Link、`graph_review_ledger`に
-   過去の全評価済みfrontierの短い台帳を投影する。過去の全Link詳細とLLM生応答を再投影しない。
-8. Review batch上限を超える候補を安定順でpage分割し、未提示page・cursor・件数を保持する。
-   Programは関連度で並べ替えず、未提示候補をrejectしない。
-9. Graph ReviewのSolver選択上限を3件とし、Cycleの残り本文取得枠を超えない。選択外の
-   関連候補はdeferし、同じHypothesisではledgerから後続stepまたは次Cycleで選べるようにする。
-   別Hypothesisへ結び直す場合だけSolverが`frontier_re_adoptions`を返す。
-10. Graphで到達できないopen WorkItemから、Solverが`legal_search`で新しい深さ0起点を作れるようにする。
-11. 7.3・7.4のWorkItem監査、Graph差分Review、Cycle予算、検索fallback語彙を各Legal Promptへ反映し、
-   Profile version・Provider schema・契約テストを同時に更新する。
-   directionの旧称を残さず、`MENTIONS`をPromptとschemaの候補から除外する。
-12. `max_material_evidence_chars=50000`を適用しても、当該Review batchのArticle ID、見出し、起点、
-    mode・predicateまたは原文relation、direction、basis・classificationRunId、depth、sourceKindと
-    deferred ledgerが残ることをテストする。
-    全履歴はCaseStoreで監査できる。
-13. 1候補と必要Link、または新規取得した1 Articleの全文でもmodel context容量を超える場合は明示的エラーにする。
-
-### 修正C: 実モデル検証
-
-非APIテスト通過後に、Reviewer OFF・全Haikuで公開買付け問題を1回実行する。traceでは品質だけでなく、
-各Cycleのgoal・strategy、本文取得数、各Stepのphase遷移・ToolRequest・観察結果、focus Hypothesis、
-frontier before/after、select・defer・reject、Review batch・ledger件数、Node/Link総数、depth、
-本文取得・Graph展開の重複有無を確認する。各Cycleが本文取得4件以内で閉じ、
-未解決ならSolverが前Cycleの結果と再採用frontierを明示して次Cycleへ進むことを確認する。
-また、Graph Review入力が累積catalogに比例して増えず、予算境界前にCycle終了判断を行うことを確認する。
-公開買付け例題の合格条件は、評価用正解をSolver Promptへ渡さず、想定資料3/3、必要条文4/4、
-回答要点4/4の合計11/11とする。11/11へ到達しない場合はPhase 4の品質確認を完了扱いにせず、
-traceから検索起点、Graph Link、frontier選択、本文取得、WorkItem完了判断のどこで欠落したかを分類する。
-
-この修正に新しい登場人物、Claude以外のprovider、DB Adapter、現行経路削除を混在させない。

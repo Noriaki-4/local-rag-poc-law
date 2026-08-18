@@ -8,8 +8,9 @@
 | 文書 | 内容 | 現在の位置づけ |
 |---|---|---|
 | [generic_iterative_agent_framework_plan.md](generic_iterative_agent_framework_plan.md) | 反復Cycle、WorkItem、Hypothesis、Evidence、Graph探索状態、Solver、任意Reviewer、Model Profile、Prompt、CaseStore、trace | 新Agent Frameworkの実装ロードマップの正本 |
+| [generic_iterative_agent_framework_plan_visual.md](generic_iterative_agent_framework_plan_visual.md) | 正本の構成、探索、Cycle引継ぎ、Graph、statusを図と平易な表現で示す | 上記実装計画と対になる人間向けガイド。仕様判断には使わない |
 | [llm_directed_legal_retrieval.md](llm_directed_legal_retrieval.md) | LLM主導の検索・本文取得・Graph展開、LLMとプログラムの責務分担、旧Research Cycle | 新基盤への切替完了までの現行経路仕様 |
-| [llm_research_case_store_implementation_plan.md](llm_research_case_store_implementation_plan.md) | 旧ResearchCase、Task、Hypothesis、Event、Checkpoint、トランザクション境界 | 新ロードマップに置換済み。移行元の背景資料 |
+| [llm_research_case_store_implementation_plan.md](llm_research_case_store_implementation_plan.md) | 旧ResearchCase、Task、Hypothesis、Event、Checkpoint、トランザクション境界 | 廃止済み。新設計・実装の参照資料にしない |
 | [agent_logic_patterns.md](agent_logic_patterns.md) | Baseline RAGからFull DeepSearchまでの4パターン比較 | 初期POC・旧経路の比較設計 |
 
 ## 2. データ・インデックス・Graph
@@ -65,9 +66,10 @@
 │  └─ legal_rag_project_checklist
 │
 ├─ Agent
-│  ├─ generic_iterative_agent_framework_plan  新しい正本
+│  ├─ generic_iterative_agent_framework_plan         正本
+│  ├─ generic_iterative_agent_framework_plan_visual  人間向け図解
 │  ├─ llm_directed_legal_retrieval            現行旧経路
-│  └─ llm_research_case_store...              移行元
+│  └─ llm_research_case_store...              廃止済み
 │
 ├─ 評価・運用
 │  ├─ evaluation_design
@@ -80,13 +82,14 @@
 
 ## 7. 推奨読順
 
-1. Agent全体: [generic_iterative_agent_framework_plan.md](generic_iterative_agent_framework_plan.md)
-2. 投入対象: [dataset_design.md](dataset_design.md)
-3. Graph構築: [graph_edge_construction.md](graph_edge_construction.md)
-4. OpenSearch: [retrieval_config.md](retrieval_config.md)
-5. 法令Domain: [layered_legal_evidence_retrieval_plan.md](layered_legal_evidence_retrieval_plan.md)
-6. 評価: [evaluation_design.md](evaluation_design.md)
-7. 実行・再投入手順: [RUNBOOK.md](../../../RUNBOOK.md)
+1. Agent全体像: [generic_iterative_agent_framework_plan_visual.md](generic_iterative_agent_framework_plan_visual.md)
+2. Agent実装仕様: [generic_iterative_agent_framework_plan.md](generic_iterative_agent_framework_plan.md)
+3. 投入対象: [dataset_design.md](dataset_design.md)
+4. Graph構築: [graph_edge_construction.md](graph_edge_construction.md)
+5. OpenSearch: [retrieval_config.md](retrieval_config.md)
+6. 法令Domain: [layered_legal_evidence_retrieval_plan.md](layered_legal_evidence_retrieval_plan.md)
+7. 評価: [evaluation_design.md](evaluation_design.md)
+8. 実行・再投入手順: [RUNBOOK.md](../../../RUNBOOK.md)
 
 ## 8. 文書を更新するときの注意
 
@@ -95,5 +98,5 @@
 - Neo4jのnode、edge、RelationAssertion、来歴を変える場合は `graph_edge_construction.md` を更新する。
 - OpenSearchのチャンク、mapping、embeddingを変える場合は `retrieval_config.md` を更新する。
 - 操作手順や再シード条件を変える場合は、リポジトリ直下の `RUNBOOK.md` も更新する。
-- 旧経路の文書を削除せず、現行・移行元・廃止済みの位置づけを冒頭に明示する。
+- 廃止済み文書を新しい設計判断の根拠にせず、必要な仕様は現行の正本文書へ統合する。
 - Graphのインデックス仕様と検索時の利用仕様は別の責務だが、対応するedgeが新Agentから利用可能かを双方の文書で確認する。
