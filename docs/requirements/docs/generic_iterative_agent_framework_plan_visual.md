@@ -277,5 +277,28 @@ flowchart TD
 Prompt用語集を更新し、未定義の組合せはテストで失敗させる。関連ファイルを記憶頼みで探して同じ文字列を
 書き足す運用には戻さない。
 
+型付きCommandだけですべての規則を保証するわけではない。Command固有のpayloadは型で分けるが、複数Commandで
+共通するCase更新やfrontier更新は、現在状態との組合せを共通適用処理と契約テストで検証する。
+
 すべてを巨大な共通Enumや一つの状態機械へまとめるわけではない。Run、Tool、Cycle、Step、WorkItem、
 Hypothesis、Frontierごとに小さい契約を持ち、共通の生成・適用方法だけを揃える。
+
+## 11. 現在の3系統と切替先
+
+現行コードには3系統ある。新しい設計へ統合するときに、`agent_core/`を新Frameworkの一部と誤認しない。
+
+```mermaid
+flowchart LR
+    OLD[旧回答経路<br/>research_case_store<br/>llm_research_loop<br/>llm_directed_research]
+    CORE[別CaseStore試作<br/>agent_core<br/>EventJournal・Repository・transaction]
+    NEW[新Framework経路<br/>agent_framework<br/>domains/legal<br/>simple_in_memory]
+    TARGET[本計画の移行先]
+
+    OLD -. baseline比較後に削除 .-> TARGET
+    CORE -. 参照元を解消して削除 .-> TARGET
+    NEW -->|契約を完成| TARGET
+```
+
+`framework_agent.py`は新Framework用の`simple_in_memory.py`を使用し、`agent_core/`を直接使わない。
+`agent_core/`は現在`llm.py`等から参照されているため未接続ではないが、EventJournalや疑似transactionを
+初期実装へ持ち込まず、参照を解消してから削除する。

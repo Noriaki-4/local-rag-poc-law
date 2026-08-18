@@ -29,7 +29,10 @@
   任意Reviewer、法令Tool Adapter、Feature Flag付き経路は存在する。
 - Reviewerの既定値は無効で、新経路のFeature Flagも既定では無効である。
 - 現行Legal Profileは本文取得に旧Graph検索を自動連動し、
-  `REFERENCES / IMPLEMENTS / APPLIED_BY`を固定指定する。本書が目標とする
+  `domains/legal/profiles.py`の`automatic_tools.fixed_arguments`で
+  `REFERENCES / IMPLEMENTS / APPLIED_BY`の3種を固定指定する。別に、`legal_ontology.py`の
+  `expandable_edge_types()`は`EDGE_REGISTRY`から`EXPLAINS`を含む4種を導出するが、現行Legal Profileの
+  自動Graph設定はこの関数を使用していない。本書が目標とする
   Hypothesis別selector、`from_subject / to_subject`、5 predicateの新Graph契約ではない。
 - 現行CaseStateはWorkItem、Hypothesis、Evidence、Graph review履歴を保持するが、
   本書の`ExplorationState / CycleRecord / StepRecord`と説明付きstatus契約は未実装である。
@@ -37,6 +40,10 @@
   `implements / reference_only / uncertain`へ分類する移行用機能である。
   本書の5 predicate、`ClassificationRun`、`SUBJECT / OBJECT / CLASSIFIED_IN`を備えた
   新Graph schemaの完成を意味しない。全候補への分類結果登録も実施していない。
+- 現行コードには、旧回答経路、新しい`agent_framework/ + domains/legal/`経路、
+  `agent_core/`を使う別試作の3系統がある。`framework_agent.py`は`agent_core/`を直接使わず、
+  新Framework用の`adapters/persistence/simple_in_memory.py`を使う。`agent_core/`は`llm.py`と
+  `adapters/persistence/in_memory.py`から参照されているため、未接続とは扱わないが、本書の移行先にも含めない。
 
 実装済みかどうかはコードとテスト、品質値は評価成果物を正とする。本節とコードが食い違う場合は、
 本節へ新しい履歴を足さず、差分表を更新する。
@@ -535,7 +542,7 @@ CaseStoreの探索履歴や案件判断をNeo4jへ保存しない。同じArticl
 | `Article` | 条 | `contentUnitId`, `documentId`, `heading`, `articleNumber`, `sourceSnapshotId`, `sourceRevisionId`, `contentHash` |
 | `Paragraph` | 項 | `contentUnitId`, `documentId`, `parentContentUnitId`, `paragraphNumber`, `sourceSnapshotId`, `contentHash` |
 | `Item` | 号 | `contentUnitId`, `documentId`, `parentContentUnitId`, `itemNumber`, `sourceSnapshotId`, `contentHash` |
-| `RelationAssertion` | 非同期LLMが生成した未確認の意味関係候補 | `assertionId`, `proposedPredicate`, `basisEdgeId`, `sourceContentUnitId`, `subjectSupportingSpanId`, `objectSupportingSpanId`, `subjectSupportingQuote`, `objectSupportingQuote`, `referenceOccurrenceHash`, `sourceSnapshotId`, `sourceRevisionId`, `classificationRunId`, `classifiedAt`, `graphSchemaVersion` |
+| `RelationAssertion` | 非同期LLMが生成した未確認の意味関係候補 | `assertionId`, `candidateKey`, `assertionDedupeKey`, `proposedPredicate`, `basisEdgeId`, `sourceContentUnitId`, `subjectSupportingSpanId`, `objectSupportingSpanId`, `subjectSupportingQuote`, `objectSupportingQuote`, `referenceOccurrenceHash`, `sourceSnapshotId`, `sourceRevisionId`, `classificationRunId`, `classifiedAt`, `graphSchemaVersion` |
 | `ClassificationRun` | snapshot単位の非同期意味分類Run | `classificationRunId`, `phase`, `sourceSnapshotId`, `graphSchemaVersion`, `model`, `promptVersion`, `candidatesPerModelCall`, `inputCount`, `processedCount`, `assertionCount`, `referenceOnlyCount`, `uncertainCount`, `failedCount`, `scopeHash`, `publishedAt` |
 
 `Article`を項・号の代用labelにしない。Graph探索をArticle単位へ投影する場合も、元の
@@ -620,8 +627,12 @@ Programは既知decision key、predicate enum、端点が入力内にあるこ�
 
 分類LLMは既定で1候補/呼出しとする。複数候補の同時提示は、単件結果との判断不変性を対象modelのfixtureで
 確認したProfileだけが明示的に有効化できる。LLM入力単位とは別に保存checkpointを持ち、
-分類jobは`subject/object content hash + reference occurrence hash + promptVersion + model + graphSchemaVersion`で
+分類jobは`sourceSnapshotId + subject/object Article ID・content hash + basisEdgeId + 正規化した全reference occurrence hash + promptVersion + model + graphSchemaVersion`で
 再開・cache可能にする。
+この組を正規化してhash化した`candidateKey`を分類入力の冪等キーとする。1候補から複数predicateが返り得るため、
+RelationAssertionの物理重複キーは候補だけにせず、
+`assertionDedupeKey = hash(classificationRunId + candidateKey + proposedPredicate)`とする。
+同じRun・候補・predicateを異なる`assertionId`で二重登録せず、別predicateと別Runは区別する。
 結果は`phase=building`のRunへ書き、入力scopeを処理し終えたRunだけ`phase=published`へ一括publishする。
 継続不能なRunは`phase=failed`とする。このphaseはProgram内部の実行事実でありSolverへ判断させない。
 Case開始時に最新のpublish済み
@@ -663,6 +674,7 @@ Tool Adapterは結果をmaterializeする前に候補件数を確認する。安
 ```text
 UNIQUE GraphNode.graphNodeId
 UNIQUE RelationAssertion.assertionId
+UNIQUE RelationAssertion.assertionDedupeKey
 UNIQUE ClassificationRun.classificationRunId
 INDEX  GraphNode.documentId
 INDEX  Document.authorityType
@@ -674,7 +686,8 @@ INDEX  ClassificationRun.sourceSnapshotId
 seed監査では、Node/Relationの端点型、dangling relation、重複`graphEdgeId`、`MENTIONS / APPLIED_BY`が0件、
 許可した物理Relation以外が0件であることを検査する。分類publish監査では、RelationAssertionごとの
 `SUBJECT / OBJECT / CLASSIFIED_IN`各1件、predicate enum、非nullな`basisEdgeId`、両端のsupporting span ID・原文、
-同一snapshotの端点・ClassificationRunとの参照整合、重複`assertionId`、Run集計件数を検査する。
+同一snapshotの端点・ClassificationRunとの参照整合、重複`assertionId`、重複`assertionDedupeKey`、
+`candidateKey`の再計算一致、Run集計件数を検査する。
 さらに、同じ入力snapshotから作ったOpenSearchとNeo4jについてDocument・Article ID、`sourceRevisionId`、
 `sourceSnapshotId`、`contentHash`の対応を検査する。入力元がrevision IDを提供しない場合は推測値を作らず
 `sourceRevisionId=null`とし、seed runで固定した`sourceSnapshotId`とcontent hashで同時生成を確認する。
@@ -944,6 +957,12 @@ SolverCommand = Annotated[
     Field(discriminator="kind"),
 ]
 ```
+
+discriminatorは、`cycle_plan`、ToolRequest、handoff、answer等のCommand固有payloadを型で分離する。
+一方、`CaseUpdate`、focus、Evidence保持、frontier更新は複数Commandで共通利用するため基底型に置く。
+したがって、型だけで全相互制約を表現できるとはみなさない。共通欄の既知ID、現在状態、全件性、
+Commandとの許可組合せは`apply_case_command`の実行時検証とCommand別の契約テストで保証する。
+意味上どのCommandを選ぶべきかは検証しない。
 
 主な整合条件は次のとおり。
 
@@ -1666,10 +1685,22 @@ OpenSearch、Neo4j、Anthropic等のSDKも`agent_framework`から直接importし
 
 ## 11. 現行コードからの切替
 
+現行コードの3系統を次のように扱う。
+
+| 系統 | 主な場所 | 扱い |
+|---|---|---|
+| 旧回答経路 | `research_case_store.py`, `llm_research_loop.py`, `llm_directed_research.py` | 切替完了まで比較対象として維持し、Phase 4合格後に削除する |
+| 新Framework経路 | `agent_framework/`, `domains/legal/`, `framework_agent.py`, `adapters/persistence/simple_in_memory.py` | 本計画に沿って完成させる移行先 |
+| 別CaseStore試作 | `agent_core/`, `adapters/persistence/in_memory.py` | `llm.py`等から参照中だが移行先には含めない。参照元を解消してから削除する |
+
+10章の目標ディレクトリに`agent_core/`を載せないのは見落としではなく、EventJournal、Repository、
+transaction等を初期Frameworkへ持ち込まないためである。`framework_agent.py`は現在も
+`adapters/persistence/simple_in_memory.py`を使い、`agent_core/`を直接使用しない。
+
 - 新経路はFeature Flagで有効化し、Phase 4の合格前に既定経路へしない。
 - 既存OpenSearch・Neo4j・本文取得はLegal Tool Adapterで利用し、法令固有ロジックをFrameworkへコピーしない。
 - 現行の自動Graph、旧Graph relation・方向・status、二重encodeされたSolver出力を互換契約として新設計へ持ち込まない。
-- 新経路が合格した後、参照を確認したうえで旧回答経路と未接続試作を別変更で削除する。
+- 新経路が合格した後、参照を確認したうえで旧回答経路と`agent_core/`試作を別変更で削除する。
 - 切替中も同じ入力snapshotからOpenSearchとNeo4jを再構築し、旧Graphと新Graphを同一Caseへ混在させない。
 
 Context Projectorは、全WorkTree案内、現Cycle、直前Step、Graph差分batch、評価済みfrontier ledger、
@@ -1680,8 +1711,20 @@ focusへ接続するNode・Link、直近ToolResult、新規・保持EvidenceをC
 
 ### Phase 0: 契約とbaseline
 
+本計画の「代表2問」は、`agent-ui/example_questions.py`の次の完全一致質問に固定する。
+採点用のrequired evidenceとanswer pointsはSolverへ渡さず、同ファイルの定義を評価時だけ使用する。
+現行fixtureには独立したquestion IDがないため、`EXAMPLE_TITLES`へ渡す完全一致titleを評価キーとする。
+
+| `EXAMPLE_TITLES`の完全一致値 | Agent APIへ渡す質問文 |
+|---|---|
+| `株券を買い集める場合の公開買付け` | 上場会社の株式を、市場を通さずに多数の株主から買い集めたいのですが、公開買付けの手続が必要になるのはどのような場合ですか。対象となる株券等の範囲、主な例外、必要な手続も含めて、根拠となる条文とともに説明してください。 |
+| `役職員への譲渡制限付株式の交付` | 上場会社が自社や子会社の役職員へ、譲渡を一定期間制限した自社株式を報酬として交付する場合、有価証券の募集・売出しの届出は必要ですか。届出が不要となり得る条件、対象にできる人の範囲、譲渡制限をいつまで課す必要があるかも含めて、根拠となる条文とともに説明してください。 |
+
+初期baselineでは同ファイルの`legal_as_of=2026-07-26`と採点定義を固定する。質問文、必要根拠、回答要点、
+法令時点のいずれかを変更する場合は、baselineを別revisionとして採り直し、本表と評価fixtureを同じ変更で更新する。
+
 - 本計画を正本として確定する。
-- 現行の代表2問について、総時間、LLM呼び出し数、用途別latency、Tool時間をtraceから記録する。
+- 上記2問について、総時間、LLM呼び出し数、用途別latency、Tool時間をtraceから記録する。
 - 評価データ、設定、model ID、code revisionを固定する。
 - 新しいSolver、Reviewer、Tool、CaseStore契約のfixtureを作る。
 - 現行のstatus、judgment、action、Command、定義箇所、決定主体、永続化有無、LLM表示有無を棚卸しし、
@@ -1748,6 +1791,11 @@ focusへ接続するNode・Link、直近ToolResult、新規・保持EvidenceをC
 - status recordのJSON保存・復元、未知値拒否、serialized value変更時の`contract_version`不一致と
   migration/旧値読替えをClaude APIなしでテストする。
 
+Phase 1の主要な実装リスクは`contract_rendering.py`である。Enum、説明、owner、LLM可視性、遷移を持つ
+正本から、Pydantic型、Provider schemaの基礎、日本語Prompt用語集、網羅性テストを矛盾なく派生させる
+小さな生成系になるため、単なるテンプレート追加として見積もらない。最初にCycleとFrontierの2種類だけで
+縦切りし、生成物のsnapshot test、未知値、全遷移組合せ、JSON round-tripを通してから他statusへ広げる。
+
 このPhaseではClaude APIを使わない。
 
 完了条件:
@@ -1812,7 +1860,9 @@ focusへ接続するNode・Link、直近ToolResult、新規・保持EvidenceをC
   件数の構造検証後にRelationAssertionを作る。Programは分類結果を補正しない。
 - 分類結果を`ClassificationRun`へ集計し、完了Runだけ一括publishする。RelationAssertionを
   `SUBJECT / OBJECT / CLASSIFIED_IN`各1本で接続し、`basisEdgeId / supportingSpans / classificationRunId`を
-  保存する。旧`fromArticleId / toArticleId / suggestedType / status`を新schemaの正本にしない。
+  保存する。`candidateKey`と`assertionDedupeKey`を決定的に生成し、後者の一意制約で同一Run・候補・predicateの
+  二重登録を防ぐ。再開時に同じkeyと同じpayloadがあれば処理済みとして再利用し、同じkeyでpayloadが違えば
+  Runを失敗させて上書きしない。旧`fromArticleId / toArticleId / suggestedType / status`を新schemaの正本にしない。
 - 分類LLMは既定1候補/呼出しとし、保存checkpointはLLM入力単位から分離する。複数候補batchは
   単件との判断不変性を対象modelのfixtureで確認した場合だけProfileで明示的に有効化する。
 - Case開始時に`sourceSnapshotId / graphSchemaVersion / classificationRunId`を固定し、検索時案件判断は
@@ -1825,6 +1875,9 @@ focusへ接続するNode・Link、直近ToolResult、新規・保持EvidenceをC
 - Graph方向の外部契約を`from_subject / to_subject`へ統一する。Tool AdapterはNeo4jのfrom/toと検索起点から
   directionを決定し、旧称をPrompt、Provider schema、ToolResult、CaseStoreの新規データへ出さない。
 - `APPLIED_BY / MENTIONS`をLegal ontology、seed、Neo4j、Graph Tool allowlist、Promptから削除する。
+  現行`legal_ontology.py`で`implemented=False`の`DEFINES / USES_TERM / EXCEPTION_TO`も物理Relationの
+  積み残しとして実装せず、旧registryから削除する。定義利用と例外の意味候補は、それぞれ
+  `RelationAssertion.proposedPredicate`の`USES_DEFINITION / EXCEPTION_TO`で表す。
   旧`referenceKind`を意味selectorから外し、原文`REFERENCES`には引用箇所と抽出来歴を保存する。
   schema versionを更新し、同じ入力snapshotからOpenSearchとNeo4jを両方再構築する。
   `EXPLAINS`以外の単なるガイド言及をGraph関係へ変換しない。
@@ -1854,6 +1907,9 @@ focusへ接続するNode・Link、直近ToolResult、新規・保持EvidenceをC
 - publish済み全RelationAssertionが`SUBJECT / OBJECT / CLASSIFIED_IN`を各1本持ち、既知Articleと
   ClassificationRunへ接続し、5種の`proposedPredicate`、非nullな`basisEdgeId / supportingSpans`の整合が取れる。
   旧`status`を正本にせず、未確認候補を正式な物理意味Relationへ自動昇格させない。
+- 同じ分類候補を中断・再開で2回保存するfixtureで、`assertionId`が異なっても
+  `classificationRunId + candidateKey + proposedPredicate`の重複が一意制約とpublish監査で検出される。
+  同一候補から異なるpredicateが返る場合と、別Runで再分類する場合は別Assertionとして保存できる。
 - 同一source content unitに複数参照先と異なる意味があるfixtureで、非同期LLMへ全端点と引用箇所が渡り、
   候補がtargetごとの別LLM入力になり、Programが全参照先へ同じpredicateを複製しない。
   同一候補内で同じ参照文字列が複数回現れるfixtureは全出現spanを提示し、最初の一致だけに固定しない。
@@ -1939,19 +1995,30 @@ focusへ接続するNode・Link、直近ToolResult、新規・保持EvidenceをC
 
 ### Phase 4: 実モデル評価と切替
 
-- Reviewer無効、research/integrationともHaikuで代表自然言語2問を1回ずつ実行する。
+- Reviewer無効、research/integrationともHaikuでPhase 0に固定した自然言語2問を1回ずつ実行する。
 - 必要根拠、回答要点、総時間、LLM呼び出し数、Tool時間をbaselineと比較する。
+- 上記2問の品質合格後、登録済み自然言語12問を各3回、同一設定・逐次実行して36件のRun全体latencyを集め、
+  外部provider障害を除くRunのp90を測る。Frameworkの予算timeout、protocol error、限定回答は除外せず
+  性能・品質失敗として数える。外部provider障害も件数と理由を別記する。
 - 必要ならReviewer有効を別試験として1回だけ実行し、品質差と時間差を測る。
 - 合格後に新経路をデフォルトへ切り替える。
-- 参照されなくなった過剰な`agent_core`試作と旧経路を、別変更で削除する。
+- `llm.py`と`adapters/persistence/in_memory.py`等の参照を解消した後、`agent_core/`試作と旧回答経路を
+  それぞれ別変更で削除する。
 
 合格条件:
 
-- 代表2問で必要根拠へ到達する。
+- Phase 0に固定した2問で必要根拠へ到達する。
 - プログラムによる法的意味判断がない。
 - Reviewer無効がデフォルトである。
 - 通常問題のp90を120秒以内とする。外部provider障害は別集計する。
 - baselineより回答品質を落とさず、LLM呼び出し数を大幅に削減する。
+
+`max_wall_time_sec=180`は異常な長時間実行を止め、Cycle終了と限定回答の時間を残す安全上限であり、
+p90 120秒は通常問題の性能目標である。安全上限以内なら性能合格という意味ではない。p90を超えた場合は、
+用途別の入力・出力token、重複投影、LLM呼出し数、Tool並列性をtraceで分解する。Evidence本文枠や
+`max_output_tokens`を調整する場合も、新規Article全文、Graph差分候補、必要根拠を欠落させない契約テストと
+上記2問の品質評価を再実行する。安全上限だけを延長して合格扱いにせず、120秒を変更する場合は実測根拠と
+品質・latencyの比較結果を本Phaseの評価成果物へ残す。
 
 ## 13. 将来拡張
 

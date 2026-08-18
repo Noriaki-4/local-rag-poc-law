@@ -8,7 +8,7 @@
 | 文書 | 内容 | 現在の位置づけ |
 |---|---|---|
 | [generic_iterative_agent_framework_plan.md](generic_iterative_agent_framework_plan.md) | 反復Cycle、WorkItem、Hypothesis、Evidence、Graph探索状態、Solver、任意Reviewer、Model Profile、Prompt、CaseStore、trace | 新Agent Frameworkの実装ロードマップの正本 |
-| [generic_iterative_agent_framework_plan_visual.md](generic_iterative_agent_framework_plan_visual.md) | 正本の構成、探索、Cycle引継ぎ、Graph、statusを図と平易な表現で示す | 上記実装計画と対になる人間向けガイド。仕様判断には使わない |
+| [generic_iterative_agent_framework_plan_visual.md](generic_iterative_agent_framework_plan_visual.md) | 正本の構成、探索、Cycle引継ぎ、Graph、保守性、現行3系統からの切替を図と平易な表現で示す | 上記実装計画と対になる人間向けガイド。仕様判断には使わない |
 | [llm_directed_legal_retrieval.md](llm_directed_legal_retrieval.md) | LLM主導の検索・本文取得・Graph展開、LLMとプログラムの責務分担、旧Research Cycle | 新基盤への切替完了までの現行経路仕様 |
 | [llm_research_case_store_implementation_plan.md](llm_research_case_store_implementation_plan.md) | 旧ResearchCase、Task、Hypothesis、Event、Checkpoint、トランザクション境界 | 廃止済み。新設計・実装の参照資料にしない |
 | [agent_logic_patterns.md](agent_logic_patterns.md) | Baseline RAGからFull DeepSearchまでの4パターン比較 | 初期POC・旧経路の比較設計 |
