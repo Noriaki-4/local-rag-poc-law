@@ -1842,6 +1842,28 @@ Phase 1の主要な実装リスクは`contract_rendering.py`である。Enum、�
 
 ### Phase 2: 法令の薄い縦切り
 
+Phase 2は、実装途中のschemaで全データを作り直さない。次の順序を固定する。
+
+1. 新Graph契約、型、Constraint、監査をfixtureへ実装する。この時点では既存の実データを更新しない。
+2. `/admin/seed`を決定的処理だけにし、1つの入力manifestから同じ`sourceSnapshotId`を持つ
+   OpenSearch本文とNeo4jの構造・原文Relationを再構築できるようにする。
+3. 非同期Relation分類をseedから独立した再開可能CLIとして実装する。初期実装では常駐worker、queue、
+   schedulerを必須にせず、HTTP seed処理内からLLMを呼ばない。
+4. 小規模fixtureとdry-run、現行34件fixture、代表100候補の順で、schema整合、分類品質、失敗率、
+   checkpoint、所要時間を確認する。全候補の所要時間を再見積りする前に全件Runを開始しない。
+5. 検証環境の回答処理を止め、同じmanifestからOpenSearchとNeo4jを一度だけ再構築する。
+   現行の破壊的seedを実行中に検索可能な状態とは扱わず、途中失敗時は不一致snapshotを公開しない。
+6. 新snapshotを対象に全件分類し、`building` RunへcheckpointとAssertionを保存する。全件監査に成功した
+   Runだけを`published`へ遷移させ、Caseは開始時にその`classificationRunId`を固定する。
+7. publish済みRunを新しいLegal Tool Adapterへ接続し、代表2問を検証する。非同期分類完了前でも
+   OpenSearchと原文`REFERENCES / EXPLAINS`は利用できるが、`semantic_assertion`はpublish済みRunが
+   ある場合だけ利用する。
+
+OpenSearchとNeo4jの決定的seedは同じsnapshotを公開する1つの移行単位、非同期Relation分類はその後に
+publishする別単位とする。Graph schema、抽出規則、入力データの変更時にNeo4jだけを再seedしたり、
+旧snapshotのClassificationRunを新snapshotへ流用したりしない。初期検証環境ではversioned indexや
+常駐workerを先に導入せず、メンテナンス中の再構築と再開可能CLIで整合を保つ。
+
 - Legal Domain Packと法令Promptを実装する。
 - 既存OpenSearch、Neo4j、本文取得をLegal Tool Adapterとして接続する。
 - `fetch_articles`はArticleごとの件数上限で打ち切らず、OpenSearchの総件数を確認して安定順に全pageを取得する。
