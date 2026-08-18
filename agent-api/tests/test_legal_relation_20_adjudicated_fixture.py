@@ -84,3 +84,12 @@ def test_structural_evaluation_can_run_without_rebuilding_graph():
     assert module.structural_result(resolved, stale_row)["passed"] is False
     assert module.structural_result(not_reference, None)["passed"] is True
     assert module.structural_result(not_reference, stale_row)["passed"] is False
+
+
+def test_evaluator_reads_adjudication_source_from_fixture():
+    module = _load_module()
+    fixtures = module.load_fixtures(FIXTURE_PATH)
+
+    assert module.adjudication_sources(fixtures) == [
+        "codex_manual_review_2026-08-18"
+    ]

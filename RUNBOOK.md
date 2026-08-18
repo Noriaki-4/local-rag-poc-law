@@ -366,6 +366,50 @@ ReviewerはWorkerの回答を見たうえで誤りと根拠を指摘し、Worker
 確定fixture
 `docs/requirements/samples/eval/legal_relation_parallel_20_adjudicated_fixture.jsonl`と全件一致した。
 
+#### 代表100件の構造・意味評価データセット（2026-08-19）
+
+法令とガイドを同じ意味分類schemaへ押し込まず、次の2レーンをmanifestで束ねた。
+
+- 法令関係94件: 13法令系統、5 `referenceKind`、本則・附則22件を含む。
+- ガイド6件: 既存のガイド検索と明示`EXPLAINS`遷移を検査する。
+
+論理シャードは20件ずつ5本である。利用可能なagent slotがCoordinatorを含め4だったため、
+物理実行は最大3並列とし、完了した枠へ残りを投入した。法令94件は意味分類前に全件を構造監査し、
+最終的に`resolved=72 / unresolved=14 / not_reference=8`となった。構造valid 72件のうち、
+Luna Worker / Reviewerが71件を承認した。1件は1回の差戻し後も判断が一致しなかったため、
+`unresolved_after_single_revision`として`expectedPredicates: null`を維持した。多数決やプログラムによる
+意味ラベル補完は行っていない。
+
+成立predicateは`IMPLEMENTS=9`、`INCORPORATES=3`、`USES_DEFINITION=12`、
+`EXCEPTION_TO=2`、`OVERRIDES=1`で、成立なしの負例も含む。Codexの横断監査では、構造監査が見逃した
+「医療法第一条の二」を薬機法第一条の二へ接続した1件を`unresolved`へ修正した。Workerが
+`needs_resolution`で停止したため、この誤接続に意味ラベルは付いていない。
+
+成果物は次の3ファイルを正本とする。
+
+- `docs/requirements/samples/eval/legal_relation_guidance_100_manifest.json`
+- `docs/requirements/samples/eval/legal_relation_94_adjudicated_fixture.jsonl`
+- `docs/requirements/samples/eval/legal_relation_94_adjudication_audit.jsonl`
+
+ガイド6件は既存の
+`docs/requirements/samples/eval/guidance_navigation_fixture.jsonl`を参照する。100件fixtureの件数、
+status、predicate網羅、監査契約は次で回帰する。
+
+```bash
+agent-api/.venv/bin/pytest -q \
+  agent-api/tests/test_legal_relation_guidance_100_fixture.py
+```
+
+Graphの参照解決を修正した後は、次で94件の構造正解と照合する。2026-08-19時点の
+現行Graphは`72/94`で、正解上`not_reference`または`unresolved`の22件がまだ接続済みである。
+合格条件は`94/94`とする。このコマンドは意味分類やGraph更新を行わない。
+
+```bash
+agent-api/.venv/bin/python \
+  scripts/evaluate_legal_relation_20_adjudicated.py \
+  --fixture docs/requirements/samples/eval/legal_relation_94_adjudicated_fixture.jsonl
+```
+
 したがって、現時点の採用判断は次のとおりである。
 
 - Gemma経路: ローカルの契約・速度・比較試験用。全件Runをpublishする品質経路には使わない。

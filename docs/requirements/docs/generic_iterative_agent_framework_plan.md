@@ -43,7 +43,7 @@
 - 現行CLIのOllama `gemma4:e4b`経路はローカル契約試験用であり、手動監査14件の5 predicate完全一致が
   4/14だったため、全件publish用の品質経路には採用しない。正本分類はCodexサブスクリプション内の
   `gpt-5.6-luna`をWorker / Reviewerの両方に使い、候補を複数ペアへ分割して並列実行する。
-  既存14件と新規20件でこの方式を確認済みだが、判定JSONLを`ClassificationRun`へ取り込む
+  既存14件、新規20件、法令94件＋ガイド6件の代表100件でこの方式を確認済みだが、判定JSONLを`ClassificationRun`へ取り込む
   検証importは未実装である。詳しい比較結果と運用手順は[RUNBOOK](../../../RUNBOOK.md)を正とする。
 - 旧`legal-relation-classifier-v8`は、schema version 7の旧`IMPLEMENTS`候補を
   `implements / reference_only / uncertain`へ分類する移行用機能である。
@@ -1400,7 +1400,9 @@ API経由でLunaを呼ばず、Codexサブスクリプションのオペレー�
 
 現行コードのOllama Profileは比較・契約試験用として残る。Gemmaは手動監査14件で5 predicate完全一致が
 4/14だったため、全件Runのpublishには使用しない。Luna方式は既存14件で14/14、新規20件で最終20/20を
-確認済みである。ただし、Luna出力を候補hash・snapshot・Pydantic契約で検証して
+確認済みである。さらに代表100件は、法令94件を構造監査して72件を意味判定対象とし、71件をReviewer承認、
+1件を差戻し上限後の未解消として教師ラベルから除外した。残り6件は別schemaのガイドレーンである。
+ただし、Luna出力を候補hash・snapshot・Pydantic契約で検証して
 `ClassificationRun`へ取り込むimportが完成するまでは、評価JSONLをpublish済みGraphとして扱わない。
 
 `solver_common.md`はresearchとintegrationの両方へ合成する。質問観点、法令階層・委任先追跡、

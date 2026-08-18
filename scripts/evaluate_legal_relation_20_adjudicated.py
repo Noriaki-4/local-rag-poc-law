@@ -79,6 +79,16 @@ def select_fixtures(
     return result
 
 
+def adjudication_sources(fixtures: list[dict[str, Any]]) -> list[str]:
+    return sorted(
+        {
+            str(item["adjudicationSource"])
+            for item in fixtures
+            if str(item.get("adjudicationSource") or "").strip()
+        }
+    )
+
+
 def structural_result(
     fixture: dict[str, Any], row: dict[str, Any] | None
 ) -> dict[str, Any]:
@@ -288,12 +298,16 @@ def main() -> int:
     status_counts = Counter(
         str(item["expectedResolutionStatus"]) for item in fixtures
     )
+    teacher_sources = adjudication_sources(fixtures)
     structural_correct = sum(bool(item["passed"]) for item in structural)
     classification_correct = sum(bool(item["passed"]) for item in classification)
     report = {
         "fixtureCount": len(fixtures),
         "teacherData": {
-            "adjudicationSource": "codex_manual_review_2026-08-18",
+            "adjudicationSource": (
+                teacher_sources[0] if len(teacher_sources) == 1 else None
+            ),
+            "adjudicationSources": teacher_sources,
             "resolutionStatusCounts": dict(sorted(status_counts.items())),
             "predicateLabeledCount": sum(
                 item["expectedPredicates"] is not None for item in fixtures
