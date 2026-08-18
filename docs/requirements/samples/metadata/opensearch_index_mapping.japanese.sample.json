@@ -83,6 +83,24 @@
       "contentUnitId": {
         "type": "keyword"
       },
+      "sourceSnapshotId": {
+        "type": "keyword"
+      },
+      "sourceRevisionId": {
+        "type": "keyword"
+      },
+      "contentHash": {
+        "type": "keyword"
+      },
+      "articleContentHash": {
+        "type": "keyword"
+      },
+      "documentContentHash": {
+        "type": "keyword"
+      },
+      "graphSchemaVersion": {
+        "type": "integer"
+      },
       "parentContentUnitId": {
         "type": "keyword"
       },

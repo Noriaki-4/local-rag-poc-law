@@ -90,13 +90,11 @@ def seed_all(os_client: OpenSearchClient, graph_client: GraphClient) -> dict[str
     if not mapping_path.is_absolute():
         mapping_path = samples_dir / mapping_path
     mapping = _read_json(mapping_path)
-    os_client.recreate_index(mapping)
 
     external_guidance_sources = _external_guidance_sources()
-    documents = _opensearch_documents(samples_dir, external_guidance_sources)
-    for document in documents:
-        os_client.index_document(document)
-    os_client.refresh()
+    documents, source_snapshot_id = _with_seed_identity(
+        _opensearch_documents(samples_dir, external_guidance_sources)
+    )
 
     nodes = _read_jsonl(samples_dir / "metadata" / "nodes.sample.jsonl")
     edges = _read_jsonl(samples_dir / "metadata" / "edges.sample.jsonl")
@@ -113,11 +111,17 @@ def seed_all(os_client: OpenSearchClient, graph_client: GraphClient) -> dict[str
             f"[seed] dropped {dropped_guidance} guidance edge(s) whose target article is not in the graph"
         )
     _assert_no_dangling_edges(nodes, edges)
-    # seed直後の自動検査(§6.3)。投入は止めず、違反はmanifestとログへ残して監査可能にする。
-    audit = audit_graph(nodes, edges)
-    for violation in audit.violations:
-        print(f"[seed][graph-audit] {violation}")
+    # 破壊的な再構築へ入る前に投入物を検査する。不正なGraphを成功扱いにしない。
+    audit = audit_graph(nodes, edges, source_snapshot_id=source_snapshot_id)
+    if not audit.ok:
+        raise ValueError(f"Graph audit failed before seed: {audit.violations}")
+
+    os_client.recreate_index(mapping)
+    for document in documents:
+        os_client.index_document(document)
+    os_client.refresh()
     graph_client.clear()
+    graph_client.ensure_legal_graph_schema()
     graph_client.seed_nodes(nodes)
     graph_client.seed_edges(edges)
 
@@ -136,11 +140,120 @@ def seed_all(os_client: OpenSearchClient, graph_client: GraphClient) -> dict[str
         "minioStaleVectorObjectsRemoved": minio_stale_removed,
         # オントロジー変更時に再シードが必要かを判別できるよう、manifestへ残す(§6.3)。
         "graphSchemaVersion": GRAPH_SCHEMA_VERSION,
+        "sourceSnapshotId": source_snapshot_id,
         "edgeTypeCounts": _count_by_key(edges, "edgeType"),
         "nodeTypeCounts": _count_by_key(nodes, "nodeType"),
         "authorityTypeCounts": _count_by_key(nodes, "authorityType"),
         "graphAudit": audit.as_dict(),
     }
+
+
+_SEED_IDENTITY_FIELDS = frozenset(
+    {
+        "embedding",
+        "contentHash",
+        "articleContentHash",
+        "parentContentHash",
+        "documentContentHash",
+        "sourceSnapshotId",
+        "graphSchemaVersion",
+    }
+)
+
+
+def _with_seed_identity(
+    documents: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], str]:
+    """同じ入力からOpenSearchとNeo4jで共有するsnapshotとhashを作る。"""
+
+    enriched = [dict(document) for document in documents]
+    for document in enriched:
+        document["contentHash"] = _stable_hash(
+            {
+                key: value
+                for key, value in document.items()
+                if key not in _SEED_IDENTITY_FIELDS
+            }
+        )
+
+    article_units: dict[str, list[tuple[str, str]]] = {}
+    parent_units: dict[str, list[tuple[str, str]]] = {}
+    document_units: dict[str, list[tuple[str, str]]] = {}
+    for document in enriched:
+        content_unit_id = str(document["contentUnitId"])
+        content_hash = str(document["contentHash"])
+        document_id = str(document["documentId"])
+        document_units.setdefault(document_id, []).append(
+            (content_unit_id, content_hash)
+        )
+        if document.get("docType") == "law":
+            article_units.setdefault(_article_id(document), []).append(
+                (content_unit_id, content_hash)
+            )
+            parent_content_unit_id = document.get("parentContentUnitId")
+            if parent_content_unit_id:
+                parent_units.setdefault(
+                    str(parent_content_unit_id), []
+                ).append((content_unit_id, content_hash))
+
+    article_hashes = {
+        article_id: _stable_hash(sorted(units))
+        for article_id, units in article_units.items()
+    }
+    document_hashes = {
+        document_id: _stable_hash(sorted(units))
+        for document_id, units in document_units.items()
+    }
+    parent_hashes = {
+        parent_id: _stable_hash(sorted(units))
+        for parent_id, units in parent_units.items()
+    }
+    manifest = [
+        {
+            "contentUnitId": str(document["contentUnitId"]),
+            "contentHash": str(document["contentHash"]),
+            "sourceRevisionId": document.get("sourceRevisionId"),
+        }
+        for document in sorted(
+            enriched,
+            key=lambda item: str(item["contentUnitId"]),
+        )
+    ]
+    source_snapshot_id = f"snapshot-{_stable_hash({'graphSchemaVersion': GRAPH_SCHEMA_VERSION, 'contentUnits': manifest})}"
+
+    for document in enriched:
+        document_id = str(document["documentId"])
+        document["documentContentHash"] = document_hashes[document_id]
+        if document.get("docType") == "law":
+            document["articleContentHash"] = article_hashes[
+                _article_id(document)
+            ]
+            parent_content_unit_id = document.get("parentContentUnitId")
+            if parent_content_unit_id:
+                document["parentContentHash"] = parent_hashes[
+                    str(parent_content_unit_id)
+                ]
+        document["sourceSnapshotId"] = source_snapshot_id
+        document["graphSchemaVersion"] = GRAPH_SCHEMA_VERSION
+    return enriched, source_snapshot_id
+
+
+def _stable_hash(value: Any) -> str:
+    payload = json.dumps(
+        value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return sha256(payload).hexdigest()
+
+
+def _article_id(document: dict[str, Any]) -> str:
+    return str(
+        document.get("articleContentUnitId")
+        or document.get("parentContentUnitId")
+        or document["contentUnitId"]
+    ).split("-paragraph-", 1)[0]
 
 
 def _count_by_key(items: list[dict[str, Any]], key: str) -> dict[str, int]:
@@ -1001,7 +1114,7 @@ def _graph_artifacts_from_documents(
             "clearanceLevel": document.get("clearanceLevel", 3),
             "authorityType": authority_type,
             "authoritySource": authority_source,
-            "graphSchemaVersion": GRAPH_SCHEMA_VERSION,
+            **_node_seed_identity(document, "documentContentHash"),
         }
         nodes_by_id[article_content_unit_id] = {
             "graphNodeId": article_content_unit_id,
@@ -1019,7 +1132,7 @@ def _graph_artifacts_from_documents(
             "clearanceLevel": document.get("clearanceLevel", 3),
             "authorityType": authority_type,
             "authoritySource": authority_source,
-            "graphSchemaVersion": GRAPH_SCHEMA_VERSION,
+            **_node_seed_identity(document, "articleContentHash"),
         }
         edge_id = f"edge-{document_id}-has-content-unit-{article_content_unit_id.removeprefix(document_id + '-')}"
         edges.append(
@@ -1033,6 +1146,7 @@ def _graph_artifacts_from_documents(
                 "relationConfidence": 1.0,
                 "publishStatus": "published",
                 "isLatest": True,
+                **_relation_seed_identity(document, article_content_unit_id),
             }
         )
         if content_unit_id != article_content_unit_id:
@@ -1049,9 +1163,11 @@ def _graph_artifacts_from_documents(
                     "isLatest": document.get("isLatest"),
                     "confidentiality": document.get("confidentiality"),
                     "clearanceLevel": document.get("clearanceLevel", 3),
-                    "graphSchemaVersion": GRAPH_SCHEMA_VERSION,
+                    **_node_seed_identity(document, "parentContentHash"),
                 }
-                edges.append(_hierarchy_edge(article_content_unit_id, parent_id, document_id))
+                edges.append(
+                    _hierarchy_edge(article_content_unit_id, parent_id, document)
+                )
             node_type = "Item" if document.get("itemNumber") is not None else "Paragraph"
             nodes_by_id[content_unit_id] = {
                 "graphNodeId": content_unit_id,
@@ -1065,18 +1181,15 @@ def _graph_artifacts_from_documents(
                 "isLatest": document.get("isLatest"),
                 "confidentiality": document.get("confidentiality"),
                 "clearanceLevel": document.get("clearanceLevel", 3),
-                "graphSchemaVersion": GRAPH_SCHEMA_VERSION,
+                **_node_seed_identity(document, "contentHash"),
             }
-            edges.append(_hierarchy_edge(parent_id, content_unit_id, document_id))
+            edges.append(_hierarchy_edge(parent_id, content_unit_id, document))
     reference_edges = _reference_edges(documents)
     edges.extend(reference_edges)
-    edges.extend(_incorporation_edges(documents, reference_edges))
-    delegation_assertions, delegation_edges = _delegation_graph_artifacts(
+    _, delegation_edges = _delegation_graph_artifacts(
         documents,
         law_family_roots or {},
     )
-    for assertion in delegation_assertions:
-        nodes_by_id[assertion["graphNodeId"]] = assertion
     edges.extend(delegation_edges)
     return list(nodes_by_id.values()), edges
 
@@ -1110,36 +1223,36 @@ def _guidance_graph_artifacts(
     上位ヒットしたガイドラインチャンクの documentId からこのエッジを辿り、
     解説対象の条文を特定する(条文本文の取得はOpenSearch側の役割)。
 
-    条文注釈・対応表で明示された参照だけを EXPLAINS とし、前ページからの引き継ぎ
-    (carried_forward)は MENTIONS にする。MENTIONS は候補発見の補助であって、
-    探索拡張の信頼経路にも根拠充足にも使わない(§6.1, §10)。
+    条文注釈・対応表で明示された参照だけを EXPLAINS とする。前ページからの引き継ぎ
+    (carried_forward)や単なる言及はOpenSearch本文にだけ残し、Graph relationへ変換しない。
 
     条文ノードは法令投入側(_graph_artifacts_from_documents)が作るため、ここでは
     作らない。張り先が存在しないEXPLAINSは seed_all 側の dangling ドロップに委ねる。
     """
-    ordered_articles_by_document: dict[str, list[str]] = {}
-    explained_articles_by_document: dict[str, set[str]] = {}
+    explained_articles_by_document: dict[str, list[str]] = {}
+    source_units_by_relation: dict[tuple[str, str], list[str]] = {}
     representative_by_document: dict[str, dict[str, Any]] = {}
     for document in documents:
         if document.get("docType") != "guideline":
             continue
         document_id = document["documentId"]
         representative_by_document.setdefault(document_id, document)
-        articles = ordered_articles_by_document.setdefault(document_id, [])
-        explained = explained_articles_by_document.setdefault(document_id, set())
+        explained = explained_articles_by_document.setdefault(document_id, [])
         reference_source = document.get("articleReferenceSource")
         # articleReferenceSourceが無い(旧形式・手動投入)場合は明示注記として扱う。
         is_explicit = reference_source is None or reference_source in GUIDANCE_EXPLAINS_REFERENCE_SOURCES
+        if not is_explicit:
+            continue
         for article_id in document.get("relatedArticleContentUnitIds") or []:
-            if article_id not in articles:
-                articles.append(article_id)
-            if is_explicit:
-                explained.add(article_id)
+            if article_id not in explained:
+                explained.append(article_id)
+            source_units_by_relation.setdefault(
+                (document_id, article_id), []
+            ).append(str(document["contentUnitId"]))
 
     nodes: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
-    for document_id, article_ids in ordered_articles_by_document.items():
-        document = representative_by_document[document_id]
+    for document_id, document in representative_by_document.items():
         nodes.append(
             {
                 "graphNodeId": document_id,
@@ -1155,40 +1268,28 @@ def _guidance_graph_artifacts(
                 "clearanceLevel": document.get("clearanceLevel", 1),
                 "authorityType": AUTHORITY_GUIDANCE,
                 "authoritySource": "doc_type",
-                "graphSchemaVersion": GRAPH_SCHEMA_VERSION,
+                **_node_seed_identity(document, "documentContentHash"),
             }
         )
-        explained = explained_articles_by_document.get(document_id, set())
-        for article_id in article_ids:
-            if article_id in explained:
-                edges.append(
-                    {
-                        "graphEdgeId": f"edge-{document_id}-explains-{article_id}",
-                        "edgeType": "EXPLAINS",
-                        "fromGraphNodeId": document_id,
-                        "toGraphNodeId": article_id,
-                        "documentId": document_id,
-                        "relationSource": "guidance_article_annotation",
-                        "relationConfidence": 0.9,
-                        "publishStatus": "published",
-                        "isLatest": True,
-                    }
-                )
-            else:
-                edges.append(
-                    {
-                        "graphEdgeId": f"edge-{document_id}-mentions-{article_id}",
-                        "edgeType": "MENTIONS",
-                        "fromGraphNodeId": document_id,
-                        "toGraphNodeId": article_id,
-                        "documentId": document_id,
-                        "relationSource": "guidance_mention_rule",
-                        "relationConfidence": 0.5,
-                        "publishStatus": "published",
-                        "isLatest": True,
-                    }
-                )
-    nodes.extend(_guidance_relation_assertions(documents, law_family_roots or {}))
+        for article_id in explained_articles_by_document.get(document_id, []):
+            source_units = list(
+                dict.fromkeys(source_units_by_relation[(document_id, article_id)])
+            )
+            edges.append(
+                {
+                    "graphEdgeId": f"edge-{document_id}-explains-{article_id}",
+                    "edgeType": "EXPLAINS",
+                    "fromGraphNodeId": document_id,
+                    "toGraphNodeId": article_id,
+                    "documentId": document_id,
+                    "relationSource": "guidance_article_annotation",
+                    "relationConfidence": 0.9,
+                    "sourceContentUnitIds": source_units,
+                    "publishStatus": "published",
+                    "isLatest": True,
+                    **_relation_seed_identity(document, source_units[0]),
+                }
+            )
     return nodes, edges
 
 
@@ -1335,7 +1436,7 @@ def _drop_dangling_guidance_edges(
     kept: list[dict[str, Any]] = []
     dropped = 0
     for edge in edges:
-        if edge.get("edgeType") in {"EXPLAINS", "MENTIONS"} and (
+        if edge.get("edgeType") == "EXPLAINS" and (
             edge["fromGraphNodeId"] not in node_ids or edge["toGraphNodeId"] not in node_ids
         ):
             dropped += 1
@@ -1344,7 +1445,12 @@ def _drop_dangling_guidance_edges(
     return kept, dropped
 
 
-def _hierarchy_edge(from_id: str, to_id: str, document_id: str) -> dict[str, Any]:
+def _hierarchy_edge(
+    from_id: str,
+    to_id: str,
+    document: dict[str, Any],
+) -> dict[str, Any]:
+    document_id = str(document["documentId"])
     return {
         "graphEdgeId": f"edge-{from_id}-has-content-unit-{to_id.removeprefix(document_id + '-')}",
         "edgeType": "HAS_CONTENT_UNIT",
@@ -1355,6 +1461,31 @@ def _hierarchy_edge(from_id: str, to_id: str, document_id: str) -> dict[str, Any
         "relationConfidence": 1.0,
         "publishStatus": "published",
         "isLatest": True,
+        **_relation_seed_identity(document, to_id),
+    }
+
+
+def _node_seed_identity(
+    document: dict[str, Any],
+    content_hash_field: str,
+) -> dict[str, Any]:
+    return {
+        "sourceSnapshotId": document.get("sourceSnapshotId"),
+        "sourceRevisionId": document.get("sourceRevisionId"),
+        "contentHash": document.get(content_hash_field),
+        "graphSchemaVersion": GRAPH_SCHEMA_VERSION,
+    }
+
+
+def _relation_seed_identity(
+    document: dict[str, Any],
+    source_content_unit_id: str,
+) -> dict[str, Any]:
+    return {
+        "sourceContentUnitId": source_content_unit_id,
+        "sourceRevisionId": document.get("sourceRevisionId"),
+        "sourceSnapshotId": document.get("sourceSnapshotId"),
+        "graphSchemaVersion": GRAPH_SCHEMA_VERSION,
     }
 
 
@@ -1396,6 +1527,13 @@ def _reference_edges(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 if target_id == source_id:
                     continue
                 edge_id = f"edge-{source_id}-references-{target_id.removeprefix(document_id + '-')}"
+                occurrences = _reference_occurrences(
+                    document_id,
+                    text,
+                    target_id,
+                    previous_target_id=ids[index - 1] if index > 0 else None,
+                    next_target_id=ids[index + 1] if index + 1 < len(ids) else None,
+                )
                 edges.append(
                     {
                         "graphEdgeId": edge_id,
@@ -1407,11 +1545,49 @@ def _reference_edges(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
                         "referenceKind": classify_reference_kind(text),
                         "relationSource": "xml_reference_rule",
                         "relationConfidence": 0.9,
+                        "citationText": occurrences[0][0],
+                        "citationTexts": [item[0] for item in occurrences],
+                        "sourceSpanStarts": [item[1] for item in occurrences],
+                        "sourceSpanEnds": [item[2] for item in occurrences],
+                        "targetResolutionMethod": occurrences[0][3],
                         "publishStatus": "published",
                         "isLatest": True,
+                        **_relation_seed_identity(document, source_id),
                     }
                 )
     return edges
+
+
+def _reference_occurrences(
+    document_id: str,
+    text: str,
+    target_id: str,
+    *,
+    previous_target_id: str | None,
+    next_target_id: str | None,
+) -> list[tuple[str, int, int, str]]:
+    occurrences: list[tuple[str, int, int, str]] = []
+    for match in ARTICLE_REFERENCE_PATTERN.finditer(text):
+        if target_id not in _explicit_article_reference_ids(
+            document_id, match.group(0)
+        ):
+            continue
+        occurrences.append(
+            (match.group(0), match.start(), match.end(), "article_reference")
+        )
+    for token, adjacent_target, method in (
+        ("前条", previous_target_id, "previous_article"),
+        ("次条", next_target_id, "next_article"),
+    ):
+        if adjacent_target != target_id:
+            continue
+        for match in re.finditer(token, text):
+            occurrences.append((token, match.start(), match.end(), method))
+    if occurrences:
+        return occurrences
+    # 構造的には解決済みでも引用位置を復元できない場合は、参照元Content Unitを
+    # 監査対象として残す。意味predicateはここから推測しない。
+    return [(text[:500], 0, min(len(text), 500), "content_unit_fallback")]
 
 
 def _incorporation_edges(
@@ -1576,6 +1752,11 @@ def _delegation_graph_artifacts(
             )
             if reference_edge_id not in seen:
                 seen.add(reference_edge_id)
+                reference_context_values = list(
+                    dict.fromkeys(
+                        context[:240] for context in reference_contexts
+                    )
+                )[:4]
                 edges.append(
                     {
                         "graphEdgeId": reference_edge_id,
@@ -1586,8 +1767,15 @@ def _delegation_graph_artifacts(
                         "referenceKind": REFERENCE_KIND_PARENT_LAW_REFERENCE,
                         "relationSource": "subordinate_law_parent_reference",
                         "relationConfidence": 0.95,
+                        "citationText": reference_context_values[0],
+                        "citationTexts": reference_context_values,
+                        "targetResolutionMethod": "parent_authority_reference",
                         "publishStatus": "published",
                         "isLatest": True,
+                        **_relation_seed_identity(
+                            document,
+                            str(document["contentUnitId"]),
+                        ),
                     }
                 )
             # 文言シグナルは候補の説明にだけ残す。ここでIMPLEMENTSを確定したり、

@@ -63,6 +63,7 @@ PHYSICAL_RELATION_TYPES = frozenset(
 
 # Neo4jのschema作成も定義箇所を分散させない。各文は再実行可能である。
 NEO4J_SCHEMA_STATEMENTS = (
+    "DROP INDEX graph_node_id IF EXISTS",
     "CREATE CONSTRAINT graph_node_id_unique IF NOT EXISTS "
     "FOR (n:GraphNode) REQUIRE n.graphNodeId IS UNIQUE",
     "CREATE CONSTRAINT relation_assertion_id_unique IF NOT EXISTS "

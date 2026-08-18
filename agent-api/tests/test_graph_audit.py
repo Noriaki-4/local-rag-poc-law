@@ -292,9 +292,51 @@ class TestEdgeInventoryComparison:
                 "SUGGESTS_RELATION": 4,
             }
         )
-        assert {violation["edgeType"] for violation in violations} == {"SUGGESTS_RELATION"}
+        assert {violation["edgeType"] for violation in violations} == {
+            "IMPLEMENTS",
+            "APPLIED_BY",
+            "MENTIONS",
+            "SUGGESTS_RELATION",
+        }
 
     def test_edge_type_without_instances_is_not_a_violation(self) -> None:
         """コーパスに0件の種別は違反にしない(本当の不一致が埋もれるため)。"""
         assert compare_edge_inventory({"HAS_CONTENT_UNIT": 10}) == []
-        assert "MENTIONS" in missing_edge_types({"HAS_CONTENT_UNIT": 10})
+        assert missing_edge_types({"HAS_CONTENT_UNIT": 10}) == [
+            "CLASSIFIED_IN",
+            "EXPLAINS",
+            "OBJECT",
+            "REFERENCES",
+            "SUBJECT",
+        ]
+
+    def test_strict_seed_audit_rejects_async_and_legacy_relations(self) -> None:
+        snapshot_id = "snapshot-1"
+        nodes = [
+            {
+                **_article_node("law-a-article-1", "law-a"),
+                "sourceSnapshotId": snapshot_id,
+                "contentHash": "hash-1",
+                "graphSchemaVersion": GRAPH_SCHEMA_VERSION,
+            },
+            {
+                **_article_node("law-b-article-2", "law-b"),
+                "sourceSnapshotId": snapshot_id,
+                "contentHash": "hash-2",
+                "graphSchemaVersion": GRAPH_SCHEMA_VERSION,
+            },
+        ]
+        edges = [
+            {
+                "graphEdgeId": "edge-applied-by",
+                "edgeType": "APPLIED_BY",
+                "fromGraphNodeId": "law-a-article-1",
+                "toGraphNodeId": "law-b-article-2",
+                "sourceContentUnitId": "law-a-article-1",
+                "sourceSnapshotId": snapshot_id,
+                "graphSchemaVersion": GRAPH_SCHEMA_VERSION,
+            }
+        ]
+        assert "non_seed_relation_type" in _rules(
+            audit_graph(nodes, edges, source_snapshot_id=snapshot_id)
+        )

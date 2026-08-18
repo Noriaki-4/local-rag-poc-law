@@ -18,7 +18,7 @@
 | 文書 | 内容 | 現在の位置づけ |
 |---|---|---|
 | [dataset_design.md](dataset_design.md) | lawqa_jp、e-Gov法令、外部ガイド、RAG対象外データ、原本・派生成果物、投入対象 | 「何を投入するか」の中心文書 |
-| [graph_edge_construction.md](graph_edge_construction.md) | `REFERENCES`、`IMPLEMENTS`、`APPLIED_BY`、`EXPLAINS`、`MENTIONS`、RelationAssertionの生成と来歴 | Neo4jインデックス構築の中心文書 |
+| [graph_edge_construction.md](graph_edge_construction.md) | 共通snapshot、`HAS_CONTENT_UNIT / REFERENCES / EXPLAINS`の決定的seed、非同期RelationAssertionとの境界 | Neo4jインデックス構築の中心文書 |
 | [retrieval_config.md](retrieval_config.md) | embedding、Article/Paragraphチャンク、OpenSearchドキュメント、mapping、Hybrid検索 | OpenSearch索引の基本設計 |
 | [japanese_legal_search_analysis_plan.md](japanese_legal_search_analysis_plan.md) | Kuromoji、N-gram、BM25・Vector・RRF、v2索引、再シード、shadow比較 | 日本語検索改善の提案・実装前レビュー文書 |
 | [id_naming_rules.md](id_naming_rules.md) | 法令・条・項・号・附則・枝番・Graph edgeのID、dangling禁止 | OpenSearchとNeo4jで共有するID規約 |

@@ -19,7 +19,7 @@
 |---|---|---|
 | Phase 0 | 一部完了 | 代表2問の現行baseline、説明付きstatus契約、生成schema・Prompt用語集のfixture |
 | Phase 1 | 一部実装 | `CycleRecord / StepRecord`、discriminator付きCommand、型付きstatusと遷移の一元化、再開契約 |
-| Phase 2 | 移行用縦切りまで実装 | Hypothesis別`ExplorationIntent`、新Neo4j schema、5 predicate分類Run、snapshot整合、旧自動Graph経路の撤去 |
+| Phase 2 | 決定的seedまで実装 | 5 predicate非同期分類Run、publish監査、Hypothesis別selector、旧自動Graph経路の撤去 |
 | Phase 3 | 未評価 | 新契約に基づくtrace、再開、入力増加、latencyの完了条件 |
 | Phase 4 | 未完了 | 新経路による代表2問の合格、既定経路切替、旧試作の撤去 |
 
@@ -36,7 +36,10 @@
   Hypothesis別selector、`from_subject / to_subject`、5 predicateの新Graph契約ではない。
 - 現行CaseStateはWorkItem、Hypothesis、Evidence、Graph review履歴を保持するが、
   本書の`ExplorationState / CycleRecord / StepRecord`と説明付きstatus契約は未実装である。
-- seedから分離した`legal-relation-classifier-v8`は、旧`IMPLEMENTS`候補を
+- schema version 8のseedは、同じsnapshotのOpenSearch本文とNeo4jの構造・
+  `REFERENCES / EXPLAINS`だけを作り、旧`APPLIED_BY / MENTIONS / RelationAssertion`を生成しない。
+  新しい5 predicate契約、冪等キー、Neo4j Constraintは実装済みだが、非同期Runの保存・publishは未実装である。
+- 旧`legal-relation-classifier-v8`は、schema version 7の旧`IMPLEMENTS`候補を
   `implements / reference_only / uncertain`へ分類する移行用機能である。
   本書の5 predicate、`ClassificationRun`、`SUBJECT / OBJECT / CLASSIFIED_IN`を備えた
   新Graph schemaの完成を意味しない。全候補への分類結果登録も実施していない。

@@ -1,5 +1,4 @@
-"""Phase 2 のseed変更(authorityType / referenceKind / 段階的IMPLEMENTS / MENTIONS /
-RelationAssertion)のテスト (計画書 §5.2, §6.1, §16.1, §16.4)。"""
+"""Phase 2の決定的seedと、旧候補生成helperの移行テスト。"""
 
 from app.graph_audit import audit_graph
 from app.legal_ontology import (
@@ -22,6 +21,7 @@ from app.seed import (
     _guidance_relation_assertions,
     _incorporation_edges,
     _reference_edges,
+    _with_seed_identity,
     _with_authority_type,
 )
 
@@ -138,7 +138,7 @@ class TestGraphNodeProperties:
 
         assert article["heading"] == "第二十七条の二 （公開買付け）"
 
-    def test_full_graph_build_keeps_parent_reference_as_audited_candidate(
+    def test_full_graph_build_keeps_parent_reference_without_sync_assertion(
         self,
     ) -> None:
         parent = _law_document(
@@ -167,16 +167,41 @@ class TestGraphNodeProperties:
             if edge.get("relationSource")
             == "subordinate_law_parent_reference"
         )
-        assertion = next(
-            node
-            for node in nodes
-            if node.get("nodeType") == "RelationAssertion"
-        )
         assert reference["referenceKind"] == (
             REFERENCE_KIND_PARENT_LAW_REFERENCE
         )
-        assert assertion["status"] == RELATION_STATUS_UNVERIFIED
-        assert assertion["sourceReferenceEdgeId"] == reference["graphEdgeId"]
+        assert reference["citationText"] == "法第五条に規定する対象を定める。"
+        assert not any(
+            node.get("nodeType") == "RelationAssertion" for node in nodes
+        )
+
+    def test_seed_identity_is_stable_and_shared_by_graph_nodes(self) -> None:
+        raw = [
+            _law_document("law-test", "1", "第一条 目的を定める。"),
+            _law_document("law-test", "2", "第二条 第一条を参照する。"),
+        ]
+        documents, snapshot_id = _with_seed_identity(raw)
+        reversed_documents, reversed_snapshot_id = _with_seed_identity(
+            list(reversed(raw))
+        )
+        nodes, edges = _graph_artifacts_from_documents(documents)
+
+        assert snapshot_id == reversed_snapshot_id
+        assert all(node["sourceSnapshotId"] == snapshot_id for node in nodes)
+        assert all(node["contentHash"] for node in nodes)
+        assert all(edge["sourceSnapshotId"] == snapshot_id for edge in edges)
+        assert all(edge["sourceContentUnitId"] for edge in edges)
+        assert audit_graph(
+            nodes,
+            edges,
+            source_snapshot_id=snapshot_id,
+        ).ok
+
+        changed, changed_snapshot_id = _with_seed_identity(
+            [raw[0], {**raw[1], "text": "第二条 本文を変更した。"}]
+        )
+        assert changed
+        assert changed_snapshot_id != snapshot_id
 
 
 class TestReferenceKind:
@@ -304,12 +329,11 @@ class TestGuidanceEdges:
         assert [edge["edgeType"] for edge in edges] == ["EXPLAINS"]
         assert nodes[0]["authorityType"] == AUTHORITY_GUIDANCE
 
-    def test_carried_forward_reference_becomes_mentions(self) -> None:
-        """引き継ぎ参照は明示的な解説対象ではないため MENTIONS にする (§6.1)。"""
+    def test_carried_forward_reference_stays_out_of_graph(self) -> None:
+        """引き継ぎ参照はOpenSearch本文だけに残し、MENTIONSを作らない。"""
         documents = [_guideline_chunk("c1", ["law-a-article-1"], "carried_forward")]
         _, edges = _guidance_graph_artifacts(documents)
-        assert [edge["edgeType"] for edge in edges] == ["MENTIONS"]
-        assert edges[0]["relationConfidence"] == 0.5
+        assert edges == []
 
     def test_article_with_both_sources_stays_explains(self) -> None:
         documents = [
@@ -402,7 +426,7 @@ class TestRelationAssertions:
         ]
         assert _guidance_relation_assertions(documents, {"law-order": "law-test"}) == []
 
-    def test_assertions_are_not_edges(self) -> None:
+    def test_guidance_does_not_create_synchronous_assertions(self) -> None:
         documents = [
             _law_document("law-test", "5", "第五条 政令で定める。"),
             _law_document(
@@ -417,5 +441,7 @@ class TestRelationAssertions:
             ),
         ]
         nodes, edges = _guidance_graph_artifacts(documents, {"law-order": "law-test"})
-        assert any(node["nodeType"] == "RelationAssertion" for node in nodes)
-        assert all(edge["edgeType"] in {"EXPLAINS", "MENTIONS"} for edge in edges)
+        assert not any(
+            node["nodeType"] == "RelationAssertion" for node in nodes
+        )
+        assert all(edge["edgeType"] == "EXPLAINS" for edge in edges)

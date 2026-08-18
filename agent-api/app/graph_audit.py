@@ -19,8 +19,15 @@ from .legal_ontology import (
     edge_spec,
     validate_edge_endpoints,
 )
+from .domains.legal.graph_schema import (
+    PHYSICAL_NODE_LABELS,
+    PHYSICAL_RELATION_TYPES,
+)
 
 HIERARCHY_EDGE_TYPE = "HAS_CONTENT_UNIT"
+DETERMINISTIC_SEED_RELATION_TYPES = frozenset(
+    {"HAS_CONTENT_UNIT", "REFERENCES", "EXPLAINS"}
+)
 
 
 @dataclass(frozen=True)
@@ -49,6 +56,8 @@ class GraphAuditReport:
 def audit_graph(
     nodes: list[dict[str, Any]],
     edges: list[dict[str, Any]],
+    *,
+    source_snapshot_id: str | None = None,
 ) -> GraphAuditReport:
     """§6.3 の検査項目を実行し、違反の一覧を返す(例外は投げない)。"""
     violations: list[dict[str, Any]] = []
@@ -66,6 +75,10 @@ def audit_graph(
     violations.extend(_unverified_assertions_used_as_edges(edges))
     violations.extend(_invalid_relation_assertions(nodes, edges, nodes_by_id))
     violations.extend(_missing_authority_types(nodes))
+    if source_snapshot_id is not None:
+        violations.extend(
+            _seed_contract_violations(nodes, edges, source_snapshot_id)
+        )
 
     return GraphAuditReport(
         node_type_counts=_counts(nodes, "nodeType"),
@@ -76,6 +89,99 @@ def audit_graph(
         ),
         violations=tuple(violations),
     )
+
+
+def _seed_contract_violations(
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+    source_snapshot_id: str,
+) -> list[dict[str, Any]]:
+    """新snapshotの決定的seedが非同期分類物を混在させないことを検査する。"""
+
+    violations: list[dict[str, Any]] = []
+    deterministic_node_types = PHYSICAL_NODE_LABELS.difference(
+        {"RelationAssertion", "ClassificationRun"}
+    )
+    for node in nodes:
+        node_id = node.get("graphNodeId")
+        node_type = str(node.get("nodeType") or "")
+        if node_type not in deterministic_node_types:
+            violations.append(
+                _violation(
+                    "non_seed_node_type",
+                    graphNodeId=node_id,
+                    nodeType=node_type,
+                )
+            )
+        if node.get("sourceSnapshotId") != source_snapshot_id:
+            violations.append(
+                _violation(
+                    "node_snapshot_mismatch",
+                    graphNodeId=node_id,
+                    sourceSnapshotId=node.get("sourceSnapshotId"),
+                )
+            )
+        if node.get("graphSchemaVersion") != GRAPH_SCHEMA_VERSION:
+            violations.append(
+                _violation(
+                    "node_schema_version_mismatch",
+                    graphNodeId=node_id,
+                    graphSchemaVersion=node.get("graphSchemaVersion"),
+                )
+            )
+        if not node.get("contentHash"):
+            violations.append(
+                _violation("node_content_hash_missing", graphNodeId=node_id)
+            )
+
+    seen_edge_ids: set[str] = set()
+    for edge in edges:
+        edge_id = str(edge.get("graphEdgeId") or "")
+        edge_type = str(edge.get("edgeType") or "")
+        if edge_id in seen_edge_ids:
+            violations.append(
+                _violation("duplicate_graph_edge_id", graphEdgeId=edge_id)
+            )
+        seen_edge_ids.add(edge_id)
+        if edge_type not in DETERMINISTIC_SEED_RELATION_TYPES:
+            violations.append(
+                _violation(
+                    "non_seed_relation_type",
+                    graphEdgeId=edge_id,
+                    edgeType=edge_type,
+                )
+            )
+        if edge.get("sourceSnapshotId") != source_snapshot_id:
+            violations.append(
+                _violation(
+                    "edge_snapshot_mismatch",
+                    graphEdgeId=edge_id,
+                    sourceSnapshotId=edge.get("sourceSnapshotId"),
+                )
+            )
+        if edge.get("graphSchemaVersion") != GRAPH_SCHEMA_VERSION:
+            violations.append(
+                _violation(
+                    "edge_schema_version_mismatch",
+                    graphEdgeId=edge_id,
+                    graphSchemaVersion=edge.get("graphSchemaVersion"),
+                )
+            )
+        if not edge.get("sourceContentUnitId"):
+            violations.append(
+                _violation(
+                    "edge_source_content_unit_missing",
+                    graphEdgeId=edge_id,
+                )
+            )
+        if edge_type == "REFERENCES" and not edge.get("citationText"):
+            violations.append(
+                _violation(
+                    "reference_citation_text_missing",
+                    graphEdgeId=edge_id,
+                )
+            )
+    return violations
 
 
 def _counts(items: list[dict[str, Any]], key: str) -> dict[str, int]:
@@ -416,19 +522,22 @@ def _missing_authority_types(nodes: list[dict[str, Any]]) -> list[dict[str, Any]
 
 
 def compare_edge_inventory(seeded: dict[str, int]) -> list[dict[str, Any]]:
-    """Neo4jの実データとregistryの実装済みエッジ種別を突き合わせる(§6.3-13, Phase 0)。
+    """Neo4jの実データと新物理Relation allowlistを突き合わせる。
 
-    registryにあってGraphに0件の種別は違反にしない。抽出条件を満たす資料がコーパスに
-    無いだけの場合があり(ガイドの`MENTIONS`など)、それを常に不一致として扱うと
-    本当の不一致(Graphにあるのにregistryに無い/未実装のはずの種別が入っている)が埋もれる。
+    allowlistにあってGraphに0件の種別は違反にしない。非同期分類前は
+    `SUBJECT / OBJECT / CLASSIFIED_IN`が存在しないためである。
     """
     return [
-        _violation("edge_type_in_graph_but_not_registry", edgeType=edge_type)
+        _violation("relation_type_not_allowed", edgeType=edge_type)
         for edge_type in seeded
-        if edge_type not in SEEDED_EDGE_TYPES
+        if edge_type not in PHYSICAL_RELATION_TYPES
     ]
 
 
 def missing_edge_types(seeded: dict[str, int]) -> list[str]:
-    """registryでは実装済みだが、このコーパスでは1件も生成されなかった種別。"""
-    return [edge_type for edge_type in SEEDED_EDGE_TYPES if edge_type not in seeded]
+    """allowlist内だが、この時点では1件も存在しない物理Relation種別。"""
+    return [
+        edge_type
+        for edge_type in sorted(PHYSICAL_RELATION_TYPES)
+        if edge_type not in seeded
+    ]

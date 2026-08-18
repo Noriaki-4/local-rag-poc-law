@@ -3,9 +3,7 @@
 layered_legal_evidence_retrieval_plan.md Phase 0(§15)の次の項目を機械的に出す。
 
 - 現在seedされるnode/edge種別を件数付きで出力する
-- 現行エッジが5種であり、未実装エッジ(DEFINES/USES_TERM/EXCEPTION_TO)が
-  Graphに存在しないことをコードとNeo4jの両方で確認する
-- registryの実装済みエッジ種別とNeo4jの実データを突き合わせる
+- Graphの物理Relationが新schemaのallowlist内であることを確認する
 - Law/ArticleのauthorityType分布と、未設定・未判別の件数を出す
 - 採用中の時間profileと設定警告を出す
 
@@ -29,11 +27,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "agent-api"))
 
 from app.graph_audit import compare_edge_inventory, missing_edge_types  # noqa: E402
 from app.graph_client import GraphClient  # noqa: E402
-from app.legal_ontology import (  # noqa: E402
-    EDGE_REGISTRY,
-    GRAPH_SCHEMA_VERSION,
-    SEEDED_EDGE_TYPES,
+from app.domains.legal.graph_schema import (  # noqa: E402
+    PHYSICAL_RELATION_TYPES,
 )
+from app.legal_ontology import GRAPH_SCHEMA_VERSION  # noqa: E402
 
 API_URL = os.getenv("AGENT_API_URL", "http://localhost:8000").rstrip("/")
 
@@ -50,21 +47,14 @@ def main() -> int:
     finally:
         graph.close()
 
-    unimplemented = tuple(
-        name for name, spec in EDGE_REGISTRY.items() if not spec.implemented
-    )
     report = {
         "graphSchemaVersion": GRAPH_SCHEMA_VERSION,
-        "registryImplementedEdgeTypes": list(SEEDED_EDGE_TYPES),
-        "registryUnimplementedEdgeTypes": list(unimplemented),
+        "allowedPhysicalRelationTypes": sorted(PHYSICAL_RELATION_TYPES),
         "neo4jEdgeTypeCounts": edges,
         "neo4jNodeTypeCounts": nodes,
         "authorityTypeCounts": authorities,
-        "unimplementedEdgeTypesFoundInGraph": [
-            name for name in unimplemented if name in edges
-        ],
         "edgeInventoryViolations": compare_edge_inventory(edges),
-        # registryでは実装済みだが、このコーパスでは0件だった種別(違反ではない)。
+        # allowlistにあるがこの時点では0件の種別(違反ではない)。
         "edgeTypesWithoutInstances": missing_edge_types(edges),
         "health": _health(),
     }
@@ -72,7 +62,6 @@ def main() -> int:
 
     ok = (
         not report["edgeInventoryViolations"]
-        and not report["unimplementedEdgeTypesFoundInGraph"]
         and authorities.get("missing", 0) == 0
     )
     if not ok:
@@ -82,9 +71,9 @@ def main() -> int:
         )
     if report["edgeTypesWithoutInstances"]:
         print(
-            "[graph-inventory] registry実装済みだがこのコーパスでは0件の種別: "
+            "[graph-inventory] allowlist内だがこの時点では0件の種別: "
             f"{', '.join(report['edgeTypesWithoutInstances'])}。"
-            "抽出条件を満たす資料が無いだけかを確認する(違反ではない)。"
+            "非同期分類前、または対象資料が無い場合は正常(違反ではない)。"
         )
     if authorities.get("ordinance_unspecified"):
         print(

@@ -189,12 +189,11 @@ curl -s -X POST http://localhost:8000/admin/seed | jq .
 投入内容:
 
 - OpenSearch index: `legal-rag-content-ja-v2`（Kuromoji＋NFKC＋bigram）
-- Graph nodes/edges: `docs/requirements/samples/metadata/*.jsonl`
-- e-Gov法令投入時のGraph edges: `HAS_CONTENT_UNIT`、同一法令内の明示的な条文参照から
-  生成した `REFERENCES`、下位法令の「法第N条」参照を親法律へ、府省令等の
-  「令第N条」参照を同じ法令系統の施行令へ結ぶ `REFERENCES` と、その逆向きの
-  未確認`IMPLEMENTS`候補を表す`RelationAssertion`、
-  準用先の規定から準用元を逆引きする `APPLIED_BY`
+- OpenSearchの各Content Unit: `sourceSnapshotId`、`contentHash`、Article・Document集約hash
+- Neo4j nodes: `Document / Article / Paragraph / Item`
+- Neo4j edges: 構造`HAS_CONTENT_UNIT`、原文上の明示参照`REFERENCES`、
+  ガイドが明示した対応`EXPLAINS`
+- `MENTIONS / APPLIED_BY`、意味関係と同名の物理Relation、同期`RelationAssertion`は生成しない
 - e-Gov法令は本則・附則を分けて投入する。本則は `law-<法令番号>-article-<条番号>`、附則は `law-<法令番号>-suppl-<index>-article-<条番号>`（条番号の衝突で本則が消えるのを防ぐ）。各文書に `provisionType` / `sectionKey` を付与。詳細は [id_naming_rules.md](docs/requirements/docs/id_naming_rules.md) 3.1
 - MinIO bucket: `knowledge-root`
 - サンプル評価データ: `knowledge-root/eval-data/samples/...`
@@ -202,21 +201,24 @@ curl -s -X POST http://localhost:8000/admin/seed | jq .
 
 原本保管用マニュアルは、OpenSearch / Neo4j / 評価データには投入しない。
 
-`/admin/seed` は OpenSearch index と Neo4j graph を作り直す。検証環境の再投入用であり、本番運用向けの差分投入ではない。
+`/admin/seed` は、書込み前に同じ入力manifestからGraphを組み立てて監査し、監査成功後に
+OpenSearch index と Neo4j graph を作り直す。レスポンスの`sourceSnapshotId`は両方で共通である。
+検証環境の再投入用であり、本番運用向けの差分投入や無停止切替ではないため、実行中は回答処理を止める。
 
-### RelationAssertionの検索時判断
+### 非同期Relation分類
 
-`/admin/seed`は決定的に抽出できる法令参照と、未確認の`RelationAssertion`候補の生成までを行う。
-全候補を索引時にLLM分類するジョブは通常運用では実行しない。
+`/admin/seed`は決定的に抽出できる構造と原文Relationまでを作り、LLMを呼ばない。
+意味分類はseed後の独立した再開可能jobが、原文`REFERENCES`を候補化し、5種類の
+`proposedPredicate`を持つ未確認`RelationAssertion`として別の`ClassificationRun`へ登録する。
+完了・監査済みRunだけを`published`にし、検索はCase開始時にpublish済みRunを固定する。
 
-検索時は探索LLMが質問との関連性を判断し、必要な候補だけ両端Article本文を取得する。統合LLMは
-両端本文の意味を比較し、`confirmed / rejected / unverified`を案件内の`relationDecision`として
-CaseStoreへ保存する。プログラムは候補ID・両端Article ID・関係種別の一致、既知の証拠IDであること、
-`confirmed / rejected`に両端本文が含まれることだけを検証し、関係の意味は決めない。
+現時点では、新しい型、冪等キー、Neo4j Constraint、seed境界まで実装済みで、新しい非同期CLIと
+Run publishは次の実装段階である。旧`scripts/classify_graph_relations.py --apply`はschema version 7の
+既存`RelationAssertion`を更新する移行用処理なので、schema version 8の再seed後には実行しない。
 
-`relationDecision`は正式`IMPLEMENTS`エッジへ昇格させず、他案件へも共有しない。ガイド対応表は
-表全体の直積ではなく同じ行の条文同士だけを候補にする。`scripts/classify_graph_relations.py`は
-索引処理ではなく、検索時方式との比較評価を行う場合だけ使う任意ツールである。
+非同期分類後もRelationAssertionは正式なArticle間Relationへ昇格させない。検索時Solverが質問に
+関係する候補だけ両端Article本文で評価し、その案件判断はCaseStoreだけへ保存する。プログラムは
+既知ID、predicate enum、端点、根拠span、snapshot・hash・件数だけを検証し、法的意味を補正しない。
 
 オフライン分類は検索・回答用のLLM providerと分離し、既定でローカルOllamaの
 `gemma4:e4b`を使う。分類単位はArticleペア全体に存在し得る任意の関係ではなく、
@@ -228,33 +230,8 @@ Article本文は決定的なspan ID付きでLLMへ渡し、LLMは判断根拠と
 既定の`RELATION_CLASSIFIER_CONTEXT_TOKENS=131072`は、既定モデル`gemma4:e4b`の
 context上限に合わせ、長いArticleを黙って切り捨てないための値である。
 
-最初は少量のdry-runで入力取得とLLM応答を確認する。
-
-```bash
-OLLAMA_BASE_URL=http://localhost:11434 \
-RELATION_CLASSIFIER_PROVIDER=ollama \
-RELATION_CLASSIFIER_MODEL=gemma4:e4b \
-RELATION_CLASSIFIER_REVIEWER_MODEL=gemma4:e4b \
-python3 scripts/classify_graph_relations.py --limit 10
-```
-
-結果をNeo4jの既存`RelationAssertion`ノードへ登録する場合だけ
-`--apply`を付ける。入力Articleのhash、prompt version、modelが同じ分類済み候補は
-再実行時にskipする。更新はbatchごとに確定するため、途中失敗後も続きから再開できる。
-
-```bash
-OLLAMA_BASE_URL=http://localhost:11434 \
-RELATION_CLASSIFIER_PROVIDER=ollama \
-RELATION_CLASSIFIER_MODEL=gemma4:e4b \
-RELATION_CLASSIFIER_REVIEWER_MODEL=gemma4:e4b \
-python3 scripts/classify_graph_relations.py --limit 10 --apply
-```
-
-`--apply`が更新するのは分類結果、両Articleのhash、model、prompt provenanceであり、
-正式なArticle間エッジは作らない。LLMが関係の意味を判断し、プログラムは
-既知decision keyの過不足と、根拠span IDが提示Articleに存在することだけを検証する。
-
 府令を含む34件の固定fixtureで現在の分類精度を評価する場合は次を実行する。
+これは旧二値分類の移行baselineであり、新5 predicateの受入れ評価ではない。
 評価用Graph代理が更新をメモリに捕捉するため、Neo4jは更新されない。
 
 ```bash
@@ -883,11 +860,10 @@ version 5以前とは評価項目が異なるため直接比較しない。
 `questionPolarity`、各判定の `verdict` と `confidence` からコードが `predictedAnswer` を決定する。
 判定に使用した `citationIds` を優先して最終引用（既定5件）を構成する。
 
-`REFERENCES`、未確認`RelationAssertion`、`APPLIED_BY`はseed時に生成するため、この変更を
-既存環境へ反映するにはagent-apiをbuild後、`/admin/seed`を再実行する。特に「法第N条」・
-「令第N条」の親参照候補はseed済みGraphの内容なので、再seedせずにコードだけ更新しても
-反映されない。Graph schema version 7の再seed後は、検索時LLMが必要な候補だけを案件内で判断する。
-親参照候補と案件内判断はいずれも正式`IMPLEMENTS`ではない。
+`HAS_CONTENT_UNIT / REFERENCES / EXPLAINS`とsnapshot情報はseed時に生成するため、この変更を
+既存環境へ反映するにはagent-apiをbuild後、OpenSearchとNeo4jを同じ`/admin/seed`で再構築する。
+Neo4jだけを更新しない。Graph schema version 8では、意味関係は後続のpublish済み
+`ClassificationRun`から取得し、正式なArticle間Relationとしては保存しない。
 Graph展開は上位ノードごとに少数ずつ取得した後、質問との語句被覆と接続先法令の多様性で
 経路を選び、一つの条文や一つの法令の参照先だけで `AGENT_MAX_GRAPH_PATHS` を
 使い切らないようにする。

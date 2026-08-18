@@ -50,6 +50,7 @@ def test_only_deterministic_and_assertion_relations_are_physical() -> None:
 
 def test_schema_has_all_required_uniqueness_constraints_and_indexes() -> None:
     schema = "\n".join(NEO4J_SCHEMA_STATEMENTS)
+    assert NEO4J_SCHEMA_STATEMENTS[0] == "DROP INDEX graph_node_id IF EXISTS"
     assert "n.graphNodeId IS UNIQUE" in schema
     assert "n.assertionId IS UNIQUE" in schema
     assert "n.assertionDedupeKey IS UNIQUE" in schema

@@ -13,7 +13,7 @@ from typing import Any
 
 # オントロジーまたは抽出規則を変更した場合に上げる。seed metadataとtraceへ保存し、
 # 「どのschemaでseedされたGraphか」を後から判別できるようにする(§6.3)。
-GRAPH_SCHEMA_VERSION = 7
+GRAPH_SCHEMA_VERSION = 8
 
 
 # --------------------------------------------------------------------------------------

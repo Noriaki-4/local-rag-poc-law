@@ -52,10 +52,6 @@ class GraphClient:
             nodes_by_type.setdefault(node_type, []).append(node)
 
         with self.driver.session() as session:
-            session.run(
-                "CREATE INDEX graph_node_id IF NOT EXISTS "
-                "FOR (n:GraphNode) ON (n.graphNodeId)"
-            ).consume()
             for node_type, typed_nodes in nodes_by_type.items():
                 label_expr = ":".join(
                     (_safe_label("GraphNode"), _safe_label(node_type))
