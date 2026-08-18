@@ -68,12 +68,19 @@ datasets/
 ## 2.1 e-Gov 由来法令本文の取得方針
 
 1. lawqa_jp の参照法令一覧から、e-Govで取得可能な法令番号を抽出する。
-2. 対象法令XMLをe-Govから事前ダウンロードする。
+2. 対象法令XMLをe-Govから事前ダウンロードし、内容ハッシュ付きの不変原本として保存する。
 3. XMLを条・項・号単位に分割し、本文Markdown / JSONとmetadataを生成する。
 4. 生成物をMinIOに配置し、OpenSearchとNeo4jに登録する。
 5. 実行時のAgentはe-Govへ直接問い合わせず、ローカルに登録済みのインデックスを検索する。
 
-Step1 POC では `SEED_LAWQA_EGOV=true` を指定した `/admin/seed` により、lawqa_jp の `references` から e-Gov 法令IDを抽出し、e-Gov API の XML を条・項・号単位で OpenSearch / Neo4j に投入できる。
+XML原本は`python3 scripts/sync_egov_law_corpus.py`で
+`datasets/lawqa_jp/egov_law_corpus/`へ同期する。`law_registry.json`を対象法令の正本とし、
+XML本体は`documents/<lawId>/<sha256>.xml`、dataset単位の一覧は`manifest.json`と
+`manifests/<datasetSnapshotId>.json`へ保存する。通常の再実行はローカルXMLを検証して再利用し、
+`--refresh`を指定した場合だけe-Govから再取得する。OpenSearch / Neo4jの再構築は同じXML
+snapshotを何度でも使用でき、e-Gov取得とindex構築を同じ処理にしない。
+
+現行のStep1 POCでは `SEED_LAWQA_EGOV=true` を指定した `/admin/seed` により、lawqa_jp の `references` から e-Gov 法令IDを抽出し、e-Gov API の XML を条・項・号単位で OpenSearch / Neo4j に投入できる。保存済みXML Manifestをseed入力へ切り替える処理は次工程で行う。
 PDF等の e-Gov 以外の参照元は、この自動投入の対象外とする。必要なPDFは `scripts/download_lawqa_guidance.sh` で原本とSHA-256付きマニフェストを `datasets/lawqa_jp/external-guidance/` に保存する。`SEED_EXTERNAL_GUIDANCE=true` を指定した場合だけ、PDF本文をOpenSearchへ投入する(docling前処理済みなら構造チャンク、未処理ならページ単位。前処理は `preprocess-worker` を参照)。ガイドラインの本文チャンクは法令の委任・準用Graphには入れないが、対応表・条文注釈から抽出した「ガイドライン文書→法令条文」の対応だけは `EXPLAINS` エッジとしてNeo4jへ載せる(詳細は `graph_edge_construction.md` 6.1)。
 
 ### 本則・附則の分離

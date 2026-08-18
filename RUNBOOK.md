@@ -308,6 +308,32 @@ python3 scripts/evaluate_legal_relation_5predicate.py
 これは観測済み誤分類の回帰fixtureであり、5 predicate全体の受入fixtureや全4,323候補の精度評価を
 代替しない。
 
+手動で参照先と意味関係を確認した20件について、Graphの参照先解決とLLMの意味分類を
+分離して評価する場合は次を実行する。既定では構造だけを監査し、`--classify`を付けた場合も、
+参照先が正解と一致し、意味分類の正解ラベルを確定できたペアだけをLLMへ渡す。
+誤接続されたArticleペアをモデル精度の評価へ混ぜない。どちらの実行もNeo4jを更新しない。
+
+```bash
+python3 scripts/evaluate_legal_relation_20_adjudicated.py
+
+OLLAMA_BASE_URL=http://localhost:11434 \
+RELATION_CLASSIFIER_PROVIDER=ollama \
+RELATION_CLASSIFIER_MODEL=gemma4:e4b \
+RELATION_CLASSIFIER_REVIEWER_MODEL=gemma4:e4b \
+python3 scripts/evaluate_legal_relation_20_adjudicated.py --classify
+```
+
+fixtureはfine-tuning用データではなく、参照解決器と分類器を同じ20件で比較するための
+正解ラベル付き評価データである。構造修正後に参照先が変わる3件は、正しいArticleペアで
+本文を再確認するまで`expectedPredicates: null`として意味分類対象から除外する。
+
+2026-08-18の初回baselineでは、現行Graphの参照先解決が14/20、参照先が正しい14ペアに
+限定した`gemma4:e4b`の5 predicate完全一致が4/14だった。構造側の不一致6件は、見出しを
+参照扱いした1件、解決不能な他法令・改正法令を自己参照にした2件、附則内参照を本則へ
+接続した1件、法律を参照する文脈を施行令の自己参照にした2件である。意味分類側では、
+`INCORPORATES`の過剰成立と`IMPLEMENTS`の見落としが主に残った。したがって、Graphの
+参照先修正だけで分類精度が解決するとは扱わない。
+
 ガイド6文書について、OpenSearch検索、明示`EXPLAINS`、遷移先Article全文取得を
 実データで検査する場合は次を実行する。LLMとClaude APIは使わず、Neo4jも更新しない。
 
@@ -809,6 +835,41 @@ tail -n 5 eval-results/*.jsonl
 lawqa_jp 本体データは同梱しない。公開データをURLから読む場合は、以下のように `LAWQA_EVAL_URL` を指定する。
 
 全問評価でRAG検索を意味あるものにするには、先に lawqa_jp の `references` に含まれる e-Gov 法令本文を投入する。
+
+#### e-Gov XML原本データセット
+
+OpenSearch / Neo4jを再構築するたびにe-Gov APIから取得し直さないよう、最初に
+`law_registry.json`の対象法令をローカルの不変XML corpusへ同期する。
+
+```bash
+python3 scripts/sync_egov_law_corpus.py
+```
+
+既定の保存先は`datasets/lawqa_jp/egov_law_corpus/`である。
+
+```text
+egov_law_corpus/
+├─ manifest.json
+├─ manifests/
+│  └─ egov-law-corpus-<dataset hash>.json
+└─ documents/
+   └─ <lawId>/
+      └─ <XML sha256>.xml
+```
+
+XMLは内容ハッシュをファイル名として不変保存する。Manifestには法令ID、法令名、取得元URL、
+取得日時、XML SHA-256、ファイルサイズ、本則・附則・Article件数、法令ファミリーを記録する。
+同じコマンドの再実行では全ファイルのXML構造・タイトル・hashを検証し、正常ならe-Govへ
+アクセスせず再利用する。e-Gov上の更新を明示的に確認するときだけ次を実行する。
+
+```bash
+python3 scripts/sync_egov_law_corpus.py --refresh
+```
+
+変更されたXMLは旧ファイルを上書きせず、新しい内容ハッシュとdataset snapshotとして保存する。
+このディレクトリは公開データのローカル原本でサイズが大きいためGit管理外である。
+現時点の`/admin/seed`はまだこのManifestを入力にするよう切り替えていない。XML datasetからの
+seed接続は次工程とし、本節の同期だけではOpenSearch / Neo4jを変更しない。
 
 ```bash
 LAWQA_EVAL_URL=https://raw.githubusercontent.com/digital-go-jp/lawqa_jp/main/data/selection.json \
