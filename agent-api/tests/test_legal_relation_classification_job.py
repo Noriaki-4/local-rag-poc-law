@@ -114,7 +114,6 @@ def _meaning_payload(candidate, predicate, finding="not_established"):
     }
     first_field, second_field = condition_fields[predicate]
     return {
-        "candidateKey": candidate.candidate_key,
         "predicate": predicate.value,
         first_field: first,
         second_field: second,
@@ -159,7 +158,6 @@ def _findings(assessments):
 def _grounding_payload(candidate):
     occurrence = candidate.reference_occurrences[0]
     return {
-        "candidateKey": candidate.candidate_key,
         "assertions": [
             {
                 "proposedPredicate": "IMPLEMENTS",
@@ -167,8 +165,12 @@ def _grounding_payload(candidate):
                 # REFERENCESは下位→親だが、IMPLEMENTSは親→下位になる。
                 "subjectArticleId": candidate.reference_target.article_id,
                 "objectArticleId": candidate.reference_source.article_id,
-                "subjectSupportingSpanId": candidate.reference_target.spans[0].span_id,
-                "objectSupportingSpanId": candidate.reference_source.spans[0].span_id,
+                "referenceSourceSupportingSpanId": candidate.reference_source.spans[
+                    0
+                ].span_id,
+                "referenceTargetSupportingSpanId": candidate.reference_target.spans[
+                    0
+                ].span_id,
             }
         ],
     }
@@ -260,6 +262,8 @@ def test_prompt_prevents_observed_predicate_overclassification():
 
     assert "準用する" in incorporates
     assert "前条に定める" in incorporates
+    assert "前条の規定を準用する" in incorporates
+    assert "sourceSpanIdsの本文全体" in incorporates
     assert "X（…をいう）" in uses_definition
     assert "同一法令内の前条参照" in implements
     assert "別のpredicateを同じ応答で検討しません" in implements
@@ -268,10 +272,9 @@ def test_prompt_prevents_observed_predicate_overclassification():
 def test_provider_schema_restricts_decision_and_endpoint_ids_to_the_candidate():
     candidate = _candidates()[0]
     schema = relation_classification_schema(candidate, ProposedPredicate.IMPLEMENTS)
-    assert schema["properties"]["candidateKey"]["enum"] == [candidate.candidate_key]
+    assert "candidateKey" not in schema["properties"]
     assert schema["properties"]["predicate"]["enum"] == ["IMPLEMENTS"]
     assert set(schema["required"]) == {
-        "candidateKey",
         "predicate",
         "explicitDelegation",
         "sameMatterImplementation",
@@ -294,10 +297,16 @@ def test_provider_schema_restricts_decision_and_endpoint_ids_to_the_candidate():
         "referenceOccurrenceHash",
         "subjectArticleId",
         "objectArticleId",
-        "subjectSupportingSpanId",
-        "objectSupportingSpanId",
+        "referenceSourceSupportingSpanId",
+        "referenceTargetSupportingSpanId",
     }
     assert relation["proposedPredicate"]["enum"] == ["IMPLEMENTS"]
+    assert relation["referenceSourceSupportingSpanId"]["enum"] == [
+        candidate.reference_source.spans[0].span_id
+    ]
+    assert relation["referenceTargetSupportingSpanId"]["enum"] == [
+        candidate.reference_target.spans[0].span_id
+    ]
 
 
 def test_grounding_prompt_only_accepts_established_predicates():
@@ -347,7 +356,6 @@ class _LLM:
                 else "not_established"
             )
             payload = _meaning_payload(_candidates()[0], predicate, finding)
-            payload["candidateKey"] = candidate_payload["candidateKey"]
             return SimpleNamespace(payload=payload)
         candidate_payload = json.loads(prompt.rsplit("根拠付与候補:\n", 1)[1])
         source = candidate_payload["referenceSourceArticle"]
@@ -357,12 +365,11 @@ class _LLM:
             "referenceOccurrenceHash": occurrence["occurrenceHash"],
             "subjectArticleId": target["articleId"],
             "objectArticleId": source["articleId"],
-            "subjectSupportingSpanId": target["spans"][0]["spanId"],
-            "objectSupportingSpanId": source["spans"][0]["spanId"],
+            "referenceSourceSupportingSpanId": source["spans"][0]["spanId"],
+            "referenceTargetSupportingSpanId": target["spans"][0]["spanId"],
         }
         return SimpleNamespace(
             payload={
-                "candidateKey": candidate_payload["candidateKey"],
                 "assertions": [
                     {
                         "proposedPredicate": "IMPLEMENTS",
@@ -386,7 +393,6 @@ class _RepairingLLM:
                 prompt.split("根拠付与候補:\n", 1)[1].split("\n\n前回", 1)[0]
             )
             valid = _grounding_payload(_candidates()[0])
-            valid["candidateKey"] = candidate_payload["candidateKey"]
             return SimpleNamespace(payload=valid)
         candidate_payload = json.loads(
             prompt.split("分類候補:\n", 1)[1].split("\n\n前回", 1)[0]
@@ -404,8 +410,47 @@ class _RepairingLLM:
             return SimpleNamespace(payload=invalid)
         if self.call_count == 2:
             assert "構造契約違反" in prompt
-        valid["candidateKey"] = candidate_payload["candidateKey"]
         return SimpleNamespace(payload=valid)
+
+
+class _GroundingFailsOnceLLM(_LLM):
+    def __init__(self):
+        super().__init__()
+        self.grounding_calls = 0
+
+    def generate_structured_json(self, *, prompt, schema, model, **kwargs):
+        if "根拠付与候補:\n" not in prompt:
+            return super().generate_structured_json(
+                prompt=prompt,
+                schema=schema,
+                model=model,
+                **kwargs,
+            )
+        self.call_count += 1
+        self.grounding_calls += 1
+        candidate_payload = json.loads(
+            prompt.split("根拠付与候補:\n", 1)[1].split("\n\n前回", 1)[0]
+        )
+        source = candidate_payload["referenceSourceArticle"]
+        target = candidate_payload["referenceTargetArticle"]
+        occurrence = candidate_payload["referenceOccurrences"][0]
+        payload = {
+            "assertions": [
+                {
+                    "proposedPredicate": "IMPLEMENTS",
+                    "referenceOccurrenceHash": occurrence["occurrenceHash"],
+                    "subjectArticleId": target["articleId"],
+                    "objectArticleId": source["articleId"],
+                    "referenceSourceSupportingSpanId": source["spans"][0]["spanId"],
+                    "referenceTargetSupportingSpanId": target["spans"][0]["spanId"],
+                }
+            ],
+        }
+        if self.grounding_calls <= 2:
+            payload["assertions"][0]["referenceSourceSupportingSpanId"] = (
+                _candidates()[0].reference_target.spans[0].span_id
+            )
+        return SimpleNamespace(payload=payload)
 
 
 class _Graph:
@@ -435,16 +480,38 @@ class _Graph:
         return [dict(value) for value in self.checkpoints]
 
     def save_classification_checkpoint(self, *, checkpoint, assertions):
-        self.checkpoints.append(dict(checkpoint))
+        existing_index = next(
+            (
+                index
+                for index, value in enumerate(self.checkpoints)
+                if value["checkpointId"] == checkpoint["checkpointId"]
+            ),
+            None,
+        )
+        replacing_failed = (
+            existing_index is not None
+            and self.checkpoints[existing_index]["outcome"] == "failed"
+        )
+        if replacing_failed:
+            self.checkpoints[existing_index] = dict(checkpoint)
+        elif existing_index is not None:
+            return False
+        else:
+            self.checkpoints.append(dict(checkpoint))
         self.assertions.extend(dict(assertion) for assertion in assertions)
-        self.run["processedCount"] += 1
         field = {
             "classified": "classifiedCandidateCount",
             "reference_only": "referenceOnlyCount",
             "uncertain": "uncertainCount",
             "failed": "failedCount",
         }[checkpoint["outcome"]]
-        self.run[field] += 1
+        if replacing_failed:
+            if checkpoint["outcome"] != "failed":
+                self.run["failedCount"] -= 1
+                self.run[field] += 1
+        else:
+            self.run["processedCount"] += 1
+            self.run[field] += 1
         self.run["assertionCount"] += len(assertions)
         return True
 
@@ -535,6 +602,36 @@ def test_job_repairs_cross_field_contract_once_before_checkpoint(monkeypatch):
     assert report["classifiedCandidateCount"] == 1
     assert report["failedCount"] == 0
     assert llm.call_count == 7
+
+
+def test_job_records_failure_details_and_retries_failed_checkpoint(monkeypatch):
+    monkeypatch.setattr(module.settings, "relation_classifier_model", "gemma4:e4b")
+    monkeypatch.setattr(
+        module.settings, "relation_classifier_reviewer_model", "gemma4:e4b"
+    )
+    graph = _Graph()
+    llm = _GroundingFailsOnceLLM()
+    job = LegalRelationClassificationJob(graph, _OpenSearch(), llm)
+
+    failed = job.run(apply=True)
+
+    assert failed["processedCount"] == 1
+    assert failed["failedCount"] == 1
+    assert graph.checkpoints[0]["errorCode"] == "ValueError"
+    assert graph.checkpoints[0]["errorStage"] == "grounding"
+    assert graph.checkpoints[0]["errorPredicate"] is None
+    assert "selected occurrence" in graph.checkpoints[0]["errorMessage"]
+    failed_payload = json.loads(graph.checkpoints[0]["decisionPayloadJson"])
+    assert failed_payload["errorStage"] == "grounding"
+
+    retried = job.run(apply=True)
+
+    assert retried["processedCount"] == 1
+    assert retried["classifiedCandidateCount"] == 1
+    assert retried["failedCount"] == 0
+    assert retried["skippedCheckpointCount"] == 0
+    assert len(graph.checkpoints) == 1
+    assert graph.checkpoints[0]["outcome"] == "classified"
 
 
 def test_dry_run_does_not_call_llm_or_create_a_run(monkeypatch):

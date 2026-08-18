@@ -1,8 +1,6 @@
 from datetime import UTC, datetime
 
 import pytest
-from pydantic import ValidationError
-
 from app.domains.legal.graph_schema import ClassificationRunPhase, ProposedPredicate
 from app.domains.legal.relation_classification import (
     ArticleSpan,
@@ -17,6 +15,7 @@ from app.domains.legal.relation_classification import (
     build_assertion_records,
     validate_classification_decision,
 )
+from pydantic import ValidationError
 
 
 def _findings(
@@ -54,7 +53,9 @@ def _article(article_id: str, text: str) -> ClassificationArticle:
     )
 
 
-def _candidate(*, occurrence_order: tuple[str, ...] = ("occ-1", "occ-2")) -> RelationClassificationCandidate:
+def _candidate(
+    *, occurrence_order: tuple[str, ...] = ("occ-1", "occ-2")
+) -> RelationClassificationCandidate:
     subject = _article("law-a-article-1", "第一条 内閣府令で定める。")
     object_ = _article("law-b-article-2", "第二条 法第一条の事項を定める。")
     return RelationClassificationCandidate(
@@ -79,26 +80,33 @@ def _candidate(*, occurrence_order: tuple[str, ...] = ("occ-1", "occ-2")) -> Rel
 
 
 def test_candidate_key_is_stable_when_occurrence_order_changes() -> None:
-    assert _candidate().candidate_key == _candidate(
-        occurrence_order=("occ-2", "occ-1")
-    ).candidate_key
+    assert (
+        _candidate().candidate_key
+        == _candidate(occurrence_order=("occ-2", "occ-1")).candidate_key
+    )
 
 
 def test_candidate_key_changes_with_snapshot_provider_model_or_content() -> None:
     candidate = _candidate()
-    assert candidate.model_copy(
-        update={"source_snapshot_id": "snapshot-2"}
-    ).candidate_key != candidate.candidate_key
-    assert candidate.model_copy(
-        update={"provider": "anthropic"}
-    ).candidate_key != candidate.candidate_key
-    assert candidate.model_copy(update={"model": "another-model"}).candidate_key != candidate.candidate_key
+    assert (
+        candidate.model_copy(update={"source_snapshot_id": "snapshot-2"}).candidate_key
+        != candidate.candidate_key
+    )
+    assert (
+        candidate.model_copy(update={"provider": "anthropic"}).candidate_key
+        != candidate.candidate_key
+    )
+    assert (
+        candidate.model_copy(update={"model": "another-model"}).candidate_key
+        != candidate.candidate_key
+    )
     changed_source = candidate.reference_source.model_copy(
         update={"content_hash": "changed"}
     )
-    assert candidate.model_copy(
-        update={"reference_source": changed_source}
-    ).candidate_key != candidate.candidate_key
+    assert (
+        candidate.model_copy(update={"reference_source": changed_source}).candidate_key
+        != candidate.candidate_key
+    )
 
 
 def test_decision_validation_accepts_known_endpoint_spans() -> None:
@@ -113,15 +121,21 @@ def test_decision_validation_accepts_known_endpoint_spans() -> None:
                 reference_occurrence_hash="occ-1",
                 subject_article_id=candidate.reference_target.article_id,
                 object_article_id=candidate.reference_source.article_id,
-                subject_supporting_span_id=candidate.reference_target.spans[0].span_id,
-                object_supporting_span_id=candidate.reference_source.spans[0].span_id,
+                reference_source_supporting_span_id=candidate.reference_source.spans[
+                    0
+                ].span_id,
+                reference_target_supporting_span_id=candidate.reference_target.spans[
+                    0
+                ].span_id,
             ),
         ),
     )
     validate_classification_decision(candidate, decision)
 
 
-def test_decision_validation_does_not_reassign_a_span_to_the_other_endpoint() -> None:
+def test_decision_validation_keeps_support_spans_in_physical_reference_direction() -> (
+    None
+):
     candidate = _candidate()
     decision = RelationClassificationDecision(
         candidate_key=candidate.candidate_key,
@@ -133,12 +147,16 @@ def test_decision_validation_does_not_reassign_a_span_to_the_other_endpoint() ->
                 reference_occurrence_hash="occ-1",
                 subject_article_id=candidate.reference_target.article_id,
                 object_article_id=candidate.reference_source.article_id,
-                subject_supporting_span_id=candidate.reference_source.spans[0].span_id,
-                object_supporting_span_id=candidate.reference_target.spans[0].span_id,
+                reference_source_supporting_span_id=candidate.reference_target.spans[
+                    0
+                ].span_id,
+                reference_target_supporting_span_id=candidate.reference_source.spans[
+                    0
+                ].span_id,
             ),
         ),
     )
-    with pytest.raises(ValueError, match="subject supporting span"):
+    with pytest.raises(ValueError, match="reference source supporting span"):
         validate_classification_decision(candidate, decision)
 
 
@@ -155,8 +173,12 @@ def test_non_classified_outcome_cannot_smuggle_an_assertion() -> None:
                     reference_occurrence_hash="occ-1",
                     subject_article_id=candidate.reference_target.article_id,
                     object_article_id=candidate.reference_source.article_id,
-                    subject_supporting_span_id=candidate.reference_target.spans[0].span_id,
-                    object_supporting_span_id=candidate.reference_source.spans[0].span_id,
+                    reference_source_supporting_span_id=candidate.reference_source.spans[
+                        0
+                    ].span_id,
+                    reference_target_supporting_span_id=candidate.reference_target.spans[
+                        0
+                    ].span_id,
                 ),
             ),
         )
@@ -168,17 +190,19 @@ def test_classified_assertions_must_match_established_findings() -> None:
         RelationClassificationDecision(
             candidate_key=candidate.candidate_key,
             outcome="classified",
-            predicate_findings=_findings(
-                established=ProposedPredicate.INCORPORATES
-            ),
+            predicate_findings=_findings(established=ProposedPredicate.INCORPORATES),
             assertions=(
                 ProposedRelationAssertion(
                     proposed_predicate=ProposedPredicate.IMPLEMENTS,
                     reference_occurrence_hash="occ-1",
                     subject_article_id=candidate.reference_target.article_id,
                     object_article_id=candidate.reference_source.article_id,
-                    subject_supporting_span_id=candidate.reference_target.spans[0].span_id,
-                    object_supporting_span_id=candidate.reference_source.spans[0].span_id,
+                    reference_source_supporting_span_id=candidate.reference_source.spans[
+                        0
+                    ].span_id,
+                    reference_target_supporting_span_id=candidate.reference_target.spans[
+                        0
+                    ].span_id,
                 ),
             ),
         )
@@ -213,9 +237,7 @@ def test_uncertain_requires_an_uncertain_predicate_finding() -> None:
 
 def test_assertion_dedupe_key_distinguishes_predicate_and_run() -> None:
     candidate_key = _candidate().candidate_key
-    key = assertion_dedupe_key(
-        "run-1", candidate_key, ProposedPredicate.IMPLEMENTS
-    )
+    key = assertion_dedupe_key("run-1", candidate_key, ProposedPredicate.IMPLEMENTS)
     assert key == assertion_dedupe_key(
         "run-1", candidate_key, ProposedPredicate.IMPLEMENTS
     )
@@ -239,8 +261,12 @@ def test_build_assertion_records_copies_only_validated_llm_choices() -> None:
                 reference_occurrence_hash="occ-1",
                 subject_article_id=candidate.reference_target.article_id,
                 object_article_id=candidate.reference_source.article_id,
-                subject_supporting_span_id=candidate.reference_target.spans[0].span_id,
-                object_supporting_span_id=candidate.reference_source.spans[0].span_id,
+                reference_source_supporting_span_id=candidate.reference_source.spans[
+                    0
+                ].span_id,
+                reference_target_supporting_span_id=candidate.reference_target.spans[
+                    0
+                ].span_id,
             ),
         ),
     )
@@ -253,8 +279,12 @@ def test_build_assertion_records_copies_only_validated_llm_choices() -> None:
     assert len(records) == 1
     assert records[0].proposed_predicate is ProposedPredicate.IMPLEMENTS
     assert records[0].reference_occurrence_hash == "occ-1"
-    assert records[0].subject_supporting_quote == candidate.reference_target.spans[0].text
-    assert records[0].object_supporting_quote == candidate.reference_source.spans[0].text
+    assert (
+        records[0].subject_supporting_quote == candidate.reference_target.spans[0].text
+    )
+    assert (
+        records[0].object_supporting_quote == candidate.reference_source.spans[0].text
+    )
 
 
 def test_unknown_occurrence_is_rejected_without_program_fallback() -> None:
@@ -269,8 +299,12 @@ def test_unknown_occurrence_is_rejected_without_program_fallback() -> None:
                 reference_occurrence_hash="unknown",
                 subject_article_id=candidate.reference_target.article_id,
                 object_article_id=candidate.reference_source.article_id,
-                subject_supporting_span_id=candidate.reference_target.spans[0].span_id,
-                object_supporting_span_id=candidate.reference_source.spans[0].span_id,
+                reference_source_supporting_span_id=candidate.reference_source.spans[
+                    0
+                ].span_id,
+                reference_target_supporting_span_id=candidate.reference_target.spans[
+                    0
+                ].span_id,
             ),
         ),
     )
@@ -287,9 +321,7 @@ def test_reference_source_support_must_match_the_selected_occurrence() -> None:
     candidate = candidate.model_copy(
         update={
             "reference_source": candidate.reference_source.model_copy(
-                update={
-                    "spans": (*candidate.reference_source.spans, extra_span)
-                }
+                update={"spans": (*candidate.reference_source.spans, extra_span)}
             )
         }
     )
@@ -303,8 +335,10 @@ def test_reference_source_support_must_match_the_selected_occurrence() -> None:
                 reference_occurrence_hash="occ-1",
                 subject_article_id=candidate.reference_target.article_id,
                 object_article_id=candidate.reference_source.article_id,
-                subject_supporting_span_id=candidate.reference_target.spans[0].span_id,
-                object_supporting_span_id=extra_span.span_id,
+                reference_source_supporting_span_id=extra_span.span_id,
+                reference_target_supporting_span_id=candidate.reference_target.spans[
+                    0
+                ].span_id,
             ),
         ),
     )

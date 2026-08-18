@@ -20,4 +20,4 @@
 - 指定されたpredicateだけを判定し、別のpredicateを同じ応答で検討しません。
 - この段階ではSUBJECT / OBJECTのID、参照hash、根拠spanを返しません。
 - 学習済み知識で欠けた条文を補いません。
-- candidateKeyとpredicateを変更せず、JSONだけを返してください。
+- predicateを変更せず、JSONだけを返してください。

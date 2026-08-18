@@ -548,7 +548,7 @@ CaseStoreの探索履歴や案件判断をNeo4jへ保存しない。同じArticl
 | `Item` | 号 | `contentUnitId`, `documentId`, `parentContentUnitId`, `itemNumber`, `sourceSnapshotId`, `contentHash` |
 | `RelationAssertion` | 非同期LLMが生成した未確認の意味関係候補 | `assertionId`, `candidateKey`, `assertionDedupeKey`, `proposedPredicate`, `basisEdgeId`, `sourceContentUnitId`, `subjectSupportingSpanId`, `objectSupportingSpanId`, `subjectSupportingQuote`, `objectSupportingQuote`, `referenceOccurrenceHash`, `sourceSnapshotId`, `sourceRevisionId`, `classificationRunId`, `classifiedAt`, `graphSchemaVersion` |
 | `ClassificationRun` | snapshot単位の非同期意味分類Run | `classificationRunId`, `phase`, `sourceSnapshotId`, `graphSchemaVersion`, `provider`, `model`, `reviewerModel`, `promptVersion`, `candidatesPerModelCall`, `inputCount`, `processedCount`, `classifiedCandidateCount`, `assertionCount`, `referenceOnlyCount`, `uncertainCount`, `failedCount`, `scopeHash`, `publishedAt` |
-| `ClassificationCheckpoint` | 1候補の保存済み実行結果。法的意味関係ではない | `checkpointId`, `classificationRunId`, `candidateKey`, `outcome`, `decisionPayloadJson`, `decisionPayloadHash`, `assertionCount`, `errorCode`, `processedAt`, `sourceSnapshotId`, `graphSchemaVersion` |
+| `ClassificationCheckpoint` | 1候補の保存済み実行結果。法的意味関係ではない | `checkpointId`, `classificationRunId`, `candidateKey`, `outcome`, `decisionPayloadJson`, `decisionPayloadHash`, `assertionCount`, `errorCode`, `errorStage`, `errorMessage`, `errorPredicate`, `processedAt`, `sourceSnapshotId`, `graphSchemaVersion` |
 
 `Article`を項・号の代用labelにしない。Graph探索をArticle単位へ投影する場合も、元の
 `Paragraph / Item.contentUnitId`と親`Article.contentUnitId`を両方保持する。本文はOpenSearchを正本とし、
@@ -629,11 +629,13 @@ Promptへ出さない。意味分類は5 predicateを同時提示せず、同じ
 分ける。各回はpredicate固有の二つの必要条件と`finding`だけをLLMへ返させる。例えば
 `INCORPORATES`は`explicitApplicationLanguage / targetRuleApplied`、`USES_DEFINITION`は
 `targetDefinesTerm / sourceUsesSameTerm`を使う。Programは二条件とfindingの真理値整合だけを検証し、
-本文から条件値を決めない。複数predicateは独立に成立でき、一方の成立を他方の根拠へ流用しない。
+本文から条件値を決めない。内部`candidateKey`は1候補・1呼出しではLLMへ提示・エコーさせず、
+呼出元が既知の候補へ機械的に付与する。複数predicateは独立に成立でき、一方の成立を他方の根拠へ流用しない。
 
 1件以上が`established`の場合だけ、同じ候補と成立predicate一覧を第二段階の根拠付与LLMへ渡す。
 根拠付与LLMはpredicateを追加・削除せず、`referenceOccurrenceHash / subjectArticleId / objectArticleId /
-subjectSupportingSpanId / objectSupportingSpanId`を成立predicateごとに返す。非成立・不確実な関係へ
+referenceSourceSupportingSpanId / referenceTargetSupportingSpanId`を成立predicateごとに返す。根拠spanは
+原文`REFERENCES`の物理方向で選び、ProgramはLLMが選んだ意味方向へ機械的に対応付ける。非成立・不確実な関係へ
 意味方向や根拠を作らせない。
 候補の`referenceSourceArticle / referenceTargetArticle`は原文`REFERENCES`の物理方向だけを表す。
 意味上の`subjectArticleId / objectArticleId`は根拠付与LLMが入力中の2端点から選ぶ。
@@ -658,8 +660,9 @@ RelationAssertionの物理重複キーは候補だけにせず、
 結果は候補単位の`ClassificationCheckpoint`とともに`phase=building`のRunへ書き、入力scopeを処理し終えたRunだけ`phase=published`へ一括publishする。
 分類CLIは`building`を既定とし、新5 predicate fixtureと対象scopeの品質確認後に明示した`--publish`だけが
 publish遷移を要求できる。構造監査の成功だけで自動publishしない。
-Assertionを作らない`REFERENCE_ONLY / UNCERTAIN / FAILED`もcheckpointを持つため、中断再開時に
-処理済み候補を再呼出ししない。checkpointは実行記録であり、Graph探索の法的関係として使わない。
+Assertionを作らない`REFERENCE_ONLY / UNCERTAIN / FAILED`もcheckpointを持つ。中断再開時に
+`REFERENCE_ONLY / UNCERTAIN / CLASSIFIED`は再呼出しせず、`FAILED`だけは同じcandidateを再試行して
+checkpointとRun集計をtransactionで置換する。checkpointは実行記録であり、Graph探索の法的関係として使わない。
 checkpointの`decisionPayloadJson`には5 predicateの固有条件とfinding、成立時の根拠付与結果を保存し、
 `decisionPayloadHash`との一致を監査する。これにより`REFERENCE_ONLY`を含む誤分類を事後に追跡できる。
 継続不能なRunは`phase=failed`とする。このphaseはProgram内部の実行事実でありSolverへ判断させない。

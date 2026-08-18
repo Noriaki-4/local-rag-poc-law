@@ -49,8 +49,25 @@ from .legal_relation_classifier import (
     relation_classification_timeout,
 )
 
-RELATION_CLASSIFICATION_PROMPT_VERSION = "legal-relation-5predicate-v16"
+RELATION_CLASSIFICATION_PROMPT_VERSION = "legal-relation-5predicate-v19"
 logger = logging.getLogger(__name__)
+
+
+class RelationClassificationStageError(RuntimeError):
+    """候補単位の失敗を、法的意味へ変換せず実行段階付きで伝える。"""
+
+    def __init__(
+        self,
+        *,
+        stage: str,
+        error: Exception,
+        predicate: ProposedPredicate | None = None,
+    ) -> None:
+        super().__init__(str(error))
+        self.stage = stage
+        self.predicate = predicate
+        self.original_error = error
+
 
 PREDICATE_PROMPT_CONTRACTS = {
     ProposedPredicate.IMPLEMENTS: """判定対象: IMPLEMENTS
@@ -64,7 +81,8 @@ PREDICATE_PROMPT_CONTRACTS = {
 成立条件1 explicitApplicationLanguage: referenceSourceArticleに「準用する」「読み替えて適用する」等、referenceTargetArticleの規律を適用する明示文言がある。
 成立条件2 targetRuleApplied: その文言によりreferenceTargetArticleの規律自体がreferenceSourceArticleへ適用される。
 両方establishedの場合だけfinding=establishedです。
-「前条の場合」「前条に定める」「第X条に規定する」「第X条の規定による」だけならnot_establishedです。""",
+「前条の規定を準用する」は典型的な成立例です。citationTextが「前条」だけでも、対応するsourceSpanIdsの本文全体に「準用する」があれば明示文言として扱います。
+「準用する」「読み替えて適用する」等を伴わず、「前条の場合」「前条に定める」「第X条に規定する」「第X条の規定による」と参照するだけならnot_establishedです。""",
     ProposedPredicate.USES_DEFINITION: """判定対象: USES_DEFINITION
 今回の参照について、referenceSourceArticleをSUBJECT、referenceTargetArticleをOBJECTとして検査します。
 成立条件1 targetDefinesTerm: referenceTargetArticleが、参照された語を「Xとは」「Xをいう」又は括弧書きの「X（…をいう）」で定義している。
@@ -144,7 +162,6 @@ def _candidate_prompt_payload(
     candidate: RelationClassificationCandidate,
 ) -> dict[str, Any]:
     return {
-        "candidateKey": candidate.candidate_key,
         "basisEdgeId": candidate.basis_edge_id,
         "referenceOccurrences": [
             occurrence.model_dump(by_alias=True, mode="json")
@@ -192,7 +209,6 @@ def relation_classification_schema(
 
     response_model, _, _ = PREDICATE_RESPONSE_CONTRACTS[predicate]
     schema = response_model.model_json_schema(by_alias=True)
-    schema["properties"]["candidateKey"]["enum"] = [candidate.candidate_key]
     schema["properties"]["predicate"]["enum"] = [predicate.value]
     return schema
 
@@ -217,15 +233,19 @@ def relation_grounding_schema(
     """成立済みpredicateと候補内の既知IDだけを許すschema。"""
 
     schema = RelationGroundingResponse.model_json_schema(by_alias=True)
-    schema["properties"]["candidateKey"]["enum"] = [candidate.candidate_key]
     article_ids = [
         candidate.reference_source.article_id,
         candidate.reference_target.article_id,
     ]
-    span_ids = [
-        span.span_id
-        for article in (candidate.reference_source, candidate.reference_target)
-        for span in article.spans
+    reference_source_span_ids = list(
+        dict.fromkeys(
+            span_id
+            for occurrence in candidate.reference_occurrences
+            for span_id in occurrence.source_span_ids
+        )
+    )
+    reference_target_span_ids = [
+        span.span_id for span in candidate.reference_target.spans
     ]
     assertion = schema["$defs"]["ProposedRelationAssertion"]["properties"]
     assertion["proposedPredicate"]["enum"] = sorted(
@@ -236,8 +256,8 @@ def relation_grounding_schema(
     ]
     assertion["subjectArticleId"]["enum"] = article_ids
     assertion["objectArticleId"]["enum"] = article_ids
-    assertion["subjectSupportingSpanId"]["enum"] = span_ids
-    assertion["objectSupportingSpanId"]["enum"] = span_ids
+    assertion["referenceSourceSupportingSpanId"]["enum"] = reference_source_span_ids
+    assertion["referenceTargetSupportingSpanId"]["enum"] = reference_target_span_ids
     return schema
 
 
@@ -300,12 +320,10 @@ def parse_relation_meaning_response(
         raise TypeError("relation classifier returned no JSON object")
     response_model, first_name, second_name = PREDICATE_RESPONSE_CONTRACTS[predicate]
     provider_response = response_model.model_validate(payload)
-    if provider_response.candidate_key != candidate.candidate_key:
-        raise ValueError("relation classifier references an unknown candidate key")
     if provider_response.predicate is not predicate:
         raise ValueError("relation classifier returned a different predicate")
     return RelationClassificationResponse(
-        candidate_key=provider_response.candidate_key,
+        candidate_key=candidate.candidate_key,
         predicate=provider_response.predicate,
         first_condition_name=first_name,
         first_condition=getattr(provider_response, first_name),
@@ -342,8 +360,6 @@ def parse_relation_classification_decision(
         if not isinstance(grounding_payload, dict):
             raise ValueError("established predicates require a grounding response")
         grounding = RelationGroundingResponse.model_validate(grounding_payload)
-        if grounding.candidate_key != candidate.candidate_key:
-            raise ValueError("relation grounder references an unknown candidate key")
         asserted = {item.proposed_predicate for item in grounding.assertions}
         if asserted != established:
             raise ValueError(
@@ -394,20 +410,16 @@ def _validate_assessment_grounding(
     }
     if {assessment.subject_article_id, assessment.object_article_id} != set(articles):
         raise ValueError("assessment endpoints must match the candidate Articles")
-    subject = articles[assessment.subject_article_id]
-    object_ = articles[assessment.object_article_id]
-    if subject.span(assessment.subject_supporting_span_id) is None:
-        raise ValueError("subject supporting span does not belong to subject Article")
-    if object_.span(assessment.object_supporting_span_id) is None:
-        raise ValueError("object supporting span does not belong to object Article")
-    reference_source_span_id = (
-        assessment.subject_supporting_span_id
-        if assessment.subject_article_id == candidate.reference_source.article_id
-        else assessment.object_supporting_span_id
-    )
-    if reference_source_span_id not in occurrence.source_span_ids:
+    if assessment.reference_source_supporting_span_id not in occurrence.source_span_ids:
         raise ValueError(
             "reference source supporting span does not belong to the selected occurrence"
+        )
+    if (
+        candidate.reference_target.span(assessment.reference_target_supporting_span_id)
+        is None
+    ):
+        raise ValueError(
+            "reference target supporting span does not belong to reference target Article"
         )
 
 
@@ -844,7 +856,9 @@ class LegalRelationClassificationJob:
             )
 
         checkpoint_rows = self.graph.classification_checkpoints(classification_run_id)
-        checkpoints: dict[str, dict[str, Any]] = {}
+        checkpoints: dict[
+            str, tuple[ClassificationCheckpointRecord, dict[str, Any]]
+        ] = {}
         for item in checkpoint_rows:
             try:
                 parsed = ClassificationCheckpointRecord.model_validate(
@@ -867,7 +881,7 @@ class LegalRelationClassificationJob:
                     classification_run_id, error_code="invalid_checkpoint_contract"
                 )
                 raise RuntimeError("persisted checkpoint contract is invalid")
-            checkpoints[parsed.candidate_key] = item
+            checkpoints[parsed.candidate_key] = (parsed, item)
         unknown_keys = set(checkpoints).difference(
             candidate.candidate_key for candidate in candidates
         )
@@ -878,31 +892,60 @@ class LegalRelationClassificationJob:
             raise RuntimeError("persisted checkpoint is outside the current scope")
 
         skipped_count = 0
-        completed_count = len(checkpoints)
+        completed_count = sum(
+            parsed.outcome.value != "failed" for parsed, _ in checkpoints.values()
+        )
         for candidate in candidates:
-            if candidate.candidate_key in checkpoints:
+            saved_checkpoint = checkpoints.get(candidate.candidate_key)
+            if (
+                saved_checkpoint is not None
+                and saved_checkpoint[0].outcome.value != "failed"
+            ):
                 skipped_count += 1
                 continue
             classified_at = datetime.now(UTC)
             try:
                 decision = self.classify_candidate(candidate)
-                assertions = build_assertion_records(
-                    candidate,
-                    decision,
-                    classification_run_id=classification_run_id,
-                    classified_at=classified_at,
-                )
+                try:
+                    assertions = build_assertion_records(
+                        candidate,
+                        decision,
+                        classification_run_id=classification_run_id,
+                        classified_at=classified_at,
+                    )
+                except Exception as error:
+                    raise RelationClassificationStageError(
+                        stage="assertion_building",
+                        error=error,
+                    ) from error
                 outcome = decision.outcome
                 error_code = None
+                error_stage = None
+                error_message = None
+                error_predicate = None
                 decision_payload = decision.model_dump(by_alias=True, mode="json")
                 payload_hash = stable_hash(decision_payload)
             except Exception as error:  # noqa: BLE001 - 候補単位でcoverageへ残して継続する
                 assertions = ()
                 outcome = "failed"
-                error_code = type(error).__name__
+                if isinstance(error, RelationClassificationStageError):
+                    original_error = error.original_error
+                    error_stage = error.stage
+                    error_predicate = error.predicate
+                else:
+                    original_error = error
+                    error_stage = "classification"
+                    error_predicate = None
+                error_code = type(original_error).__name__
+                error_message = str(original_error)[:2000] or error_code
                 decision_payload = {
                     "candidateKey": candidate.candidate_key,
                     "errorCode": error_code,
+                    "errorStage": error_stage,
+                    "errorMessage": error_message,
+                    "errorPredicate": (
+                        error_predicate.value if error_predicate is not None else None
+                    ),
                 }
                 payload_hash = stable_hash(decision_payload)
             decision_payload_json = json.dumps(
@@ -926,6 +969,9 @@ class LegalRelationClassificationJob:
                 decision_payload_json=decision_payload_json,
                 assertion_count=len(assertions),
                 error_code=error_code,
+                error_stage=error_stage,
+                error_message=error_message,
+                error_predicate=error_predicate,
                 processed_at=classified_at,
                 source_snapshot_id=candidate.source_snapshot_id,
                 graph_schema_version=candidate.graph_schema_version,
@@ -980,20 +1026,34 @@ class LegalRelationClassificationJob:
         assessments: list[RelationClassificationResponse] = []
         grounding_model = settings.relation_classifier_model
         for predicate in ProposedPredicate:
-            meaning = self._call_meaning_model(
-                candidate,
-                predicate,
-                model=settings.relation_classifier_model,
-                reviewer=False,
-            )
-            if meaning.finding is PredicateFinding.UNCERTAIN:
+            try:
                 meaning = self._call_meaning_model(
                     candidate,
                     predicate,
-                    model=settings.relation_classifier_reviewer_model,
-                    reviewer=True,
-                    primary_response=meaning,
+                    model=settings.relation_classifier_model,
+                    reviewer=False,
                 )
+            except Exception as error:
+                raise RelationClassificationStageError(
+                    stage="meaning",
+                    predicate=predicate,
+                    error=error,
+                ) from error
+            if meaning.finding is PredicateFinding.UNCERTAIN:
+                try:
+                    meaning = self._call_meaning_model(
+                        candidate,
+                        predicate,
+                        model=settings.relation_classifier_reviewer_model,
+                        reviewer=True,
+                        primary_response=meaning,
+                    )
+                except Exception as error:
+                    raise RelationClassificationStageError(
+                        stage="review",
+                        predicate=predicate,
+                        error=error,
+                    ) from error
                 grounding_model = settings.relation_classifier_reviewer_model
             assessments.append(meaning)
         meaning_assessments = tuple(assessments)
@@ -1009,12 +1069,18 @@ class LegalRelationClassificationJob:
             return parse_relation_classification_decision(
                 candidate, meaning_assessments
             )
-        grounding = self._call_grounding_model(
-            candidate,
-            meaning_assessments,
-            findings,
-            model=grounding_model,
-        )
+        try:
+            grounding = self._call_grounding_model(
+                candidate,
+                meaning_assessments,
+                findings,
+                model=grounding_model,
+            )
+        except Exception as error:
+            raise RelationClassificationStageError(
+                stage="grounding",
+                error=error,
+            ) from error
         return parse_relation_classification_decision(
             candidate,
             meaning_assessments,

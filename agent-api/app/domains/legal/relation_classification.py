@@ -131,8 +131,8 @@ class ProposedRelationAssertion(LegalGraphModel):
     reference_occurrence_hash: str = Field(min_length=1, max_length=128)
     subject_article_id: str = Field(min_length=1, max_length=500)
     object_article_id: str = Field(min_length=1, max_length=500)
-    subject_supporting_span_id: str = Field(min_length=1, max_length=500)
-    object_supporting_span_id: str = Field(min_length=1, max_length=500)
+    reference_source_supporting_span_id: str = Field(min_length=1, max_length=500)
+    reference_target_supporting_span_id: str = Field(min_length=1, max_length=500)
 
 
 class PredicateFindings(LegalGraphModel):
@@ -234,7 +234,6 @@ class RelationClassificationResponse(LegalGraphModel):
 
 
 class ImplementsClassificationResponse(LegalGraphModel):
-    candidate_key: str = Field(min_length=1, max_length=128)
     predicate: ProposedPredicate
     explicit_delegation: PredicateFinding
     same_matter_implementation: PredicateFinding
@@ -251,7 +250,6 @@ class ImplementsClassificationResponse(LegalGraphModel):
 
 
 class IncorporatesClassificationResponse(LegalGraphModel):
-    candidate_key: str = Field(min_length=1, max_length=128)
     predicate: ProposedPredicate
     explicit_application_language: PredicateFinding
     target_rule_applied: PredicateFinding
@@ -268,7 +266,6 @@ class IncorporatesClassificationResponse(LegalGraphModel):
 
 
 class UsesDefinitionClassificationResponse(LegalGraphModel):
-    candidate_key: str = Field(min_length=1, max_length=128)
     predicate: ProposedPredicate
     target_defines_term: PredicateFinding
     source_uses_same_term: PredicateFinding
@@ -285,7 +282,6 @@ class UsesDefinitionClassificationResponse(LegalGraphModel):
 
 
 class ExceptionToClassificationResponse(LegalGraphModel):
-    candidate_key: str = Field(min_length=1, max_length=128)
     predicate: ProposedPredicate
     target_contains_affected_rule: PredicateFinding
     citation_directly_limits_target_rule: PredicateFinding
@@ -302,7 +298,6 @@ class ExceptionToClassificationResponse(LegalGraphModel):
 
 
 class OverridesClassificationResponse(LegalGraphModel):
-    candidate_key: str = Field(min_length=1, max_length=128)
     predicate: ProposedPredicate
     explicit_priority_over_target: PredicateFinding
     target_application_modified: PredicateFinding
@@ -321,7 +316,6 @@ class OverridesClassificationResponse(LegalGraphModel):
 class RelationGroundingResponse(LegalGraphModel):
     """第二段階で成立関係へ既知IDを割り当てるLLM応答。"""
 
-    candidate_key: str = Field(min_length=1, max_length=128)
     assertions: tuple[ProposedRelationAssertion, ...] = Field()
 
     @model_validator(mode="after")
@@ -470,6 +464,9 @@ class ClassificationCheckpointRecord(LegalGraphModel):
     decision_payload_json: str = Field(min_length=2)
     assertion_count: int = Field(ge=0)
     error_code: str | None = Field(default=None, max_length=160)
+    error_stage: str | None = Field(default=None, max_length=160)
+    error_message: str | None = Field(default=None, max_length=2000)
+    error_predicate: ProposedPredicate | None = None
     processed_at: datetime
     source_snapshot_id: str = Field(min_length=1, max_length=500)
     graph_schema_version: int = Field(ge=1)
@@ -491,11 +488,16 @@ class ClassificationCheckpointRecord(LegalGraphModel):
             and not self.error_code
         ):
             raise ValueError("failed checkpoint requires errorCode")
-        if (
-            self.outcome is not ClassificationCheckpointOutcome.FAILED
-            and self.error_code is not None
+        if self.outcome is not ClassificationCheckpointOutcome.FAILED and any(
+            value is not None
+            for value in (
+                self.error_code,
+                self.error_stage,
+                self.error_message,
+                self.error_predicate,
+            )
         ):
-            raise ValueError("only failed checkpoint may contain errorCode")
+            raise ValueError("only failed checkpoint may contain error details")
         return self
 
 
@@ -550,22 +552,21 @@ def validate_classification_decision(
             assertion.object_article_id,
         } != set(articles):
             raise ValueError("assertion endpoints must match the candidate Articles")
-        subject = articles[assertion.subject_article_id]
-        object_ = articles[assertion.object_article_id]
-        if subject.span(assertion.subject_supporting_span_id) is None:
-            raise ValueError(
-                "subject supporting span does not belong to subject Article"
-            )
-        if object_.span(assertion.object_supporting_span_id) is None:
-            raise ValueError("object supporting span does not belong to object Article")
-        reference_source_span_id = (
-            assertion.subject_supporting_span_id
-            if assertion.subject_article_id == candidate.reference_source.article_id
-            else assertion.object_supporting_span_id
-        )
-        if reference_source_span_id not in occurrence.source_span_ids:
+        if (
+            assertion.reference_source_supporting_span_id
+            not in occurrence.source_span_ids
+        ):
             raise ValueError(
                 "reference source supporting span does not belong to the selected occurrence"
+            )
+        if (
+            candidate.reference_target.span(
+                assertion.reference_target_supporting_span_id
+            )
+            is None
+        ):
+            raise ValueError(
+                "reference target supporting span does not belong to reference target Article"
             )
 
 
@@ -585,19 +586,18 @@ def build_assertion_records(
     records: list[RelationAssertionRecord] = []
     for proposed in decision.assertions:
         occurrence = occurrences[proposed.reference_occurrence_hash]
-        articles = {
-            candidate.reference_source.article_id: candidate.reference_source,
-            candidate.reference_target.article_id: candidate.reference_target,
-        }
         source_article = candidate.reference_source
-        subject_span = articles[proposed.subject_article_id].span(
-            proposed.subject_supporting_span_id
+        source_span = source_article.span(proposed.reference_source_supporting_span_id)
+        target_span = candidate.reference_target.span(
+            proposed.reference_target_supporting_span_id
         )
-        object_span = articles[proposed.object_article_id].span(
-            proposed.object_supporting_span_id
-        )
-        if subject_span is None or object_span is None:
+        if source_span is None or target_span is None:
             raise ValueError("validated supporting span is unavailable")
+        source_is_subject = (
+            proposed.subject_article_id == candidate.reference_source.article_id
+        )
+        subject_span = source_span if source_is_subject else target_span
+        object_span = target_span if source_is_subject else source_span
         dedupe_key = assertion_dedupe_key(
             classification_run_id,
             candidate.candidate_key,
@@ -613,8 +613,8 @@ def build_assertion_records(
                 source_content_unit_id=occurrence.source_content_unit_id,
                 subject_article_id=proposed.subject_article_id,
                 object_article_id=proposed.object_article_id,
-                subject_supporting_span_id=proposed.subject_supporting_span_id,
-                object_supporting_span_id=proposed.object_supporting_span_id,
+                subject_supporting_span_id=subject_span.span_id,
+                object_supporting_span_id=object_span.span_id,
                 subject_supporting_quote=subject_span.text,
                 object_supporting_quote=object_span.text,
                 reference_occurrence_hash=occurrence.occurrence_hash,

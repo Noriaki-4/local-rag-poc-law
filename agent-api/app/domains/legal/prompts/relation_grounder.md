@@ -18,6 +18,8 @@
 - proposedPredicateはestablishedPredicatesから選び、各predicateをちょうど1回返してください。
 - subjectArticleIdとobjectArticleIdは提示された二つのArticle IDから選び、同じIDを両方に使わないでください。
 - referenceOccurrenceHashは判断対象となった既知の値をそのまま返してください。
-- supportingSpanIdは各端点Articleの根拠を示す既知span IDを一つずつ返し、本文を書き写さないでください。
-- referenceSourceArticle側のsupportingSpanIdは、選んだreferenceOccurrenceHashのsourceSpanIdsから選んでください。
-- 意味分類を再判断せず、candidateKeyを変更せず、JSONだけを返してください。
+- referenceSourceSupportingSpanIdは、選んだreferenceOccurrenceHashのsourceSpanIdsから選んでください。
+- referenceTargetSupportingSpanIdは、referenceTargetArticleのspansから選んでください。
+- SUBJECT / OBJECTの向きに応じてspan名を入れ替えず、上記の物理方向のまま返してください。
+- span IDだけを返し、本文を書き写さないでください。
+- 意味分類を再判断せず、JSONだけを返してください。

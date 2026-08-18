@@ -230,9 +230,12 @@ OpenSearchの子チャンクが親チャンク本文を再掲する場合は、`
 Article本文は決定的なspan ID付きでLLMへ渡し、LLMは判断根拠とするspan IDを選ぶ。
 自由記述の引用文は求めず、プログラムは選ばれたIDが対応Articleに存在することだけを検証する。
 5種類は同時に判定せず、候補ごとに1 predicateずつ5回の専門判定を行う。各判定はpredicate固有の
-二つの必要条件とfindingだけを返す。成立したpredicateがある場合だけ、別の根拠付与呼出しで
-`referenceOccurrenceHash / subjectArticleId / objectArticleId / subjectSupportingSpanId /
-objectSupportingSpanId`を選ぶ。プログラムは条件とfinding、既知ID、件数の整合を検証してoutcomeと
+二つの必要条件とfindingだけを返す。内部`candidateKey`は1候補・1呼出しではLLMにエコーさせず、
+呼出元が既知の候補へ機械的に付与する。成立したpredicateがある場合だけ、別の根拠付与呼出しで
+`referenceOccurrenceHash / subjectArticleId / objectArticleId /
+referenceSourceSupportingSpanId / referenceTargetSupportingSpanId`を選ぶ。根拠spanは原文参照の
+物理方向で選び、プログラムがLLMの選んだSUBJECT / OBJECT方向へ機械的に対応付ける。プログラムは
+条件とfinding、既知ID、件数の整合を検証してoutcomeと
 保存対象Assertionへ決定的に投影するだけで、predicate・条件値・finding・方向・根拠を補正しない。
 既定の`RELATION_CLASSIFIER_CONTEXT_TOKENS=131072`は、既定モデル`gemma4:e4b`の
 context上限に合わせ、長いArticleを黙って切り捨てないための値である。
@@ -255,7 +258,8 @@ python3 scripts/classify_legal_relations.py --limit 10 --apply
 ```
 
 中断した`building` Runは、最初の出力・ログにあるIDを指定して再開する。同じ候補の
-`ClassificationCheckpoint`は再度LLMへ送らない。
+成功済み`ClassificationCheckpoint`は再度LLMへ送らない。`failed` checkpointはエラー段階・
+メッセージ・対象predicateを保持し、再開時に再試行して同じcheckpointを置換する。
 
 ```bash
 OLLAMA_BASE_URL=http://localhost:11434 \
@@ -298,7 +302,8 @@ RELATION_CLASSIFIER_REVIEWER_MODEL=gemma4:e4b \
 python3 scripts/evaluate_legal_relation_5predicate.py
 ```
 
-2026-08-18のv16では、民法618条→617条の`INCORPORATES`、603条→602条の
+2026-08-18のv19では、内部candidate keyをLLM入力から除外し、根拠spanを原文参照の物理方向で
+選択する契約に改めた。民法618条→617条の`INCORPORATES`、603条→602条の
 `REFERENCE_ONLY`、619条→622条の2の`USES_DEFINITION`かつ非`EXCEPTION_TO`を3/3で確認した。
 これは観測済み誤分類の回帰fixtureであり、5 predicate全体の受入fixtureや全4,323候補の精度評価を
 代替しない。

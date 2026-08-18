@@ -564,21 +564,24 @@ class GraphClient:
                 "RETURN properties(checkpoint) AS checkpoint",
                 checkpointId=checkpoint_id,
             ).single()
+            replacing_failed = False
             if existing is not None:
                 saved = dict(existing["checkpoint"])
-                comparable = (
-                    "classificationRunId",
-                    "candidateKey",
-                    "outcome",
-                    "decisionPayloadHash",
-                    "decisionPayloadJson",
-                    "assertionCount",
-                )
-                if any(saved.get(key) != checkpoint.get(key) for key in comparable):
-                    raise RuntimeError(
-                        "classification checkpoint payload conflicts with persisted result"
+                replacing_failed = str(saved.get("outcome")) == "failed"
+                if not replacing_failed:
+                    comparable = (
+                        "classificationRunId",
+                        "candidateKey",
+                        "outcome",
+                        "decisionPayloadHash",
+                        "decisionPayloadJson",
+                        "assertionCount",
                     )
-                return False
+                    if any(saved.get(key) != checkpoint.get(key) for key in comparable):
+                        raise RuntimeError(
+                            "classification checkpoint payload conflicts with persisted result"
+                        )
+                    return False
 
             for assertion in assertions:
                 basis = transaction.run(
@@ -598,17 +601,29 @@ class GraphClient:
                 "graphNodeId": checkpoint_id,
                 "nodeType": "ClassificationCheckpoint",
             }
-            transaction.run(
-                """
-                CREATE (checkpoint:GraphNode:ClassificationCheckpoint {
-                  graphNodeId: $checkpointId,
-                  checkpointId: $checkpointId
-                })
-                SET checkpoint += $properties
-                """,
-                checkpointId=checkpoint_id,
-                properties=checkpoint_properties,
-            ).consume()
+            if replacing_failed:
+                transaction.run(
+                    """
+                    MATCH (checkpoint:ClassificationCheckpoint {
+                      checkpointId: $checkpointId
+                    })
+                    SET checkpoint = $properties
+                    """,
+                    checkpointId=checkpoint_id,
+                    properties=checkpoint_properties,
+                ).consume()
+            else:
+                transaction.run(
+                    """
+                    CREATE (checkpoint:GraphNode:ClassificationCheckpoint {
+                      graphNodeId: $checkpointId,
+                      checkpointId: $checkpointId
+                    })
+                    SET checkpoint += $properties
+                    """,
+                    checkpointId=checkpoint_id,
+                    properties=checkpoint_properties,
+                ).consume()
 
             for assertion in assertions:
                 assertion_id = str(assertion["assertionId"])
@@ -672,16 +687,29 @@ class GraphClient:
                 str(checkpoint["outcome"])
             ]
             # counter名は固定mapからだけ選び、LLM出力をCypherへ埋め込まない。
-            transaction.run(
-                f"""
-                MATCH (run:ClassificationRun {{classificationRunId: $runId}})
-                SET run.processedCount = run.processedCount + 1,
-                    run.{outcome_counter} = run.{outcome_counter} + 1,
-                    run.assertionCount = run.assertionCount + $assertionCount
-                """,
-                runId=run_id,
-                assertionCount=len(assertions),
-            ).consume()
+            if replacing_failed:
+                if str(checkpoint["outcome"]) != "failed":
+                    transaction.run(
+                        f"""
+                        MATCH (run:ClassificationRun {{classificationRunId: $runId}})
+                        SET run.failedCount = run.failedCount - 1,
+                            run.{outcome_counter} = run.{outcome_counter} + 1,
+                            run.assertionCount = run.assertionCount + $assertionCount
+                        """,
+                        runId=run_id,
+                        assertionCount=len(assertions),
+                    ).consume()
+            else:
+                transaction.run(
+                    f"""
+                    MATCH (run:ClassificationRun {{classificationRunId: $runId}})
+                    SET run.processedCount = run.processedCount + 1,
+                        run.{outcome_counter} = run.{outcome_counter} + 1,
+                        run.assertionCount = run.assertionCount + $assertionCount
+                    """,
+                    runId=run_id,
+                    assertionCount=len(assertions),
+                ).consume()
             return True
 
         with self.driver.session() as session:

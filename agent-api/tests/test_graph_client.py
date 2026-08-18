@@ -3,7 +3,6 @@
 from typing import Any
 
 import pytest
-
 from app import graph_client as graph_client_module
 from app.graph_client import GraphClient
 
@@ -164,7 +163,9 @@ class TestBatchTraversal:
     ) -> None:
         graph, _ = client
         with pytest.raises(ValueError):
-            graph.paths_from_many(["law-a-article-1"], edge_types=["IMPLEMENTS]->() DELETE n //"])
+            graph.paths_from_many(
+                ["law-a-article-1"], edge_types=["IMPLEMENTS]->() DELETE n //"]
+            )
 
     def test_legacy_single_edge_type_still_works(
         self, client: tuple[GraphClient, dict[str, Any]]
@@ -202,6 +203,74 @@ class TestTimeout:
         graph, recorder = client
         assert graph.paths_from_many(["law-a-article-1"], timeout_sec=0) == []
         assert recorder == {}
+
+
+class TestClassificationCheckpointRetry:
+    def test_failed_checkpoint_is_replaced_without_incrementing_processed_count(
+        self,
+    ) -> None:
+        calls: list[tuple[str, dict[str, Any]]] = []
+
+        class Result:
+            def __init__(self, record: dict[str, Any] | None = None) -> None:
+                self.record = record
+
+            def single(self) -> dict[str, Any] | None:
+                return self.record
+
+            def consume(self) -> None:
+                return None
+
+        class Transaction:
+            def run(self, query: str, **kwargs: Any) -> Result:
+                calls.append((query, kwargs))
+                if "RETURN properties(run) AS run" in query:
+                    return Result({"run": {"phase": "building"}})
+                if "RETURN properties(checkpoint) AS checkpoint" in query:
+                    return Result({"checkpoint": {"outcome": "failed"}})
+                return Result()
+
+        class Session:
+            def __enter__(self) -> "Session":
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+            def execute_write(self, callback):
+                return callback(Transaction())
+
+        class Driver:
+            def session(self) -> Session:
+                return Session()
+
+        graph = GraphClient.__new__(GraphClient)
+        graph.driver = Driver()
+        saved = graph.save_classification_checkpoint(
+            checkpoint={
+                "classificationRunId": "run-1",
+                "checkpointId": "checkpoint-1",
+                "candidateKey": "candidate-1",
+                "outcome": "reference_only",
+                "decisionPayloadHash": "hash-1",
+                "decisionPayloadJson": "{}",
+                "assertionCount": 0,
+            },
+            assertions=[],
+        )
+
+        assert saved is True
+        replacement_query = next(
+            query for query, _ in calls if "SET checkpoint = $properties" in query
+        )
+        assert "MATCH (checkpoint:ClassificationCheckpoint" in replacement_query
+        counter_query = next(
+            query
+            for query, _ in calls
+            if "run.failedCount = run.failedCount - 1" in query
+        )
+        assert "run.referenceOnlyCount = run.referenceOnlyCount + 1" in counter_query
+        assert "processedCount" not in counter_query
 
 
 class TestAssertionsAndInventory:
