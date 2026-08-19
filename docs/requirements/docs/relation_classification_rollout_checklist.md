@@ -19,6 +19,7 @@
 - [x] 差戻しは元のWorkerへ1回だけ返し、元のReviewerが差分を最終確認する契約にした
 - [x] Programがpredicate、condition、finding、意味方向、根拠を補正しないことを契約テストへ固定した
 - [x] skill version、model、reasoning effort、shard size、session上限、snapshotをmanifestへ記録する契約にした
+- [x] 読替適用の`INCORPORATES / OVERRIDES`併存と、不適用時に`INCORPORATES`を付けない境界をWorker / Reviewer契約へ固定した
 
 合格条件: 実装計画、RUNBOOK、skill、Pydantic schema、テストfixtureに矛盾がない。
 
@@ -132,6 +133,10 @@ manifest schemaは2、promptは`legal-relation-5predicate-v20-pair`、skillは
 `legal-relation-adjudicator-2026-08-19-pair-v3`を使用し、v2成果物と同じRunへ混在させない。
 差分再評価で判明した無名の法的役割、前方スコープ、無関係な逆参照の境界は
 `legal-relation-adjudicator-2026-08-19-pair-v4`へ一般則として反映した。
+2026-08-20の読替適用境界修正後は、Luna用prompt
+`legal-relation-5predicate-v22-pair`、skill
+`legal-relation-adjudicator-2026-08-20-pair-v7`を使用する。ローカルOllama経路の旧prompt version 21とは
+成果物を混在させない。
 
 ## Gate 6: 代表100件を最大3並列で再評価する
 
@@ -182,6 +187,14 @@ status `73/73`、5 predicate `365/365`、方向 `62/62`、grounding `62/62`、�
 `adjudicationStatus=needs_resolution`は「入力Articleペアを意味分類できない」というLLM判断であり、
 final Review後のworkflow `unresolved`は「差戻し1回後もReviewerが承認しなかった」という実行結果である。
 両者を同じ0件条件として扱わない。
+
+### Gate 6追加回帰（2026-08-20、pair-v7）
+
+読替適用、不適用、置換を伴わない直接適用の3境界を、goldを除去した新規Luna Worker / Reviewer
+contextで再評価した。predicate完全一致`3/3`、Reviewer承認`3/3`、差戻し0件で、ローカル全テストは
+`768 passed`だった。成果物は`eval-results/relation-incorporates-regression-pair-v7-complete/`に保存した。
+旧20件fixtureの第137条の77→第137条の47は、準用に加えて様式の読替えも行うため、
+`INCORPORATES`のみから`INCORPORATES + OVERRIDES`へ教師データを訂正した。
 
 ## Gate 7: 全件分類を最大3並列で実行する
 

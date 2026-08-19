@@ -1824,10 +1824,18 @@ def test_context_keeps_all_graph_candidates_outside_material_limit() -> None:
         "neighborHeading": "第二条の五",
         "relations": [
             {
-                "kind": "formal_relation",
-                "edgeType": "REFERENCES",
-                "direction": "incoming",
-                "status": "unverified",
+                "kind": "relation_assertion",
+                "edgeType": "USES_DEFINITION",
+                "direction": "to_subject",
+                "basisEdgeId": "edge-1",
+                "classificationRunId": "classification-run-1",
+                "subjectArticleId": "law-ordinance-article-2_5",
+                "objectArticleId": "law-act-article-27_2",
+                "subjectSupportingSpanId": "ordinance::span-1",
+                "objectSupportingSpanId": "act::span-1",
+                "subjectSupportingQuote": "定義語を使用する。",
+                "objectSupportingQuote": "定義語とは対象をいう。",
+                "relationExplanation": "OBJECTが定める定義語をSUBJECTが利用する。",
                 "sourceId": "edge-1",
             }
         ],
@@ -1945,10 +1953,18 @@ def test_context_keeps_all_graph_candidates_outside_material_limit() -> None:
     assert link.hypothesis_ids == ("h1", "h2")
     assert link.relations == (
         {
-            "kind": "formal_relation",
-            "edgeType": "REFERENCES",
-            "direction": "incoming",
-            "status": "unverified",
+            "kind": "relation_assertion",
+            "edgeType": "USES_DEFINITION",
+            "direction": "to_subject",
+            "basisEdgeId": "edge-1",
+            "classificationRunId": "classification-run-1",
+            "subjectArticleId": "law-ordinance-article-2_5",
+            "objectArticleId": "law-act-article-27_2",
+            "subjectSupportingSpanId": "ordinance::span-1",
+            "objectSupportingSpanId": "act::span-1",
+            "subjectSupportingQuote": "定義語を使用する。",
+            "objectSupportingQuote": "定義語とは対象をいう。",
+            "relationExplanation": "OBJECTが定める定義語をSUBJECTが利用する。",
         },
     )
     assert tuple(item.evidence_id for item in context.evidence_manifest) == (

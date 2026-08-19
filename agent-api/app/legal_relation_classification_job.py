@@ -50,7 +50,8 @@ from .legal_relation_classifier import (
     without_repeated_parent_context_with_offset,
 )
 
-RELATION_CLASSIFICATION_PROMPT_VERSION = "legal-relation-5predicate-v20-pair"
+RELATION_CLASSIFICATION_PROMPT_VERSION = "legal-relation-5predicate-v21-pair"
+RELATION_ADJUDICATION_PROMPT_VERSION = "legal-relation-5predicate-v22-pair"
 logger = logging.getLogger(__name__)
 
 
@@ -443,6 +444,7 @@ def candidates_from_graph_and_sources(
     provider: str,
     model: str,
     reviewer_model: str | None,
+    prompt_version: str = RELATION_CLASSIFICATION_PROMPT_VERSION,
 ) -> tuple[RelationClassificationCandidate, ...]:
     """Graphの参照事実とOpenSearch全文を同一snapshotの候補へ変換する。"""
 
@@ -653,7 +655,7 @@ def candidates_from_graph_and_sources(
             RelationClassificationCandidate(
                 source_snapshot_id=source_snapshot_id,
                 graph_schema_version=graph_schema_version,
-                prompt_version=RELATION_CLASSIFICATION_PROMPT_VERSION,
+                prompt_version=prompt_version,
                 provider=provider,
                 model=model,
                 reviewer_model=reviewer_model,
@@ -1402,6 +1404,7 @@ class LegalRelationClassificationJob:
 
 __all__ = [
     "RELATION_CLASSIFICATION_PROMPT_VERSION",
+    "RELATION_ADJUDICATION_PROMPT_VERSION",
     "LegalRelationClassificationJob",
     "audit_classification_materialization",
     "candidates_from_graph_and_sources",

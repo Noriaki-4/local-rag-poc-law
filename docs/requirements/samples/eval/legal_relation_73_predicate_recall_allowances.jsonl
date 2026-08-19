@@ -1,0 +1,1 @@
+{"candidateKey":"0d39784c98080896ab0e3c7fd121f7c509fe2d7f3ac14adc36bc567e70446a18","predicate":"USES_DEFINITION","auditNote":"第295条が『金融商品又は法人』の適用範囲を第310条へ明示的に延ばすため関係自体は妥当。ただし、長大な定義条の複数列挙から個別のforward scopeを漏れなく再現することは必須再現率に含めない。陽性とする場合は当該scopeと第310条の用語使用を正しく根拠付ける。"}

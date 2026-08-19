@@ -330,7 +330,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 
 def test_all_solver_stages_include_shared_legal_research_rules() -> None:
     profile = legal_profiles.legal_agent_profile()
-    assert profile.version == "49"
+    assert profile.version == "50"
     prompts = (
         profile.solver_research.system_prompt,
         profile.solver_integration.system_prompt,
@@ -355,10 +355,11 @@ def test_all_solver_stages_include_shared_legal_research_rules() -> None:
         assert "Graph候補Articleには伴いません" in prompt
         assert "Graphを再展開しません" in prompt
         assert "[一致箇所N]" in prompt
-        assert "IMPLEMENTSはfromが親規定、toが具体化規定" in prompt
+        assert "IMPLEMENTSは親規定→具体化規定" in prompt
         assert "outgoingは起点Articleがfrom側" in prompt
-        assert "llm_classified_implementsが別処理のLLMによる具体化関係判定" in prompt
-        assert "いずれのstatusも正式関係への昇格を意味せず" in prompt
+        assert "USES_DEFINITIONは、引用符付き用語だけでなく" in prompt
+        assert "relationExplanation、SUBJECT/OBJECTのsupportingQuote" in prompt
+        assert "旧GraphのIMPLEMENTS / APPLIED_BYやstatus" in prompt
         assert "parent_law_referenceが下位法令本文から親法律・親政令への明示参照" in prompt
         assert "生成元・監査用の来歴はCaseStateに保持" in prompt
         assert "GraphをToolRequestへ指定しません" in prompt
@@ -416,6 +417,8 @@ def test_all_solver_stages_include_shared_legal_research_rules() -> None:
     assert "start_next_cycle=false" in graph_prompt
     assert "deferred_frontier_resolutions=[]" in graph_prompt
     assert "各reasonは判断を区別できる一文" in graph_prompt
+    assert "USES_DEFINITIONはラベルだけで選びません" in graph_prompt
+    assert "relationExplanationと両端supportingQuote" in graph_prompt
 
 
 def test_cycle_boundary_requires_a_structural_resolution_for_every_deferred_frontier(

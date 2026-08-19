@@ -200,14 +200,18 @@ flowchart LR
     O[(OpenSearch
     両端Article全文)] --> C
     C --> P[Article ID付きspanへ変換]
-    P --> L[Relation Classifier LLM
-    1候補・1 predicate/意味判定
-    固有の二必要条件とfindingを判断]
-    L -->|成立predicateだけ| G[Grounding LLM
-    方向・参照箇所・両端spanを選択]
-    L -->|成立なし| D[Programがfindingから
+    P --> W[Worker LLM
+    1候補の5 predicateを比較
+    二必要条件・方向・根拠を返す]
+    W --> RV[Reviewer LLM
+    Worker回答を見て誤りを指摘]
+    RV -->|承認| D[Programがfindingから
     outcome・Assertionを決定的に投影]
-    G --> D
+    RV -->|差戻しは1回だけ| W2[同じWorkerが
+    5 predicate全体を再確認]
+    W2 --> FR[Reviewerが差分確認]
+    FR -->|承認| D
+    FR -->|再び不合格| U[unresolvedへ分離]
     D --> V[ID・enum・span・hashだけ構造検証]
     V --> CP[(候補ごとのCheckpoint)]
     CP --> R[(building ClassificationRun)]
@@ -215,9 +219,10 @@ flowchart LR
     PUB --> A[未確認RelationAssertionとして検索可能]
 ```
 
-複数候補を同じPromptへ束ねない。保存checkpointのbatchとLLM入力のbatchは別であり、1候補ずつでも
-再開できる。LLMは5関係のfinding・方向・両端根拠を一度に判断する。Programは法的意味を補わず、
-成立したassessmentだけをRelationAssertionへ写す。
+1 sessionには最大5候補のshardを渡せるが、候補ごとに独立した判定recordを返し、別候補の本文・判断を
+根拠へ流用しない。保存checkpointも候補単位なので、1候補ずつ再開できる。Workerは5関係のfinding・方向・
+両端根拠を一度に判断し、ReviewerはWorker回答を知った上で具体的な誤りを指摘する。Programは法的意味を
+補わず、承認されたassessmentだけをRelationAssertionへ写す。
 
 ## 9. 共有法令Graphの形
 
@@ -237,7 +242,136 @@ flowchart LR
 `IMPLEMENTS / INCORPORATES / USES_DEFINITION / EXCEPTION_TO / OVERRIDES`は物理Edgeではなく、
 RelationAssertionの`proposedPredicate`である。RelationAssertionは共有候補であり、案件で確認済みの正式関係ではない。
 
-## 10. 保守性向上のコンセプト
+検索時にはpredicate名だけを見せない。Projectorは意味方向、両端の根拠抜粋、承認Reviewerの短い説明も
+AgentViewへ投影する。特に`USES_DEFINITION`は次のように読む。
+
+```text
+利用側Article (SUBJECT)
+  └─ どの語・法的役割・地位・scopeを使うか
+          │  USES_DEFINITION
+          │  relationExplanation + 両端supportingQuote
+          ▼
+定義側Article (OBJECT)
+  └─ その意味・範囲をどの本文で定めるか
+```
+
+Solverは現在のHypothesisがその意味・範囲に依存するときだけ定義側本文を取得する。逆に定義の適用先を
+問う場合だけ利用側へたどる。全候補を順にたどるのではなく、`relationExplanation`が示す具体的な概念と
+Hypothesisが一致する候補だけを選ぶ。候補がない場合も「定義関係なし」とは断定せず、必要ならOpenSearchへ戻る。
+説明と抜粋は候補選別用であり、回答根拠にはArticle全文の取得が必要である。
+
+## 10. 5つの意味関係の整理
+
+### 10.1 原文関係と意味関係は別物
+
+`REFERENCES`と`EXPLAINS`は、原文やガイドから決定的に確認できる物理関係である。一方、次の5つは
+両端Article全文をLLMが読んで作る意味関係候補であり、Neo4j上では`RelationAssertion`として保存する。
+
+```text
+原文・構造から確認できる関係
+├─ REFERENCES   ある規定が別の規定を明示参照する
+└─ EXPLAINS     ガイドが特定Articleを明示的に解説する
+
+本文の意味判断が必要な関係候補
+├─ IMPLEMENTS
+├─ INCORPORATES
+├─ USES_DEFINITION
+├─ EXCEPTION_TO
+└─ OVERRIDES
+```
+
+`REFERENCES`があるだけでは5つのどれが成立するかは分からない。反対に、1組のArticle間で複数の意味関係が
+同時に成立することもある。例えば、下位規定が委任事項を具体化しながら親規定の定義語も利用する場合は、
+`IMPLEMENTS`と`USES_DEFINITION`が両方成立し得る。
+
+### 10.2 各関係の意味と向き
+
+すべての意味関係は`SUBJECT → OBJECT`として読む。ここでSUBJECT / OBJECTはGraph上の端点役割であり、
+契約当事者、文法上の主語、法律上の主体・客体を意味しない。
+
+| 関係 | 何を表すか | SUBJECT | OBJECT | 代表的な手掛かり | それだけでは足りないもの |
+|---|---|---|---|---|---|
+| `IMPLEMENTS` | 上位規定の委任事項を下位規定が具体化する | 委任する親規定 | 同じ事項を具体化する下位規定 | 「政令で定める」「内閣府令で定める」と対応する具体的内容 | 上下関係、親法令への引用、同じ制度を扱うことだけ |
+| `INCORPORATES` | 別規定のルールを現在の場面へ取り込む | 準用・読替え等を行う規定 | 取り込まれる規定 | 「準用する」「読み替えて適用する」「X条の適用については、同条中AをBとする」 | 「第X条に規定する」「第X条の場合」という対象特定だけ |
+| `USES_DEFINITION` | 別規定が定めた意味・範囲を利用する | 定義を利用する規定 | 定義を置く規定 | 「Xをいう」「以下Xという」「第Y条までにおいて同じ」、再利用可能な法的地位・役割 | 同じ語の出現、期間・要件の参照、委任事項の列挙だけ |
+| `EXCEPTION_TO` | 一般規定の適用範囲・効果を例外側が狭める | 例外・適用除外を定める規定 | 狭められる一般規定 | 「適用しない」「除く」「この限りでない」、対象や期間の限定 | 例外語が別の規定にかかる場合、単なる要件追加 |
+| `OVERRIDES` | 特則が対象規定より優先し、内容を排除・置換する | 優先する特則 | 排除・修正される規定 | 「かかわらず」、対象を特定した不適用、読替表の置換 | 単なる例外、地位の失効、下位規定による委任事項の補充 |
+
+### 10.3 間違えやすい境界
+
+| 迷いやすい組合せ | 区別する問い |
+|---|---|
+| `IMPLEMENTS` / `USES_DEFINITION` | 下位規定が委任された事項を供給しているのか、それとも親規定が定めた語・役割・scopeを利用しているのか。別々の根拠があれば両方成立できる。 |
+| `INCORPORATES` / `USES_DEFINITION` | 対象規定のルール全体を現在の場面へ適用しているのか、対象規定から語の意味だけを借りているのか。 |
+| `EXCEPTION_TO` / `OVERRIDES` | 一般規定の適用範囲を狭めるだけか、競合時に特則を優先して対象規定の内容を排除・置換するか。両方の条件を満たす場合は併存できる。 |
+| `INCORPORATES` / `OVERRIDES` | 対象規律を読替後も適用するなら両方成立し得る。対象規律を適用せず別規律を優先するだけなら`OVERRIDES`であり、`INCORPORATES`ではない。 |
+| `REFERENCES` / 5つの意味関係 | 引用が存在するという物理事実だけか、その引用文脈と両端本文から特定の意味作用まで確認できるか。 |
+
+意味関係は推移させない。`A IMPLEMENTS B`かつ`B IMPLEMENTS C`であっても、Programが自動的に
+`A IMPLEMENTS C`を作らない。各RelationAssertionは、保存された参照箇所が直接橋渡しするArticleペアだけを表す。
+
+### 10.4 検索時の使い方
+
+`from_subject`は検索起点がSUBJECT側、`to_subject`は検索起点がOBJECT側である。同じpredicateでも、
+方向によって検索目的が変わる。
+
+| 関係 | `from_subject`で探すもの | `to_subject`で探すもの |
+|---|---|---|
+| `IMPLEMENTS` | 親規定から、その委任事項を具体化する下位規定 | 下位規定から、具体化の根拠となる親規定 |
+| `INCORPORATES` | 準用・読替え側から、取り込まれる規定 | ある規定から、それを取り込んでいる規定 |
+| `USES_DEFINITION` | 利用側から、意味・範囲を定める規定 | 定義側から、その定義を利用する規定 |
+| `EXCEPTION_TO` | 例外側から、対象となる一般規定 | 一般規定から、それに対する例外・適用除外 |
+| `OVERRIDES` | 特則から、排除・修正される規定 | 一般規定から、それより優先する特則 |
+
+SolverはHypothesisに必要なpredicateを1つ、方向を1つ選んで検索する。複数predicateや両方向を一度に検索して
+Programへ関連候補の選別を任せない。候補を取得した後も、次の情報をまとめて読む。
+
+| AgentViewの項目 | Solverが理解する内容 |
+|---|---|
+| `proposedPredicate` | 候補となる意味関係の種類 |
+| `from_subject / to_subject` | 起点Articleが意味方向のどちら側か |
+| `relationExplanation` | Reviewerが確認した、具体的に何と何を結ぶ候補かという短い説明 |
+| `subjectSupportingQuote` | SUBJECT側でその役割を示した分類時の抜粋 |
+| `objectSupportingQuote` | OBJECT側でその役割を示した分類時の抜粋 |
+| `basisEdgeId` | この意味候補の橋渡しとなった原文`REFERENCES` |
+| `classificationRunId` | どのpublish済み分類Runが作った候補か |
+
+これらはGraph候補を選ぶためのナビゲーション情報であり、質問への回答根拠ではない。Solverが候補を
+質問・WorkItem・Hypothesisに関係すると判断した後、OpenSearchから必要なArticle全文を取得して再確認する。
+
+### 10.5 `USES_DEFINITION`を検索で扱うための補足
+
+`USES_DEFINITION`は一つのpredicateのまま維持するが、内容は次のような形を含み得る。
+
+- 名前付き定義: `Xとは…をいう`、`以下「X」という`など。
+- 明示的なscope: `この条において同じ`、`第Y条までにおいて同じ`など。
+- 再利用可能な法的役割・地位: 許可・登録・指定等によって規定が形成し、別Articleがその資格を利用する場合。
+
+これは新しい下位predicateを追加する意味ではない。分類Reviewerの`relationExplanation`に、対象となる語・役割・
+地位・scope、定義側、利用側、橋渡しとなる参照箇所を記録する。検索Solverはラベルだけから範囲を推測せず、
+説明と両端抜粋を読んで現在のHypothesisに必要か判断する。
+
+期間、要件一覧、委任された項目、単なる対象者の列挙、同じ名詞の反復は、それだけでは定義ではない。
+また、定義Article全体を準用しただけで、そこに含まれる全定義語を利用したとは扱わない。対象概念が不明な
+旧候補はラベルだけで採用せず、必要なら両端本文を確認し、不要なら全方向へ探索を広げない。
+
+分類上の意味範囲はこのまま維持する。ただし、要求する精度は次のように考える。
+
+```text
+直接的な名前付き定義・参照箇所に局所的な明示scope
+  └─ 優先して取得し、必須再現率として評価
+
+暗黙の役割・地位・長いscope連鎖
+  └─ 関係としては有効
+     ├─ 見つけた場合: 向き・根拠・説明を厳格に評価
+     └─ 人が指定した候補: 見落としを必須再現率から除外可能
+```
+
+この区別はGraphへ新しいstatusやpredicateを増やすものではない。評価時だけ人手の
+`PredicateRecallAllowance`を適用し、raw一致値と合格判定値を分けて表示する。検索Solverから見ると、
+どちらも同じ`USES_DEFINITION`候補であり、具体的な`relationExplanation`と両端抜粋を使って選別する。
+
+## 11. 保守性向上のコンセプト
 
 根幹は、statusの値を隠すことではなく、**定義と更新経路を一か所にすること**である。
 各ファイルが同じstatus一覧や遷移条件を持つと、一つの値を変更するたびにPrompt、schema、validator、Loopの
@@ -292,7 +426,7 @@ Prompt用語集を更新し、未定義の組合せはテストで失敗させ�
 すべてを巨大な共通Enumや一つの状態機械へまとめるわけではない。Run、Tool、Cycle、Step、WorkItem、
 Hypothesis、Frontierごとに小さい契約を持ち、共通の生成・適用方法だけを揃える。
 
-## 11. 現在の3系統と切替先
+## 12. 現在の3系統と切替先
 
 現行コードには3系統ある。新しい設計へ統合するときに、`agent_core/`を新Frameworkの一部と誤認しない。
 

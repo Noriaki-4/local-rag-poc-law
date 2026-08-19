@@ -91,5 +91,6 @@ def test_evaluator_reads_adjudication_source_from_fixture():
     fixtures = module.load_fixtures(FIXTURE_PATH)
 
     assert module.adjudication_sources(fixtures) == [
-        "codex_manual_review_2026-08-18"
+        "codex_manual_review_2026-08-18",
+        "codex_manual_review_2026-08-20_incorporates_boundary",
     ]

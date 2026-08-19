@@ -154,7 +154,7 @@ def main() -> int:
     parser.add_argument("--reviewer-model", default="gpt-5.6-luna")
     parser.add_argument("--reasoning-effort", default="high")
     parser.add_argument(
-        "--skill-version", default="legal-relation-adjudicator-2026-08-19-pair-v4"
+        "--skill-version", default="legal-relation-adjudicator-2026-08-20-pair-v7"
     )
     parser.add_argument("--source-snapshot-id")
     parser.add_argument("--graph-schema-version", type=int)

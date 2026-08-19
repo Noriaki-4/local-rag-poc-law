@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 2,
+  "sourcePacket": "/Users/nt/projects/local-rag-poc-law/eval-results/relation-guidance-100-pair-v6-wrong/work-packet.jsonl",
+  "sourcePacketSha256": "68bbc6630f4fbbb441c959ed05e7774f73d03c5770fafa8d19cd20562b866ea5",
+  "sourceSnapshotId": "snapshot-1e9f9f5c1ac849f7ddffdd7480f80c9f771db7c00efea06a612fc286f8c3d27e",
+  "graphSchemaVersion": 9,
+  "promptVersion": "legal-relation-5predicate-v20-pair",
+  "candidateCount": 2,
+  "scopeHash": "3f2037b69c75ac01c4d3c1dafe811e8231b727cfe6fba76ea0022806dffd3c1f",
+  "shardingMode": "fixed_candidate_limit",
+  "maxCandidatesPerShard": 5,
+  "shardCount": 1,
+  "executionProfile": {
+    "skillVersion": "legal-relation-adjudicator-2026-08-19-pair-v6",
+    "workerModel": "gpt-5.6-luna",
+    "reviewerModel": "gpt-5.6-luna",
+    "reasoningEffort": "high",
+    "candidatesPerWorkerSession": 5,
+    "candidatesPerReviewerSession": 5,
+    "maxActiveSessions": 1,
+    "workerReviewerSeparateContexts": true,
+    "maxRevisionRounds": 1
+  },
+  "shards": [
+    {
+      "shardId": "shard-0000",
+      "file": "shard-0000.jsonl",
+      "candidateCount": 2,
+      "inputCharacters": 11154,
+      "sha256": "68bbc6630f4fbbb441c959ed05e7774f73d03c5770fafa8d19cd20562b866ea5",
+      "candidateKeys": [
+        "61de47bec39623350b64f24d3f7c8f6679744806cab3d1cbdb4548701ead99b7",
+        "d0b03c706c83ce31a4765babd2dbdfbbae920676ad70a7339bd1458190713aa5"
+      ],
+      "basisEdgeIds": [
+        "edge-law-340CO0000000321-article-33_14_2-references-article-33_14_8",
+        "edge-law-419M60000002052-suppl-75-article-2-references-article-230_2"
+      ]
+    }
+  ]
+}

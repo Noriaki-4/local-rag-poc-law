@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
@@ -235,6 +235,14 @@ class PredicateGroundingAllowance(LegalGraphModel):
         if len(self.allowed_groundings) != len(set(self.allowed_groundings)):
             raise ValueError("allowed groundings must be unique")
         return self
+
+
+class PredicateRecallAllowance(LegalGraphModel):
+    """人が確認した、評価時だけ見落としを許容する妥当なpredicate。"""
+
+    candidate_key: str = Field(min_length=64, max_length=64)
+    predicate: ProposedPredicate
+    audit_note: str = Field(min_length=1, max_length=4000)
 
 
 class AdjudicationPredicateAssessment(LegalGraphModel):
@@ -839,6 +847,11 @@ class RelationAssertionRecord(LegalGraphModel):
     object_supporting_span_id: str = Field(min_length=1, max_length=500)
     subject_supporting_quote: str = Field(min_length=1)
     object_supporting_quote: str = Field(min_length=1)
+    relation_explanation: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=2000,
+    )
     reference_occurrence_hash: str = Field(min_length=1, max_length=128)
     source_snapshot_id: str = Field(min_length=1, max_length=500)
     source_revision_id: str | None = Field(default=None, max_length=500)
@@ -1089,6 +1102,7 @@ def build_assertion_records(
     *,
     classification_run_id: str,
     classified_at: datetime,
+    relation_explanations: Mapping[ProposedPredicate, str] | None = None,
 ) -> tuple[RelationAssertionRecord, ...]:
     """検証済みLLM出力を保存形へ写す。predicateの選択・補正はしない。"""
 
@@ -1130,6 +1144,11 @@ def build_assertion_records(
                 object_supporting_span_id=object_span.span_id,
                 subject_supporting_quote=subject_span.text,
                 object_supporting_quote=object_span.text,
+                relation_explanation=(
+                    relation_explanations.get(proposed.proposed_predicate)
+                    if relation_explanations is not None
+                    else None
+                ),
                 reference_occurrence_hash=occurrence.occurrence_hash,
                 source_snapshot_id=candidate.source_snapshot_id,
                 source_revision_id=source_article.source_revision_id,
@@ -1159,6 +1178,7 @@ __all__ = [
     "OverridesClassificationResponse",
     "PredicateFindings",
     "PredicateGroundingAllowance",
+    "PredicateRecallAllowance",
     "PredicateReviewCheck",
     "PredicateReviewChecks",
     "ProposedRelationAssertion",

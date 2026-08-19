@@ -54,12 +54,16 @@
   既存14件、新規20件、法令94件＋ガイド6件の代表100件でこの方式を確認している。
   Articleペア単位にしたGate 6初回はstatus `73/73`、5 predicate `355/365`だった。
   その後、gold移行誤りと複数の妥当な根拠spanを扱えない採点不備を修正した。
-  単一edgeを含む人手overrideと、候補・predicate単位の明示grounding許容集合を扱う評価契約は実装済みである。
+  単一edgeを含む人手override、候補・predicate単位の明示grounding許容集合、意味上妥当な広域関係の
+  見落としだけを人手指定で必須再現率から除外する評価契約は実装済みである。
   訂正goldによる同じv2成果物の監査値は5 predicate `356/365`、候補完全一致`63/73`であり、
   残る10候補を新規contextで差分再評価した。本文監査で2件のgoldを訂正し、pair-v3で`7/10`、
   一般化したUSES_DEFINITION境界を加えたpair-v4で残り`3/3`を確認した。評価用に承認済み差分を合成した
   最終値はstatus `73/73`、5 predicate `365/365`、方向 `62/62`、grounding `62/62`、候補完全一致
   `73/73`である。異なるskill versionの成果物は評価時にだけ合成し、同一ClassificationRunへは混在させない。
+  2026-08-20には読替適用で`INCORPORATES`を落とす境界を一般契約として修正し、Luna用prompt v22・
+  skill pair-v7のblind 3境界回帰でpredicate `3/3`、Reviewer承認`3/3`を確認した。ローカルOllama経路の
+  旧prompt version 21は別契約として残し、Luna成果物と混在させない。
   分類skillの正本はリポジトリ内の`.agents/skills/legal-relation-adjudicator`へ移し、
   コード・契約・補助スクリプトを同じrevisionで管理する。ユーザー共通skillを正本にしない。
   判定JSONLはReviewer承認証跡付きで`ClassificationRun`へ取り込む検証importを実装済みである。
@@ -571,7 +575,7 @@ CaseStoreの探索履歴や案件判断をNeo4jへ保存しない。同じArticl
 | `Article` | 条 | `contentUnitId`, `documentId`, `heading`, `articleNumber`, `sourceSnapshotId`, `sourceRevisionId`, `contentHash` |
 | `Paragraph` | 項 | `contentUnitId`, `documentId`, `parentContentUnitId`, `paragraphNumber`, `sourceSnapshotId`, `contentHash` |
 | `Item` | 号 | `contentUnitId`, `documentId`, `parentContentUnitId`, `itemNumber`, `sourceSnapshotId`, `contentHash` |
-| `RelationAssertion` | 非同期LLMが生成した未確認の意味関係候補 | `assertionId`, `candidateKey`, `assertionDedupeKey`, `proposedPredicate`, `basisEdgeId`, `sourceContentUnitId`, `subjectSupportingSpanId`, `objectSupportingSpanId`, `subjectSupportingQuote`, `objectSupportingQuote`, `referenceOccurrenceHash`, `sourceSnapshotId`, `sourceRevisionId`, `classificationRunId`, `classifiedAt`, `graphSchemaVersion` |
+| `RelationAssertion` | 非同期LLMが生成した未確認の意味関係候補 | `assertionId`, `candidateKey`, `assertionDedupeKey`, `proposedPredicate`, `basisEdgeId`, `sourceContentUnitId`, `subjectSupportingSpanId`, `objectSupportingSpanId`, `subjectSupportingQuote`, `objectSupportingQuote`, `relationExplanation`, `referenceOccurrenceHash`, `sourceSnapshotId`, `sourceRevisionId`, `classificationRunId`, `classifiedAt`, `graphSchemaVersion` |
 | `ClassificationRun` | snapshot単位の非同期意味分類Run | `classificationRunId`, `phase`, `sourceSnapshotId`, `graphSchemaVersion`, `provider`, `model`, `reviewerModel`, `promptVersion`, `skillVersion`, `reasoningEffort`, `candidatesPerModelCall`, `inputCount`, `processedCount`, `classifiedCandidateCount`, `assertionCount`, `referenceOnlyCount`, `uncertainCount`, `failedCount`, `scopeHash`, `publishedAt` |
 | `ClassificationCheckpoint` | 1候補の保存済み実行結果。法的意味関係ではない | `checkpointId`, `classificationRunId`, `candidateKey`, `outcome`, `decisionPayloadJson`, `decisionPayloadHash`, `assertionCount`, `errorCode`, `errorStage`, `errorMessage`, `errorPredicate`, `processedAt`, `sourceSnapshotId`, `graphSchemaVersion` |
 
@@ -623,6 +627,12 @@ RelationAssertionに汎用`status=unverified`を重複保存せず、Nodeとし�
 同じ端点間でもpredicateまたは根拠箇所が異なれば別Assertionにできる。推移関係をProgramが推論して
 新Assertionを書かず、LLMが根拠本文から明示的に分類した直接関係だけを保存する。
 
+`relationExplanation`は、承認Reviewerがそのpredicateについて記述した短い意味説明をそのまま保存する。
+Programが本文やpredicate名から生成・要約しない。特に`USES_DEFINITION`では、定義対象の語・法的役割・地位・
+適用scope、定義側、利用側、橋渡しとなる参照箇所を説明へ含める。これにより検索時Solverへ
+`USES_DEFINITION`という広いラベルだけを渡さず、何の定義をどちら側が利用する候補なのかを示せる。
+説明とsupporting quoteは候補選別用であって回答根拠ではなく、検索時Solverは必要なArticle本文を取得して再確認する。
+
 predicateと向きを次に固定する。
 
 | `proposedPredicate` | SUBJECT | OBJECT | 例 |
@@ -632,6 +642,32 @@ predicateと向きを次に固定する。
 | `USES_DEFINITION` | 定義を利用する規定 | 定義を置く規定 | 利用条文 → 定義条文 |
 | `EXCEPTION_TO` | 例外・適用除外を定める規定 | 一般規定 | 施行令7条 → 金商法27条の2 |
 | `OVERRIDES` | 優先して適用される規定 | 排除・修正される規定 | 特則 → 一般則 |
+
+この5 predicateは排他的ではない。同じArticleペアでも、別々の必要条件と根拠参照が成立すれば複数を保存できる。
+特に`第X条の規定の適用については、同条中「A」とあるのは「B」とする`という対象固有の読替えは、
+読替後もX条の規律を現在の場面へ適用するため`INCORPORATES`となり、同時に対象文言を置換するため
+`OVERRIDES`にもなり得る。一方、`第X条の規定にかかわらず`別規律を置く場合やX条を直接`適用しない`
+場合は、X条の規律を取り込んでいないので`OVERRIDES`から`INCORPORATES`を自動成立させない。
+Programはpredicate間の優先順位を付けず、一方が成立したことから他方を成立・不成立へ補正しない。
+また、意味関係を推移させて未分類のArticleペアへ新しいAssertionを生成しない。
+
+検索時の標準的な読み方を次に固定する。
+
+| `proposedPredicate` | `from_subject` | `to_subject` | 主な境界 |
+|---|---|---|---|
+| `IMPLEMENTS` | 親規定から具体化規定を探す | 具体化規定から委任元を探す | 上下関係や引用だけでは成立しない。同じ委任事項の供給が必要 |
+| `INCORPORATES` | 準用・読替え側から取り込まれる規定を探す | 対象規定からその適用先を探す | 対象・定義の参照ではなく、規律自体の適用が必要 |
+| `USES_DEFINITION` | 利用規定から定義規定を探す | 定義規定から利用規定を探す | 同じ語や要件参照だけではなく、再利用可能な意味・役割・地位・scopeが必要 |
+| `EXCEPTION_TO` | 例外規定から一般規定を探す | 一般規定から例外を探す | 同じ一般規律の適用範囲・効果を直接狭める必要がある |
+| `OVERRIDES` | 優先規定から排除・修正対象を探す | 一般規定から優先特則を探す | 単なる例外や委任事項の補充ではなく、優先・排除・置換が必要 |
+
+`USES_DEFINITION`の対象範囲、各predicateの間違えやすい境界、検索時AgentViewの読み方は、
+[人間向け視覚ガイドの「5つの意味関係の整理」](generic_iterative_agent_framework_plan_visual.md#10-5つの意味関係の整理)
+に例示する。契約上の正本は本節と分類契約であり、図解側から新しいpredicateや遷移を追加しない。
+
+検索時Solverは`USES_DEFINITION`を網羅探索しない。現在のHypothesisが`relationExplanation`に書かれた
+具体的な語・役割・地位・scopeへ依存するときだけ候補を採用する。候補不在は定義関係不存在の証明ではなく、
+必要ならOpenSearch本文検索へ戻る。説明のない旧Assertionをpredicate名だけで採用しない。
 
 非同期分類結果は共有候補にすぎない。検索時Solverが質問に関係する候補だけ両端Article全文で評価し、
 その案件判断をHypothesis・EvidenceとともにCaseStoreへ保存する。Neo4jのRelationAssertionを更新・削除したり、
@@ -670,14 +706,21 @@ referenceSourceSupportingSpanId / referenceTargetSupportingSpanId`も返す。�
 別の参照内にある委任・定義・準用を、現在の参照へ移してはならない。`IMPLEMENTS`の準用経由委任は、
 同じ参照文脈が準用された委任事項と下位Articleの供給事項を接続する場合だけ成立する。
 `USES_DEFINITION`は引用符付き用語に限らず、条項が構成した再利用可能な法的役割・地位・対象者scopeも
-扱えるが、単なる期間、要件列挙、委任スロットを定義へ広げない。`OVERRIDES`の明示的優先には、
+扱えるが、それらを網羅的に発見することは分類完了条件にしない。名前付き定義と明示scopeを優先し、
+広い役割・地位関係は見つけた場合の誤陽性、向き、根拠を厳格に検査するprecision-firstとする。
+単なる期間、要件列挙、委任スロットを定義へ広げない。`OVERRIDES`の明示的優先には、
 対象行が一致する読替表や、特別規律が対象Articleを直接`適用しない`と命じる場合を含める。
+WorkerとReviewerは、読替えによる`OVERRIDES`を認めたとき、対象規律が読替後も適用されるかを
+`INCORPORATES`の二条件で必ず再確認する。同じ根拠を理解した結果として複数predicateが成立することはあるが、
+Programが一方から他方を補完することはない。
 
 Luna ReviewerはWorkerの全回答と同じ候補入力を受け取り、答えを知らない独立再分類ではなく、
 Workerの誤り・不足・根拠不整合を具体的に指摘する。`request_change`の場合は同じWorkerが指摘を参照して
 5 predicate全体を再確認し、差戻しは1回だけに制限する。同じReviewerが修正版を差分確認し、
 2回目も不合格なら自動再試行せず`unresolved`へ分離する。候補集合は複数のWorker / Reviewerペアへ
 分割して並列化できるが、1候補を異なるペアへ重複配布しない。
+承認時のpredicate別review noteは`relationExplanation`として同じpredicateのAssertionへ機械転記する。
+Reviewerは`USES_DEFINITION`の成立を承認する場合、定義対象、定義側、利用側、scopeを運ぶ参照箇所をnoteへ明記する。
 
 Programは二条件とfindingの真理値整合、既知ID、成立predicateと根拠件数の対応だけを検証し、
 本文から条件値、predicate、意味方向を決めない。内部`candidateKey`はProgramが入力候補へ
@@ -693,6 +736,13 @@ grounding許容集合を評価成果物に保存し、scorerは完全一致す�
 Programへ移さず、妥当な別根拠を単一gold spanとの差だけで誤答にしない。許容集合はcanonical goldを必ず含み、
 入力packetにないcandidate、predicate、occurrence、source/target span IDを受け付けない。単一edge候補も
 人手overrideを適用できるが、overrideがない単一edgeだけを旧監査goldから機械的に移行する。
+
+意味上妥当なgold predicateでも、長いforward scopeや暗黙の法的役割・地位まで完全再現を要求しない場合は、
+正解生成者がcandidate・predicate単位の`PredicateRecallAllowance`を評価成果物へ明記できる。
+これはgoldを否定へ変更せず、`established → not_established`という見落としだけを必須再現率から除外する。
+`uncertain`、goldにない陽性、誤ったSUBJECT / OBJECT、誤ったgroundingは許容しない。scorerはraw完全一致と
+許容適用後の合格値を両方出し、許容件数と実際の省略件数も表示する。Programが本文から許容対象を推測せず、
+許容リストは人が確認した既存gold predicateだけを参照できる。
 
 候補の`referenceSourceArticle / referenceTargetArticle`は原文`REFERENCES`の物理方向だけを表す。
 新seedは同一法令参照と親法令参照の両経路で引用位置を保存する。位置を持たない旧Graphを分類する場合は、
@@ -735,7 +785,8 @@ Graph ToolResultにcoverageを示し、Assertionがないことを「関係な�
 #### 検索時のArticle投影
 
 Graph Tool Adapterは、正確な端点Content Unit ID、親Article ID、mode、predicateまたは原文Relation、
-`basisEdgeId`、`supportingSpans`、`classificationRunId`、`from_subject / to_subject`を同時に保持する。
+`basisEdgeId`、`supportingSpans / supportingQuotes`、`relationExplanation`、`classificationRunId`、
+`from_subject / to_subject`を同時に保持する。
 
 frontierと本文取得はArticle単位にまとめても、どの項・号に記載された関係から発見したかを
 DiscoveryLinkのrelation metadataから失わない。Graph候補だけではEvidenceとせず、Article本文はOpenSearchの
@@ -1638,6 +1689,10 @@ Legal Domain Packの共通Promptには次を追加する。
   INCORPORATES=準用・読み替える規定から取り込まれる規定、USES_DEFINITION=利用規定から定義規定、
   EXCEPTION_TO=例外規定から一般規定、OVERRIDES=優先規定から排除・修正される規定である。
   `from_subject`は起点がSUBJECT/from側、`to_subject`は起点がOBJECT/to側である。
+- `USES_DEFINITION`は引用符付きの定義語だけでなく、再利用可能な法的役割・地位や明示的な適用scopeを含み得る。
+  検索時Solverはpredicate名だけで候補を採否せず、`relationExplanation`と両端supporting quoteから対象概念を確認する。
+  Hypothesisがその概念の意味・範囲に依存する場合は利用側から定義側をたどり、定義の適用先を問う場合だけ逆方向をたどる。
+  ProjectorやTool Adapterはこの判断を代行せず、保存済み説明と根拠を欠落なくAgentViewへ投影する。
 - `MENTIONS`はLegal Graphの関係種別ではない。単なる言及をGraph候補、本文取得対象、根拠として扱わず、
   ガイドと条文の明示的対応だけを`EXPLAINS`として扱う。
 - 旧referenceKindは移行監査情報であり、意味predicateや法的結論に使用しない。RelationAssertionでは
@@ -1668,14 +1723,14 @@ Promptだけを先行させて現行SolverContextに存在しない値をLLMへ�
 | `solver_common.md` | `fetch_articles`のcontent `succeeded`は当該Articleの全登録済みchunk取得完了を意味し、index完全性・関連性・根拠採用を意味しないと定義する。本文取得に`partial`を導入しない。 |
 | `solver_common.md` | 評価済みNodeを別Hypothesisへ使う場合は`frontier_re_adoptions`で明示し、Programが自動転用しないことを定義する。 |
 | `solver_common.md` | 各検索を既知WorkItem・Hypothesis・ExplorationIntentへ結び付け、OpenSearchとGraphの明示selector、候補と根拠の違い、selectorをProgramへ補完させないことを定義する。 |
-| `solver_common.md` / `solver_graph_review.md` | RelationAssertionは`SUBJECT / OBJECT`で接続された未確認候補で、`proposedPredicate`は確定関係ではないと定義する。5 predicateの向き、`ClassificationRun` coverage、検索時の案件判断をNeo4jへ更新・昇格しないことも定義する。 |
+| `solver_common.md` / `solver_graph_review.md` | RelationAssertionは`SUBJECT / OBJECT`で接続された未確認候補で、`proposedPredicate`は確定関係ではないと定義する。5 predicateの向き、`ClassificationRun` coverage、検索時の案件判断をNeo4jへ更新・昇格しないことも定義する。`USES_DEFINITION`はラベルだけで扱わず、`relationExplanation`、両端supporting quote、方向から対象概念と探索目的を確認する手順を含める。 |
 | `solver_research.md` / `solver_integration.md` | 未確認事項から検証目的と最小scopeを作る。Graphの関係種別を選べなければ全種別を要求せず、OpenSearchで根拠または起点を発見する。 |
 | `solver_graph_review.md` | `graph_review_batch`と`graph_review_ledger`を読む。`review_trigger`を解釈し、過去の詳細が再提示されないことを候補の不存在と解釈しない。 |
 | `solver_graph_review.md` | 各batchの全候補をWorkItem・Hypothesis別に評価し、最大3件を`select`、関連する残りを`defer`、無関係と判断したものだけを`reject`する。 |
 | `solver_graph_review.md` | `remaining_fetch_capacity=0`なら新たにselectせず、関連候補をdeferしてCycle終了判断へ戻す。Graph Reviewから直接次Cycleの法的方針を決めない。 |
 | `solver_integration.md` | Cycle上限に達したら、直前までのToolResultを評価し、Hypothesis・WorkItem・Evidence・Graph ledgerを整理した後に、finalizeまたは次Cycleへの構造化引継ぎを返す。次Cycleのgoal・strategyは返さない。 |
 | `solver_integration.md` | Cycle境界でactiveな`relevant_deferred`全件を`carry_forward / no_longer_needed / unresolved_at_limit`のいずれかへ明示し、黙って破棄しない。`start_next_cycle`では次Cycle計画やToolRequestを返さない。 |
-| `relation_classifier.md` / `relation_grounder.md` | 同じ候補を1 predicateずつ専門判定し、predicate固有の二必要条件とfindingを返す。成立predicateだけを別の根拠付与応答へ渡し、方向・参照箇所・両端spanを選ぶ。Programは意味を補完せず、条件整合・既知ID・件数だけを検証する。 |
+| リポジトリ固有`legal-relation-adjudicator` skill | Workerは1候補の5 predicateを同じ回答で比較し、各predicate固有の二必要条件とfinding、成立predicateの方向・参照箇所・両端spanを返す。ReviewerはWorker回答を見て全5 predicateを検査し、具体的な誤りだけを差し戻す。Programは意味を補完せず、条件整合・既知ID・件数だけを検証する。 |
 | Provider schema | Review判断対象は現在のbatch、本文取得へ選べるIDはbatchの候補とledgerの`relevant_deferred`、再試行時の`selected + failed/timeout`に制限する。選択上限は`min(3, remaining_fetch_capacity)`とする。`rejected`は新Link差分でbatchへ再提示された場合を除き同じHypothesisで再選択させず、別Hypothesisへの`frontier_re_adoptions`はledgerの既知Nodeと既知のopen WorkItem・Hypothesisだけを許可する。候補の関連性や優先度はschemaまたはProgramで補正しない。 |
 | Provider schema | Deferred解消はledgerの既知IDだけを許可する。Programは全件性と次動作との矛盾だけを拒否し、関連性・必要性を補正しない。 |
 | Provider schema | Graph Reviewモードで必ず空になるre-adoption、deferred解消、answerは空配列またはnullの簡易schemaとし、未使用の動的enumをコンパイルさせない。 |

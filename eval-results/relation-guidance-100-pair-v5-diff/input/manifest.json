@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 2,
+  "sourcePacket": "/Users/nt/projects/local-rag-poc-law/eval-results/relation-guidance-100-pair-v5-diff/work-packet.jsonl",
+  "sourcePacketSha256": "45eb5ba466a357e66a11193e2df34d71d16a03b2f7781f2bee489ebe58b3f722",
+  "sourceSnapshotId": "snapshot-1e9f9f5c1ac849f7ddffdd7480f80c9f771db7c00efea06a612fc286f8c3d27e",
+  "graphSchemaVersion": 9,
+  "promptVersion": "legal-relation-5predicate-v20-pair",
+  "candidateCount": 5,
+  "scopeHash": "7075f86e0b628e14f46bba18634906a9b5cfb5ac938f44b454e9d12898a60a60",
+  "shardingMode": "fixed_candidate_limit",
+  "maxCandidatesPerShard": 5,
+  "shardCount": 1,
+  "executionProfile": {
+    "skillVersion": "legal-relation-adjudicator-2026-08-19-pair-v5",
+    "workerModel": "gpt-5.6-luna",
+    "reviewerModel": "gpt-5.6-luna",
+    "reasoningEffort": "high",
+    "candidatesPerWorkerSession": 5,
+    "candidatesPerReviewerSession": 5,
+    "maxActiveSessions": 1,
+    "workerReviewerSeparateContexts": true,
+    "maxRevisionRounds": 1
+  },
+  "shards": [
+    {
+      "shardId": "shard-0000",
+      "file": "shard-0000.jsonl",
+      "candidateCount": 5,
+      "inputCharacters": 37242,
+      "sha256": "45eb5ba466a357e66a11193e2df34d71d16a03b2f7781f2bee489ebe58b3f722",
+      "candidateKeys": [
+        "34c0dbeb523fa2bf6512c420f2cef750761e0b96929b239a64d7ed8d3a0a8902",
+        "8d2806ff7cce3e47d55b1e05a21d70ed14a7f01ac3ed3b8038a9da9eaab80fe5",
+        "61de47bec39623350b64f24d3f7c8f6679744806cab3d1cbdb4548701ead99b7",
+        "0d39784c98080896ab0e3c7fd121f7c509fe2d7f3ac14adc36bc567e70446a18",
+        "d0b03c706c83ce31a4765babd2dbdfbbae920676ad70a7339bd1458190713aa5"
+      ],
+      "basisEdgeIds": [
+        "edge-law-335AC0000000145-article-69-paragraph-1-references-article-68_7",
+        "edge-law-335AC0000000145-article-69-paragraph-2-references-article-68_7",
+        "edge-law-335AC0000000145-article-69-paragraph-6-references-article-68_7",
+        "edge-law-336M50000100001-suppl-346-article-4-paragraph-1-references-suppl-346-article-3",
+        "edge-law-340CO0000000321-article-33_14_2-references-article-33_14_8",
+        "edge-law-419M60000002052-article-295-paragraph-1-references-article-310",
+        "edge-law-419M60000002052-article-295-paragraph-3-item-3-references-article-310",
+        "edge-law-419M60000002052-suppl-75-article-2-references-article-230_2"
+      ]
+    }
+  ]
+}

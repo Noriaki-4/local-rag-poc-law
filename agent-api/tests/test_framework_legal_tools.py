@@ -144,10 +144,16 @@ class FakeGraph:
         return [
             {
                 "assertionId": "assertion-1",
-                "suggestedType": "IMPLEMENTS",
-                "status": "unverified",
-                "fromArticleId": "law-act-article-27_2",
-                "toArticleId": "law-ordinance-article-2_5",
+                "proposedPredicate": "USES_DEFINITION",
+                "subjectArticleId": "law-act-article-27_2",
+                "objectArticleId": "law-ordinance-article-2_5",
+                "subjectSupportingSpanId": "law-act-article-27_2::span-1",
+                "objectSupportingSpanId": "law-ordinance-article-2_5::span-2",
+                "subjectSupportingQuote": "届出者は対象株券等を記載する。",
+                "objectSupportingQuote": "対象株券等とは、次に掲げるものをいう。",
+                "relationExplanation": "SUBJECTが使う対象株券等の範囲をOBJECTが定義する。",
+                "classificationRunId": "classification-run-1",
+                "basisEdgeId": "edge-definition-1",
             }
         ]
 
@@ -352,6 +358,12 @@ def test_graph_tool_returns_both_relation_kinds_as_navigation_only() -> None:
     )
     assert "law-order-article-7" in execution.evidence[0].content
     assert "law-ordinance-article-2_5" in execution.evidence[1].content
+    assert '"direction":"from_subject"' in execution.evidence[1].content
+    assert '"edgeType":"USES_DEFINITION"' in execution.evidence[1].content
+    assert "SUBJECTが使う対象株券等の範囲をOBJECTが定義する" in (
+        execution.evidence[1].content
+    )
+    assert "対象株券等とは、次に掲げるものをいう" in execution.evidence[1].content
     assert execution.evidence[0].metadata["neighborTitle"] == "金融商品取引法施行令"
     assert execution.evidence[0].metadata["neighborHeading"] == "第七条"
 

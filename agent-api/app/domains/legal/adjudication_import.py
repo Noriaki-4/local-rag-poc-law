@@ -149,6 +149,13 @@ def build_adjudication_import_batch(
                     decision,
                     classification_run_id=classification_run_id,
                     classified_at=processed_at,
+                    relation_explanations={
+                        predicate: check.note
+                        for predicate, check in (
+                            approved.approval_review.predicate_checks.by_predicate().items()
+                        )
+                        if predicate in decision.predicate_findings.established_predicates()
+                    },
                 )
                 outcome = ClassificationCheckpointOutcome(decision.outcome.value)
             else:

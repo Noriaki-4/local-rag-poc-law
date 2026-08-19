@@ -44,14 +44,20 @@ For every Worker record:
    For every positive finding, name the supplied occurrence that bridges those two
    roles. Article-wide semantic compatibility without an occurrence-local bridge is
    not sufficient.
-4. Independently inventory definition roles in **both** endpoints. For every
-   `USES_DEFINITION` check, identify which Article defines the term and which uses
+4. Independently check named definitions and explicit scope clauses in **both**
+   endpoints. For every positive `USES_DEFINITION` finding, identify which Article
+   defines the term and which uses
    it, including forward-scope clauses such as `第X条において同じ`. Do not confirm a
    negative merely because the physical target is not the definition source.
    If the source sentence contains multiple citations, map each candidate term to
    the citation that actually defines it. Reject `USES_DEFINITION` when the supplied
    target merely uses or regulates the term and another citation supplies its
    definition.
+   In a nested parenthesis, identify whether a forward-scope marker governs the
+   outer numbered-item term or an inner noun immediately before the parenthesis,
+   then verify that the later Article textually uses that exact noun. For a sentence
+   that excludes A条/B条 from persons or conduct defined by a later C法D条 citation,
+   do not transfer C/D's definition to the supplied A/B occurrence.
    Treat a delegated slot and its subordinate enumeration as IMPLEMENTS only unless
    there is a separate reusable term definition. Conversely, always scan
    forward-scope markers such as `第Y条において同じ`; they commonly reverse semantic
@@ -60,7 +66,10 @@ For every Worker record:
    item named by the scope clause with the governing source item. Also do not extend
    that scope through an unrelated `前条` occurrence elsewhere in the source
    Article. Require the supplied occurrence and the term use to share the exact
-   governing sentence or structural item.
+   governing sentence or structural item. Unquoted roles and statuses remain valid,
+   but review them precision-first: correct an evident omission when the exact role
+   and occurrence-local bridge are present; do not perform an exhaustive hunt for
+   every plausible implicit role or long indirect scope chain.
 5. Independently compare delegation matter for `IMPLEMENTS`, even when the Worker
    established another predicate for the pair. Record why the delegated and
    supplied matters match or do not match.
@@ -81,6 +90,14 @@ For every Worker record:
    the current source situation. Accept direct transitional application such as
    `これらの規定の例により`; reject `準用する` that only modifies a person, a
    category, or a third provision.
+   Treat `第X条の規定の適用については、同条中「A」とあるのは「B」とする`
+   as direct read-as application when the exact supplied occurrence identifies X and
+   the target rule remains operative after substitution. In that case independently
+   confirm both `INCORPORATES` and `OVERRIDES`. If an `OVERRIDES` note says that an
+   occurrence applies the target through an exact read-as substitution while the
+   `INCORPORATES` check denies equivalent application, require a change unless the
+   note explains how the target rule is removed rather than applied. Do not perform
+   this cross-check for mere non-application or a separate rule taking priority.
    Also reject a reverse reconstruction where the occurrence only says that the
    current source rule is applied in the target (`target条において準用するsource条の
    規定`). The target's independent application sentence is not the supplied
@@ -105,6 +122,11 @@ For every Worker record:
     For `USES_DEFINITION`, confirm that the other endpoint textually uses the term;
     wholesale incorporation of the defining Article does not count as use of every
     definition it contains.
+    Check the target span against the semantic role: a defining endpoint's span must
+    create or scope the selected term/role, and a using endpoint's span must contain
+    its actual use. For `EXCEPTION_TO` and `OVERRIDES`, require the affected target
+    rule, effect, or directly limited scope. Do not approve a heading, generic
+    preamble, or a nearby mention that omits the predicate-specific role.
 11. Return `approve` when there is no concrete defect. Otherwise return
    `request_change` and identify every defect that the Worker must reconsider.
 
@@ -175,6 +197,9 @@ Rules:
 - For `EXCEPTION_TO` and `OVERRIDES`, the notes must name the affected target rule
   or legal effect and distinguish narrowing/termination from priority. In a table,
   name the exact row subject and the supplied target subject.
+- When `OVERRIDES` rests on an exact read-as substitution, the `INCORPORATES` and
+  `OVERRIDES` notes must state consistently whether the target rule remains
+  operative after substitution.
 
 ## Revision boundary
 

@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 2,
+  "sourcePacket": "/Users/nt/projects/local-rag-poc-law/eval-results/relation-uses-definition-typical-pair-v6/packet.jsonl",
+  "sourcePacketSha256": "9fef38fc1c9cec12b4508315420ceb9cba72913389dd0c46460fc1658add9153",
+  "sourceSnapshotId": "snapshot-1e9f9f5c1ac849f7ddffdd7480f80c9f771db7c00efea06a612fc286f8c3d27e",
+  "graphSchemaVersion": 9,
+  "promptVersion": "legal-relation-5predicate-v21-pair",
+  "candidateCount": 8,
+  "scopeHash": "ce9908ab2ce6ac7373542241349cf699137b6c042604c3507c1ee980620ee642",
+  "shardingMode": "fixed_candidate_limit",
+  "maxCandidatesPerShard": 5,
+  "shardCount": 2,
+  "executionProfile": {
+    "skillVersion": "legal-relation-adjudicator-2026-08-19-pair-v6",
+    "workerModel": "gpt-5.6-luna",
+    "reviewerModel": "gpt-5.6-luna",
+    "reasoningEffort": "high",
+    "candidatesPerWorkerSession": 5,
+    "candidatesPerReviewerSession": 5,
+    "maxActiveSessions": 2,
+    "workerReviewerSeparateContexts": true,
+    "maxRevisionRounds": 1
+  },
+  "shards": [
+    {
+      "shardId": "shard-0000",
+      "file": "shard-0000.jsonl",
+      "candidateCount": 5,
+      "inputCharacters": 35088,
+      "sha256": "87cffff084ad4d3747b1c97501f01bf1ca8ff7388374dc9c50333963e379486b",
+      "candidateKeys": [
+        "244a26aa6e6a9b1c2d269c64f1440a87094d762b5130878630c107077b261e8e",
+        "a357349bd11d4b3bb0aaaa19a5b7940c8a82339135bbc636304ef5b9b1ae7475",
+        "f04c886ac506992717f1129890544e0b3ed25eb15b84df52c59e3f4f311093f1",
+        "7abd43c969e612e73b187743c84dffbd2c5dc52bb2da06b2f2ff8179daf17f61",
+        "7251ff4020b8cad032ea71861c8167ee8d0c670f0b3a0f803cb60585899cc883"
+      ],
+      "basisEdgeIds": [
+        "edge-law-323AC0000000025-article-173-paragraph-1-item-1-references-article-130",
+        "edge-law-323AC0000000025-article-173-paragraph-1-item-2-references-article-130",
+        "edge-law-323AC0000000025-article-173-paragraph-1-item-3-references-article-130",
+        "edge-law-323AC0000000025-article-33-paragraph-1-references-article-33_2",
+        "edge-law-323AC0000000025-article-33-paragraph-2-references-article-33_2",
+        "edge-law-335AC0000000145-article-23_8-paragraph-1-references-article-23_2_23",
+        "edge-law-336M50000100001-article-114_16-paragraph-1-references-article-114_13",
+        "edge-law-336M50000100001-article-114_16-paragraph-2-references-article-114_13",
+        "edge-law-336M50000100001-article-15_11-references-article-1_2"
+      ]
+    },
+    {
+      "shardId": "shard-0001",
+      "file": "shard-0001.jsonl",
+      "candidateCount": 3,
+      "inputCharacters": 29430,
+      "sha256": "a6275ff3ebc23113cf0b05ff149bb58a2e2ea549a3dad2fe182fd317991f8781",
+      "candidateKeys": [
+        "e048deccc9671d4d911686ec0cc9919629bb0e2a739d0ee53b464e2c58d1ff98",
+        "89a5154ac1629ecbc6c7e1cfdb4970af2503ce7625419558ec6f61c8eab0cb7f",
+        "1ef43fae19e9cb6b88683d765669d8a5be6158321bcc510218b28a90e68bfa0b"
+      ],
+      "basisEdgeIds": [
+        "edge-law-336M50000100001-suppl-381-article-2-paragraph-2-references-article-140",
+        "edge-law-336M50000100001-suppl-381-article-2-paragraph-5-references-article-140",
+        "edge-law-336M50000100001-suppl-381-article-2-paragraph-7-references-article-140",
+        "edge-law-419M60000002059-article-12-references-law-340CO0000000321-article-26_4",
+        "edge-law-419M60000002059-article-55_7-references-law-323AC0000000025-article-24"
+      ]
+    }
+  ]
+}

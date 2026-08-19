@@ -94,7 +94,7 @@ def plan_adjudication_shards(
     source_packet_bytes: bytes,
     max_candidates_per_shard: int = 5,
     max_active_sessions: int = 3,
-    skill_version: str = "legal-relation-adjudicator-2026-08-19-pair-v4",
+    skill_version: str = "legal-relation-adjudicator-2026-08-20-pair-v7",
     reasoning_effort: str = "high",
 ) -> tuple[RelationAdjudicationManifest, dict[str, bytes]]:
     """固定件数上限でshardを作り、Pydantic manifestとbytesを返す。"""

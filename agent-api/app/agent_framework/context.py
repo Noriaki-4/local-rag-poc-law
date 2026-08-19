@@ -497,6 +497,15 @@ _GRAPH_RELATION_FIELDS = (
     "direction",
     "status",
     "referenceKind",
+    "basisEdgeId",
+    "classificationRunId",
+    "subjectArticleId",
+    "objectArticleId",
+    "subjectSupportingSpanId",
+    "objectSupportingSpanId",
+    "subjectSupportingQuote",
+    "objectSupportingQuote",
+    "relationExplanation",
 )
 
 

@@ -19,6 +19,7 @@ from app.domains.legal.relation_classification import (  # noqa: E402
     ApprovedAdjudicationRecord,
     EvaluationGrounding,
     PredicateGroundingAllowance,
+    PredicateRecallAllowance,
     RelationAdjudicationCandidatePacket,
     WorkerAdjudicationRecord,
     validate_worker_adjudication,
@@ -145,6 +146,40 @@ def _grounding_allowances(
     return indexed
 
 
+def _recall_allowances(
+    records: list[PredicateRecallAllowance],
+    *,
+    packets: dict[str, RelationAdjudicationCandidatePacket],
+    gold: dict[str, WorkerAdjudicationRecord],
+) -> frozenset[tuple[str, ProposedPredicate]]:
+    """人が妥当と確認したpredicateだけを、必須再現率から除外する。"""
+
+    indexed: set[tuple[str, ProposedPredicate]] = set()
+    for record in records:
+        key = (record.candidate_key, record.predicate)
+        if key in indexed:
+            raise ValueError(
+                "duplicate predicate recall allowance: "
+                f"{record.candidate_key} {record.predicate.value}"
+            )
+        if record.candidate_key not in packets or record.candidate_key not in gold:
+            raise ValueError(
+                "predicate recall allowance is outside gold scope: "
+                f"{record.candidate_key}"
+            )
+        expected = gold[record.candidate_key]
+        expected_finding = expected.predicate_assessments.by_predicate()[
+            record.predicate
+        ].finding
+        if expected_finding.value != "established":
+            raise ValueError(
+                "predicate recall allowance requires an established gold predicate: "
+                f"{record.candidate_key} {record.predicate.value}"
+            )
+        indexed.add(key)
+    return frozenset(indexed)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--packet", type=Path, required=True)
@@ -157,6 +192,7 @@ def main() -> int:
         required=True,
     )
     parser.add_argument("--grounding-allowances", type=Path)
+    parser.add_argument("--predicate-recall-allowances", type=Path)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
 
@@ -197,6 +233,19 @@ def main() -> int:
             packets=packets,
             gold=gold,
         )
+        recall_allowance_records = (
+            [
+                PredicateRecallAllowance.model_validate(record)
+                for record in _load_jsonl(args.predicate_recall_allowances)
+            ]
+            if args.predicate_recall_allowances is not None
+            else []
+        )
+        recall_allowances = _recall_allowances(
+            recall_allowance_records,
+            packets=packets,
+            gold=gold,
+        )
     except ValueError as error:
         parser.error(str(error))
 
@@ -208,11 +257,15 @@ def main() -> int:
     mismatches: list[dict[str, Any]] = []
     status_correct = 0
     predicate_correct = 0
+    raw_predicate_correct = 0
     direction_correct = 0
     grounding_correct = 0
     exact_correct = 0
+    raw_exact_correct = 0
+    optional_predicate_omissions = 0
     predicate_total = len(gold) * len(ProposedPredicate)
     assertion_total = sum(len(record.assertions) for record in gold.values())
+    required_assertion_total = assertion_total - len(recall_allowances)
 
     for candidate_key in sorted(set(gold).intersection(actual)):
         packet = packets[candidate_key]
@@ -227,9 +280,11 @@ def main() -> int:
             continue
 
         differences: dict[str, Any] = {}
+        raw_difference = False
         status_match = observed.adjudication_status is expected.adjudication_status
         status_correct += int(status_match)
         if not status_match:
+            raw_difference = True
             differences["status"] = {
                 "expected": expected.adjudication_status.value,
                 "actual": observed.adjudication_status.value,
@@ -241,8 +296,18 @@ def main() -> int:
         for predicate in ProposedPredicate:
             expected_finding = expected_assessments[predicate].finding
             actual_finding = actual_assessments[predicate].finding
-            predicate_correct += int(expected_finding is actual_finding)
-            if expected_finding is not actual_finding:
+            raw_match = expected_finding is actual_finding
+            raw_predicate_correct += int(raw_match)
+            omission_allowed = (
+                (candidate_key, predicate) in recall_allowances
+                and expected_finding.value == "established"
+                and actual_finding.value == "not_established"
+            )
+            predicate_correct += int(raw_match or omission_allowed)
+            optional_predicate_omissions += int(omission_allowed)
+            if not raw_match:
+                raw_difference = True
+            if not raw_match and not omission_allowed:
                 predicate_differences[predicate.value] = {
                     "expected": expected_finding.value,
                     "actual": actual_finding.value,
@@ -256,6 +321,9 @@ def main() -> int:
         for predicate, expected_assertion in expected_assertions.items():
             actual_assertion = actual_assertions.get(predicate)
             if actual_assertion is None:
+                raw_difference = True
+                if (candidate_key, predicate) in recall_allowances:
+                    continue
                 assertion_differences[predicate.value] = {"actual": None}
                 continue
             direction_match = (
@@ -272,6 +340,7 @@ def main() -> int:
             direction_correct += int(direction_match)
             grounding_correct += int(grounding_match)
             if not direction_match or not grounding_match:
+                raw_difference = True
                 assertion_differences[predicate.value] = {
                     "expected": expected_assertion,
                     "actual": actual_assertion,
@@ -288,6 +357,7 @@ def main() -> int:
                     ],
                 }
         if set(actual_assertions).difference(expected_assertions):
+            raw_difference = True
             assertion_differences["unexpectedPredicates"] = sorted(
                 predicate.value
                 for predicate in set(actual_assertions).difference(expected_assertions)
@@ -299,6 +369,8 @@ def main() -> int:
             exact_correct += 1
         else:
             mismatches.append({"candidateKey": candidate_key, **differences})
+        if not raw_difference:
+            raw_exact_correct += 1
 
     report = {
         "candidateCount": len(gold),
@@ -306,16 +378,21 @@ def main() -> int:
         "missingCandidateKeys": missing,
         "unexpectedCandidateKeys": unexpected,
         "exactCorrectCount": exact_correct,
+        "rawExactCorrectCount": raw_exact_correct,
         "statusCorrectCount": status_correct,
         "predicateFindingCorrectCount": predicate_correct,
+        "rawPredicateFindingCorrectCount": raw_predicate_correct,
         "predicateFindingTotal": predicate_total,
         "directionCorrectCount": direction_correct,
         "groundingCorrectCount": grounding_correct,
         "expectedAssertionCount": assertion_total,
+        "requiredAssertionCount": required_assertion_total,
         "groundingAllowanceCount": len(allowances),
         "groundingAlternativeCount": sum(
             len(values) - 1 for values in allowances.values()
         ),
+        "predicateRecallAllowanceCount": len(recall_allowances),
+        "optionalPredicateOmissionCount": optional_predicate_omissions,
         "mismatches": mismatches,
     }
     rendered = json.dumps(report, ensure_ascii=False, indent=2) + "\n"

@@ -376,7 +376,7 @@ def test_manifest_builds_luna_classification_run_and_import_records(tmp_path) ->
     assert run.provider == "codex_subscription"
     assert run.model == "gpt-5.6-luna"
     assert run.reviewer_model == "gpt-5.6-luna"
-    assert run.skill_version == "legal-relation-adjudicator-2026-08-19-pair-v4"
+    assert run.skill_version == "legal-relation-adjudicator-2026-08-20-pair-v7"
     assert run.reasoning_effort == "high"
     assert run.candidates_per_model_call == 5
     assert run.input_count == 2
@@ -407,7 +407,11 @@ def test_manifest_builds_luna_classification_run_and_import_records(tmp_path) ->
         "classified",
         "uncertain",
     ]
-    assert len(batch.assertions_by_candidate[first_worker.candidate_key]) == 1
+    assertions = batch.assertions_by_candidate[first_worker.candidate_key]
+    assert len(assertions) == 1
+    assert assertions[0].relation_explanation == (
+        "Workerの必要条件と根拠を確認した。"
+    )
     assert batch.assertions_by_candidate[unresolved[0].candidate_key] == ()
     assert "unresolved_after_revision" in batch.checkpoints[1].decision_payload_json
 

@@ -19,6 +19,7 @@ from app.domains.legal.adjudication_packets import (  # noqa: E402
 )
 from app.graph_client import GraphClient  # noqa: E402
 from app.legal_relation_classification_job import (  # noqa: E402
+    RELATION_ADJUDICATION_PROMPT_VERSION,
     candidates_from_graph_and_sources,
     group_reference_rows_by_article_pair,
 )
@@ -103,6 +104,7 @@ def main() -> int:
         provider=args.provider,
         model=args.worker_model,
         reviewer_model=args.reviewer_model,
+        prompt_version=RELATION_ADJUDICATION_PROMPT_VERSION,
     )
     all_records = packet_records_from_candidates(selected_rows, candidates)
     completed = _completed_candidate_keys(args.completed_jsonl)

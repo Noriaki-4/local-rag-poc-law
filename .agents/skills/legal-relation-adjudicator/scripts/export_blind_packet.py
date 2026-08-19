@@ -57,6 +57,7 @@ def main() -> int:
     sys.path.insert(0, str(repo_root / "agent-api"))
     from app.graph_client import GraphClient
     from app.legal_relation_classification_job import (
+        RELATION_ADJUDICATION_PROMPT_VERSION,
         candidates_from_graph_and_sources,
     )
     from app.opensearch_client import OpenSearchClient
@@ -111,6 +112,7 @@ def main() -> int:
         provider=args.provider,
         model=args.worker_model,
         reviewer_model=args.reviewer_model,
+        prompt_version=RELATION_ADJUDICATION_PROMPT_VERSION,
     )
     records = []
     for candidate in candidates:

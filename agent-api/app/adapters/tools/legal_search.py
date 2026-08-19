@@ -472,8 +472,24 @@ def _graph_navigation_evidence(
         ("relation_assertion", assertions),
     ):
         for relation in relations:
-            from_article_id = str(relation.get("fromArticleId") or "")
-            to_article_id = str(relation.get("toArticleId") or "")
+            is_semantic_assertion = bool(
+                kind == "relation_assertion"
+                and relation.get("proposedPredicate")
+                and relation.get("subjectArticleId")
+                and relation.get("objectArticleId")
+            )
+            from_article_id = str(
+                relation.get(
+                    "subjectArticleId" if is_semantic_assertion else "fromArticleId"
+                )
+                or ""
+            )
+            to_article_id = str(
+                relation.get(
+                    "objectArticleId" if is_semantic_assertion else "toArticleId"
+                )
+                or ""
+            )
             for seed_article_id in (
                 item
                 for item in seed_article_ids
@@ -519,8 +535,13 @@ def _graph_navigation_evidence(
                     for key, value in {
                         "kind": kind,
                         "edgeType": relation.get("edgeType")
+                        or relation.get("proposedPredicate")
                         or relation.get("suggestedType"),
-                        "direction": "outgoing" if outgoing else "incoming",
+                        "direction": (
+                            "from_subject" if outgoing else "to_subject"
+                        )
+                        if is_semantic_assertion
+                        else ("outgoing" if outgoing else "incoming"),
                         "status": relation.get("status"),
                         "referenceKind": relation.get("referenceKind"),
                         "relationSource": relation.get("relationSource")
@@ -528,6 +549,23 @@ def _graph_navigation_evidence(
                         "sourceId": relation.get("graphEdgeId")
                         or relation.get("assertionId"),
                         "derivedFromEdgeId": relation.get("derivedFromEdgeId"),
+                        "basisEdgeId": relation.get("basisEdgeId"),
+                        "classificationRunId": relation.get("classificationRunId"),
+                        "subjectArticleId": relation.get("subjectArticleId"),
+                        "objectArticleId": relation.get("objectArticleId"),
+                        "subjectSupportingSpanId": relation.get(
+                            "subjectSupportingSpanId"
+                        ),
+                        "objectSupportingSpanId": relation.get(
+                            "objectSupportingSpanId"
+                        ),
+                        "subjectSupportingQuote": relation.get(
+                            "subjectSupportingQuote"
+                        ),
+                        "objectSupportingQuote": relation.get(
+                            "objectSupportingQuote"
+                        ),
+                        "relationExplanation": relation.get("relationExplanation"),
                     }.items()
                     if value is not None
                 }

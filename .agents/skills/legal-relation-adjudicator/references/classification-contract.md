@@ -90,6 +90,22 @@ Necessary conditions:
    this target, such as `準用する`, `読み替えて適用する`, or `この規定の例により`.
 2. `targetRuleApplied`: the target Article's rule itself is applied to the source situation.
 
+Direct application language is functional, not limited to those literal phrases.
+When the source says `第X条の規定の適用については、同条中「A」とあるのは
+「B」とする`, the target rule remains operative in the source situation after the
+stated substitution. The exact target occurrence therefore satisfies
+`explicitApplicationLanguage`, and the target's affected rule satisfies
+`targetRuleApplied`. Establish `INCORPORATES` and evaluate `OVERRIDES`
+independently; both normally apply to this target-specific read-as pattern.
+
+Do not infer `INCORPORATES` from every `OVERRIDES` finding. A special rule that
+merely applies `第X条の規定にかかわらず`, or directly commands that the target is
+not applied, displaces the target instead of making its rule operative. Before
+making `INCORPORATES` negative, however, cross-check every exact read-as occurrence
+used for `OVERRIDES`: recognizing that the occurrence applies the target with
+replacement wording is inconsistent with denying both INCORPORATES conditions
+unless the text actually removes the target rule from operation.
+
 Read the occurrence in its governing sentence context within the same source Article. A
 blanket or range-based `準用する` statement followed by `この場合において` and a
 target-specific read-as clause establishes INCORPORATES when the target is within that
@@ -124,10 +140,10 @@ Necessary conditions:
    the supplied occurrence establishes the definition's scope linkage between the
    two Articles.
 
-Evaluate this predicate by explicitly matching the term on both sides before
-returning `not_established`:
+Evaluate this predicate by explicitly matching the term on both sides. Named
+definitions and explicit scope clauses are the primary recall target:
 
-1. Inventory terms whose meaning or local scope **each endpoint** establishes,
+1. Check terms whose meaning or local scope **each endpoint** expressly establishes,
    including parenthetical forms such as `以下この条において「Y」という`, direct
    forms such as `第X条に規定するY`, and forward-scope forms such as `第X条において
    同じ` or `以下第X条までにおいて同じ`.
@@ -164,9 +180,10 @@ Apply these boundary rules before establishing the predicate:
 Definitions include named legal statuses introduced by forms such as
 `以下「X」という` after a rule creates or designates that status. The using term
 may appear in the governing sentence around the supplied Article citation rather
-than inside the citation characters themselves. Before a negative finding, list
-every plausible defined term from both complete Articles and compare it with the
-terms in that governing sentence.
+than inside the citation characters themselves. Before a negative finding, compare
+the named definitions and the closest plausible role/status in both complete
+Articles with the terms in that governing sentence. This is a precision check, not
+an instruction to enumerate every derivable role or status.
 
 A reusable legal role or category may also be scope-setting without a quoted short
 name. For example, an Article may constitute a role by authorizing or designating a
@@ -182,6 +199,14 @@ that reusable role. Do not require a quoted short name in those cases. Compare t
 role-forming act in the defining endpoint with the exact role used around the
 supplied occurrence.
 
+These unquoted role/status forms and long forward-scope chains remain semantically
+valid, but the batch is precision-first rather than exhaustive. Do not manufacture
+a positive merely to cover every person, status, or scope that might be derived
+from a long Article. A human-authored evaluation recall allowance may mark a valid
+gold predicate whose omission is acceptable. That allowance changes only the
+required-recall score: it does not turn the gold relation negative, and it never
+permits a false positive, wrong direction, or wrong grounding.
+
 Conversely, `第X条に規定する期間`, `前条各号の要件`, or similar
 cross-references are not definitions merely because they delimit a result. Require
 either a reusable term, role, or status, or an express scope clause that makes the
@@ -194,6 +219,19 @@ second citation to the supplied target occurrence. An endpoint's mere use, listi
 or regulation of a term does not make it the definition source; the endpoint must
 establish that term's meaning or scope, and the supplied occurrence must carry that
 definition to the other endpoint.
+
+Apply the same binding rule to nested parentheses. A numbered item may define one
+outer term while an inner parenthesis separately fixes the scope of a noun used
+inside that definition. A forward marker such as `第Y条において同じ` inside the
+parenthesis normally carries the immediately governed inner noun into Article Y;
+do not automatically assign it to the outer item heading. Confirm which exact noun
+Article Y textually uses.
+
+When a sentence has the form `A条及びB条の規定は、C法D条に規定するXを行う者に
+適用しない`, A and B are the rules being excluded, while C/D supplies the possible
+definition or status of X. Do not assign `USES_DEFINITION` to A or B merely because
+the later C/D citation defines X. Map every candidate term to its own citation
+before deciding the predicate.
 
 A forward-scope clause does not make every reverse citation between the same two
 Articles a definition bridge. When the supplied occurrence is an independent rule
@@ -278,6 +316,20 @@ For every established predicate:
 - choose `referenceTargetSupportingSpanId` from the target Article's known spans;
 - choose SUBJECT and OBJECT only from the two supplied Article IDs;
 - do not reproduce or invent a span ID.
+
+Select the target grounding for the predicate-specific role, not merely a nearby
+mention of the Article or concept:
+
+- for `USES_DEFINITION`, use the span that creates or scopes the term/role when the
+  physical target is the defining endpoint, and the span that textually uses that
+  exact term/role when the physical target is the using endpoint;
+- for `EXCEPTION_TO` and `OVERRIDES`, use a span containing the affected target
+  rule, legal effect, or its directly limited scope, rather than a heading or an
+  unrelated qualifier;
+- if the target sentence is split across spans, either the span that states its
+  regulated subject/scope or the span that states its legal effect may be direct
+  support, but a span containing only an Article number or generic calculation
+  preamble is not.
 
 Grounding span names remain physical: source support must come from the reference source even when the semantic SUBJECT is the target.
 

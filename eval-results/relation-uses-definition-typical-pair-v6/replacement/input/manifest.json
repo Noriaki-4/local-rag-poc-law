@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 2,
+  "sourcePacket": "/Users/nt/projects/local-rag-poc-law/eval-results/relation-uses-definition-typical-pair-v6/replacement/packet.jsonl",
+  "sourcePacketSha256": "a65803dee1470d290ba800d4231bf99816b9906acb8c055ebd5f096cb5779444",
+  "sourceSnapshotId": "snapshot-1e9f9f5c1ac849f7ddffdd7480f80c9f771db7c00efea06a612fc286f8c3d27e",
+  "graphSchemaVersion": 9,
+  "promptVersion": "legal-relation-5predicate-v21-pair",
+  "candidateCount": 1,
+  "scopeHash": "833a1d68d85888c5f8dc9650835498f7929c50b105e2d6aa42821e75ef9c291c",
+  "shardingMode": "fixed_candidate_limit",
+  "maxCandidatesPerShard": 5,
+  "shardCount": 1,
+  "executionProfile": {
+    "skillVersion": "legal-relation-adjudicator-2026-08-19-pair-v6",
+    "workerModel": "gpt-5.6-luna",
+    "reviewerModel": "gpt-5.6-luna",
+    "reasoningEffort": "high",
+    "candidatesPerWorkerSession": 5,
+    "candidatesPerReviewerSession": 5,
+    "maxActiveSessions": 1,
+    "workerReviewerSeparateContexts": true,
+    "maxRevisionRounds": 1
+  },
+  "shards": [
+    {
+      "shardId": "shard-0000",
+      "file": "shard-0000.jsonl",
+      "candidateCount": 1,
+      "inputCharacters": 4580,
+      "sha256": "a65803dee1470d290ba800d4231bf99816b9906acb8c055ebd5f096cb5779444",
+      "candidateKeys": [
+        "124414444eef26ddcdcd97d77143ff4a3b7c7a02ade4fb77755528a507c315b4"
+      ],
+      "basisEdgeIds": [
+        "edge-law-420M60000002078-article-8-paragraph-2-references-article-5"
+      ]
+    }
+  ]
+}

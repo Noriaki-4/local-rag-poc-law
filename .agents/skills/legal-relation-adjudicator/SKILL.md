@@ -58,9 +58,17 @@ For each candidate independently:
    uses, excepts, or is displaced.
 4. Evaluate all five predicates independently using their two necessary conditions.
    Apply a predicate's negative examples only to that predicate.
-5. Before making `USES_DEFINITION` negative, inventory defined terms and scoped
-   definitions in both endpoints. A definition may project forward to a later
-   Article, so the physical reference source may be the semantic definition OBJECT.
+   Independence does not mean ignoring an occurrence already understood for another
+   predicate. When an exact read-as occurrence establishes `OVERRIDES`, cross-check
+   whether that same occurrence keeps the target rule operative after substitution;
+   if it does, evaluate `INCORPORATES` as established too. A command not to apply the
+   target, or a separate rule that merely takes priority, does not pass this check.
+5. For `USES_DEFINITION`, first check named definitions and explicit scope clauses
+   in both endpoints. A definition may project forward to a later Article, so the
+   physical reference source may be the semantic definition OBJECT. Unquoted legal
+   roles and statuses remain valid when the supplied occurrence clearly carries the
+   same role, but classification is precision-first: do not try to enumerate every
+   merely plausible role or long indirect scope chain before returning a negative.
 6. Evaluate `IMPLEMENTS` independently even when `USES_DEFINITION` is established:
    compare the parent delegation's regulated matter with the subordinate Article's
    supplied matter. More than one predicate may be established.
@@ -83,8 +91,9 @@ For each candidate independently:
    closest delegation phrase, candidate defined term, or affected rule was checked.
    For `USES_DEFINITION`, distinguish a reusable legal term, role, status, or scoped
    category created by one endpoint from a mere list of requirements, period, or
-   delegated slot. Confirm that the same role or scope is used in the governing
-   sentence around the selected occurrence.
+   delegated slot. If establishing a broad role/status relation, confirm the exact
+   concept and occurrence-local bridge; a weak broad positive is worse than leaving
+   that optional navigation relation absent.
 9. Write exactly one JSON object per candidate. Copy the candidate, Article,
    occurrence, and span IDs used by the output directly from the input; never
    retype, shorten, hash, or reconstruct them. Do not copy `basisEdgeIds` into the

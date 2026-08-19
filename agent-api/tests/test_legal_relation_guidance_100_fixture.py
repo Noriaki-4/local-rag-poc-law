@@ -60,7 +60,7 @@ def test_legal_fixture_covers_reference_structure_and_all_predicates():
         for predicate in (item["expectedPredicates"] or [])
     ) == {
         "IMPLEMENTS": 9,
-        "USES_DEFINITION": 26,
+        "USES_DEFINITION": 25,
         "INCORPORATES": 5,
         "EXCEPTION_TO": 5,
         "OVERRIDES": 2,

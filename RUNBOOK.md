@@ -467,11 +467,14 @@ Reviewer成果は作業履歴としてauditに残すが、正解の根拠には�
 意味分類可能な全ペアについて定義文言も横断確認し、定義条文が将来の利用条文を列挙する物理参照では、
 `USES_DEFINITION`の意味方向が物理`REFERENCES`と逆になることを明示した。正解生成プログラムは
 候補抽出にだけ使い、述語の追加・削除やSUBJECT / OBJECTの選択には使っていない。
+その後のoccurrence-local回帰で、施行規則第十五条の十一から第一条の二第五項第十号への参照は
+「健康サポート薬局」の定義ではなく基準・書類要件を指すことを再確認した。同じArticle内に定義があっても
+当該occurrenceが定義scopeを橋渡ししないため、この1件の`USES_DEFINITION`を不成立へ訂正した。
 
 次の成立predicate件数とLuna精度は、物理edgeごとに評価していた旧baselineの記録である。
 Articleペア単位の現行Gate 6結果と混同しない。
 
-成立predicateは`IMPLEMENTS=9`、`INCORPORATES=5`、`USES_DEFINITION=26`、
+成立predicateは`IMPLEMENTS=9`、`INCORPORATES=5`、`USES_DEFINITION=25`、
 `EXCEPTION_TO=5`、`OVERRIDES=2`で、成立なしの負例も含む。Codexの横断監査では、構造監査が見逃した
 「医療法第一条の二」を薬機法第一条の二へ接続した1件を`unresolved`へ修正した。Workerが
 `needs_resolution`で停止したため、この誤接続に意味ラベルは付いていない。
@@ -536,6 +539,19 @@ status `73/73`、5 predicate `365/365`、方向 `62/62`、grounding `62/62`、�
 `eval-results/relation-guidance-100-pair-v4-diff/`に保存した。skill versionが異なるため、これらを
 同一ClassificationRunへimportしてはならない。
 
+2026-08-20の追加回帰で、`第X条の規定の適用については、同条中「A」とあるのは「B」とする`
+という読替適用をLunaが`OVERRIDES`だけに分類し、`INCORPORATES`を落とす例を確認した。
+pair-v7では、読替後も対象規律が適用される場合は両predicateを独立に成立させ、対象規律を直接
+`適用しない`場合は`OVERRIDES`から`INCORPORATES`を自動成立させない一般則をWorker / Reviewer契約へ追加した。
+Luna用versionはprompt `legal-relation-5predicate-v22-pair`、skill
+`legal-relation-adjudicator-2026-08-20-pair-v7`である。ローカルOllama経路の旧prompt本文とversion 21は
+別契約として維持し、全件Luna成果物と混在させない。
+
+正解を除去した3候補で、読替適用、不適用、置換を伴わない直接適用を新規Luna Worker / Reviewer
+contextへ渡した結果、predicate完全一致`3/3`、Reviewer承認`3/3`、差戻し0件だった。
+成果物は`eval-results/relation-incorporates-regression-pair-v7-complete/`に保存した。
+同時にローカル回帰は`768 passed`であり、特定の第140条をPromptへ記載していない。
+
 gold再構築と再採点は次で行う。`--output`は既存成果物を上書きしないため、新しいパスを指定する。
 
 ```bash
@@ -560,7 +576,8 @@ status、predicate網羅、監査契約は次で回帰する。
 
 ```bash
 agent-api/.venv/bin/pytest -q \
-  agent-api/tests/test_legal_relation_guidance_100_fixture.py
+  agent-api/tests/test_legal_relation_guidance_100_fixture.py \
+  agent-api/tests/test_legal_relation_incorporates_contract.py
 ```
 
 Graphの参照解決を修正した後は、次で94件の構造正解と照合する。2026-08-19の再seed後は
