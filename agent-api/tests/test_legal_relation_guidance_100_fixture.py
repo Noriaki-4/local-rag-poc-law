@@ -38,8 +38,8 @@ def test_legal_fixture_covers_reference_structure_and_all_predicates():
     legal = _load_jsonl(LEGAL_FIXTURE)
 
     assert Counter(item["referenceKind"] for item in legal) == {
-        "parent_law_reference": 22,
-        "application": 18,
+        "parent_law_reference": 23,
+        "application": 17,
         "definition": 18,
         "exception": 18,
         "article_reference": 18,
@@ -77,6 +77,7 @@ def test_every_resolved_pair_has_a_reviewed_semantic_status():
     assert set(audits) == {item["basisEdgeId"] for item in legal}
     assert {item["adjudicationSource"] for item in legal} == {
         "gpt_5_6_sol_full_manual_gold_2026_08_19",
+        "gpt_5_6_sol_structure_correction_2026_08_19",
         "gpt_5_6_sol_version_mismatch_correction_2026_08_19",
     }
     for item in legal:
@@ -132,9 +133,12 @@ def test_every_resolved_pair_has_a_reviewed_semantic_status():
         for audit in audits.values()
         if audit["manualStructureAdjudication"] is not None
     ]
-    assert len(manually_structured) == 1
-    assert manually_structured[0]["originalStructuralDecision"] is not None
-    assert manually_structured[0]["structuralDecision"]["structuralStatus"] == "valid_pair"
+    assert len(manually_structured) == 2
+    assert all(
+        audit["originalStructuralDecision"] is not None
+        and audit["structuralDecision"]["structuralStatus"] == "valid_pair"
+        for audit in manually_structured
+    )
 
 
 def test_manifest_records_human_judgment_boundary():
@@ -146,9 +150,9 @@ def test_manifest_records_human_judgment_boundary():
         "answerKeyVerifiedCaseCount": 100,
         "semanticVerifiedPairCount": 72,
         "priorLunaArtifactsRetainedForAudit": True,
-        "manualStructureCorrectionCount": 1,
+        "manualStructureCorrectionCount": 2,
         "manualSemanticCorrectionCount": 18,
-        "finalAudit": "Codex full 100-case manual audit plus Article-version mismatch correction",
+        "finalAudit": "Codex full 100-case manual audit plus Article-version and parent-law list-scope corrections",
         "meaningJudgmentByProgram": False,
     }
     assert manifest["coverage"]["sourceLawFamilyCount"] == 13

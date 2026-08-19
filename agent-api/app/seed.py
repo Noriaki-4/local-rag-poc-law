@@ -16,6 +16,8 @@ from .embeddings import embed_text, embed_texts
 from .graph_audit import audit_graph
 from .graph_client import GraphClient
 from .legal_ontology import (
+    AUTHORITY_ACT,
+    AUTHORITY_CABINET_ORDER,
     AUTHORITY_GUIDANCE,
     GRAPH_SCHEMA_VERSION,
     REFERENCE_KIND_PARENT_LAW_REFERENCE,
@@ -30,6 +32,30 @@ from .opensearch_client import OpenSearchClient
 EGOV_LAW_ID_PATTERN = re.compile(r"laws\.e-gov\.go\.jp/law/([^/?#]+)")
 ARTICLE_REFERENCE_PATTERN = re.compile(
     r"(?<![法令])第([一二三四五六七八九十百千〇零\d]+)条((?:の[一二三四五六七八九十百千〇零\d]+)*)"
+)
+NAMED_AUTHORITY_ARTICLE_PATTERN = re.compile(
+    r"(?P<title>[一-鿏々ぁ-んァ-ヶー・]{1,100}?(?:法律|法|政令|内閣府令|府令|省令|規則))"
+    r"(?:（[^（）]{0,160}）)?第"
+)
+DIRECT_NAMED_AUTHORITY_PATTERN = re.compile(
+    r"(?P<title>[一-鿏々ぁ-んァ-ヶー・]{1,100}?(?:法律|法|政令|内閣府令|府令|省令|規則))"
+    r"(?:（[^（）]{0,160}）)?$"
+)
+SUPPLEMENTARY_CHAIN_BRIDGE_PATTERN = re.compile(
+    r"(?:\s|、|及び|又は|若しくは|から|ないし|乃至)*"
+)
+ARTICLE_LIST_CHAIN_BRIDGE_PATTERN = re.compile(
+    r"(?:\s|、|，|,|及び|並びに|又は|若しくは|から|まで|ないし|乃至|"
+    r"(?:第)?[一二三四五六七八九十百千〇零\d]+(?:項|号))*"
+)
+PARENTHETICAL_TEXT_PATTERN = re.compile(r"（[^（）]*）")
+CURRENT_REVISION_ALIAS_PATTERN = re.compile(
+    r"改正後の(?P<title>[^（）。\n]{1,120})"
+    r"（以下「(?P<alias>[^」]{1,40})」という。?）"
+)
+ARTICLE_REFERENCE_BODY_PATTERN = re.compile(
+    r"第([一二三四五六七八九十百千〇零\d]+)条"
+    r"((?:の[一二三四五六七八九十百千〇零\d]+)*)"
 )
 PARENT_LAW_ARTICLE_PATTERN = re.compile(
     r"(?:当該法律|同法|本法|(?<![一-鿏])法)"
@@ -1513,6 +1539,20 @@ def _reference_edges(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
             section_key: {article_id: index for index, article_id in enumerate(ids)}
             for section_key, ids in section_article_ids.items()
         }
+        article_texts: dict[str, list[str]] = {}
+        for document in scoped_documents:
+            article_id = str(
+                document.get("articleContentUnitId")
+                or document.get("parentContentUnitId")
+                or document["contentUnitId"]
+            ).split("-paragraph-", 1)[0]
+            article_texts.setdefault(article_id, []).append(
+                str(document.get("text") or "")
+            )
+        current_revision_aliases_by_article = {
+            article_id: _current_revision_aliases("\n".join(texts))
+            for article_id, texts in article_texts.items()
+        }
         # 「第N条」は本則の条文を指す慣行なので、本則の存在する条だけを参照先にする。
         main_article_ids = set(section_article_ids.get("main", []))
         for document in scoped_documents:
@@ -1530,23 +1570,61 @@ def _reference_edges(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 text, source_offset = without_repeated_parent_context_with_offset(
                     raw_text, str(parent.get("text") or "").strip()
                 )
-            targets = set(_explicit_article_reference_ids(document_id, text)) & main_article_ids
+            occurrences_by_target: dict[
+                str, list[tuple[str, int, int, str]]
+            ] = {}
+            explicit_occurrences = _same_document_reference_occurrences(
+                document_id=document_id,
+                document_title=str(document.get("title") or ""),
+                authority_type=str(document.get("authorityType") or ""),
+                heading=str(document.get("heading") or ""),
+                section_key=str(section_key),
+                source_article_id=str(source_article_id),
+                current_revision_aliases=current_revision_aliases_by_article.get(
+                    str(source_article_id), ()
+                ),
+                text=text,
+                main_article_ids=main_article_ids,
+                section_article_ids=set(ids),
+            )
+            for target_id, citation, start, end, method in explicit_occurrences:
+                if target_id == source_article_id:
+                    continue
+                occurrences_by_target.setdefault(target_id, []).append(
+                    (
+                        citation,
+                        start + source_offset,
+                        end + source_offset,
+                        method,
+                    )
+                )
             if "前条" in text and index > 0:
-                targets.add(ids[index - 1])
+                target_id = ids[index - 1]
+                occurrences_by_target.setdefault(target_id, []).extend(
+                    (
+                        "前条",
+                        match.start() + source_offset,
+                        match.end() + source_offset,
+                        "previous_article",
+                    )
+                    for match in re.finditer("前条", text)
+                )
             if "次条" in text and index + 1 < len(ids):
-                targets.add(ids[index + 1])
-            for target_id in sorted(targets):
-                if target_id == source_id:
+                target_id = ids[index + 1]
+                occurrences_by_target.setdefault(target_id, []).extend(
+                    (
+                        "次条",
+                        match.start() + source_offset,
+                        match.end() + source_offset,
+                        "next_article",
+                    )
+                    for match in re.finditer("次条", text)
+                )
+            for target_id in sorted(occurrences_by_target):
+                if target_id == source_article_id:
                     continue
                 edge_id = f"edge-{source_id}-references-{target_id.removeprefix(document_id + '-')}"
-                occurrences = _reference_occurrences(
-                    document_id,
-                    text,
-                    target_id,
-                    previous_target_id=ids[index - 1] if index > 0 else None,
-                    next_target_id=ids[index + 1] if index + 1 < len(ids) else None,
-                    source_offset=source_offset,
-                )
+                occurrences = occurrences_by_target[target_id]
                 edges.append(
                     {
                         "graphEdgeId": edge_id,
@@ -1571,51 +1649,277 @@ def _reference_edges(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return edges
 
 
-def _reference_occurrences(
-    document_id: str,
-    text: str,
-    target_id: str,
+def _same_document_reference_occurrences(
     *,
-    previous_target_id: str | None,
-    next_target_id: str | None,
-    source_offset: int = 0,
-) -> list[tuple[str, int, int, str]]:
-    occurrences: list[tuple[str, int, int, str]] = []
+    document_id: str,
+    document_title: str,
+    authority_type: str,
+    heading: str,
+    section_key: str,
+    source_article_id: str,
+    current_revision_aliases: tuple[str, ...],
+    text: str,
+    main_article_ids: set[str],
+    section_article_ids: set[str],
+) -> list[tuple[str, str, int, int, str]]:
+    """同じe-Gov法令XML内で一意なArticle参照だけを返す。"""
+
+    occurrences: list[tuple[str, str, int, int, str]] = []
+    current_named_occurrences = _current_named_authority_article_occurrences(
+        document_id=document_id,
+        document_title=document_title,
+        text=text,
+        main_article_ids=main_article_ids,
+    )
+    if section_key == "main":
+        occurrences.extend(current_named_occurrences)
+        for match in ARTICLE_REFERENCE_PATTERN.finditer(text):
+            if _is_source_article_heading_match(
+                match,
+                text=text,
+                source_article_id=source_article_id,
+            ):
+                continue
+            if _reference_uses_external_authority_scope(
+                text,
+                match,
+                document_title=document_title,
+                authority_type=authority_type,
+                current_revision_aliases=current_revision_aliases,
+            ):
+                continue
+            target_id = _article_id_from_reference_match(document_id, match)
+            if target_id not in main_article_ids:
+                continue
+            occurrences.append(
+                (
+                    target_id,
+                    match.group(0),
+                    match.start(),
+                    match.end(),
+                    "article_reference",
+                )
+            )
+        return occurrences
+
+    occurrences.extend(current_named_occurrences)
+    prior_match: re.Match[str] | None = None
+    supplementary_scope = False
     for match in ARTICLE_REFERENCE_PATTERN.finditer(text):
-        if target_id not in _explicit_article_reference_ids(
-            document_id, match.group(0)
+        if _is_source_article_heading_match(
+            match,
+            text=text,
+            source_article_id=source_article_id,
         ):
+            continue
+        direct_prefix = text[max(0, match.start() - 2) : match.start()]
+        if direct_prefix == "附則":
+            supplementary_scope = True
+            citation_start = match.start() - len("附則")
+        elif prior_match is not None and supplementary_scope:
+            bridge = text[prior_match.end() : match.start()]
+            if not SUPPLEMENTARY_CHAIN_BRIDGE_PATTERN.fullmatch(bridge):
+                supplementary_scope = False
+            citation_start = match.start()
+        else:
+            supplementary_scope = False
+            citation_start = match.start()
+        prior_match = match
+        if supplementary_scope:
+            target_id = _article_id_from_reference_match(
+                f"{document_id}-{section_key}", match
+            )
+            if target_id not in section_article_ids:
+                continue
+            occurrences.append(
+                (
+                    target_id,
+                    text[citation_start : match.end()],
+                    citation_start,
+                    match.end(),
+                    "supplementary_article_reference",
+                )
+            )
+            continue
+
+        if _reference_uses_external_authority_scope(
+            text,
+            match,
+            document_title=document_title,
+            authority_type=authority_type,
+            current_revision_aliases=current_revision_aliases,
+        ):
+            continue
+        if (
+            "施行期日" in heading
+            and not _reference_uses_current_named_authority_scope(
+                text,
+                match,
+                document_title=document_title,
+                current_revision_aliases=current_revision_aliases,
+            )
+        ):
+            continue
+        target_id = _article_id_from_reference_match(document_id, match)
+        if target_id not in main_article_ids:
             continue
         occurrences.append(
             (
+                target_id,
                 match.group(0),
-                match.start() + source_offset,
-                match.end() + source_offset,
-                "article_reference",
+                match.start(),
+                match.end(),
+                "current_main_article_reference",
             )
         )
-    for token, adjacent_target, method in (
-        ("前条", previous_target_id, "previous_article"),
-        ("次条", next_target_id, "next_article"),
-    ):
-        if adjacent_target != target_id:
+    return occurrences
+
+
+def _current_revision_aliases(text: str) -> tuple[str, ...]:
+    """附則で明示的に定義された改正後の現行法令名・略称を返す。"""
+
+    aliases: list[str] = []
+    for match in CURRENT_REVISION_ALIAS_PATTERN.finditer(text):
+        aliases.extend((match.group("title").strip(), match.group("alias").strip()))
+    return tuple(dict.fromkeys(alias for alias in aliases if alias))
+
+
+def _current_named_authority_article_occurrences(
+    *,
+    document_id: str,
+    document_title: str,
+    text: str,
+    main_article_ids: set[str],
+) -> list[tuple[str, str, int, int, str]]:
+    """現行法令名を明記した、同一文書の本則参照を返す。"""
+
+    if not document_title:
+        return []
+    pattern = re.compile(
+        re.escape(document_title)
+        + r"(第([一二三四五六七八九十百千〇零\d]+)条"
+        + r"((?:の[一二三四五六七八九十百千〇零\d]+)*))"
+    )
+    occurrences: list[tuple[str, str, int, int, str]] = []
+    for match in pattern.finditer(text):
+        parts = [match.group(2), *match.group(3).removeprefix("の").split("の")]
+        numbers = [_japanese_number_to_int(part) for part in parts if part]
+        if not numbers or any(number is None for number in numbers):
             continue
-        for match in re.finditer(token, text):
-            occurrences.append(
-                (token, match.start() + source_offset, match.end() + source_offset, method)
+        target_id = f"{document_id}-article-{'_'.join(str(number) for number in numbers)}"
+        if target_id not in main_article_ids:
+            continue
+        occurrences.append(
+            (
+                target_id,
+                match.group(1),
+                match.start(1),
+                match.end(1),
+                "current_named_authority_article_reference",
             )
-    if occurrences:
-        return occurrences
-    # 構造的には解決済みでも引用位置を復元できない場合は、参照元Content Unitを
-    # 監査対象として残す。意味predicateはここから推測しない。
-    return [
-        (
-            text[:500],
-            source_offset,
-            source_offset + min(len(text), 500),
-            "content_unit_fallback",
         )
-    ]
+    return occurrences
+
+
+def _is_source_article_heading_match(
+    match: re.Match[str],
+    *,
+    text: str,
+    source_article_id: str,
+) -> bool:
+    """Article本文の先頭に含まれる自分自身のArticleTitleを参照から除く。"""
+
+    # e-GovのArticle本文は、ArticleTitleの前にArticleCaptionを含むことがある。
+    # 見出し以外の本文が始まっていれば、同じ条番号でも通常の参照として扱う。
+    prefix_without_caption = PARENTHETICAL_TEXT_PATTERN.sub(
+        "", text[: match.start()]
+    ).strip()
+    if prefix_without_caption:
+        return False
+    article_suffix = source_article_id.rsplit("-article-", 1)[-1]
+    target_suffix = _article_id_from_reference_match("source", match)
+    return target_suffix == f"source-article-{article_suffix}"
+
+
+def _article_id_from_reference_match(
+    document_id: str,
+    match: re.Match[str],
+) -> str | None:
+    parts = [match.group(1), *match.group(2).removeprefix("の").split("の")]
+    numbers = [_japanese_number_to_int(part) for part in parts if part]
+    if not numbers or any(number is None for number in numbers):
+        return None
+    suffix = "_".join(str(number) for number in numbers)
+    return f"{document_id}-article-{suffix}"
+
+
+def _reference_uses_external_authority_scope(
+    text: str,
+    match: re.Match[str],
+    *,
+    document_title: str,
+    authority_type: str,
+    current_revision_aliases: tuple[str, ...] = (),
+) -> bool:
+    """明示された別法令名のscope内にある条番号かを判定する。"""
+
+    title = _nearest_named_authority_title(text, match)
+    if title is not None:
+        current_titles = tuple(
+            item for item in (document_title, *current_revision_aliases) if item
+        )
+        return not any(title.endswith(item) for item in current_titles)
+    if authority_type != AUTHORITY_ACT and any(
+        inherited.start() == match.start()
+        for inherited, _ in _prefixed_scope_matches(text, PARENT_LAW_ARTICLE_PATTERN)
+    ):
+        return True
+    if authority_type not in {AUTHORITY_ACT, AUTHORITY_CABINET_ORDER} and any(
+        inherited.start() == match.start()
+        for inherited, _ in _prefixed_scope_matches(
+            text, PARENT_ORDER_ARTICLE_PATTERN
+        )
+    ):
+        return True
+    return False
+
+
+def _reference_uses_current_named_authority_scope(
+    text: str,
+    match: re.Match[str],
+    *,
+    document_title: str,
+    current_revision_aliases: tuple[str, ...] = (),
+) -> bool:
+    title = _nearest_named_authority_title(text, match)
+    current_titles = tuple(
+        item for item in (document_title, *current_revision_aliases) if item
+    )
+    return bool(title and any(title.endswith(item) for item in current_titles))
+
+
+def _nearest_named_authority_title(
+    text: str,
+    match: re.Match[str],
+) -> str | None:
+    sentence_start = max(
+        text.rfind(delimiter, 0, match.start()) for delimiter in ("。", "\n", "；")
+    )
+    prefix = text[sentence_start + 1 : match.start()]
+    direct_anchor = DIRECT_NAMED_AUTHORITY_PATTERN.search(prefix)
+    if direct_anchor is not None:
+        return direct_anchor.group("title")
+    anchors = list(NAMED_AUTHORITY_ARTICLE_PATTERN.finditer(prefix))
+    for anchor in reversed(anchors):
+        initial_reference = ARTICLE_REFERENCE_BODY_PATTERN.match(
+            prefix, anchor.end() - 1
+        )
+        if initial_reference is None:
+            continue
+        bridge = prefix[initial_reference.end() :]
+        if bridge and _is_article_list_chain_bridge(bridge):
+            return anchor.group("title")
+    return None
 
 
 def _incorporation_edges(
@@ -1950,14 +2254,12 @@ def _prefixed_article_references_with_context(
     参照位置から文末または閉じ括弧までに限定する。
     """
     references: list[tuple[str, str, int, int]] = []
-    for match in pattern.finditer(text):
-        if not _relative_reference_targets_expected_authority(
-            text,
-            match,
-            expected_authority_title=expected_authority_title,
-            known_authority_titles=known_authority_titles,
-        ):
-            continue
+    for match, _ in _prefixed_scope_matches(
+        text,
+        pattern,
+        expected_authority_title=expected_authority_title,
+        known_authority_titles=known_authority_titles,
+    ):
         parts = [
             match.group(1),
             *match.group(2).removeprefix("の").split("の"),
@@ -1982,6 +2284,82 @@ def _prefixed_article_references_with_context(
             (article_id, text[match.start():context_end], match.start(), context_end)
         )
     return references
+
+
+def _prefixed_scope_matches(
+    text: str,
+    pattern: re.Pattern[str],
+    *,
+    expected_authority_title: str | None = None,
+    known_authority_titles: tuple[str, ...] = (),
+) -> list[tuple[re.Match[str], bool]]:
+    """明示した法令prefixと、同じ列挙内でscopeを引き継ぐ条番号を返す。"""
+
+    events = [
+        (match.start(), 0, match, True) for match in pattern.finditer(text)
+    ]
+    events.extend(
+        (match.start(), 1, match, False)
+        for match in ARTICLE_REFERENCE_PATTERN.finditer(text)
+    )
+    events.sort(key=lambda item: (item[0], item[1]))
+    parenthesis_depths = _parenthesis_depths(text)
+
+    scoped: list[tuple[re.Match[str], bool]] = []
+    scope_by_depth: dict[int, bool] = {}
+    previous_end_by_depth: dict[int, int] = {}
+    for position, _, match, explicit in events:
+        depth = parenthesis_depths[position]
+        if explicit:
+            scope_by_depth[depth] = (
+                expected_authority_title is None
+                or _relative_reference_targets_expected_authority(
+                    text,
+                    match,
+                    expected_authority_title=expected_authority_title,
+                    known_authority_titles=known_authority_titles,
+                )
+            )
+            if scope_by_depth[depth]:
+                scoped.append((match, True))
+            previous_end_by_depth[depth] = match.end()
+            continue
+        scope_active = scope_by_depth.get(depth, False)
+        previous_end = previous_end_by_depth.get(depth)
+        if (
+            not scope_active
+            or previous_end is None
+            or not _is_article_list_chain_bridge(text[previous_end : match.start()])
+        ):
+            scope_by_depth[depth] = False
+            previous_end_by_depth[depth] = match.end()
+            continue
+        scoped.append((match, False))
+        previous_end_by_depth[depth] = match.end()
+    return scoped
+
+
+def _is_article_list_chain_bridge(value: str) -> bool:
+    without_parentheticals = value
+    while True:
+        reduced = PARENTHETICAL_TEXT_PATTERN.sub("", without_parentheticals)
+        if reduced == without_parentheticals:
+            break
+        without_parentheticals = reduced
+    return bool(ARTICLE_LIST_CHAIN_BRIDGE_PATTERN.fullmatch(without_parentheticals))
+
+
+def _parenthesis_depths(text: str) -> list[int]:
+    depths = [0] * (len(text) + 1)
+    depth = 0
+    for index, character in enumerate(text):
+        depths[index] = depth
+        if character == "（":
+            depth += 1
+        elif character == "）":
+            depth = max(0, depth - 1)
+    depths[len(text)] = depth
+    return depths
 
 
 def _relative_reference_targets_expected_authority(

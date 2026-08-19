@@ -399,7 +399,10 @@ def main() -> int:
                 manual_structure_adjudications
             ),
             "manualSemanticCorrectionCount": len(manual_adjudications),
-            "finalAudit": "Codex full 100-case manual audit plus Article-version mismatch correction",
+            "finalAudit": (
+                "Codex full 100-case manual audit plus Article-version and "
+                "parent-law list-scope corrections"
+            ),
             "meaningJudgmentByProgram": False,
         },
     }

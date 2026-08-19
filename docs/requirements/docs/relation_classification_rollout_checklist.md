@@ -24,14 +24,18 @@
 
 ## Gate 1: 参照構造を正しくする
 
-- [ ] own Article title・見出しを`REFERENCES`として登録しない
-- [ ] 明示された法令名、`法 / 令 / 規則`、表の列scopeを先に解決する
-- [ ] 本則、附則、改正法令のscopeを区別する
-- [ ] 親法令参照を同じ下位法令の同番号Articleへ接続しない
-- [ ] `wrong_target`を既知catalog内の一意なArticleへだけ修正する
-- [ ] 正しい候補がcatalogにない参照は`unresolved`として除外する
-- [ ] 代表94件の構造評価が`94/94`になった
-- [ ] 直近20件比較で見つかった誤った教師targetを正本fixtureで修正した
+- [x] own Article title・見出しを`REFERENCES`として登録しない
+- [x] 明示された法令名、`法 / 令 / 規則`、表の列scopeを先に解決する
+- [x] 本則、附則、改正法令のscopeを区別する
+- [x] 親法令参照を同じ下位法令の同番号Articleへ接続しない
+- [x] `wrong_target`を既知catalog内の一意なArticleへだけ修正する
+- [x] 正しい候補がcatalogにない参照は`unresolved`として除外する
+- [x] 代表94件の構造評価が`94/94`になった
+- [x] 直近20件比較で見つかった誤った教師targetを正本fixtureで修正した
+
+2026-08-19に保存済みe-Gov XML snapshot（14法令、16,949 Content Unit）からshadow構築し、
+正解73組を全て保持し、`not_reference / unresolved`の21組を全て除外したことを確認した。
+Gate 5でOpenSearch / Neo4jを実際に再構築した後、同じ`94/94`を再確認する。
 
 合格条件: 意味分類へ渡す全候補が、構造的に検証済みのArticleペアである。
 

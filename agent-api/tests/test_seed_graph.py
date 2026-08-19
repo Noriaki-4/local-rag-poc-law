@@ -122,6 +122,230 @@ def test_reference_edges_keep_child_own_reference_and_raw_offsets():
     ]
 
 
+def test_reference_edges_do_not_treat_article_title_as_a_reference() -> None:
+    documents = [
+        {
+            **_document("4", "第四条"),
+            "title": "試験法",
+        },
+        {
+            **_document("4", "（経過措置）\n第四条"),
+            "contentUnitId": "law-test-suppl-1-article-4",
+            "articleContentUnitId": "law-test-suppl-1-article-4",
+            "sectionKey": "suppl-1",
+            "title": "試験法",
+        },
+    ]
+
+    assert _reference_edges(documents) == []
+
+
+def test_reference_edges_do_not_connect_an_explicit_other_law_to_same_number() -> (
+    None
+):
+    source_article_id = "law-test-article-166"
+    documents = [
+        {
+            **_document("165", "第百六十五条 現在の法律の別規定。"),
+            "title": "金融商品取引法",
+        },
+        {
+            **_document(
+                "166",
+                (
+                    "会社法第百五十六条第一項（同法第百六十三条及び"
+                    "第百六十五条第三項の規定により読み替えて適用する場合を含む。）"
+                ),
+            ),
+            "contentUnitId": f"{source_article_id}-paragraph-6-item-4_2",
+            "articleContentUnitId": source_article_id,
+            "title": "金融商品取引法",
+        },
+    ]
+
+    assert _reference_edges(documents) == []
+
+
+def test_reference_edges_do_not_connect_named_external_act_after_parentheses() -> (
+    None
+):
+    documents = [
+        {
+            **_document("2", "第二条 現在の府令の定義。"),
+            "title": "開示府令",
+        },
+        {
+            **_document(
+                "9",
+                "投資信託及び投資法人に関する法律（昭和二十六年法律第百九十八号）第二条の定義をいう。",
+            ),
+            "title": "開示府令",
+        },
+    ]
+
+    assert _reference_edges(documents) == []
+
+
+def test_supplementary_references_stay_in_the_same_supplement_group() -> None:
+    def supplementary(article: str, text: str) -> dict:
+        article_id = f"law-test-suppl-2-article-{article}"
+        return {
+            **_document(article, text),
+            "contentUnitId": article_id,
+            "articleContentUnitId": article_id,
+            "sectionKey": "suppl-2",
+            "title": "試験法",
+        }
+
+    documents = [
+        {**_document("2", "第二条 本則。"), "title": "試験法"},
+        {**_document("3", "第三条 本則。"), "title": "試験法"},
+        supplementary(
+            "1",
+            "第一条 附則第二条及び第三条の規定は、公布の日から施行する。",
+        ),
+        supplementary("2", "第二条 経過措置。"),
+        supplementary("3", "第三条 経過措置。"),
+    ]
+
+    pairs = {
+        (edge["fromGraphNodeId"], edge["toGraphNodeId"])
+        for edge in _reference_edges(documents)
+    }
+    assert pairs == {
+        ("law-test-suppl-2-article-1", "law-test-suppl-2-article-2"),
+        ("law-test-suppl-2-article-1", "law-test-suppl-2-article-3"),
+    }
+
+
+def test_supplementary_amending_law_articles_do_not_connect_to_current_main() -> (
+    None
+):
+    source_id = "law-test-suppl-5-article-1"
+    documents = [
+        {**_document("31", "第三十一条 現行法。"), "title": "試験法"},
+        {**_document("60", "第六十条 現行法。"), "title": "試験法"},
+        {
+            **_document(
+                "1",
+                (
+                    "第一条 第三十一条及び第六十条の規定並びに"
+                    "附則第十条及び第十二条の規定は、公布の日から施行する。"
+                ),
+            ),
+            "contentUnitId": source_id,
+            "articleContentUnitId": source_id,
+            "sectionKey": "suppl-5",
+            "title": "試験法",
+            "heading": "附則 第一条（施行期日）",
+        },
+    ]
+
+    assert _reference_edges(documents) == []
+
+
+def test_supplementary_reference_can_target_current_main_article() -> None:
+    source_id = "law-test-suppl-6-article-2"
+    documents = [
+        {**_document("3", "第三条 現行法。"), "title": "試験法"},
+        {
+            **_document(
+                "2",
+                "第二条 この法律の施行後は、改正後の試験法第三条を適用する。",
+            ),
+            "contentUnitId": source_id,
+            "articleContentUnitId": source_id,
+            "sectionKey": "suppl-6",
+            "title": "試験法",
+            "heading": "附則 第二条（経過措置）",
+        },
+    ]
+
+    assert [
+        (edge["fromGraphNodeId"], edge["toGraphNodeId"])
+        for edge in _reference_edges(documents)
+    ] == [(source_id, "law-test-article-3")]
+
+
+def test_supplementary_bare_reference_can_target_current_main_article() -> None:
+    source_id = "law-test-suppl-7-article-4"
+    documents = [
+        {**_document("140", "第百四十条 現行法。"), "title": "試験規則"},
+        {
+            **_document(
+                "4",
+                "第四条 この場合には、第百四十条の規定による。",
+            ),
+            "contentUnitId": source_id,
+            "articleContentUnitId": source_id,
+            "sectionKey": "suppl-7",
+            "title": "試験規則",
+            "heading": "附則 第四条（経過措置）",
+        },
+    ]
+
+    assert [
+        (edge["fromGraphNodeId"], edge["toGraphNodeId"])
+        for edge in _reference_edges(documents)
+    ] == [(source_id, "law-test-article-140")]
+
+
+def test_supplementary_revision_alias_is_shared_within_the_article() -> None:
+    article_id = "law-test-suppl-8-article-2"
+    first_paragraph_id = f"{article_id}-paragraph-1"
+    second_paragraph_id = f"{article_id}-paragraph-2"
+    documents = [
+        {**_document("3", "第三条 現行法。"), "title": "試験規則"},
+        {
+            **_document(
+                "2",
+                "この省令による改正後の試験規則（以下「新規則」という。）を適用する。",
+            ),
+            "contentUnitId": first_paragraph_id,
+            "articleContentUnitId": article_id,
+            "parentContentUnitId": article_id,
+            "sectionKey": "suppl-8",
+            "title": "試験規則",
+            "heading": "附則 第二条 第1項",
+        },
+        {
+            **_document("2", "２新規則第三条の規定を適用する。"),
+            "contentUnitId": second_paragraph_id,
+            "articleContentUnitId": article_id,
+            "parentContentUnitId": article_id,
+            "sectionKey": "suppl-8",
+            "title": "試験規則",
+            "heading": "附則 第二条 第2項",
+        },
+    ]
+
+    assert any(
+        edge["fromGraphNodeId"] == second_paragraph_id
+        and edge["toGraphNodeId"] == "law-test-article-3"
+        for edge in _reference_edges(documents)
+    )
+
+
+def test_named_authority_scope_does_not_cross_a_flattened_table_cell() -> None:
+    source_id = "law-test-article-10"
+    documents = [
+        {**_document("1", "第一条 現行法。"), "title": "試験規則"},
+        {**_document("3", "第三条 現行法。"), "title": "試験規則"},
+        {
+            **_document("10", "第十条 別規則第一条第三条の規定による。"),
+            "contentUnitId": source_id,
+            "title": "試験規則",
+        },
+    ]
+
+    pairs = {
+        (edge["fromGraphNodeId"], edge["toGraphNodeId"])
+        for edge in _reference_edges(documents)
+    }
+    assert (source_id, "law-test-article-1") not in pairs
+    assert (source_id, "law-test-article-3") in pairs
+
+
 def test_delegation_edges_reverse_subordinate_law_parent_references():
     parent = _document("5", "第五条 政令で定めるものを除く。")
     subordinate = {
@@ -164,6 +388,59 @@ def test_delegation_edges_reverse_subordinate_law_parent_references():
             "unverified",
         )
     ]
+
+
+def test_parent_law_scope_is_inherited_across_an_article_list() -> None:
+    parent_35_3 = {
+        **_document("35_3", "第三十五条の三 親法律の規定。"),
+        "title": "金融商品取引法",
+    }
+    parent_41_2 = {
+        **_document("41_2", "第四十一条の二 親法律の規定。"),
+        "title": "金融商品取引法",
+    }
+    lower_38 = {
+        **_document(
+            "38",
+            (
+                "法第三十五条の三（公正を確保するためのものに限る。）、"
+                "第三十六条第一項、第四十条の二及び第四十一条の二の規定"
+            ),
+        ),
+        "documentId": "law-order",
+        "contentUnitId": "law-order-article-38",
+        "title": "金融商品取引法施行令",
+        "authorityType": "cabinet_order",
+    }
+    lower_41_2 = {
+        **_document("41_2", "第四十一条の二 施行令自身の別規定。"),
+        "documentId": "law-order",
+        "contentUnitId": "law-order-article-41_2",
+        "title": "金融商品取引法施行令",
+        "authorityType": "cabinet_order",
+    }
+    documents = [parent_35_3, parent_41_2, lower_38, lower_41_2]
+
+    delegation_pairs = {
+        (edge["fromGraphNodeId"], edge["toGraphNodeId"])
+        for edge in _delegation_edges(
+            documents,
+            {"law-test": "law-test", "law-order": "law-test"},
+        )
+    }
+    same_document_pairs = {
+        (edge["fromGraphNodeId"], edge["toGraphNodeId"])
+        for edge in _reference_edges(documents)
+    }
+
+    assert (
+        "law-order-article-38",
+        "law-test-article-41_2",
+    ) in delegation_pairs
+    assert (
+        "law-order-article-38",
+        "law-order-article-41_2",
+    ) not in same_document_pairs
 
 
 def test_delegation_edges_do_not_assign_parent_reference_to_repeated_child():
