@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
@@ -63,6 +63,8 @@ class ClassificationArticle(LegalGraphModel):
 
 class ReferenceOccurrence(LegalGraphModel):
     occurrence_hash: str = Field(min_length=1, max_length=128)
+    basis_edge_id: str = Field(min_length=1, max_length=500)
+    reference_kind: str = Field(min_length=1, max_length=160)
     citation_text: str = Field(min_length=1)
     source_content_unit_id: str = Field(min_length=1, max_length=500)
     source_start: int = Field(ge=0)
@@ -81,7 +83,7 @@ class ReferenceOccurrence(LegalGraphModel):
 
 
 class RelationClassificationCandidate(LegalGraphModel):
-    """1組のArticle端点と1本の原文Relationを分類する入力。
+    """1組のArticle端点と、その間の全原文Relationを分類する入力。
 
     `reference_source / reference_target`は原文REFERENCESの物理方向であり、
     法的意味上のSUBJECT / OBJECTではない。意味方向はLLM出力で選択する。
@@ -93,7 +95,7 @@ class RelationClassificationCandidate(LegalGraphModel):
     provider: str = Field(min_length=1, max_length=160)
     model: str = Field(min_length=1, max_length=300)
     reviewer_model: str | None = Field(default=None, max_length=300)
-    basis_edge_id: str = Field(min_length=1, max_length=500)
+    basis_edge_ids: tuple[str, ...] = Field(min_length=1)
     reference_source: ClassificationArticle
     reference_target: ClassificationArticle
     reference_occurrences: tuple[ReferenceOccurrence, ...] = Field(min_length=1)
@@ -105,6 +107,15 @@ class RelationClassificationCandidate(LegalGraphModel):
         hashes = [item.occurrence_hash for item in self.reference_occurrences]
         if len(hashes) != len(set(hashes)):
             raise ValueError("reference occurrence hashes must be unique")
+        if self.basis_edge_ids != tuple(sorted(set(self.basis_edge_ids))):
+            raise ValueError("candidate basis edge IDs must be sorted and unique")
+        occurrence_basis_ids = {
+            item.basis_edge_id for item in self.reference_occurrences
+        }
+        if occurrence_basis_ids != set(self.basis_edge_ids):
+            raise ValueError(
+                "candidate basis edge IDs must exactly match reference occurrences"
+            )
         source_span_ids = {span.span_id for span in self.reference_source.spans}
         for occurrence in self.reference_occurrences:
             occurrence_span_ids = set(occurrence.source_span_ids)
@@ -124,7 +135,7 @@ class RelationClassificationCandidate(LegalGraphModel):
                 "provider": self.provider,
                 "model": self.model,
                 "reviewerModel": self.reviewer_model,
-                "basisEdgeId": self.basis_edge_id,
+                "basisEdgeIds": self.basis_edge_ids,
                 "referenceSourceArticleId": self.reference_source.article_id,
                 "referenceSourceContentHash": self.reference_source.content_hash,
                 "referenceTargetArticleId": self.reference_target.article_id,
@@ -146,8 +157,7 @@ class RelationAdjudicationCandidatePacket(LegalGraphModel):
     provider: str = Field(min_length=1, max_length=160)
     model: str = Field(min_length=1, max_length=300)
     reviewer_model: str = Field(min_length=1, max_length=300)
-    basis_edge_id: str = Field(min_length=1, max_length=500)
-    reference_kind: str = Field(min_length=1, max_length=160)
+    basis_edge_ids: tuple[str, ...] = Field(min_length=1)
     reference_source_article: ClassificationArticle
     reference_target_article: ClassificationArticle
     reference_occurrences: tuple[ReferenceOccurrence, ...] = Field(min_length=1)
@@ -167,7 +177,7 @@ class RelationAdjudicationCandidatePacket(LegalGraphModel):
             provider=self.provider,
             model=self.model,
             reviewer_model=self.reviewer_model,
-            basis_edge_id=self.basis_edge_id,
+            basis_edge_ids=self.basis_edge_ids,
             reference_source=self.reference_source_article,
             reference_target=self.reference_target_article,
             reference_occurrences=self.reference_occurrences,
@@ -177,8 +187,6 @@ class RelationAdjudicationCandidatePacket(LegalGraphModel):
     def from_candidate(
         cls,
         candidate: RelationClassificationCandidate,
-        *,
-        reference_kind: str,
     ) -> RelationAdjudicationCandidatePacket:
         if candidate.reviewer_model is None:
             raise ValueError("adjudication packet requires a reviewer model")
@@ -190,8 +198,7 @@ class RelationAdjudicationCandidatePacket(LegalGraphModel):
             provider=candidate.provider,
             model=candidate.model,
             reviewer_model=candidate.reviewer_model,
-            basis_edge_id=candidate.basis_edge_id,
-            reference_kind=reference_kind,
+            basis_edge_ids=candidate.basis_edge_ids,
             reference_source_article=candidate.reference_source,
             reference_target_article=candidate.reference_target,
             reference_occurrences=candidate.reference_occurrences,
@@ -247,7 +254,6 @@ class WorkerAdjudicationRecord(LegalGraphModel):
     """Codex Workerが1候補について返す完全な意味判断。"""
 
     candidate_key: str = Field(min_length=1, max_length=128)
-    basis_edge_id: str = Field(min_length=1, max_length=500)
     adjudication_status: AdjudicationStatus
     predicate_assessments: AdjudicationPredicateAssessments
     assertions: tuple[ProposedRelationAssertion, ...] = ()
@@ -334,7 +340,6 @@ class ReviewerRecord(LegalGraphModel):
     """ReviewerがWorker回答を見て返す確認結果。"""
 
     candidate_key: str = Field(min_length=1, max_length=128)
-    basis_edge_id: str = Field(min_length=1, max_length=500)
     review_status: ReviewStatus
     predicate_checks: PredicateReviewChecks
     issues: tuple[ReviewIssue, ...] = ()
@@ -364,7 +369,6 @@ class AdjudicationRevisionPacket(LegalGraphModel):
     """Reviewerが差し戻した1候補を、同じWorkerへ一度だけ返すpacket。"""
 
     candidate_key: str = Field(min_length=64, max_length=64)
-    basis_edge_id: str = Field(min_length=1, max_length=500)
     original_candidate: RelationAdjudicationCandidatePacket
     previous_decision: WorkerAdjudicationRecord
     review_feedback: ReviewerRecord
@@ -372,10 +376,7 @@ class AdjudicationRevisionPacket(LegalGraphModel):
     @model_validator(mode="after")
     def validate_revision_scope(self) -> AdjudicationRevisionPacket:
         candidate = self.original_candidate.to_candidate()
-        if (
-            self.candidate_key != candidate.candidate_key
-            or self.basis_edge_id != candidate.basis_edge_id
-        ):
+        if self.candidate_key != candidate.candidate_key:
             raise ValueError("revision identity must match original candidate")
         validate_reviewer_record(
             candidate,
@@ -391,7 +392,6 @@ class UnresolvedAdjudicationRecord(LegalGraphModel):
     """1回の差戻し後もReviewerが承認しなかった候補の監査記録。"""
 
     candidate_key: str = Field(min_length=64, max_length=64)
-    basis_edge_id: str = Field(min_length=1, max_length=500)
     reason: str = Field(pattern="^request_change_after_single_revision$")
     original_candidate: RelationAdjudicationCandidatePacket
     initial_worker_decision: WorkerAdjudicationRecord
@@ -402,10 +402,7 @@ class UnresolvedAdjudicationRecord(LegalGraphModel):
     @model_validator(mode="after")
     def validate_unresolved_scope(self) -> UnresolvedAdjudicationRecord:
         candidate = self.original_candidate.to_candidate()
-        if (
-            self.candidate_key != candidate.candidate_key
-            or self.basis_edge_id != candidate.basis_edge_id
-        ):
+        if self.candidate_key != candidate.candidate_key:
             raise ValueError("unresolved identity must match original candidate")
         validate_reviewer_record(
             candidate,
@@ -428,7 +425,6 @@ class ApprovedAdjudicationRecord(LegalGraphModel):
     """Reviewer承認とWorker回答を切り離さずにimportする証跡。"""
 
     candidate_key: str = Field(min_length=64, max_length=64)
-    basis_edge_id: str = Field(min_length=1, max_length=500)
     original_candidate: RelationAdjudicationCandidatePacket
     worker_decision: WorkerAdjudicationRecord
     approval_review: ReviewerRecord
@@ -439,10 +435,7 @@ class ApprovedAdjudicationRecord(LegalGraphModel):
     @model_validator(mode="after")
     def validate_approval_scope(self) -> ApprovedAdjudicationRecord:
         candidate = self.original_candidate.to_candidate()
-        if (
-            self.candidate_key != candidate.candidate_key
-            or self.basis_edge_id != candidate.basis_edge_id
-        ):
+        if self.candidate_key != candidate.candidate_key:
             raise ValueError("approval identity must match original candidate")
         validate_reviewer_record(
             candidate,
@@ -494,14 +487,12 @@ class AdjudicationShardManifest(LegalGraphModel):
     input_characters: int = Field(ge=1)
     sha256: str = Field(min_length=64, max_length=64)
     candidate_keys: tuple[str, ...] = Field(min_length=1, max_length=5)
-    basis_edge_ids: tuple[str, ...] = Field(min_length=1, max_length=5)
+    basis_edge_ids: tuple[str, ...] = Field(min_length=1)
 
     @model_validator(mode="after")
     def validate_shard_coverage(self) -> AdjudicationShardManifest:
         if len(self.candidate_keys) != self.candidate_count:
             raise ValueError("shard candidate count must match candidate keys")
-        if len(self.basis_edge_ids) != self.candidate_count:
-            raise ValueError("shard candidate count must match basis edge IDs")
         if len(set(self.candidate_keys)) != len(self.candidate_keys):
             raise ValueError("shard candidate keys must be unique")
         if len(set(self.basis_edge_ids)) != len(self.basis_edge_ids):
@@ -510,7 +501,7 @@ class AdjudicationShardManifest(LegalGraphModel):
 
 
 class RelationAdjudicationManifest(LegalGraphModel):
-    schema_version: int = Field(ge=1)
+    schema_version: Literal[2]
     source_packet: str = Field(min_length=1)
     source_packet_sha256: str = Field(min_length=64, max_length=64)
     source_snapshot_id: str = Field(min_length=1, max_length=500)
@@ -1003,8 +994,6 @@ def validate_worker_adjudication(
 
     if worker.candidate_key != candidate.candidate_key:
         raise ValueError("Worker references an unknown candidate key")
-    if worker.basis_edge_id != candidate.basis_edge_id:
-        raise ValueError("Worker references an unknown basis edge ID")
     validate_classification_decision(
         candidate,
         worker_adjudication_to_decision(worker),
@@ -1051,8 +1040,6 @@ def validate_reviewer_record(
     validate_worker_adjudication(candidate, worker)
     if review.candidate_key != candidate.candidate_key:
         raise ValueError("Reviewer references an unknown candidate key")
-    if review.basis_edge_id != candidate.basis_edge_id:
-        raise ValueError("Reviewer references an unknown basis edge ID")
     worker_findings = {
         predicate: assessment.finding
         for predicate, assessment in worker.predicate_assessments.by_predicate().items()
@@ -1112,7 +1099,7 @@ def build_assertion_records(
                 candidate_key=candidate.candidate_key,
                 assertion_dedupe_key=dedupe_key,
                 proposed_predicate=proposed.proposed_predicate,
-                basis_edge_id=candidate.basis_edge_id,
+                basis_edge_id=occurrence.basis_edge_id,
                 source_content_unit_id=occurrence.source_content_unit_id,
                 subject_article_id=proposed.subject_article_id,
                 object_article_id=proposed.object_article_id,

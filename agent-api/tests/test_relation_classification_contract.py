@@ -77,12 +77,14 @@ def _candidate(
         prompt_version="legal-relation-v1",
         provider="ollama",
         model="gemma4:e4b",
-        basis_edge_id="reference-1",
+        basis_edge_ids=("reference-1",),
         reference_source=object_,
         reference_target=subject,
         reference_occurrences=tuple(
             ReferenceOccurrence(
                 occurrence_hash=occurrence_hash,
+                basis_edge_id="reference-1",
+                reference_kind="parent_law_reference",
                 citation_text="法第一条",
                 source_content_unit_id=object_.article_id,
                 source_start=0,
@@ -473,7 +475,6 @@ def test_worker_adjudication_requires_five_consistent_predicates_and_grounding()
     candidate = _candidate()
     worker = WorkerAdjudicationRecord(
         candidate_key=candidate.candidate_key,
-        basis_edge_id=candidate.basis_edge_id,
         adjudication_status="accepted",
         predicate_assessments=_adjudication_assessments(implements="established"),
         assertions=(
@@ -499,7 +500,6 @@ def test_worker_adjudication_does_not_turn_uncertainty_into_accepted() -> None:
     with pytest.raises(ValidationError, match="cannot contain uncertainty"):
         WorkerAdjudicationRecord(
             candidate_key="candidate-1",
-            basis_edge_id="basis-1",
             adjudication_status="accepted",
             predicate_assessments=_adjudication_assessments(
                 implements="uncertain"
@@ -511,7 +511,6 @@ def test_reviewer_must_copy_worker_findings_and_known_span_ids() -> None:
     candidate = _candidate()
     worker = WorkerAdjudicationRecord(
         candidate_key=candidate.candidate_key,
-        basis_edge_id=candidate.basis_edge_id,
         adjudication_status="accepted",
         predicate_assessments=_adjudication_assessments(implements="established"),
         assertions=(
@@ -531,7 +530,6 @@ def test_reviewer_must_copy_worker_findings_and_known_span_ids() -> None:
     )
     review = ReviewerRecord(
         candidate_key=candidate.candidate_key,
-        basis_edge_id=candidate.basis_edge_id,
         review_status="request_change",
         predicate_checks=_review_checks(implements="change_required"),
         issues=(
@@ -585,7 +583,7 @@ def test_relation_adjudication_manifest_covers_each_candidate_once() -> None:
         max_revision_rounds=1,
     )
     manifest = RelationAdjudicationManifest(
-        schema_version=1,
+        schema_version=2,
         source_packet="/tmp/packet.jsonl",
         source_packet_sha256="a" * 64,
         source_snapshot_id="snapshot-1",
@@ -611,6 +609,10 @@ def test_relation_adjudication_manifest_covers_each_candidate_once() -> None:
     )
 
     assert manifest.candidate_count == 2
+    with pytest.raises(ValidationError, match="Input should be 2"):
+        RelationAdjudicationManifest.model_validate(
+            {**manifest.model_dump(by_alias=True), "schemaVersion": 1}
+        )
     with pytest.raises(ValidationError, match="only one shard"):
         RelationAdjudicationManifest.model_validate(
             {

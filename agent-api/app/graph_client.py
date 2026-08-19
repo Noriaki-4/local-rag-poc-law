@@ -455,9 +455,8 @@ class GraphClient:
         self,
         *,
         source_snapshot_id: str,
-        limit: int | None = None,
     ) -> list[dict[str, Any]]:
-        """REFERENCESの物理方向と両端Articleを、意味判断せず候補化する。"""
+        """全REFERENCESの物理方向と両端Articleを、意味判断せず返す。"""
 
         query = """
         MATCH (sourceUnit:GraphNode)-[basis:REFERENCES]->(targetUnit:GraphNode)
@@ -479,12 +478,14 @@ class GraphClient:
           properties(targetArticle) AS referenceTargetArticle
         ORDER BY basis.graphEdgeId
         """
-        parameters: dict[str, Any] = {"sourceSnapshotId": source_snapshot_id}
-        if limit is not None:
-            query += "\nLIMIT $limit"
-            parameters["limit"] = max(1, limit)
         with self.driver.session() as session:
-            return [dict(record) for record in session.run(query, **parameters)]
+            return [
+                dict(record)
+                for record in session.run(
+                    query,
+                    sourceSnapshotId=source_snapshot_id,
+                )
+            ]
 
     def create_or_resume_classification_run(
         self, record: dict[str, Any]

@@ -50,7 +50,7 @@ from .legal_relation_classifier import (
     without_repeated_parent_context_with_offset,
 )
 
-RELATION_CLASSIFICATION_PROMPT_VERSION = "legal-relation-5predicate-v19"
+RELATION_CLASSIFICATION_PROMPT_VERSION = "legal-relation-5predicate-v20-pair"
 logger = logging.getLogger(__name__)
 
 
@@ -72,26 +72,26 @@ class RelationClassificationStageError(RuntimeError):
 
 PREDICATE_PROMPT_CONTRACTS = {
     ProposedPredicate.IMPLEMENTS: """判定対象: IMPLEMENTS
-今回の参照について、referenceTargetArticleを委任する親規定、referenceSourceArticleを具体化する下位規定として検査します。
+今回のArticleペアに与えられたreferenceOccurrencesについて、referenceTargetArticleを委任する親規定、referenceSourceArticleを具体化する下位規定として検査します。
 成立条件1 explicitDelegation: referenceTargetArticleが、政令・府省令等の下位法令へ対象事項の具体化を明示的に委ねている。
 成立条件2 sameMatterImplementation: referenceSourceArticleが、委任された同じ事項を具体化している。
 両方establishedの場合だけfinding=establishedです。
 同一法令内の前条参照、準用、用語定義、要件の引用、効果の追加だけならnot_establishedです。""",
     ProposedPredicate.INCORPORATES: """判定対象: INCORPORATES
-今回の参照について、referenceSourceArticleをSUBJECT、referenceTargetArticleをOBJECTとして検査します。
+今回のArticleペアに与えられたreferenceOccurrencesについて、referenceSourceArticleをSUBJECT、referenceTargetArticleをOBJECTとして検査します。
 成立条件1 explicitApplicationLanguage: referenceSourceArticleに「準用する」「読み替えて適用する」等、referenceTargetArticleの規律を適用する明示文言がある。
 成立条件2 targetRuleApplied: その文言によりreferenceTargetArticleの規律自体がreferenceSourceArticleへ適用される。
 両方establishedの場合だけfinding=establishedです。
 「前条の規定を準用する」は典型的な成立例です。citationTextが「前条」だけでも、対応するsourceSpanIdsの本文全体に「準用する」があれば明示文言として扱います。
 「準用する」「読み替えて適用する」等を伴わず、「前条の場合」「前条に定める」「第X条に規定する」「第X条の規定による」と参照するだけならnot_establishedです。""",
     ProposedPredicate.USES_DEFINITION: """判定対象: USES_DEFINITION
-今回の参照について、referenceSourceArticleをSUBJECT、referenceTargetArticleをOBJECTとして検査します。
+今回のArticleペアに与えられたreferenceOccurrencesについて、referenceSourceArticleをSUBJECT、referenceTargetArticleをOBJECTとして検査します。
 成立条件1 targetDefinesTerm: referenceTargetArticleが、参照された語を「Xとは」「Xをいう」又は括弧書きの「X（…をいう）」で定義している。
 成立条件2 sourceUsesSameTerm: referenceSourceArticleが「第X条に規定するX」等の形でその同じ定義語を利用している。
 両方establishedの場合だけfinding=establishedです。
 OBJECTが権利、義務、要件又は手続を定めるだけならnot_establishedです。""",
     ProposedPredicate.EXCEPTION_TO: """判定対象: EXCEPTION_TO
-今回の参照について、referenceSourceArticleをSUBJECT、referenceTargetArticleをOBJECTとして検査します。
+今回のArticleペアに与えられたreferenceOccurrencesについて、referenceSourceArticleをSUBJECT、referenceTargetArticleをOBJECTとして検査します。
 成立条件1 targetContainsAffectedRule: referenceTargetArticleに、referenceSourceArticleが打ち消し又は制限しているものと同一の規律・法的効果が書かれている。
 成立条件2 citationDirectlyLimitsTargetRule: referenceSourceArticleの例外・適用除外文言が、そのreferenceTargetArticleの規律・法的効果を直接の対象として適用範囲を狭める。
 両方establishedの場合だけfinding=establishedです。
@@ -99,7 +99,7 @@ referenceSourceArticleに「ただし」「この限りでない」があって�
 例えばsourceが「担保は消滅する。ただし、targetに規定する敷金はこの限りでない」とし、targetが敷金を定義して返還義務を定める場合、打ち消される「担保は消滅する」はtargetの規律ではないためnot_establishedです。
 「前条に定める」「前条を準用する」だけでもnot_establishedです。""",
     ProposedPredicate.OVERRIDES: """判定対象: OVERRIDES
-今回の参照について、referenceSourceArticleをSUBJECT、referenceTargetArticleをOBJECTとして検査します。
+今回のArticleペアに与えられたreferenceOccurrencesについて、referenceSourceArticleをSUBJECT、referenceTargetArticleをOBJECTとして検査します。
 成立条件1 explicitPriorityOverTarget: 「referenceTargetArticleの規定にかかわらず」等、referenceSourceArticleがreferenceTargetArticleより優先すると明示されている。
 成立条件2 targetApplicationModified: referenceSourceArticleがreferenceTargetArticleの適用内容を排除又は修正する。
 両方establishedの場合だけfinding=establishedです。
@@ -163,7 +163,7 @@ def _candidate_prompt_payload(
     candidate: RelationClassificationCandidate,
 ) -> dict[str, Any]:
     return {
-        "basisEdgeId": candidate.basis_edge_id,
+        "basisEdgeIds": candidate.basis_edge_ids,
         "referenceOccurrences": [
             occurrence.model_dump(by_alias=True, mode="json")
             for occurrence in candidate.reference_occurrences
@@ -509,7 +509,9 @@ def candidates_from_graph_and_sources(
             spans=spans,
         )
 
-    candidates: list[RelationClassificationCandidate] = []
+    occurrences_by_pair: dict[tuple[str, str], list[ReferenceOccurrence]] = {}
+    basis_ids_by_pair: dict[tuple[str, str], set[str]] = {}
+    seen_basis_ids: set[str] = set()
     for row in rows:
         basis = dict(row["basis"])
         if basis.get("sourceSnapshotId") != source_snapshot_id:
@@ -518,6 +520,16 @@ def candidates_from_graph_and_sources(
             raise ValueError("REFERENCES schema mismatch")
         source_id = str(row["referenceSourceArticle"].get("graphNodeId") or "")
         target_id = str(row["referenceTargetArticle"].get("graphNodeId") or "")
+        basis_edge_id = str(basis.get("graphEdgeId") or "")
+        reference_kind = str(basis.get("referenceKind") or "")
+        if not basis_edge_id or not reference_kind:
+            raise ValueError("REFERENCES requires graphEdgeId and referenceKind")
+        if basis_edge_id in seen_basis_ids:
+            raise ValueError(f"duplicate REFERENCES basis edge: {basis_edge_id}")
+        seen_basis_ids.add(basis_edge_id)
+        pair_key = (source_id, target_id)
+        basis_ids_by_pair.setdefault(pair_key, set()).add(basis_edge_id)
+        pair_occurrences = occurrences_by_pair.setdefault(pair_key, [])
         source_article = articles[source_id]
         source_spans = {span.span_id: span.text for span in source_article.spans}
         citation_texts = basis.get("citationTexts")
@@ -608,6 +620,8 @@ def candidates_from_graph_and_sources(
             occurrences.append(
                 ReferenceOccurrence(
                     occurrence_hash=occurrence_hash,
+                    basis_edge_id=basis_edge_id,
+                    reference_kind=reference_kind,
                     citation_text=citation_text,
                     source_content_unit_id=str(basis.get("sourceContentUnitId") or ""),
                     source_start=raw_source_start,
@@ -619,6 +633,22 @@ def candidates_from_graph_and_sources(
                     source_span_ids=tuple(matching_span_ids),
                 )
             )
+        pair_occurrences.extend(occurrences)
+
+    candidates: list[RelationClassificationCandidate] = []
+    for (source_id, target_id), occurrences in occurrences_by_pair.items():
+        ordered_occurrences = tuple(
+            sorted(
+                occurrences,
+                key=lambda item: (
+                    item.basis_edge_id,
+                    item.source_content_unit_id,
+                    item.source_start,
+                    item.source_end,
+                    item.occurrence_hash,
+                ),
+            )
+        )
         candidates.append(
             RelationClassificationCandidate(
                 source_snapshot_id=source_snapshot_id,
@@ -627,13 +657,41 @@ def candidates_from_graph_and_sources(
                 provider=provider,
                 model=model,
                 reviewer_model=reviewer_model,
-                basis_edge_id=str(basis.get("graphEdgeId") or ""),
-                reference_source=source_article,
+                basis_edge_ids=tuple(sorted(basis_ids_by_pair[(source_id, target_id)])),
+                reference_source=articles[source_id],
                 reference_target=articles[target_id],
-                reference_occurrences=tuple(occurrences),
+                reference_occurrences=ordered_occurrences,
             )
         )
     return tuple(sorted(candidates, key=lambda item: item.candidate_key))
+
+
+def group_reference_rows_by_article_pair(
+    rows: list[dict[str, Any]],
+) -> tuple[tuple[dict[str, Any], ...], ...]:
+    """物理REFERENCESを有向Articleペア単位へ決定的に束ねる。"""
+
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    seen_basis_ids: set[str] = set()
+    for row in rows:
+        source_id = str(row["referenceSourceArticle"].get("graphNodeId") or "")
+        target_id = str(row["referenceTargetArticle"].get("graphNodeId") or "")
+        basis_id = str(row["basis"].get("graphEdgeId") or "")
+        if not source_id or not target_id or not basis_id:
+            raise ValueError("reference row requires Article endpoints and basis edge ID")
+        if basis_id in seen_basis_ids:
+            raise ValueError(f"duplicate REFERENCES basis edge: {basis_id}")
+        seen_basis_ids.add(basis_id)
+        grouped.setdefault((source_id, target_id), []).append(row)
+    return tuple(
+        tuple(
+            sorted(
+                grouped[pair],
+                key=lambda row: str(row["basis"].get("graphEdgeId") or ""),
+            )
+        )
+        for pair in sorted(grouped)
+    )
 
 
 def _recover_reference_occurrences(
@@ -739,8 +797,6 @@ def audit_classification_materialization(
             assertion.proposed_predicate,
         ):
             violations.append("assertion_dedupe_key_mismatch")
-        if assertion.basis_edge_id != candidate.basis_edge_id:
-            violations.append("assertion_basis_mismatch")
         occurrence = next(
             (
                 item
@@ -751,8 +807,11 @@ def audit_classification_materialization(
         )
         if occurrence is None:
             violations.append("assertion_reference_occurrence_unknown")
-        elif assertion.source_content_unit_id != occurrence.source_content_unit_id:
-            violations.append("assertion_source_content_unit_mismatch")
+        else:
+            if assertion.basis_edge_id != occurrence.basis_edge_id:
+                violations.append("assertion_basis_mismatch")
+            if assertion.source_content_unit_id != occurrence.source_content_unit_id:
+                violations.append("assertion_source_content_unit_mismatch")
         if assertion.source_snapshot_id != candidate.source_snapshot_id:
             violations.append("assertion_snapshot_mismatch")
         endpoint_ids = {
@@ -848,13 +907,17 @@ class LegalRelationClassificationJob:
             raise RuntimeError("classification graph schema version is not current")
         eligible_rows = self.graph.reference_candidates_for_classification(
             source_snapshot_id=str(source["sourceSnapshotId"]),
-            limit=None,
         )
-        rows = eligible_rows[:limit] if limit is not None else eligible_rows
+        eligible_groups = group_reference_rows_by_article_pair(eligible_rows)
+        selected_groups = (
+            eligible_groups[:limit] if limit is not None else eligible_groups
+        )
+        rows = [row for group in selected_groups for row in group]
         coverage = {
             "sourceReferenceCount": int(source["referenceCount"]),
-            "eligibleCandidateCount": len(eligible_rows),
-            "outOfScopeCandidateCount": len(eligible_rows) - len(rows),
+            "eligibleBasisEdgeCount": len(eligible_rows),
+            "eligibleCandidateCount": len(eligible_groups),
+            "outOfScopeCandidateCount": len(eligible_groups) - len(selected_groups),
             "excludedReferenceCount": max(
                 0, int(source["referenceCount"]) - len(eligible_rows)
             ),
@@ -1342,6 +1405,7 @@ __all__ = [
     "LegalRelationClassificationJob",
     "audit_classification_materialization",
     "candidates_from_graph_and_sources",
+    "group_reference_rows_by_article_pair",
     "parse_relation_classification_decision",
     "relation_classification_prompt",
     "relation_classification_repair_prompt",

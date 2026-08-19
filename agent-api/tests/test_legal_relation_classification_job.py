@@ -1,14 +1,20 @@
 import json
+from copy import deepcopy
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
 from app import legal_relation_classification_job as module
 from app.domains.legal.graph_schema import ProposedPredicate
-from app.domains.legal.relation_classification import PredicateFindings
+from app.domains.legal.relation_classification import (
+    PredicateFindings,
+    build_assertion_records,
+)
 from app.legal_relation_classification_job import (
     LegalRelationClassificationJob,
     audit_classification_materialization,
     candidates_from_graph_and_sources,
+    group_reference_rows_by_article_pair,
     parse_relation_classification_decision,
     parse_relation_meaning_response,
     relation_classification_prompt,
@@ -29,6 +35,7 @@ def _rows():
         {
             "basis": {
                 "graphEdgeId": "edge-reference-1",
+                "referenceKind": "parent_law_reference",
                 "sourceContentUnitId": SOURCE_ARTICLE_ID,
                 "sourceSnapshotId": SNAPSHOT_ID,
                 "graphSchemaVersion": 9,
@@ -86,6 +93,58 @@ def _candidates():
         model="gemma4:e4b",
         reviewer_model="gemma4:e4b",
     )
+
+
+def test_physical_edges_for_same_article_pair_form_one_candidate() -> None:
+    rows = _rows()
+    second = deepcopy(rows[0])
+    second["basis"]["graphEdgeId"] = "edge-reference-2"
+    second["basis"]["referenceKind"] = "definition"
+    rows.append(second)
+
+    groups = group_reference_rows_by_article_pair(rows)
+    candidates = candidates_from_graph_and_sources(
+        rows,
+        _sources(),
+        source_snapshot_id=SNAPSHOT_ID,
+        graph_schema_version=9,
+        provider="ollama",
+        model="gemma4:e4b",
+        reviewer_model="gemma4:e4b",
+    )
+
+    assert len(groups) == 1
+    assert len(groups[0]) == 2
+    assert len(candidates) == 1
+    assert candidates[0].basis_edge_ids == (
+        "edge-reference-1",
+        "edge-reference-2",
+    )
+    assert {
+        (occurrence.basis_edge_id, occurrence.reference_kind)
+        for occurrence in candidates[0].reference_occurrences
+    } == {
+        ("edge-reference-1", "parent_law_reference"),
+        ("edge-reference-2", "definition"),
+    }
+
+    selected_occurrence = candidates[0].reference_occurrences[1]
+    grounding = _grounding_payload(candidates[0])
+    grounding["assertions"][0]["referenceOccurrenceHash"] = (
+        selected_occurrence.occurrence_hash
+    )
+    decision = parse_relation_classification_decision(
+        candidates[0],
+        _meaning_assessments(candidates[0]),
+        grounding,
+    )
+    (assertion,) = build_assertion_records(
+        candidates[0],
+        decision,
+        classification_run_id="run-pair",
+        classified_at=datetime(2026, 8, 19, tzinfo=UTC),
+    )
+    assert assertion.basis_edge_id == "edge-reference-2"
 
 
 def _meaning_payload(candidate, predicate, finding="not_established"):

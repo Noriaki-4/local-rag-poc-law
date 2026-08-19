@@ -61,7 +61,8 @@ def main() -> int:
     parser.add_argument("--max-candidates-per-shard", type=int, default=5)
     parser.add_argument("--max-active-sessions", type=int, default=3)
     parser.add_argument(
-        "--skill-version", default="legal-relation-adjudicator-2026-08-19"
+        "--skill-version",
+        default="legal-relation-adjudicator-2026-08-19-pair-v2",
     )
     parser.add_argument("--reasoning-effort", default="high")
     args = parser.parse_args()

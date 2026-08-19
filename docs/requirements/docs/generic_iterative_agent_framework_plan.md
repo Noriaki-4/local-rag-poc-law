@@ -602,7 +602,10 @@ Assertionへ保存する。span IDは本文hashと組み合わせて解釈し、
 
 各RelationAssertionは`SUBJECT`と`OBJECT`を1本ずつ持ち、`proposedPredicate`は
 SUBJECTからOBJECTへ向く意味候補として解釈する。原文`REFERENCES`の向きとは独立であり、
-`basisEdgeId`で分類根拠となった原文Relationへ接続する。
+分類候補は同じ有向Articleペアを結ぶ全`basisEdgeIds`を持つ。各`referenceOccurrence`は自身の
+`basisEdgeId / referenceKind`を持ち、LLMがpredicateごとに選んだ`referenceOccurrenceHash`から、
+Programが対応する単一`basisEdgeId`をRelationAssertionへ写して原文Relationへ接続する。
+`referenceKind`は抽出上の手掛かりであり、ProgramもLLMも意味predicateの確定値として扱わない。
 
 `SUBJECT / OBJECT`は端点の役割であり、契約当事者や法律上の主体・客体を意味しない。
 RelationAssertionに汎用`status=unverified`を重複保存せず、Nodeとして存在すること自体を未確認候補とする。
@@ -640,8 +643,10 @@ LLM分類の完了を待たず終了する。その後の非同期jobは、決�
   反復しても、LLMは位置と局所文脈から出現を区別する
 - law family、authority type、snapshot・content hash
 
-複数targetを同じ判断へ束ねず、候補生成元のheuristic、旧`suggestedType / referenceKind`を正解候補として
-Promptへ出さない。Luna Workerは1候補の5 predicateを同じ呼出しで比較する。各predicateについて固有の
+異なるtargetを同じ判断へ束ねず、同じ物理方向のArticleペアを結ぶ全原文Relationだけを1候補へ束ねる。
+候補生成元のheuristicや旧`suggestedType`を正解候補としてPromptへ出さない。`referenceKind`は
+各occurrenceの抽出来歴として提示しても意味predicateの正解とは明記しない。Luna Workerは1候補の
+5 predicateを同じ呼出しで比較する。各predicateについて固有の
 二必要条件と`finding`を独立に返し、1件以上が`established`なら同じ回答内で
 `referenceOccurrenceHash / subjectArticleId / objectArticleId /
 referenceSourceSupportingSpanId / referenceTargetSupportingSpanId`も返す。例えば`INCORPORATES`は
@@ -682,7 +687,7 @@ Codexオペレーター実行では1つのWorker sessionへ最大5候補のshard
 候補ごとに1つの判定recordを返す。他候補の本文・判断を根拠へ流用しない。Reviewerも同じ5候補以下の
 shardとWorkerの候補別回答を別sessionで検査する。候補間の並列化はshardを独立したWorker / Reviewerペアへ
 割り当てることで行う。sessionの処理単位とは別に候補単位の保存checkpointを持ち、
-分類jobは`sourceSnapshotId + 参照元/参照先Article ID・content hash + basisEdgeId + 正規化した全reference occurrence hash + promptVersion + provider + model + reviewer model + graphSchemaVersion`で
+分類jobは`sourceSnapshotId + 参照元/参照先Article ID・content hash + 正規化した全basisEdgeIds + 正規化した全reference occurrence hash + promptVersion + provider + model + reviewer model + graphSchemaVersion`で
 再開・cache可能にする。
 この組を正規化してhash化した`candidateKey`を分類入力の冪等キーとする。1候補から複数predicateが返り得るため、
 RelationAssertionの物理重複キーは候補だけにせず、

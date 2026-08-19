@@ -164,7 +164,9 @@ def classify_eligible(
         reviewer_model=settings.relation_classifier_reviewer_model or None,
     )
     candidates_by_basis = {
-        candidate.basis_edge_id: candidate for candidate in candidates
+        basis_edge_id: candidate
+        for candidate in candidates
+        for basis_edge_id in candidate.basis_edge_ids
     }
     classifier = LegalRelationClassificationJob(
         graph,

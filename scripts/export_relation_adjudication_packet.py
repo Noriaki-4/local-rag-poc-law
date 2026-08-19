@@ -20,6 +20,7 @@ from app.domains.legal.adjudication_packets import (  # noqa: E402
 from app.graph_client import GraphClient  # noqa: E402
 from app.legal_relation_classification_job import (  # noqa: E402
     candidates_from_graph_and_sources,
+    group_reference_rows_by_article_pair,
 )
 from app.opensearch_client import OpenSearchClient  # noqa: E402
 
@@ -77,14 +78,16 @@ def main() -> int:
         source_state = graph.classification_source_state()
         rows = graph.reference_candidates_for_classification(
             source_snapshot_id=str(source_state["sourceSnapshotId"]),
-            limit=args.limit,
         )
     finally:
         graph.close()
+    eligible_groups = group_reference_rows_by_article_pair(rows)
+    selected_groups = eligible_groups[: args.limit] if args.limit else eligible_groups
+    selected_rows = [row for group in selected_groups for row in group]
     article_ids = list(
         dict.fromkeys(
             str(row[key].get("graphNodeId") or "")
-            for row in rows
+            for row in selected_rows
             for key in ("referenceSourceArticle", "referenceTargetArticle")
         )
     )
@@ -93,7 +96,7 @@ def main() -> int:
         user_clearance_level=3,
     )
     candidates = candidates_from_graph_and_sources(
-        rows,
+        selected_rows,
         sources,
         source_snapshot_id=str(source_state["sourceSnapshotId"]),
         graph_schema_version=int(source_state["graphSchemaVersion"]),
@@ -101,7 +104,7 @@ def main() -> int:
         model=args.worker_model,
         reviewer_model=args.reviewer_model,
     )
-    all_records = packet_records_from_candidates(rows, candidates)
+    all_records = packet_records_from_candidates(selected_rows, candidates)
     completed = _completed_candidate_keys(args.completed_jsonl)
     remaining = exclude_completed_packet_records(all_records, completed)
     _atomic_create(args.output, canonical_packet_jsonl(remaining))
@@ -111,6 +114,8 @@ def main() -> int:
                 "sourceSnapshotId": source_state["sourceSnapshotId"],
                 "graphSchemaVersion": source_state["graphSchemaVersion"],
                 "candidateCount": len(all_records),
+                "eligibleCandidateCount": len(eligible_groups),
+                "basisEdgeCount": len(selected_rows),
                 "completedCandidateCount": len(completed),
                 "exportedCandidateCount": len(remaining),
                 "expectedLabelsIncluded": False,

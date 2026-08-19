@@ -4,7 +4,8 @@
 入力の意味:
 - referenceSourceArticleはREFERENCESを書いたArticleです。
 - referenceTargetArticleはREFERENCESが指すArticleです。
-- referenceOccurrencesは今回分類した原文参照です。
+- basisEdgeIdsは、このArticleペアを結ぶ物理REFERENCESの既知IDです。
+- referenceOccurrencesは今回分類した原文参照で、各出現のbasisEdgeIdとreferenceKindは物理REFERENCESとの対応を示します。
 - 同じcitationTextが複数ある場合、sourceStart/sourceEndとsourcePrefix/sourceSuffixで、成立判断に使った出現のreferenceOccurrenceHashを選んでください。
 - establishedPredicatesだけが成立済みの意味関係です。
 
@@ -18,7 +19,7 @@
 出力規則:
 - proposedPredicateはestablishedPredicatesから選び、各predicateをちょうど1回返してください。
 - subjectArticleIdとobjectArticleIdは提示された二つのArticle IDから選び、同じIDを両方に使わないでください。
-- referenceOccurrenceHashは判断対象となった既知の値をそのまま返してください。
+- referenceOccurrenceHashは、そのpredicateを直接支える出現の既知の値をそのまま返してください。Programは選ばれた出現に対応するbasisEdgeIdだけを保存します。
 - referenceSourceSupportingSpanIdは、選んだreferenceOccurrenceHashのsourceSpanIdsから選んでください。
 - referenceTargetSupportingSpanIdは、referenceTargetArticleのspansから選んでください。
 - SUBJECT / OBJECTの向きに応じてspan名を入れ替えず、上記の物理方向のまま返してください。

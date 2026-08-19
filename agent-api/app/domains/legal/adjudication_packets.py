@@ -21,7 +21,7 @@ def packet_records_from_candidates(
     rows: Iterable[dict[str, Any]],
     candidates: Iterable[RelationClassificationCandidate],
 ) -> tuple[RelationAdjudicationCandidatePacket, ...]:
-    """Graphのreference kindを、同じbasis edgeの候補へ意味判断なしで結合する。"""
+    """Graph edgeとArticleペア候補のOccurrence対応を意味判断なしで検証する。"""
 
     kinds_by_basis: dict[str, str] = {}
     for row in rows:
@@ -34,20 +34,23 @@ def packet_records_from_candidates(
             raise ValueError(f"duplicate Graph basis edge: {basis_edge_id}")
         kinds_by_basis[basis_edge_id] = reference_kind
 
-    candidates_by_basis: dict[str, RelationClassificationCandidate] = {}
+    candidate_basis_ids: set[str] = set()
+    candidate_values: list[RelationClassificationCandidate] = []
     for candidate in candidates:
-        if candidate.basis_edge_id in candidates_by_basis:
-            raise ValueError(f"duplicate candidate basis edge: {candidate.basis_edge_id}")
-        candidates_by_basis[candidate.basis_edge_id] = candidate
-    if set(kinds_by_basis) != set(candidates_by_basis):
+        overlap = candidate_basis_ids.intersection(candidate.basis_edge_ids)
+        if overlap:
+            raise ValueError(f"basis edge appears in multiple candidates: {sorted(overlap)}")
+        candidate_basis_ids.update(candidate.basis_edge_ids)
+        candidate_values.append(candidate)
+        for occurrence in candidate.reference_occurrences:
+            if kinds_by_basis.get(occurrence.basis_edge_id) != occurrence.reference_kind:
+                raise ValueError("candidate occurrence reference kind does not match Graph")
+    if set(kinds_by_basis) != candidate_basis_ids:
         raise ValueError("Graph rows and candidates must cover the same basis edges")
 
     records = [
-        RelationAdjudicationCandidatePacket.from_candidate(
-            candidate,
-            reference_kind=kinds_by_basis[candidate.basis_edge_id],
-        )
-        for candidate in candidates_by_basis.values()
+        RelationAdjudicationCandidatePacket.from_candidate(candidate)
+        for candidate in candidate_values
     ]
     return tuple(sorted(records, key=lambda item: item.candidate_key))
 
@@ -91,7 +94,7 @@ def plan_adjudication_shards(
     source_packet_bytes: bytes,
     max_candidates_per_shard: int = 5,
     max_active_sessions: int = 3,
-    skill_version: str = "legal-relation-adjudicator-2026-08-19",
+    skill_version: str = "legal-relation-adjudicator-2026-08-19-pair-v2",
     reasoning_effort: str = "high",
 ) -> tuple[RelationAdjudicationManifest, dict[str, bytes]]:
     """固定件数上限でshardを作り、Pydantic manifestとbytesを返す。"""
@@ -104,7 +107,9 @@ def plan_adjudication_shards(
     if not ordered:
         raise ValueError("adjudication packet is empty")
     candidate_keys = [item.candidate_key for item in ordered]
-    basis_edge_ids = [item.basis_edge_id for item in ordered]
+    basis_edge_ids = [
+        basis_edge_id for item in ordered for basis_edge_id in item.basis_edge_ids
+    ]
     if len(candidate_keys) != len(set(candidate_keys)):
         raise ValueError("candidate keys must be unique")
     if len(basis_edge_ids) != len(set(basis_edge_ids)):
@@ -145,7 +150,13 @@ def plan_adjudication_shards(
                 input_characters=len(data.decode("utf-8")),
                 sha256=hashlib.sha256(data).hexdigest(),
                 candidate_keys=tuple(item.candidate_key for item in shard),
-                basis_edge_ids=tuple(item.basis_edge_id for item in shard),
+                basis_edge_ids=tuple(
+                    sorted(
+                        basis_edge_id
+                        for item in shard
+                        for basis_edge_id in item.basis_edge_ids
+                    )
+                ),
             )
         )
 
@@ -155,7 +166,7 @@ def plan_adjudication_shards(
     worker_model = next(iter(worker_models))
     reviewer_model = next(iter(reviewer_models))
     manifest = RelationAdjudicationManifest(
-        schema_version=1,
+        schema_version=2,
         source_packet=str(source_packet.resolve()),
         source_packet_sha256=hashlib.sha256(source_packet_bytes).hexdigest(),
         source_snapshot_id=source_snapshot_id,

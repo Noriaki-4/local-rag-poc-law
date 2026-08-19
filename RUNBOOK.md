@@ -216,9 +216,8 @@ OpenSearch index と Neo4j graph を作り直す。レスポンスの`sourceSnap
 完了・監査済みRunだけを`published`にし、検索はCase開始時にpublish済みRunを固定する。
 
 現時点では、新しい型、冪等キー、Neo4j Constraint、候補単位checkpoint、再開可能CLI、
-Run publish監査まで実装済みである。保存済みe-Gov XMLに対する新しい参照構造の
-shadow検証は`94/94`だが、OpenSearch / Neo4jへの再構築は全件分類用IF完成後に一度だけ行う。
-新5 predicateの全件Runとpublishはまだ実行していない。
+Run publish監査まで実装済みである。保存済みe-Gov XMLからOpenSearch / Neo4jを再構築し、
+新しい参照構造の監査は`94/94`である。新5 predicateの全件Runとpublishはまだ実行していない。
 旧`scripts/classify_graph_relations.py --apply`はschema version 7の
 既存`RelationAssertion`を更新する移行用処理なので、schema version 9の再seed後には実行しない。
 
@@ -245,7 +244,8 @@ reasoning effortを変えただけでも判定条件が変わったものとし�
 
 live indexからLuna用のlabel-free packetをexportし、最大5件のshardへ分割する。
 `candidateKey`にはsnapshot、schema、prompt、Worker / Reviewer model、両Article hash、
-参照出現hashが含まれるため、一時的なモデル名でexportしたpacketを本番Runへ流用しない。
+同じ有向Articleペアを結ぶ全`basisEdgeIds`と参照出現hashが含まれるため、一時的なモデル名や
+物理Relationの一部だけでexportしたpacketを本番Runへ流用しない。
 
 ```bash
 python3 scripts/export_relation_adjudication_packet.py \
@@ -263,8 +263,11 @@ python3 scripts/shard_relation_adjudication_packet.py \
 `--completed-jsonl`でexportへ渡し、同じ候補集合の完了済みkeyだけを除外する。
 別snapshotや別modelのkeyが混じった場合は再開とせず失敗する。
 
-分類単位はArticleペア全体に存在し得る任意の関係ではなく、
-候補の`sourceText` / `sourceTexts`が示す参照箇所群である。Article本文はその文脈として使う。
+分類単位は1本の物理`REFERENCES`ではなく、同じ物理方向を持つ1組のArticleペアである。
+そのペアを結ぶ全`basisEdgeIds`と全`referenceOccurrences`を同じ候補へ含め、Article本文を文脈として使う。
+各occurrenceは対応する`basisEdgeId / referenceKind`を持つ。`referenceKind`は抽出上の手掛かりであり、
+意味predicateの正解として扱わない。成立predicateごとにLunaが根拠occurrenceを選び、Programは
+その既知hashから保存対象のbasis edgeを一意に復元する。
 OpenSearchの子チャンクが親チャンク本文を再掲する場合は、`parentContentUnitId`で
 直接の親子と確認できた先頭部分だけを除き、重複のないArticle全文を復元する。
 Article本文は決定的なspan ID付きでLLMへ渡し、LLMは判断根拠とするspan IDを選ぶ。

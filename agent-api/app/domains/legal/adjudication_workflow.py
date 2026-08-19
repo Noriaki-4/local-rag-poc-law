@@ -25,18 +25,13 @@ def _index_by_candidate_key(
     label: str,
 ) -> dict[str, RecordT]:
     indexed: dict[str, RecordT] = {}
-    basis_edge_ids: set[str] = set()
     for record in records:
         candidate_key = str(getattr(record, "candidate_key", ""))
-        basis_edge_id = str(getattr(record, "basis_edge_id", ""))
-        if not candidate_key or not basis_edge_id:
+        if not candidate_key:
             raise ValueError(f"{label} record identity is missing")
         if candidate_key in indexed:
             raise ValueError(f"duplicate {label} candidate key: {candidate_key}")
-        if basis_edge_id in basis_edge_ids:
-            raise ValueError(f"duplicate {label} basis edge ID: {basis_edge_id}")
         indexed[candidate_key] = record
-        basis_edge_ids.add(basis_edge_id)
     return indexed
 
 
@@ -70,7 +65,6 @@ def prepare_adjudication_revisions(
         revisions.append(
             AdjudicationRevisionPacket(
                 candidate_key=candidate_key,
-                basis_edge_id=packet.basis_edge_id,
                 original_candidate=packet,
                 previous_decision=worker,
                 review_feedback=review,
@@ -121,7 +115,6 @@ def merge_once_revised_adjudications(
     approved = [
         ApprovedAdjudicationRecord(
             candidate_key=candidate_key,
-            basis_edge_id=packet_by_key[candidate_key].basis_edge_id,
             original_candidate=packet_by_key[candidate_key],
             worker_decision=initial_worker_by_key[candidate_key],
             approval_review=initial_review_by_key[candidate_key],
@@ -141,7 +134,6 @@ def merge_once_revised_adjudications(
             approved.append(
                 ApprovedAdjudicationRecord(
                     candidate_key=candidate_key,
-                    basis_edge_id=packet.basis_edge_id,
                     original_candidate=packet,
                     worker_decision=revised_worker,
                     approval_review=final_review,
@@ -154,7 +146,6 @@ def merge_once_revised_adjudications(
         unresolved.append(
             UnresolvedAdjudicationRecord(
                 candidate_key=candidate_key,
-                basis_edge_id=packet.basis_edge_id,
                 reason="request_change_after_single_revision",
                 original_candidate=packet,
                 initial_worker_decision=initial_worker_by_key[candidate_key],

@@ -42,8 +42,8 @@ Gate 5でOpenSearch / Neo4jを実際に再構築した後、同じ`94/94`を再�
 ## Gate 2: export・shard IFを完成させる
 
 - [x] 同じsnapshotのNeo4j `REFERENCES`とOpenSearch Article全文から候補をexportできる
-- [x] 各候補にcandidate key、basis edge、両Article全文、全参照出現、offset、span、content hashがある
-- [x] 1つのcandidate keyとbasis edgeが複数shardへ重複しない
+- [x] 各候補にcandidate key、全basis edge、両Article全文、全参照出現、offset、span、content hashがある
+- [x] 1つのcandidate keyと各basis edgeが複数shardへ重複しない
 - [x] shardは決定的な順序で最大5件、最後だけ5件未満になる
 - [x] manifestの候補集合と全shardの和集合が一致する
 - [x] 中断後に完了済み候補を除外して再開できる
@@ -102,7 +102,7 @@ Worker JSONLはPydantic契約を通らず、Assertionへ変換できない。
 - [x] 両方の`sourceSnapshotId`、Article ID、revision、content hashが対応する
 - [x] Graph schema inventoryに旧`MENTIONS / APPLIED_BY`がない
 - [x] 代表94件の構造評価を再実行して`94/94`を確認した
-- [ ] 再構築後の正式な候補総数とshard数を記録した
+- [x] 再構築後の正式な候補総数とshard数を記録した
 
 合格条件: 不一致snapshotを公開せず、再構築後の構造監査がすべて成功する。
 
@@ -112,10 +112,14 @@ Worker JSONLはPydantic契約を通らず、Assertionへ変換できない。
 共通`sourceSnapshotId=snapshot-1e9f9f5c1ac849f7ddffdd7480f80c9f771db7c00efea06a612fc286f8c3d27e`、
 schema version 9、Graph監査違反0、構造評価`94/94`だった。
 
-ただし現exportは`REFERENCES`出現16,972件をそのまま16,972候補・3,395 shardへ投影していた。
-同一Articleペアは14,460組（最大31出現）であり、「Articleペアをまとめ、全参照出現を文脈として渡す」
-契約と不一致である。`basisEdgeId`単数契約を、候補内の複数basis edgeと各occurrenceの対応を表す契約へ
-修正し、再exportするまで正式候補総数とは扱わない。誤ったpacketは全件Lunaへ渡していない。
+旧exportは`REFERENCES`出現16,972件をそのまま16,972候補へ投影する不具合があった。
+2026-08-19に候補単位を有向Articleペアへ修正し、候補の`basisEdgeIds`と各
+`referenceOccurrence.basisEdgeId / referenceKind`で物理Relationとの対応を保持する契約へ変更した。
+再export結果は14,460候補、16,972 basis edge、最大5候補の2,892 shardである。
+複数basis edgeを持つ候補は1,558件、1候補の最大basis edge数は31件だった。
+manifest schemaは2、promptは`legal-relation-5predicate-v20-pair`、skillは
+`legal-relation-adjudicator-2026-08-19-pair-v2`で固定した。全basis edgeはmanifestで一度ずつ被覆され、
+最大shard入力は228,858文字だった。誤った旧packetは全件Lunaへ渡していない。
 
 ## Gate 6: 代表100件を最大3並列で再評価する
 

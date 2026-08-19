@@ -2,5 +2,6 @@
 __pycache__/
 *.py[cod]
 eval-results/*.jsonl
+eval-results/relation-full/
 .env
 datasets/

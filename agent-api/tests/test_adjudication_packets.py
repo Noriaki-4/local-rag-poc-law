@@ -48,7 +48,7 @@ def _candidate(index: int) -> RelationClassificationCandidate:
         provider="codex_subscription",
         model="gpt-5.6-luna",
         reviewer_model="gpt-5.6-luna",
-        basis_edge_id=f"edge-{index:03d}",
+        basis_edge_ids=(f"edge-{index:03d}",),
         reference_source=ClassificationArticle(
             article_id=source_id,
             document_id="law-order",
@@ -76,6 +76,8 @@ def _candidate(index: int) -> RelationClassificationCandidate:
         reference_occurrences=(
             ReferenceOccurrence(
                 occurrence_hash=f"occurrence-{index}",
+                basis_edge_id=f"edge-{index:03d}",
+                reference_kind="parent_law_reference",
                 citation_text=citation,
                 source_content_unit_id=source_id,
                 source_start=0,
@@ -108,7 +110,6 @@ def _worker(candidate: RelationClassificationCandidate) -> WorkerAdjudicationRec
     )
     return WorkerAdjudicationRecord(
         candidate_key=candidate.candidate_key,
-        basis_edge_id=candidate.basis_edge_id,
         adjudication_status="accepted",
         predicate_assessments=AdjudicationPredicateAssessments(
             implements=negative,
@@ -135,7 +136,6 @@ def _established_worker(
     )
     return WorkerAdjudicationRecord(
         candidate_key=candidate.candidate_key,
-        basis_edge_id=candidate.basis_edge_id,
         adjudication_status="accepted",
         predicate_assessments=AdjudicationPredicateAssessments(
             implements=positive,
@@ -185,7 +185,6 @@ def _review(
     )
     return ReviewerRecord(
         candidate_key=candidate.candidate_key,
-        basis_edge_id=candidate.basis_edge_id,
         review_status="request_change" if request_change else "approve",
         predicate_checks=PredicateReviewChecks(
             implements=(
@@ -223,7 +222,6 @@ def _approved(
 ) -> ApprovedAdjudicationRecord:
     return ApprovedAdjudicationRecord(
         candidate_key=candidate.candidate_key,
-        basis_edge_id=candidate.basis_edge_id,
         original_candidate=packet,
         worker_decision=worker,
         approval_review=_review(candidate, worker, request_change=False),
@@ -232,9 +230,7 @@ def _approved(
 
 
 def test_packet_candidate_key_is_recomputed_from_complete_input() -> None:
-    record = RelationAdjudicationCandidatePacket.from_candidate(
-        _candidate(1), reference_kind="parent_law_reference"
-    )
+    record = RelationAdjudicationCandidatePacket.from_candidate(_candidate(1))
     payload = record.model_dump(by_alias=True, mode="json")
     payload["candidateKey"] = "0" * 64
 
@@ -325,9 +321,7 @@ def test_review_routes_only_request_change_candidate_to_one_revision() -> None:
 
 def test_final_review_approves_revision_or_separates_unresolved() -> None:
     candidate = _candidate(1)
-    packet = RelationAdjudicationCandidatePacket.from_candidate(
-        candidate, reference_kind="parent_law_reference"
-    )
+    packet = RelationAdjudicationCandidatePacket.from_candidate(candidate)
     initial_worker = _worker(candidate)
     initial_review = _review(candidate, initial_worker, request_change=True)
     revised_worker = _worker(candidate)
@@ -358,9 +352,7 @@ def test_final_review_approves_revision_or_separates_unresolved() -> None:
 
 def test_revision_sets_must_exactly_match_reviewer_requests() -> None:
     candidate = _candidate(1)
-    packet = RelationAdjudicationCandidatePacket.from_candidate(
-        candidate, reference_kind="parent_law_reference"
-    )
+    packet = RelationAdjudicationCandidatePacket.from_candidate(candidate)
     worker = _worker(candidate)
     review = _review(candidate, worker, request_change=True)
 
@@ -384,7 +376,7 @@ def test_manifest_builds_luna_classification_run_and_import_records(tmp_path) ->
     assert run.provider == "codex_subscription"
     assert run.model == "gpt-5.6-luna"
     assert run.reviewer_model == "gpt-5.6-luna"
-    assert run.skill_version == "legal-relation-adjudicator-2026-08-19"
+    assert run.skill_version == "legal-relation-adjudicator-2026-08-19-pair-v2"
     assert run.reasoning_effort == "high"
     assert run.candidates_per_model_call == 5
     assert run.input_count == 2
@@ -422,9 +414,7 @@ def test_manifest_builds_luna_classification_run_and_import_records(tmp_path) ->
 
 def test_import_rejects_manifest_with_different_reasoning_effort(tmp_path) -> None:
     candidate = _candidate(0)
-    packet = RelationAdjudicationCandidatePacket.from_candidate(
-        candidate, reference_kind="parent_law_reference"
-    )
+    packet = RelationAdjudicationCandidatePacket.from_candidate(candidate)
     data = canonical_packet_jsonl((packet,))
     manifest, _ = plan_adjudication_shards(
         (packet,),
@@ -497,9 +487,7 @@ class _ImportGraph:
 
 def test_importer_dry_run_is_read_only_and_reimport_is_idempotent(tmp_path) -> None:
     candidate = _candidate(0)
-    packet = RelationAdjudicationCandidatePacket.from_candidate(
-        candidate, reference_kind="parent_law_reference"
-    )
+    packet = RelationAdjudicationCandidatePacket.from_candidate(candidate)
     packet_bytes = canonical_packet_jsonl((packet,))
     manifest, _ = plan_adjudication_shards(
         (packet,),
