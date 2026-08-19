@@ -1896,6 +1896,12 @@ def _current_named_authority_article_occurrences(
     )
     occurrences: list[tuple[str, str, int, int, str]] = []
     for match in pattern.finditer(text):
+        if _named_authority_has_historical_revision_modifier(
+            text,
+            match.start(),
+            authority_title=match.group(0)[: match.start(1) - match.start()],
+        ):
+            continue
         parts = [match.group(2), *match.group(3).removeprefix("の").split("の")]
         numbers = [_japanese_number_to_int(part) for part in parts if part]
         if not numbers or any(number is None for number in numbers):
@@ -1957,8 +1963,20 @@ def _reference_uses_external_authority_scope(
 ) -> bool:
     """明示された別法令名のscope内にある条番号かを判定する。"""
 
-    title = _nearest_named_authority_title(text, match)
-    if title is not None:
+    anchor = _nearest_named_authority_anchor(text, match)
+    if anchor is not None:
+        title = anchor.group("title")
+        if _named_authority_has_historical_revision_modifier(
+            text,
+            max(
+                text.rfind(delimiter, 0, match.start())
+                for delimiter in ("。", "\n", "；")
+            )
+            + 1
+            + anchor.start(),
+            authority_title=title,
+        ):
+            return True
         current_titles = tuple(
             item for item in (document_title, *current_revision_aliases) if item
         )
@@ -1996,13 +2014,21 @@ def _nearest_named_authority_title(
     text: str,
     match: re.Match[str],
 ) -> str | None:
+    anchor = _nearest_named_authority_anchor(text, match)
+    return anchor.group("title") if anchor is not None else None
+
+
+def _nearest_named_authority_anchor(
+    text: str,
+    match: re.Match[str],
+) -> re.Match[str] | None:
     sentence_start = max(
         text.rfind(delimiter, 0, match.start()) for delimiter in ("。", "\n", "；")
     )
     prefix = text[sentence_start + 1 : match.start()]
     direct_anchor = DIRECT_NAMED_AUTHORITY_PATTERN.search(prefix)
     if direct_anchor is not None:
-        return direct_anchor.group("title")
+        return direct_anchor
     anchors = list(NAMED_AUTHORITY_ARTICLE_PATTERN.finditer(prefix))
     for anchor in reversed(anchors):
         initial_reference = ARTICLE_REFERENCE_BODY_PATTERN.match(
@@ -2012,8 +2038,22 @@ def _nearest_named_authority_title(
             continue
         bridge = prefix[initial_reference.end() :]
         if bridge and _is_article_list_chain_bridge(bridge):
-            return anchor.group("title")
+            return anchor
     return None
+
+
+def _named_authority_has_historical_revision_modifier(
+    text: str,
+    authority_start: int,
+    *,
+    authority_title: str = "",
+) -> bool:
+    """明示法令名が「改正前の」で修飾される場合は現行Articleへ接続しない。"""
+
+    if authority_title.startswith(("改正前の", "改正前における")):
+        return True
+    prefix = text[max(0, authority_start - 12) : authority_start].rstrip()
+    return prefix.endswith(("改正前の", "改正前における"))
 
 
 def _incorporation_edges(

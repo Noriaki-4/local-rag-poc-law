@@ -108,32 +108,60 @@ Worker JSONLはPydantic契約を通らず、Assertionへ変換できない。
 
 2026-08-19に保存manifest
 `egov-law-corpus-4458d52586f9a2a4233e05ffc7e06f07c9c5429a4916043ad233908a4d911e1c`
-から再構築した。結果はOpenSearch 16,459文書、Neo4j 17,254 node / 34,214 edge、
+から再構築した。結果はOpenSearch 16,459文書、Neo4j 17,254 node / 34,206 edge、
 共通`sourceSnapshotId=snapshot-1e9f9f5c1ac849f7ddffdd7480f80c9f771db7c00efea06a612fc286f8c3d27e`、
 schema version 9、Graph監査違反0、構造評価`94/94`だった。
 
-旧exportは`REFERENCES`出現16,972件をそのまま16,972候補へ投影する不具合があった。
+初回再構築後の差分監査で、`改正前の<法令名>第N条`を現行Articleへ接続する誤りを検出した。
+明示法令名が`改正前の / 改正前における`で修飾される参照は、旧版Articleを一意に解決できない限り
+現行Articleへ接続しない。保存済みsnapshotから再seedした結果、誤った8 occurrenceを除外し、
+`REFERENCES`は16,964件となった。構造評価は引き続き`94/94`、Graph監査違反は0である。
+
+旧exportは`REFERENCES`出現をそのまま同数の候補へ投影する不具合があった。
 2026-08-19に候補単位を有向Articleペアへ修正し、候補の`basisEdgeIds`と各
 `referenceOccurrence.basisEdgeId / referenceKind`で物理Relationとの対応を保持する契約へ変更した。
-再export結果は14,460候補、16,972 basis edge、最大5候補の2,892 shardである。
-複数basis edgeを持つ候補は1,558件、1候補の最大basis edge数は31件だった。
+旧版Article誤接続の除外後に再exportした結果は14,454候補、16,964 basis edge、
+最大5候補の2,891 shardである。
+複数basis edgeを持つ候補は1,556件、1候補の最大basis edge数は31件だった。
 manifest schemaは2、promptは`legal-relation-5predicate-v20-pair`、skillは
 `legal-relation-adjudicator-2026-08-19-pair-v2`で固定した。全basis edgeはmanifestで一度ずつ被覆され、
-最大shard入力は228,858文字だった。誤った旧packetは全件Lunaへ渡していない。
+最大shard入力は210,366文字だった。誤った旧packetは全件Lunaへ渡していない。
 
 ## Gate 6: 代表100件を最大3並列で再評価する
 
-- [ ] goldをWorker・Reviewerへ渡していない
-- [ ] 新しいWorker / Reviewer sessionを使い、過去評価のcontextを引き継いでいない
-- [ ] 1 shard最大5候補、同時に実行中のsession最大3を守った
-- [ ] 構造レーン94件が`94/94`である
+- [x] goldをWorker・Reviewerへ渡していない
+- [x] 新しいWorker / Reviewer sessionを使い、過去評価のcontextを引き継いでいない
+- [x] 1 shard最大5候補、同時に実行中のsession最大3を守った
+- [x] 構造レーン94件が`94/94`である
 - [ ] 意味分類可能な全候補でstatus・5 predicate・SUBJECT / OBJECT・groundingが正解と一致する
 - [ ] ガイドレーン6件が`6/6`である
-- [ ] final Review後の`unresolved`が0件である
-- [ ] 全JSONLがGate 3・4のIF検証を通る
+- [x] final Review後のworkflow上の`unresolved`が0件である
+- [x] 全JSONLがGate 3・4のIF検証を通る
 - [ ] Worker / Reviewer / revision別の時間、差戻し率、context使用量を記録した
 
 合格条件: 上記をすべて満たす。1件でも意味不一致またはIF違反があれば全件実行を開始せず、原因を修正して誤答対象だけを再確認する。goldへ合わせる個別例外は追加しない。
+
+### Gate 6初回実行の停止記録（2026-08-19）
+
+構造的に有効な73 Articleペアを15 shardへ分け、Luna `high`のWorker / Reviewerを最大3 sessionで
+ブラインド実行した。Reviewerは5候補を1回だけ差し戻し、同じWorkerとReviewerで再判定した。
+workflow上の最終`unresolved`は0、statusは`73/73`一致、5 predicateは`355/365`一致、
+候補単位のpredicate完全一致は`63/73`だったためGate 6を停止した。
+
+差分を人間が再監査した結果、初回スコアには次が混在していた。
+
+- Lunaの意味誤判定: 参照出現と意味役割の結び付け不足、読替表・明示的不適用の見落とし
+- edge単位goldからArticleペアgoldへ移した際の教師データ誤り
+- 複数の直接根拠spanが成立し得る候補を、単一spanとの完全一致だけで不正解にする採点不備
+
+対処は、特定Articleの正解をPromptへ加えることではない。各predicateについて、選択した
+`referenceOccurrence`が両端の意味役割を実際に橋渡しすることをWorker / Reviewerへ要求する。
+goldはCodexによる本文再監査で修正し、複数の妥当なgroundingは人が明示した許容集合として保存する。
+Programは許容集合とのID一致だけを検査し、新しい意味や許容spanを推測しない。
+
+`adjudicationStatus=needs_resolution`は「入力Articleペアを意味分類できない」というLLM判断であり、
+final Review後のworkflow `unresolved`は「差戻し1回後もReviewerが承認しなかった」という実行結果である。
+両者を同じ0件条件として扱わない。
 
 ## Gate 7: 全件分類を最大3並列で実行する
 

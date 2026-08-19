@@ -1,0 +1,347 @@
+{
+  "candidateCount": 73,
+  "actualCount": 73,
+  "missingCandidateKeys": [],
+  "unexpectedCandidateKeys": [],
+  "exactCorrectCount": 57,
+  "statusCorrectCount": 73,
+  "predicateFindingCorrectCount": 355,
+  "predicateFindingTotal": 365,
+  "directionCorrectCount": 55,
+  "groundingCorrectCount": 46,
+  "expectedAssertionCount": 61,
+  "mismatches": [
+    {
+      "candidateKey": "34c0dbeb523fa2bf6512c420f2cef750761e0b96929b239a64d7ed8d3a0a8902",
+      "predicates": {
+        "USES_DEFINITION": {
+          "expected": "established",
+          "actual": "not_established"
+        }
+      },
+      "assertions": {
+        "USES_DEFINITION": {
+          "actual": null
+        }
+      }
+    },
+    {
+      "candidateKey": "3bd9883e3e9a89d2f8d168229704012ae94b85820093023c316c8f87a1441108",
+      "assertions": {
+        "USES_DEFINITION": {
+          "expected": {
+            "proposedPredicate": "USES_DEFINITION",
+            "referenceOccurrenceHash": "0321a5274dc54e4b9b8bc5e09277c24775e6c9da9003193edc7a43729b638b88",
+            "subjectArticleId": "law-323AC0000000025-article-35",
+            "objectArticleId": "law-323AC0000000025-article-2",
+            "referenceSourceSupportingSpanId": "law-323AC0000000025-article-35::span-9",
+            "referenceTargetSupportingSpanId": "law-323AC0000000025-article-2::span-17"
+          },
+          "actual": {
+            "proposedPredicate": "USES_DEFINITION",
+            "referenceOccurrenceHash": "0321a5274dc54e4b9b8bc5e09277c24775e6c9da9003193edc7a43729b638b88",
+            "subjectArticleId": "law-323AC0000000025-article-35",
+            "objectArticleId": "law-323AC0000000025-article-2",
+            "referenceSourceSupportingSpanId": "law-323AC0000000025-article-35::span-9",
+            "referenceTargetSupportingSpanId": "law-323AC0000000025-article-2::span-1"
+          }
+        }
+      }
+    },
+    {
+      "candidateKey": "4dd33ad257f054ffca71fd2503e98c6280f1107f6069437cba5d34077c095325",
+      "predicates": {
+        "IMPLEMENTS": {
+          "expected": "not_established",
+          "actual": "established"
+        }
+      },
+      "assertions": {
+        "unexpectedPredicates": [
+          "IMPLEMENTS"
+        ]
+      }
+    },
+    {
+      "candidateKey": "63d6258070d322128fd21e29a06453f326689e782945f095b5ad27643aa1a72f",
+      "assertions": {
+        "INCORPORATES": {
+          "expected": {
+            "proposedPredicate": "INCORPORATES",
+            "referenceOccurrenceHash": "735ff3d0cb3e2bc3e6daa1a0f03290d58ffdbc7b29fb0f9547085c4fa4449835",
+            "subjectArticleId": "law-405M50000040014-suppl-86-article-28",
+            "objectArticleId": "law-405M50000040014-article-11",
+            "referenceSourceSupportingSpanId": "law-405M50000040014-suppl-86-article-28::span-2",
+            "referenceTargetSupportingSpanId": "law-405M50000040014-article-11::span-57"
+          },
+          "actual": {
+            "proposedPredicate": "INCORPORATES",
+            "referenceOccurrenceHash": "735ff3d0cb3e2bc3e6daa1a0f03290d58ffdbc7b29fb0f9547085c4fa4449835",
+            "subjectArticleId": "law-405M50000040014-suppl-86-article-28",
+            "objectArticleId": "law-405M50000040014-article-11",
+            "referenceSourceSupportingSpanId": "law-405M50000040014-suppl-86-article-28::span-2",
+            "referenceTargetSupportingSpanId": "law-405M50000040014-article-11::span-61"
+          }
+        }
+      }
+    },
+    {
+      "candidateKey": "701a15b971410faa38cad407a5a886aaece1487c16b648c0f39743e11bfc10ef",
+      "predicates": {
+        "USES_DEFINITION": {
+          "expected": "established",
+          "actual": "not_established"
+        }
+      },
+      "assertions": {
+        "INCORPORATES": {
+          "expected": {
+            "proposedPredicate": "INCORPORATES",
+            "referenceOccurrenceHash": "865595e909fe811aeba023636139e992c4cf668ddb390aa66a5edf69b70096d8",
+            "subjectArticleId": "law-336M50000100001-suppl-381-article-2",
+            "objectArticleId": "law-336M50000100001-article-140",
+            "referenceSourceSupportingSpanId": "law-336M50000100001-suppl-381-article-2::span-20",
+            "referenceTargetSupportingSpanId": "law-336M50000100001-article-140::span-7"
+          },
+          "actual": {
+            "proposedPredicate": "INCORPORATES",
+            "referenceOccurrenceHash": "865595e909fe811aeba023636139e992c4cf668ddb390aa66a5edf69b70096d8",
+            "subjectArticleId": "law-336M50000100001-suppl-381-article-2",
+            "objectArticleId": "law-336M50000100001-article-140",
+            "referenceSourceSupportingSpanId": "law-336M50000100001-suppl-381-article-2::span-20",
+            "referenceTargetSupportingSpanId": "law-336M50000100001-article-140::span-6"
+          }
+        },
+        "USES_DEFINITION": {
+          "actual": null
+        }
+      }
+    },
+    {
+      "candidateKey": "8d2806ff7cce3e47d55b1e05a21d70ed14a7f01ac3ed3b8038a9da9eaab80fe5",
+      "predicates": {
+        "USES_DEFINITION": {
+          "expected": "not_established",
+          "actual": "established"
+        }
+      },
+      "assertions": {
+        "unexpectedPredicates": [
+          "USES_DEFINITION"
+        ]
+      }
+    },
+    {
+      "candidateKey": "8dcc5fb94052e14a28647ca76c4d12c9ee10e55b27c7019a55e2ac354e8bcb5b",
+      "predicates": {
+        "OVERRIDES": {
+          "expected": "established",
+          "actual": "not_established"
+        }
+      },
+      "assertions": {
+        "OVERRIDES": {
+          "actual": null
+        }
+      }
+    },
+    {
+      "candidateKey": "914d8fffe3afe536b1451d1af404b7e7b14942c2d55da308b39603a3b1897d19",
+      "assertions": {
+        "INCORPORATES": {
+          "expected": {
+            "proposedPredicate": "INCORPORATES",
+            "referenceOccurrenceHash": "9077da217e83b9854b241ae49c1dac6b8f4220d52a4add47f99af8a36969c2ad",
+            "subjectArticleId": "law-348M50000040005-suppl-106-article-2",
+            "objectArticleId": "law-348M50000040005-article-3",
+            "referenceSourceSupportingSpanId": "law-348M50000040005-suppl-106-article-2::span-2",
+            "referenceTargetSupportingSpanId": "law-348M50000040005-article-3::span-6"
+          },
+          "actual": {
+            "proposedPredicate": "INCORPORATES",
+            "referenceOccurrenceHash": "9077da217e83b9854b241ae49c1dac6b8f4220d52a4add47f99af8a36969c2ad",
+            "subjectArticleId": "law-348M50000040005-suppl-106-article-2",
+            "objectArticleId": "law-348M50000040005-article-3",
+            "referenceSourceSupportingSpanId": "law-348M50000040005-suppl-106-article-2::span-2",
+            "referenceTargetSupportingSpanId": "law-348M50000040005-article-3::span-3"
+          }
+        },
+        "EXCEPTION_TO": {
+          "expected": {
+            "proposedPredicate": "EXCEPTION_TO",
+            "referenceOccurrenceHash": "9077da217e83b9854b241ae49c1dac6b8f4220d52a4add47f99af8a36969c2ad",
+            "subjectArticleId": "law-348M50000040005-suppl-106-article-2",
+            "objectArticleId": "law-348M50000040005-article-3",
+            "referenceSourceSupportingSpanId": "law-348M50000040005-suppl-106-article-2::span-2",
+            "referenceTargetSupportingSpanId": "law-348M50000040005-article-3::span-6"
+          },
+          "actual": {
+            "proposedPredicate": "EXCEPTION_TO",
+            "referenceOccurrenceHash": "9077da217e83b9854b241ae49c1dac6b8f4220d52a4add47f99af8a36969c2ad",
+            "subjectArticleId": "law-348M50000040005-suppl-106-article-2",
+            "objectArticleId": "law-348M50000040005-article-3",
+            "referenceSourceSupportingSpanId": "law-348M50000040005-suppl-106-article-2::span-2",
+            "referenceTargetSupportingSpanId": "law-348M50000040005-article-3::span-3"
+          }
+        },
+        "OVERRIDES": {
+          "expected": {
+            "proposedPredicate": "OVERRIDES",
+            "referenceOccurrenceHash": "9077da217e83b9854b241ae49c1dac6b8f4220d52a4add47f99af8a36969c2ad",
+            "subjectArticleId": "law-348M50000040005-suppl-106-article-2",
+            "objectArticleId": "law-348M50000040005-article-3",
+            "referenceSourceSupportingSpanId": "law-348M50000040005-suppl-106-article-2::span-2",
+            "referenceTargetSupportingSpanId": "law-348M50000040005-article-3::span-6"
+          },
+          "actual": {
+            "proposedPredicate": "OVERRIDES",
+            "referenceOccurrenceHash": "9077da217e83b9854b241ae49c1dac6b8f4220d52a4add47f99af8a36969c2ad",
+            "subjectArticleId": "law-348M50000040005-suppl-106-article-2",
+            "objectArticleId": "law-348M50000040005-article-3",
+            "referenceSourceSupportingSpanId": "law-348M50000040005-suppl-106-article-2::span-2",
+            "referenceTargetSupportingSpanId": "law-348M50000040005-article-3::span-3"
+          }
+        }
+      }
+    },
+    {
+      "candidateKey": "94890c4723ad436a797b03bcc6d81774d6ad93aae5d26f295d01e7c06cd55e52",
+      "predicates": {
+        "USES_DEFINITION": {
+          "expected": "established",
+          "actual": "not_established"
+        }
+      },
+      "assertions": {
+        "USES_DEFINITION": {
+          "actual": null
+        }
+      }
+    },
+    {
+      "candidateKey": "a033f13538d8f5cecbeca646794776bfa7ab78300bd86292ef31ed4cb5a6d2ea",
+      "predicates": {
+        "IMPLEMENTS": {
+          "expected": "not_established",
+          "actual": "established"
+        }
+      },
+      "assertions": {
+        "unexpectedPredicates": [
+          "IMPLEMENTS"
+        ]
+      }
+    },
+    {
+      "candidateKey": "ce27bf3e32e5b0e9b902d06fa04f12baf2da933c487ef61c2b63b9713905fd5a",
+      "assertions": {
+        "IMPLEMENTS": {
+          "expected": {
+            "proposedPredicate": "IMPLEMENTS",
+            "referenceOccurrenceHash": "7bdd33effb8f3f8d3f52161986332972f82c67b117b75a8634b1ad5626b4c89a",
+            "subjectArticleId": "law-340CO0000000321-article-16_11",
+            "objectArticleId": "law-419M60000002052-article-127_2",
+            "referenceSourceSupportingSpanId": "law-419M60000002052-article-127_2::span-3",
+            "referenceTargetSupportingSpanId": "law-340CO0000000321-article-16_11::span-3"
+          },
+          "actual": {
+            "proposedPredicate": "IMPLEMENTS",
+            "referenceOccurrenceHash": "7bdd33effb8f3f8d3f52161986332972f82c67b117b75a8634b1ad5626b4c89a",
+            "subjectArticleId": "law-340CO0000000321-article-16_11",
+            "objectArticleId": "law-419M60000002052-article-127_2",
+            "referenceSourceSupportingSpanId": "law-419M60000002052-article-127_2::span-3",
+            "referenceTargetSupportingSpanId": "law-340CO0000000321-article-16_11::span-14"
+          }
+        }
+      }
+    },
+    {
+      "candidateKey": "d0b03c706c83ce31a4765babd2dbdfbbae920676ad70a7339bd1458190713aa5",
+      "assertions": {
+        "EXCEPTION_TO": {
+          "expected": {
+            "proposedPredicate": "EXCEPTION_TO",
+            "referenceOccurrenceHash": "5106428aa26b7d9d85bddd01e2c6efe454a99ebbf6b438331edd626bfd7ffe26",
+            "subjectArticleId": "law-419M60000002052-suppl-75-article-2",
+            "objectArticleId": "law-419M60000002052-article-230_2",
+            "referenceSourceSupportingSpanId": "law-419M60000002052-suppl-75-article-2::span-7",
+            "referenceTargetSupportingSpanId": "law-419M60000002052-article-230_2::span-4"
+          },
+          "actual": {
+            "proposedPredicate": "EXCEPTION_TO",
+            "referenceOccurrenceHash": "5106428aa26b7d9d85bddd01e2c6efe454a99ebbf6b438331edd626bfd7ffe26",
+            "subjectArticleId": "law-419M60000002052-suppl-75-article-2",
+            "objectArticleId": "law-419M60000002052-article-230_2",
+            "referenceSourceSupportingSpanId": "law-419M60000002052-suppl-75-article-2::span-7",
+            "referenceTargetSupportingSpanId": "law-419M60000002052-article-230_2::span-3"
+          }
+        }
+      }
+    },
+    {
+      "candidateKey": "db2b9b9091eb7e3bd58e103f90b77702e773923fb94086262f5687a2c36c8287",
+      "predicates": {
+        "USES_DEFINITION": {
+          "expected": "established",
+          "actual": "not_established"
+        }
+      },
+      "assertions": {
+        "USES_DEFINITION": {
+          "actual": null
+        }
+      }
+    },
+    {
+      "candidateKey": "dcbf21bddc76d1853679c8535da0fc5fa748cfb9a9a6199f4a4859702cf09531",
+      "assertions": {
+        "USES_DEFINITION": {
+          "expected": {
+            "proposedPredicate": "USES_DEFINITION",
+            "referenceOccurrenceHash": "6f032c5300bd498474e4ec6e23b35255e13cf30a1333c339e506d7491a671fe1",
+            "subjectArticleId": "law-419M60000002052-suppl-0-article-51",
+            "objectArticleId": "law-419M60000002052-suppl-0-article-50",
+            "referenceSourceSupportingSpanId": "law-419M60000002052-suppl-0-article-51::span-28",
+            "referenceTargetSupportingSpanId": "law-419M60000002052-suppl-0-article-50::span-14"
+          },
+          "actual": {
+            "proposedPredicate": "USES_DEFINITION",
+            "referenceOccurrenceHash": "29b932b9255ff023ad9c09c3f44dd056dc7b09e235bf4ed31ba2607ec3fb94bb",
+            "subjectArticleId": "law-419M60000002052-suppl-0-article-51",
+            "objectArticleId": "law-419M60000002052-suppl-0-article-50",
+            "referenceSourceSupportingSpanId": "law-419M60000002052-suppl-0-article-51::span-28",
+            "referenceTargetSupportingSpanId": "law-419M60000002052-suppl-0-article-50::span-28"
+          }
+        }
+      }
+    },
+    {
+      "candidateKey": "de1221a79e825f7d934254a2fec1edec37987007e0a9f029b8cfca1d02af51ae",
+      "predicates": {
+        "OVERRIDES": {
+          "expected": "established",
+          "actual": "not_established"
+        }
+      },
+      "assertions": {
+        "OVERRIDES": {
+          "actual": null
+        }
+      }
+    },
+    {
+      "candidateKey": "f1c399452de503a314bff38301d1ae83259714d7cba24875ea61145de1494772",
+      "predicates": {
+        "USES_DEFINITION": {
+          "expected": "not_established",
+          "actual": "established"
+        }
+      },
+      "assertions": {
+        "unexpectedPredicates": [
+          "USES_DEFINITION"
+        ]
+      }
+    }
+  ]
+}

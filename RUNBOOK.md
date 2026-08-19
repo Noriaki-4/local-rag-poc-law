@@ -282,6 +282,11 @@ Worker出力後は`legal-relation-adjudicator/scripts/bind_single_occurrence_ids
 プログラムは条件とfinding、既知ID、件数の整合を検証してoutcomeと保存対象Assertionへ決定的に投影するだけで、
 predicate・条件値・finding・方向・根拠を補正しない。
 
+参照抽出では、`改正前の<法令名>第N条`または`改正前における<法令名>第N条`を現行Articleへ
+接続しない。保存snapshotに旧版Articleがなく一意に解決できない場合は`REFERENCES`を生成せず、
+同じ文中の`新規則第N条`等の現行参照だけを独立して接続する。この規則を変更した場合はNeo4jだけでなく、
+同じsnapshot契約を持つOpenSearchも保存XMLから再seedし、代表94件の構造評価を再実行する。
+
 現行`classify_legal_relations.py`のOllama経路は、1候補をpredicateごとの5回と根拠付与に分ける実装のままである。
 これはローカル契約試験と比較baselineには使えるが、LunaのWorker / Reviewer成果をGraphへ登録するimport経路ではない。
 Luna成果は`import_relation_adjudication_results.py`が、元packet・Worker回答・Reviewer承認・
@@ -462,6 +467,9 @@ Reviewer成果は作業履歴としてauditに残すが、正解の根拠には�
 `USES_DEFINITION`の意味方向が物理`REFERENCES`と逆になることを明示した。正解生成プログラムは
 候補抽出にだけ使い、述語の追加・削除やSUBJECT / OBJECTの選択には使っていない。
 
+次の成立predicate件数とLuna精度は、物理edgeごとに評価していた旧baselineの記録である。
+Articleペア単位の現行Gate 6結果と混同しない。
+
 成立predicateは`IMPLEMENTS=9`、`INCORPORATES=5`、`USES_DEFINITION=26`、
 `EXCEPTION_TO=5`、`OVERRIDES=2`で、成立なしの負例も含む。Codexの横断監査では、構造監査が見逃した
 「医療法第一条の二」を薬機法第一条の二へ接続した1件を`unresolved`へ修正した。Workerが
@@ -473,11 +481,44 @@ Reviewer成果は作業履歴としてauditに残すが、正解の根拠には�
 SUBJECT / OBJECTまで含む完全一致は`56/72`（77.8%）である。ガイド6件は意味5分類の対象ではなく、
 専用の決定的評価で`6/6`だった。この結果から、現行Luna方式を無監査で全件publishする精度には達していない。
 
+#### Articleペア単位Gate 6の初回結果（2026-08-19）
+
+保存XMLからOpenSearch 16,459文書、Neo4j 17,254 node / 34,206 edgeを再構築した。
+`REFERENCES`は16,964件で、代表94件の構造評価は`94/94`、Graph監査違反は0だった。
+全件exportは14,454 Articleペア候補、16,964 basis edge、最大5候補の2,891 shardとなった。
+
+代表データのうち構造的に有効な73 Articleペアを15 shardへ分け、goldを見せない新規contextで
+Luna `high`のWorker / Reviewerを最大3 session並列で実行した。差戻しは5候補、各1回で、
+final Review後のworkflow `unresolved`は0だった。初回採点はstatus `73/73`、5 predicate
+`355/365`、候補単位のpredicate完全一致`63/73`、単一gold spanとのstrict完全一致`57/73`で停止した。
+
+差分監査により、predicate差10件にはLuna誤判定だけでなく、旧edge単位goldからArticleペアgoldへ
+移した際の教師データ誤りが含まれることが分かった。またstrict grounding差には、同じ法的関係を
+直接支える別spanを選んだだけの候補が含まれていた。したがって、この初回値を最終精度として使わない。
+
+修正方針は次のとおりである。
+
+- Worker / Reviewerは、各predicateについて選択した参照出現が両端の意味役割を結ぶことを確認する。
+- goldはCodexがArticle全文と参照出現を再確認して修正し、Luna出力を機械的に正解へ採用しない。
+- 複数の妥当なgroundingは、人が確認した既知IDの許容集合として評価データへ保存する。
+- scorerは許容集合との一致だけを検査し、隣接・親子spanから意味的な許容範囲を推測しない。
+- 修正後は差分候補だけを新規Worker / Reviewer contextで再評価し、合格までGate 7へ進まない。
+
+`adjudicationStatus=needs_resolution`は入力Articleペアの構造・版が意味分類に適さないという判断、
+workflow `unresolved`は差戻し1回後もReviewerが承認しなかった実行結果であり、別の値である。
+
 成果物は次の3ファイルを正本とする。
 
 - `docs/requirements/samples/eval/legal_relation_guidance_100_manifest.json`
 - `docs/requirements/samples/eval/legal_relation_94_adjudicated_fixture.jsonl`
 - `docs/requirements/samples/eval/legal_relation_94_adjudication_audit.jsonl`
+
+Articleペア化後の複数edge候補の意味goldは
+`docs/requirements/samples/eval/legal_relation_73_pair_overrides.jsonl`で明示的に上書きする。
+Gate 6差分監査で単一edge候補にも訂正対象が見つかったため、同じ明示overrideを単一edgeにも適用できるよう
+builder契約を修正中である。このファイルはProgramが意味を生成する規則ではなく、CodexがArticle全文を
+確認した監査結果である。groundingの許容集合も同様に別の監査成果物へ明示し、scorerが隣接spanから
+自動生成してはならない。修正と差分再試験が終わるまで、このpair-level goldを確定版として扱わない。
 
 ガイド6件は既存の
 `docs/requirements/samples/eval/guidance_navigation_fixture.jsonl`を参照する。100件fixtureの件数、
@@ -488,10 +529,9 @@ agent-api/.venv/bin/pytest -q \
   agent-api/tests/test_legal_relation_guidance_100_fixture.py
 ```
 
-Graphの参照解決を修正した後は、次で94件の構造正解と照合する。2026-08-19時点の
-現行Graphは`73/94`である。正解上`not_reference`または`unresolved`の
-21件がまだ接続済みであり、接続対象にしてはならない。
-合格条件は`94/94`とする。このコマンドは意味分類やGraph更新を行わない。
+Graphの参照解決を修正した後は、次で94件の構造正解と照合する。2026-08-19の再seed後は
+`94/94`である。正解上`not_reference`または`unresolved`の21件はGraph候補から除外済みである。
+合格条件は引き続き`94/94`とする。このコマンドは意味分類やGraph更新を行わない。
 
 ```bash
 agent-api/.venv/bin/python \

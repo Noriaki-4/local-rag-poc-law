@@ -28,11 +28,15 @@
 - OpenSearchは`legal-rag-content-ja-v2`（Kuromoji、NFKC、bigram）を既定とする。
 - Graph seedは`HAS_CONTENT_UNIT / REFERENCES / EXPLAINS`だけを決定的に作る。
   5つの意味predicateはseed後に`RelationAssertion`として非同期登録する。
-- 代表100件は法令関係94件とガイド6件を別schemaで確定済み。構造上resolvedの73件中1件は
-  Article revision不一致のため意味判定を`needs_resolution`へ訂正した。Lunaのブラインド評価は構造`89/94`、
-  意味分類可能な72件に対する差戻し後のpredicate・status完全一致`57/72`、意味方向込み`56/72`であり、
-  無監査publishには使わない。
-- 現行Graphの構造正解は`73/94`で、再seed・全件分類・検索時selectorへの接続は残作業である。
+- 保存済みe-Gov XMLからOpenSearchとNeo4jを再構築済みで、代表94件の構造監査は`94/94`である。
+  `改正前の`等で明示された旧版Articleを現行Articleへ接続しない修正も反映した。現在の実indexは
+  OpenSearch 16,459文書、Neo4j 17,254 node / 34,206 edge、うち`REFERENCES` 16,964件である。
+- 非同期意味分類の単位は、1本の物理edgeではなく同じ物理方向の有向Articleペアである。現行exportは
+  14,454候補、16,964 basis edge、最大5候補の2,891 shardとなる。代表94件のうち構造的に分類可能な
+  73 ArticleペアをLuna Worker / Reviewerでブラインド評価した初回結果は、status `73/73`、5 predicate
+  `355/365`、候補単位のpredicate完全一致`63/73`だった。ただし差分監査で旧edge単位goldの移行誤りと、
+  同じ法的根拠を示す複数spanを一律不正解にする採点不備が判明したため、この値は最終品質値ではない。
+  教師データ・採点契約を修正し、差分候補だけを再評価するまでGate 7の全件分類へ進めない。
 
 ## 1. 現行基盤・Agent設計
 

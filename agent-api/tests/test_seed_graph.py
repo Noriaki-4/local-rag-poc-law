@@ -326,6 +326,54 @@ def test_supplementary_revision_alias_is_shared_within_the_article() -> None:
     )
 
 
+def test_historical_revision_reference_does_not_connect_to_current_article() -> None:
+    article_id = "law-test-suppl-9-article-2"
+    first_paragraph_id = f"{article_id}-paragraph-1"
+    second_paragraph_id = f"{article_id}-paragraph-2"
+    documents = [
+        {**_document("11", "第十一条 現行規定。"), "title": "試験規則"},
+        {
+            **_document(
+                "2",
+                "改正後の試験規則（以下「新規則」という。）を適用する。",
+            ),
+            "contentUnitId": first_paragraph_id,
+            "articleContentUnitId": article_id,
+            "parentContentUnitId": article_id,
+            "sectionKey": "suppl-9",
+            "title": "試験規則",
+            "heading": "附則 第二条 第1項",
+        },
+        {
+            **_document(
+                "2",
+                (
+                    "２改正前の試験規則第十一条の規定による申出は、"
+                    "新規則第十一条の規定による請求とみなす。"
+                ),
+            ),
+            "contentUnitId": second_paragraph_id,
+            "articleContentUnitId": article_id,
+            "parentContentUnitId": article_id,
+            "sectionKey": "suppl-9",
+            "title": "試験規則",
+            "heading": "附則 第二条 第2項",
+        },
+    ]
+
+    matching_edges = [
+        edge
+        for edge in _reference_edges(documents)
+        if edge["fromGraphNodeId"] == second_paragraph_id
+        and edge["toGraphNodeId"] == "law-test-article-11"
+    ]
+    assert len(matching_edges) == 1
+    assert matching_edges[0]["citationTexts"] == ["第十一条"]
+    assert matching_edges[0]["sourceSpanStarts"] == [
+        documents[2]["text"].rfind("第十一条")
+    ]
+
+
 def test_named_authority_scope_does_not_cross_a_flattened_table_cell() -> None:
     source_id = "law-test-article-10"
     documents = [

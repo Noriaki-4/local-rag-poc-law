@@ -60,6 +60,11 @@ Document → Article → Paragraph → Item
 接続しない。Relationには参照文字列、参照元Content Unit、取得できる位置、解決方法を保存する。
 旧`referenceKind`は移行監査用に残っていても、意味predicateや検索selectorには使用しない。
 
+`改正前の<法令名>第N条`、`改正前における<法令名>第N条`のように旧版を明示する参照は、
+現行の同名Articleへ接続しない。保存datasetに旧版Articleがなく一意に解決できない場合は、本文と
+引用位置をOpenSearchへ残しても、現行Articleへの`REFERENCES`は生成しない。後続文に現行法令の
+別名（例: `新規則`）と同番号Articleがある場合、その現行参照だけを独立して接続する。
+
 ### 4.3 EXPLAINS
 
 ガイドの条文注釈・対応表が明示した、ガイド`Document`→法令`Article`だけを保存する。
@@ -85,9 +90,12 @@ Neo4jだけを再seedする経路は設けない。
 ## 6. 非同期分類との境界
 
 非同期jobはpublish済みseedの`sourceSnapshotId`を固定し、原文`REFERENCES`と両端Article全文から
-分類候補を作る。原文上の参照元・参照先と意味上のSUBJECT・OBJECTを区別する。LLMは1 predicateずつ
-固有の二必要条件を判定し、成立predicateだけ別の根拠付与呼出しでSUBJECT・OBJECT、参照箇所、両端spanを
-選ぶ。Programは条件整合と既知IDを構造検証し、
+分類候補を作る。分類単位は物理Relation 1本ではなく、同じ物理方向の有向Articleペアである。
+そのペアを結ぶ全`basisEdgeIds`と全参照出現を1候補へ束ね、原文上の参照元・参照先と意味上の
+SUBJECT・OBJECTを区別する。LLMは同じ候補について5 predicateを一度に比較し、各predicate固有の
+二必要条件を判定する。成立predicateについては同じ回答内でSUBJECT・OBJECT、参照箇所、両端spanを
+選ぶ。各predicateは、選択した参照出現が両端Articleの意味役割を実際に結び付ける場合だけ成立できる。
+Article内の別の参照や無関係な委任・定義を流用しない。Programは条件整合と既知IDを構造検証し、
 `building`の`ClassificationRun`へ保存する。プログラムはpredicateを推測・補正しない。
 
 Assertionを作らない`reference_only / uncertain / failed`を含め、各候補の完了結果を

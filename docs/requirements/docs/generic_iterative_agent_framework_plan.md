@@ -19,7 +19,7 @@
 |---|---|---|
 | Phase 0 | 一部完了 | 代表2問の現行baseline、説明付きstatus契約、生成schema・Prompt用語集のfixture |
 | Phase 1 | 一部実装 | `CycleRecord / StepRecord`、discriminator付きCommand、型付きstatusと遷移の一元化、再開契約 |
-| Phase 2 | 非同期分類のexport・検証importまで実装 | 実indexの再構築・全件Run、Hypothesis別selector、旧自動Graph経路の撤去 |
+| Phase 2 | 実index再構築・Articleペアexport・検証importまで実装 | Gate 6のgold・採点修正と差分再評価、全件Run、Hypothesis別selector、旧自動Graph経路の撤去 |
 | Phase 3 | 未評価 | 新契約に基づくtrace、再開、入力増加、latencyの完了条件 |
 | Phase 4 | 未完了 | 新経路による代表2問の合格、既定経路切替、旧試作の撤去 |
 
@@ -39,18 +39,22 @@
 - schema version 9のseedは、同じsnapshotのOpenSearch本文とNeo4jの構造・
   `REFERENCES / EXPLAINS`だけを作り、旧`APPLIED_BY / MENTIONS / RelationAssertion`を生成しない。
   新しい5 predicate契約、候補単位checkpoint、再開可能CLI、Neo4j保存、publish監査は実装済みである。
-  保存済みe-Gov XML manifestのhash・法令ID・法令名を検証してseedする経路も実装済みだが、
-  実データの再seed・分類と検索時selectorへの接続はまだ行っていない。
+  保存済みe-Gov XML manifestのhash・法令ID・法令名を検証してseedする経路も実装済みで、
+  2026-08-19に実データを再seedし、代表94件の構造監査`94/94`を確認した。
+  `改正前の / 改正前における`で明示された旧版Articleを現行Articleへ誤接続しない修正も反映済みである。
+  全件意味分類のpublishと検索時selectorへの接続はまだ行っていない。
 - Luna用のlabel-free候補packetと最大5件のshardを決定的に生成するIFは実装済みである。
   packetはsnapshot、schema、prompt、Worker / Reviewer model、両Article全文、全参照出現を含み、
-  goldやexpected predicateを型上受け付けない。実indexでのexportは再seed後に行う。
-  実indexでの初回exportにより、現IFがArticleペアではなく物理`REFERENCES`出現ごとに候補化する
-  不一致を検出した。複数basis edgeと各参照出現の対応を1つのArticleペア候補へ束ねるまで、
-  全件Luna実行へ進めない。
+  goldやexpected predicateを型上受け付けない。実indexのexportは有向Articleペア単位へ修正済みで、
+  全`basisEdgeIds`と各参照出現の対応を1候補へ束ねる。現在の実indexは14,454候補、
+  16,964 basis edge、最大5候補の2,891 shardである。
 - 現行CLIのOllama `gemma4:e4b`経路はローカル契約試験用であり、手動監査14件の5 predicate完全一致が
   4/14だったため、全件publish用の品質経路には採用しない。正本分類はCodexサブスクリプション内の
   `gpt-5.6-luna`をWorker / Reviewerの両方に使い、候補を複数ペアへ分割して並列実行する。
-  既存14件、新規20件、法令94件＋ガイド6件の代表100件でこの方式を確認済みである。
+  既存14件、新規20件、法令94件＋ガイド6件の代表100件でこの方式を確認している。
+  Articleペア単位にしたGate 6初回はstatus `73/73`、5 predicate `355/365`だったが、
+  gold移行誤りと複数の妥当な根拠spanを扱えない採点不備が判明したため未合格である。
+  教師データ・採点契約を修正し、差分候補の再評価を完了するまで全件Runへ進めない。
   判定JSONLはReviewer承認証跡付きで`ClassificationRun`へ取り込む検証importを実装済みである。
   詳しい比較結果と運用手順は[RUNBOOK](../../../RUNBOOK.md)を正とする。
 - 旧`legal-relation-classifier-v8`は、schema version 7の旧`IMPLEMENTS`候補を
@@ -654,6 +658,14 @@ referenceSourceSupportingSpanId / referenceTargetSupportingSpanId`も返す。�
 `targetDefinesTerm / sourceUsesSameTerm`を使う。複数predicateは同時に成立でき、一方の成立を
 他方の根拠へ流用しない。非成立・不確実な関係へ意味方向や根拠を作らせない。
 
+各predicateの成立には、Article全文のどこかに二つの役割が存在するだけでなく、選択した
+`referenceOccurrence`の文脈がその役割を同じArticleペアとして橋渡しすることを要求する。
+別の参照内にある委任・定義・準用を、現在の参照へ移してはならない。`IMPLEMENTS`の準用経由委任は、
+同じ参照文脈が準用された委任事項と下位Articleの供給事項を接続する場合だけ成立する。
+`USES_DEFINITION`は引用符付き用語に限らず、条項が構成した再利用可能な法的役割・地位・対象者scopeも
+扱えるが、単なる期間、要件列挙、委任スロットを定義へ広げない。`OVERRIDES`の明示的優先には、
+対象行が一致する読替表や、特別規律が対象Articleを直接`適用しない`と命じる場合を含める。
+
 Luna ReviewerはWorkerの全回答と同じ候補入力を受け取り、答えを知らない独立再分類ではなく、
 Workerの誤り・不足・根拠不整合を具体的に指摘する。`request_change`の場合は同じWorkerが指摘を参照して
 5 predicate全体を再確認し、差戻しは1回だけに制限する。同じReviewerが修正版を差分確認し、
@@ -667,6 +679,11 @@ Programは二条件とfindingの真理値整合、既知ID、成立predicateと�
 Programがassertionへ機械的に束縛する。複数箇所ならどの参照箇所を根拠にするかは意味判断なので、
 Workerが既知hashから選び、Programは存在だけを検証する。Programはこの束縛でpredicate、方向、
 根拠spanを変更しない。
+
+評価goldでは、同じ意味関係を直接支えるspanが複数存在し得る。正解生成者が本文を確認して明示した
+grounding許容集合を評価成果物に保存し、scorerは完全一致する既知IDが集合内にあるかだけを検査する。
+隣接spanや親子spanをProgramが自動で許容集合へ追加してはならない。これにより、採点の都合で意味判断を
+Programへ移さず、妥当な別根拠を単一gold spanとの差だけで誤答にしない。
 
 候補の`referenceSourceArticle / referenceTargetArticle`は原文`REFERENCES`の物理方向だけを表す。
 新seedは同一法令参照と親法令参照の両経路で引用位置を保存する。位置を持たない旧Graphを分類する場合は、
