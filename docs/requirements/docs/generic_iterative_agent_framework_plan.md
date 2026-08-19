@@ -9,7 +9,7 @@
 > 過去の実装計画やProfile変更履歴は本書へ残さない。現在のコードから目標仕様へ移すために
 > 必要な差分、実装順、完了条件だけを記載する。
 
-## 実装状況（2026-08-18）
+## 実装状況（2026-08-19）
 
 この節は変更履歴ではなく、12章の完了条件に対する差分だけを示す。個別のProfile version、
 不具合修正、実測結果はGit履歴、[RUNBOOK](../../../RUNBOOK.md)、
@@ -19,7 +19,7 @@
 |---|---|---|
 | Phase 0 | 一部完了 | 代表2問の現行baseline、説明付きstatus契約、生成schema・Prompt用語集のfixture |
 | Phase 1 | 一部実装 | `CycleRecord / StepRecord`、discriminator付きCommand、型付きstatusと遷移の一元化、再開契約 |
-| Phase 2 | 非同期分類jobとLuna評価まで実装 | Luna判定JSONLの検証import・全件Run、Hypothesis別selector、旧自動Graph経路の撤去 |
+| Phase 2 | 非同期分類のexport・検証importまで実装 | 実indexの再構築・全件Run、Hypothesis別selector、旧自動Graph経路の撤去 |
 | Phase 3 | 未評価 | 新契約に基づくtrace、再開、入力増加、latencyの完了条件 |
 | Phase 4 | 未完了 | 新経路による代表2問の合格、既定経路切替、旧試作の撤去 |
 
@@ -40,11 +40,15 @@
   `REFERENCES / EXPLAINS`だけを作り、旧`APPLIED_BY / MENTIONS / RelationAssertion`を生成しない。
   新しい5 predicate契約、候補単位checkpoint、再開可能CLI、Neo4j保存、publish監査は実装済みである。
   実データの再seed・分類と検索時selectorへの接続はまだ行っていない。
+- Luna用のlabel-free候補packetと最大5件のshardを決定的に生成するIFは実装済みである。
+  packetはsnapshot、schema、prompt、Worker / Reviewer model、両Article全文、全参照出現を含み、
+  goldやexpected predicateを型上受け付けない。実indexでのexportは再seed後に行う。
 - 現行CLIのOllama `gemma4:e4b`経路はローカル契約試験用であり、手動監査14件の5 predicate完全一致が
   4/14だったため、全件publish用の品質経路には採用しない。正本分類はCodexサブスクリプション内の
   `gpt-5.6-luna`をWorker / Reviewerの両方に使い、候補を複数ペアへ分割して並列実行する。
-  既存14件、新規20件、法令94件＋ガイド6件の代表100件でこの方式を確認済みだが、判定JSONLを`ClassificationRun`へ取り込む
-  検証importは未実装である。詳しい比較結果と運用手順は[RUNBOOK](../../../RUNBOOK.md)を正とする。
+  既存14件、新規20件、法令94件＋ガイド6件の代表100件でこの方式を確認済みである。
+  判定JSONLはReviewer承認証跡付きで`ClassificationRun`へ取り込む検証importを実装済みである。
+  詳しい比較結果と運用手順は[RUNBOOK](../../../RUNBOOK.md)を正とする。
 - 旧`legal-relation-classifier-v8`は、schema version 7の旧`IMPLEMENTS`候補を
   `implements / reference_only / uncertain`へ分類する移行用機能である。
   本書の5 predicate、`ClassificationRun`、`SUBJECT / OBJECT / CLASSIFIED_IN`を備えた
@@ -553,7 +557,7 @@ CaseStoreの探索履歴や案件判断をNeo4jへ保存しない。同じArticl
 | `Paragraph` | 項 | `contentUnitId`, `documentId`, `parentContentUnitId`, `paragraphNumber`, `sourceSnapshotId`, `contentHash` |
 | `Item` | 号 | `contentUnitId`, `documentId`, `parentContentUnitId`, `itemNumber`, `sourceSnapshotId`, `contentHash` |
 | `RelationAssertion` | 非同期LLMが生成した未確認の意味関係候補 | `assertionId`, `candidateKey`, `assertionDedupeKey`, `proposedPredicate`, `basisEdgeId`, `sourceContentUnitId`, `subjectSupportingSpanId`, `objectSupportingSpanId`, `subjectSupportingQuote`, `objectSupportingQuote`, `referenceOccurrenceHash`, `sourceSnapshotId`, `sourceRevisionId`, `classificationRunId`, `classifiedAt`, `graphSchemaVersion` |
-| `ClassificationRun` | snapshot単位の非同期意味分類Run | `classificationRunId`, `phase`, `sourceSnapshotId`, `graphSchemaVersion`, `provider`, `model`, `reviewerModel`, `promptVersion`, `candidatesPerModelCall`, `inputCount`, `processedCount`, `classifiedCandidateCount`, `assertionCount`, `referenceOnlyCount`, `uncertainCount`, `failedCount`, `scopeHash`, `publishedAt` |
+| `ClassificationRun` | snapshot単位の非同期意味分類Run | `classificationRunId`, `phase`, `sourceSnapshotId`, `graphSchemaVersion`, `provider`, `model`, `reviewerModel`, `promptVersion`, `skillVersion`, `reasoningEffort`, `candidatesPerModelCall`, `inputCount`, `processedCount`, `classifiedCandidateCount`, `assertionCount`, `referenceOnlyCount`, `uncertainCount`, `failedCount`, `scopeHash`, `publishedAt` |
 | `ClassificationCheckpoint` | 1候補の保存済み実行結果。法的意味関係ではない | `checkpointId`, `classificationRunId`, `candidateKey`, `outcome`, `decisionPayloadJson`, `decisionPayloadHash`, `assertionCount`, `errorCode`, `errorStage`, `errorMessage`, `errorPredicate`, `processedAt`, `sourceSnapshotId`, `graphSchemaVersion` |
 
 `Article`を項・号の代用labelにしない。Graph探索をArticle単位へ投影する場合も、元の

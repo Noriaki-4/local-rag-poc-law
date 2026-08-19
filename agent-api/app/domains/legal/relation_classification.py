@@ -136,6 +136,68 @@ class RelationClassificationCandidate(LegalGraphModel):
         )
 
 
+class RelationAdjudicationCandidatePacket(LegalGraphModel):
+    """Codex Workerへ渡す、label-freeな1候補の完全な作業packet。"""
+
+    candidate_key: str = Field(min_length=64, max_length=64)
+    source_snapshot_id: str = Field(min_length=1, max_length=500)
+    graph_schema_version: int = Field(ge=1)
+    prompt_version: str = Field(min_length=1, max_length=160)
+    provider: str = Field(min_length=1, max_length=160)
+    model: str = Field(min_length=1, max_length=300)
+    reviewer_model: str = Field(min_length=1, max_length=300)
+    basis_edge_id: str = Field(min_length=1, max_length=500)
+    reference_kind: str = Field(min_length=1, max_length=160)
+    reference_source_article: ClassificationArticle
+    reference_target_article: ClassificationArticle
+    reference_occurrences: tuple[ReferenceOccurrence, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_candidate_identity(self) -> RelationAdjudicationCandidatePacket:
+        candidate = self.to_candidate()
+        if candidate.candidate_key != self.candidate_key:
+            raise ValueError("packet candidate key does not match packet contents")
+        return self
+
+    def to_candidate(self) -> RelationClassificationCandidate:
+        return RelationClassificationCandidate(
+            source_snapshot_id=self.source_snapshot_id,
+            graph_schema_version=self.graph_schema_version,
+            prompt_version=self.prompt_version,
+            provider=self.provider,
+            model=self.model,
+            reviewer_model=self.reviewer_model,
+            basis_edge_id=self.basis_edge_id,
+            reference_source=self.reference_source_article,
+            reference_target=self.reference_target_article,
+            reference_occurrences=self.reference_occurrences,
+        )
+
+    @classmethod
+    def from_candidate(
+        cls,
+        candidate: RelationClassificationCandidate,
+        *,
+        reference_kind: str,
+    ) -> RelationAdjudicationCandidatePacket:
+        if candidate.reviewer_model is None:
+            raise ValueError("adjudication packet requires a reviewer model")
+        return cls(
+            candidate_key=candidate.candidate_key,
+            source_snapshot_id=candidate.source_snapshot_id,
+            graph_schema_version=candidate.graph_schema_version,
+            prompt_version=candidate.prompt_version,
+            provider=candidate.provider,
+            model=candidate.model,
+            reviewer_model=candidate.reviewer_model,
+            basis_edge_id=candidate.basis_edge_id,
+            reference_kind=reference_kind,
+            reference_source_article=candidate.reference_source,
+            reference_target_article=candidate.reference_target,
+            reference_occurrences=candidate.reference_occurrences,
+        )
+
+
 class ProposedRelationAssertion(LegalGraphModel):
     proposed_predicate: ProposedPredicate
     reference_occurrence_hash: str = Field(min_length=1, max_length=128)
@@ -295,6 +357,113 @@ class ReviewerRecord(LegalGraphModel):
         )
         if self.review_status is not expected:
             raise ValueError("review status must match predicate check conclusions")
+        return self
+
+
+class AdjudicationRevisionPacket(LegalGraphModel):
+    """Reviewerが差し戻した1候補を、同じWorkerへ一度だけ返すpacket。"""
+
+    candidate_key: str = Field(min_length=64, max_length=64)
+    basis_edge_id: str = Field(min_length=1, max_length=500)
+    original_candidate: RelationAdjudicationCandidatePacket
+    previous_decision: WorkerAdjudicationRecord
+    review_feedback: ReviewerRecord
+
+    @model_validator(mode="after")
+    def validate_revision_scope(self) -> AdjudicationRevisionPacket:
+        candidate = self.original_candidate.to_candidate()
+        if (
+            self.candidate_key != candidate.candidate_key
+            or self.basis_edge_id != candidate.basis_edge_id
+        ):
+            raise ValueError("revision identity must match original candidate")
+        validate_reviewer_record(
+            candidate,
+            self.previous_decision,
+            self.review_feedback,
+        )
+        if self.review_feedback.review_status is not ReviewStatus.REQUEST_CHANGE:
+            raise ValueError("revision packet requires request_change")
+        return self
+
+
+class UnresolvedAdjudicationRecord(LegalGraphModel):
+    """1回の差戻し後もReviewerが承認しなかった候補の監査記録。"""
+
+    candidate_key: str = Field(min_length=64, max_length=64)
+    basis_edge_id: str = Field(min_length=1, max_length=500)
+    reason: str = Field(pattern="^request_change_after_single_revision$")
+    original_candidate: RelationAdjudicationCandidatePacket
+    initial_worker_decision: WorkerAdjudicationRecord
+    initial_review: ReviewerRecord
+    revised_worker_decision: WorkerAdjudicationRecord
+    final_review: ReviewerRecord
+
+    @model_validator(mode="after")
+    def validate_unresolved_scope(self) -> UnresolvedAdjudicationRecord:
+        candidate = self.original_candidate.to_candidate()
+        if (
+            self.candidate_key != candidate.candidate_key
+            or self.basis_edge_id != candidate.basis_edge_id
+        ):
+            raise ValueError("unresolved identity must match original candidate")
+        validate_reviewer_record(
+            candidate,
+            self.initial_worker_decision,
+            self.initial_review,
+        )
+        validate_reviewer_record(
+            candidate,
+            self.revised_worker_decision,
+            self.final_review,
+        )
+        if self.initial_review.review_status is not ReviewStatus.REQUEST_CHANGE:
+            raise ValueError("unresolved record requires an initial request_change")
+        if self.final_review.review_status is not ReviewStatus.REQUEST_CHANGE:
+            raise ValueError("unresolved record requires a final request_change")
+        return self
+
+
+class ApprovedAdjudicationRecord(LegalGraphModel):
+    """Reviewer承認とWorker回答を切り離さずにimportする証跡。"""
+
+    candidate_key: str = Field(min_length=64, max_length=64)
+    basis_edge_id: str = Field(min_length=1, max_length=500)
+    original_candidate: RelationAdjudicationCandidatePacket
+    worker_decision: WorkerAdjudicationRecord
+    approval_review: ReviewerRecord
+    revision_round: int = Field(ge=0, le=1)
+    initial_worker_decision: WorkerAdjudicationRecord | None = None
+    initial_review: ReviewerRecord | None = None
+
+    @model_validator(mode="after")
+    def validate_approval_scope(self) -> ApprovedAdjudicationRecord:
+        candidate = self.original_candidate.to_candidate()
+        if (
+            self.candidate_key != candidate.candidate_key
+            or self.basis_edge_id != candidate.basis_edge_id
+        ):
+            raise ValueError("approval identity must match original candidate")
+        validate_reviewer_record(
+            candidate,
+            self.worker_decision,
+            self.approval_review,
+        )
+        if self.approval_review.review_status is not ReviewStatus.APPROVE:
+            raise ValueError("approved record requires Reviewer approve")
+        if self.revision_round == 0:
+            if self.initial_worker_decision is not None or self.initial_review is not None:
+                raise ValueError("initial approval cannot contain revision history")
+        else:
+            if self.initial_worker_decision is None or self.initial_review is None:
+                raise ValueError("revised approval requires initial review history")
+            validate_reviewer_record(
+                candidate,
+                self.initial_worker_decision,
+                self.initial_review,
+            )
+            if self.initial_review.review_status is not ReviewStatus.REQUEST_CHANGE:
+                raise ValueError("revised approval requires initial request_change")
         return self
 
 
@@ -673,6 +842,8 @@ class ClassificationRunRecord(LegalGraphModel):
     model: str = Field(min_length=1, max_length=300)
     reviewer_model: str | None = Field(default=None, max_length=300)
     prompt_version: str = Field(min_length=1, max_length=160)
+    skill_version: str | None = Field(default=None, max_length=160)
+    reasoning_effort: str | None = Field(default=None, max_length=80)
     candidates_per_model_call: int = Field(ge=1)
     input_count: int = Field(ge=0)
     processed_count: int = Field(ge=0)
@@ -834,7 +1005,18 @@ def validate_worker_adjudication(
         raise ValueError("Worker references an unknown candidate key")
     if worker.basis_edge_id != candidate.basis_edge_id:
         raise ValueError("Worker references an unknown basis edge ID")
-    decision = RelationClassificationDecision(
+    validate_classification_decision(
+        candidate,
+        worker_adjudication_to_decision(worker),
+    )
+
+
+def worker_adjudication_to_decision(
+    worker: WorkerAdjudicationRecord,
+) -> RelationClassificationDecision:
+    """Worker判定を保存用の共通Decisionへ値を変えずに投影する。"""
+
+    return RelationClassificationDecision(
         candidate_key=worker.candidate_key,
         outcome=(
             RelationClassificationOutcome.CLASSIFIED
@@ -857,7 +1039,6 @@ def validate_worker_adjudication(
         ),
         assertions=worker.assertions,
     )
-    validate_classification_decision(candidate, decision)
 
 
 def validate_reviewer_record(
@@ -953,7 +1134,9 @@ def build_assertion_records(
 __all__ = [
     "AdjudicationPredicateAssessment",
     "AdjudicationPredicateAssessments",
+    "ApprovedAdjudicationRecord",
     "AdjudicationShardManifest",
+    "AdjudicationRevisionPacket",
     "ArticleSpan",
     "ClassificationArticle",
     "ClassificationCheckpointRecord",
@@ -970,6 +1153,7 @@ __all__ = [
     "ReferenceOccurrence",
     "RelationAssertionRecord",
     "RelationAdjudicationExecutionProfile",
+    "RelationAdjudicationCandidatePacket",
     "RelationAdjudicationManifest",
     "RelationClassificationCandidate",
     "RelationClassificationDecision",
@@ -978,11 +1162,13 @@ __all__ = [
     "ReviewerRecord",
     "ReviewIssue",
     "UsesDefinitionClassificationResponse",
+    "UnresolvedAdjudicationRecord",
     "assertion_dedupe_key",
     "build_assertion_records",
     "stable_hash",
     "validate_classification_decision",
     "validate_reviewer_record",
     "validate_worker_adjudication",
+    "worker_adjudication_to_decision",
     "WorkerAdjudicationRecord",
 ]

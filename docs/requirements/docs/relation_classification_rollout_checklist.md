@@ -41,45 +41,56 @@ Gate 5でOpenSearch / Neo4jを実際に再構築した後、同じ`94/94`を再�
 
 ## Gate 2: export・shard IFを完成させる
 
-- [ ] 同じsnapshotのNeo4j `REFERENCES`とOpenSearch Article全文から候補をexportできる
-- [ ] 各候補にcandidate key、basis edge、両Article全文、全参照出現、offset、span、content hashがある
-- [ ] 1つのcandidate keyとbasis edgeが複数shardへ重複しない
-- [ ] shardは決定的な順序で最大5件、最後だけ5件未満になる
-- [ ] manifestの候補集合と全shardの和集合が一致する
-- [ ] 中断後に完了済み候補を除外して再開できる
-- [ ] gold、expected predicate、旧heuristicをblind packetへ入れない
+- [x] 同じsnapshotのNeo4j `REFERENCES`とOpenSearch Article全文から候補をexportできる
+- [x] 各候補にcandidate key、basis edge、両Article全文、全参照出現、offset、span、content hashがある
+- [x] 1つのcandidate keyとbasis edgeが複数shardへ重複しない
+- [x] shardは決定的な順序で最大5件、最後だけ5件未満になる
+- [x] manifestの候補集合と全shardの和集合が一致する
+- [x] 中断後に完了済み候補を除外して再開できる
+- [x] gold、expected predicate、旧heuristicをblind packetへ入れない
+
+exportは`codex_subscription / gpt-5.6-luna`を候補keyの一部として固定し、
+入力順を変えた2回の生成で同一JSONLとなる契約テストを追加した。
+Gate 5の再構築後にlive indexの実成果物でhashを再確認する。
 
 合格条件: exportを2回実行して、manifest・候補key・shard割当が同一になる。
 
 ## Gate 3: Worker・Reviewer・差戻し IFを完成させる
 
-- [ ] Worker出力は入力候補ごとに1 recordあり、過不足・重複がない
-- [ ] 全recordに5 predicateの二条件とfindingがある
-- [ ] 二条件とfindingの代数が一致する
-- [ ] 成立predicateだけがAssertionを持つ
-- [ ] Assertionの端点、occurrence hash、source/target spanが入力の既知IDである
-- [ ] Reviewer出力はWorker全recordに対応し、全5 predicateを検査する
-- [ ] `approve`はissuesなし、`request_change`は具体的issueありという代数を満たす
-- [ ] revision packetには`request_change`候補だけが含まれる
-- [ ] revisionは同じcandidate keyの完全な置換recordである
-- [ ] final Reviewで再度`request_change`なら`unresolved`へ分離し、2回目の差戻しを行わない
-- [ ] 単件、5件、候補順入替えで候補別判断・ID対応が変わらないfixtureが通る
+- [x] Worker出力は入力候補ごとに1 recordあり、過不足・重複がない
+- [x] 全recordに5 predicateの二条件とfindingがある
+- [x] 二条件とfindingの代数が一致する
+- [x] 成立predicateだけがAssertionを持つ
+- [x] Assertionの端点、occurrence hash、source/target spanが入力の既知IDである
+- [x] Reviewer出力はWorker全recordに対応し、全5 predicateを検査する
+- [x] `approve`はissuesなし、`request_change`は具体的issueありという代数を満たす
+- [x] revision packetには`request_change`候補だけが含まれる
+- [x] revisionは同じcandidate keyの完全な置換recordである
+- [x] final Reviewで再度`request_change`なら`unresolved`へ分離し、2回目の差戻しを行わない
+- [x] 単件、5件、候補順入替えで候補別判断・ID対応が変わらないfixtureが通る
+
+`prepare_adjudication_revisions`と`merge_once_revised_adjudications`はReviewerの状態に従って
+成果物を振り分けるだけで、predicate、condition、finding、方向、根拠を修正しない。
 
 合格条件: fake成果物による正常系・差戻し・未解消・不正ID・欠落・重複のIFテストがすべて通る。
 
 ## Gate 4: import・checkpoint・publish IFを完成させる
 
-- [ ] Luna JSONLをリポジトリのPydantic契約で検証してから取り込む
-- [ ] candidate key、snapshot、schema version、prompt/skill version、modelがRunと一致する
-- [ ] 候補単位でcheckpointとAssertionを同一transactionに保存する
-- [ ] 同じkey・同じpayloadの再importをskipする
-- [ ] 同じkey・異なるpayloadを上書きせずRun失敗にする
-- [ ] 同じRun・候補・predicateの重複Assertionを拒否する
-- [ ] `failed` checkpointが1件でもあればpublishを拒否する
-- [ ] 未承認recordをAssertionへ変換しない
-- [ ] `unresolved`件数とcoverageをRunへ保存し、関係不存在として扱わない
-- [ ] dry-runではNeo4jを更新しない
-- [ ] 中断後の再importで完了済みcheckpointを再保存しない
+- [x] Luna JSONLをリポジトリのPydantic契約で検証してから取り込む
+- [x] candidate key、snapshot、schema version、prompt/skill version、modelがRunと一致する
+- [x] 候補単位でcheckpointとAssertionを同一transactionに保存する
+- [x] 同じkey・同じpayloadの再importをskipする
+- [x] 同じkey・異なるpayloadを上書きせずRun失敗にする
+- [x] 同じRun・候補・predicateの重複Assertionを拒否する
+- [x] `failed` checkpointが1件でもあればpublishを拒否する
+- [x] 未承認recordをAssertionへ変換しない
+- [x] `unresolved`件数とcoverageをRunへ保存し、関係不存在として扱わない
+- [x] dry-runではNeo4jを更新しない
+- [x] 中断後の再importで完了済みcheckpointを再保存しない
+
+import入力はWorker回答単体ではなく、元packet・Worker回答・Reviewerの`approve`・
+差戻し回数を一体化した`ApprovedAdjudicationRecord`とする。Reviewerを経ていない
+Worker JSONLはPydantic契約を通らず、Assertionへ変換できない。
 
 合格条件: export→fake Worker→fake Reviewer→revision→import→中断再開→監査→publishの統合テストが通る。
 

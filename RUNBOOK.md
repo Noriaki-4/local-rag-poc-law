@@ -216,8 +216,9 @@ OpenSearch index と Neo4j graph を作り直す。レスポンスの`sourceSnap
 完了・監査済みRunだけを`published`にし、検索はCase開始時にpublish済みRunを固定する。
 
 現時点では、新しい型、冪等キー、Neo4j Constraint、候補単位checkpoint、再開可能CLI、
-Run publish監査まで実装済みである。実データは再seed済みだが、新5 predicate分類は小規模な
-未公開Runで契約を検証中であり、全件Runとpublishはまだ実行していない。
+Run publish監査まで実装済みである。保存済みe-Gov XMLに対する新しい参照構造の
+shadow検証は`94/94`だが、OpenSearch / Neo4jへの再構築は全件分類用IF完成後に一度だけ行う。
+新5 predicateの全件Runとpublishはまだ実行していない。
 旧`scripts/classify_graph_relations.py --apply`はschema version 7の
 既存`RelationAssertion`を更新する移行用処理なので、schema version 9の再seed後には実行しない。
 
@@ -242,6 +243,26 @@ Coordinatorは各sessionの開始時にmodelとreasoning effortを明示し、�
 速度比較のため別のreasoning effortを試す場合は別Run・別manifestとし、`high`の成果物へ混ぜない。
 reasoning effortを変えただけでも判定条件が変わったものとして代表100件の品質ゲートを再実行する。
 
+live indexからLuna用のlabel-free packetをexportし、最大5件のshardへ分割する。
+`candidateKey`にはsnapshot、schema、prompt、Worker / Reviewer model、両Article hash、
+参照出現hashが含まれるため、一時的なモデル名でexportしたpacketを本番Runへ流用しない。
+
+```bash
+python3 scripts/export_relation_adjudication_packet.py \
+  --output eval-results/relation-full/packet.jsonl
+
+python3 scripts/shard_relation_adjudication_packet.py \
+  --packet eval-results/relation-full/packet.jsonl \
+  --output-dir eval-results/relation-full/shards \
+  --max-candidates-per-shard 5 \
+  --max-active-sessions 3 \
+  --reasoning-effort high
+```
+
+どちらも既存成果物を上書きしない。中断後はWorkerの承認済みJSONLを
+`--completed-jsonl`でexportへ渡し、同じ候補集合の完了済みkeyだけを除外する。
+別snapshotや別modelのkeyが混じった場合は再開とせず失敗する。
+
 分類単位はArticleペア全体に存在し得る任意の関係ではなく、
 候補の`sourceText` / `sourceTexts`が示す参照箇所群である。Article本文はその文脈として使う。
 OpenSearchの子チャンクが親チャンク本文を再掲する場合は、`parentContentUnitId`で
@@ -260,8 +281,35 @@ predicate・条件値・finding・方向・根拠を補正しない。
 
 現行`classify_legal_relations.py`のOllama経路は、1候補をpredicateごとの5回と根拠付与に分ける実装のままである。
 これはローカル契約試験と比較baselineには使えるが、LunaのWorker / Reviewer成果をGraphへ登録するimport経路ではない。
-全件実行前に、Luna判定JSONLを同じPydantic契約・候補hash・snapshotで検証して`ClassificationRun`へ取り込む
-再開可能importを実装する。import完成前はLunaの評価結果を`published`扱いしない。
+Luna成果は`import_relation_adjudication_results.py`が、元packet・Worker回答・Reviewer承認・
+差戻し回数をPydantic契約で検証してから`ClassificationRun`へ取り込む。
+Worker回答単体は取り込めない。同じpayloadの再importはskipし、異なるpayloadは上書きしない。
+
+```bash
+# Neo4jを更新せず、入力契約と保存予定件数を確認
+python3 scripts/import_relation_adjudication_results.py \
+  --manifest eval-results/relation-full/shards/manifest.json \
+  --packet eval-results/relation-full/packet.jsonl \
+  --approved eval-results/relation-full/approved.jsonl \
+  --unresolved eval-results/relation-full/unresolved.jsonl
+
+# 候補別checkpointと承認済みAssertionを保存（まだpublishしない）
+python3 scripts/import_relation_adjudication_results.py \
+  --manifest eval-results/relation-full/shards/manifest.json \
+  --packet eval-results/relation-full/packet.jsonl \
+  --approved eval-results/relation-full/approved.jsonl \
+  --unresolved eval-results/relation-full/unresolved.jsonl \
+  --apply
+
+# 全scopeのimport後だけ、同じrun IDを監査してpublish
+python3 scripts/import_relation_adjudication_results.py \
+  --manifest eval-results/relation-full/shards/manifest.json \
+  --packet eval-results/relation-full/packet.jsonl \
+  --approved eval-results/relation-full/approved.jsonl \
+  --unresolved eval-results/relation-full/unresolved.jsonl \
+  --run-id classification-run-... \
+  --apply --publish
+```
 
 `RELATION_CLASSIFIER_CONTEXT_TOKENS=131072`はOllama経路で長いArticleを黙って切り捨てないための上限である。
 
