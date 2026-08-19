@@ -39,6 +39,7 @@
 - schema version 9のseedは、同じsnapshotのOpenSearch本文とNeo4jの構造・
   `REFERENCES / EXPLAINS`だけを作り、旧`APPLIED_BY / MENTIONS / RelationAssertion`を生成しない。
   新しい5 predicate契約、候補単位checkpoint、再開可能CLI、Neo4j保存、publish監査は実装済みである。
+  保存済みe-Gov XML manifestのhash・法令ID・法令名を検証してseedする経路も実装済みだが、
   実データの再seed・分類と検索時selectorへの接続はまだ行っていない。
 - Luna用のlabel-free候補packetと最大5件のshardを決定的に生成するIFは実装済みである。
   packetはsnapshot、schema、prompt、Worker / Reviewer model、両Article全文、全参照出現を含み、

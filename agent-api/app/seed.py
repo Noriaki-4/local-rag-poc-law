@@ -168,6 +168,11 @@ def seed_all(os_client: OpenSearchClient, graph_client: GraphClient) -> dict[str
         # オントロジー変更時に再シードが必要かを判別できるよう、manifestへ残す(§6.3)。
         "graphSchemaVersion": GRAPH_SCHEMA_VERSION,
         "sourceSnapshotId": source_snapshot_id,
+        "egovDatasetSnapshotId": (
+            _egov_corpus_manifest()["datasetSnapshotId"]
+            if settings.seed_lawqa_egov
+            else None
+        ),
         "edgeTypeCounts": _count_by_key(edges, "edgeType"),
         "nodeTypeCounts": _count_by_key(nodes, "nodeType"),
         "authorityTypeCounts": _count_by_key(nodes, "authorityType"),
@@ -723,14 +728,82 @@ def _with_authority_type(
 def _lawqa_egov_documents(samples_dir: Path) -> list[dict[str, Any]]:
     law_ids = _lawqa_egov_law_ids(samples_dir)
     registry_entries = _law_registry_entries(samples_dir)
+    manifest = _egov_corpus_manifest()
+    entries_by_law_id = {
+        str(entry["lawId"]): entry for entry in manifest["laws"]
+    }
     documents: list[dict[str, Any]] = []
-    for law_id in law_ids:
-        documents.extend(_egov_law_documents(law_id, registry_entries))
+    for law_id_spec in law_ids:
+        law_id, _ = _parse_law_id_spec(law_id_spec)
+        entry = entries_by_law_id.get(law_id)
+        if entry is None:
+            raise ValueError(
+                f"e-Gov corpus manifest does not contain requested law: {law_id}"
+            )
+        payload = _read_egov_corpus_xml(entry)
+        documents.extend(
+            _egov_law_documents_from_xml(
+                payload,
+                law_id_spec=law_id_spec,
+                source_url=str(entry["sourceUrl"]),
+                registry_entries=registry_entries,
+            )
+        )
     for batch in _chunks(documents, settings.embedding_batch_size):
         embeddings = embed_texts([_embedding_text(document) for document in batch])
         for document, embedding in zip(batch, embeddings, strict=True):
             document["embedding"] = embedding
     return documents
+
+
+def _egov_corpus_manifest() -> dict[str, Any]:
+    manifest_path = settings.egov_law_corpus_manifest
+    if not manifest_path.is_file():
+        raise FileNotFoundError(
+            "e-Gov law corpus manifest not found. Run "
+            f"scripts/sync_egov_law_corpus.py first: {manifest_path}"
+        )
+    manifest = _read_json(manifest_path)
+    if manifest.get("schemaVersion") != 1:
+        raise ValueError(
+            f"Unsupported e-Gov corpus schema: {manifest.get('schemaVersion')}"
+        )
+    if manifest.get("datasetType") != "egov_law_xml":
+        raise ValueError("e-Gov corpus manifest has an invalid datasetType")
+    snapshot_id = str(manifest.get("datasetSnapshotId") or "")
+    entries = manifest.get("laws")
+    if not snapshot_id or not isinstance(entries, list) or not entries:
+        raise ValueError("e-Gov corpus manifest is missing snapshot or laws")
+    if any(not isinstance(entry, dict) for entry in entries):
+        raise ValueError("e-Gov corpus laws must contain objects")
+    law_ids = [str(entry.get("lawId") or "") for entry in entries]
+    if any(not law_id for law_id in law_ids) or len(law_ids) != len(set(law_ids)):
+        raise ValueError("e-Gov corpus lawId values must be non-empty and unique")
+    if int(manifest.get("lawCount") or -1) != len(entries):
+        raise ValueError("e-Gov corpus lawCount does not match laws")
+    return manifest
+
+
+def _read_egov_corpus_xml(entry: dict[str, Any]) -> bytes:
+    manifest_path = settings.egov_law_corpus_manifest.resolve()
+    corpus_root = manifest_path.parent
+    relative_path = Path(str(entry.get("path") or ""))
+    if relative_path.is_absolute() or ".." in relative_path.parts:
+        raise ValueError(f"Unsafe e-Gov corpus path: {relative_path}")
+    source_path = (corpus_root / relative_path).resolve()
+    try:
+        source_path.relative_to(corpus_root)
+    except ValueError as exc:
+        raise ValueError(f"Unsafe e-Gov corpus path: {relative_path}") from exc
+    if not source_path.is_file():
+        raise FileNotFoundError(f"Cached e-Gov XML is missing: {source_path}")
+    payload = source_path.read_bytes()
+    expected_hash = str(entry.get("sha256") or "").removeprefix("sha256:")
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+        raise ValueError(f"e-Gov corpus entry requires SHA-256: {source_path}")
+    if sha256(payload).hexdigest() != expected_hash:
+        raise ValueError(f"Cached e-Gov XML hash mismatch: {source_path}")
+    return payload
 
 
 def _lawqa_egov_law_ids(samples_dir: Path) -> list[str]:
@@ -795,11 +868,27 @@ def _egov_law_documents(
     law_id_spec: str,
     registry_entries: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    law_id, article_range = _parse_law_id_spec(law_id_spec)
+    law_id, _ = _parse_law_id_spec(law_id_spec)
     url = f"{settings.egov_api_base_url.rstrip('/')}/lawdata/{law_id}"
     response = requests.get(url, timeout=120)
     response.raise_for_status()
-    root = ET.fromstring(response.content)
+    return _egov_law_documents_from_xml(
+        response.content,
+        law_id_spec=law_id_spec,
+        source_url=url,
+        registry_entries=registry_entries,
+    )
+
+
+def _egov_law_documents_from_xml(
+    payload: bytes,
+    *,
+    law_id_spec: str,
+    source_url: str,
+    registry_entries: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    law_id, article_range = _parse_law_id_spec(law_id_spec)
+    root = ET.fromstring(payload)
     code = root.findtext("./Result/Code")
     if code and code != "0":
         message = root.findtext("./Result/Message") or "unknown e-Gov API error"
@@ -811,6 +900,11 @@ def _egov_law_documents(
     # 人手確認値を正とする(§5.2)。registryに無い場合は ordinance_unspecified のままにする。
     law_element = root.find(".//Law")
     entry = (registry_entries or {}).get(law_id, {})
+    expected_title = str(entry.get("title") or "")
+    if expected_title and "".join(title.split()) != "".join(expected_title.split()):
+        raise ValueError(
+            f"Cached e-Gov law title mismatch: registry={expected_title!r}, XML={title!r}"
+        )
     authority = resolve_authority_type(
         law_id,
         registry_authority_type=entry.get("authorityType"),
@@ -843,7 +937,7 @@ def _egov_law_documents(
             law_id,
             title,
             law_num,
-            url,
+            source_url,
             id_prefix="article",
             section_key="main",
             authority_type=authority.authority_type,
@@ -860,7 +954,7 @@ def _egov_law_documents(
                     law_id,
                     title,
                     law_num,
-                    url,
+                    source_url,
                     id_prefix=f"{section_key}-article",
                     section_key=section_key,
                     section_label=_suppl_label(suppl),

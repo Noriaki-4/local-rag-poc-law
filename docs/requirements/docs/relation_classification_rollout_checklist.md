@@ -106,6 +106,10 @@ Worker JSONLはPydantic契約を通らず、Assertionへ変換できない。
 
 合格条件: 不一致snapshotを公開せず、再構築後の構造監査がすべて成功する。
 
+`EGOV_LAW_CORPUS_MANIFEST`から各XMLのSHA-256・法令ID・法令名を検証してseedする経路は実装済み。
+実データ14法令（14,742 OpenSearch文書相当）のread-only parseも完了した。上記項目は
+実際の再構築と監査が成功した時点で完了にする。
+
 ## Gate 6: 代表100件を最大3並列で再評価する
 
 - [ ] goldをWorker・Reviewerへ渡していない

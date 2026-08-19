@@ -103,6 +103,7 @@ services:
       SEED_LAWQA_EGOV: ${SEED_LAWQA_EGOV:-false}
       LAWQA_EGOV_LAW_IDS: ${LAWQA_EGOV_LAW_IDS:-}
       EGOV_API_BASE_URL: ${EGOV_API_BASE_URL:-https://laws.e-gov.go.jp/api/1}
+      EGOV_LAW_CORPUS_MANIFEST: ${EGOV_LAW_CORPUS_MANIFEST:-/workspace/datasets/lawqa_jp/egov_law_corpus/manifest.json}
       SEED_EXTERNAL_GUIDANCE: ${SEED_EXTERNAL_GUIDANCE:-false}
       EXTERNAL_GUIDANCE_MANIFEST: ${EXTERNAL_GUIDANCE_MANIFEST:-/workspace/datasets/lawqa_jp/external-guidance/manifest.json}
       EXTERNAL_GUIDANCE_CHUNK_CHARS: ${EXTERNAL_GUIDANCE_CHUNK_CHARS:-900}

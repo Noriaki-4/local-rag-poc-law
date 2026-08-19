@@ -1051,8 +1051,10 @@ python3 scripts/sync_egov_law_corpus.py --refresh
 
 変更されたXMLは旧ファイルを上書きせず、新しい内容ハッシュとdataset snapshotとして保存する。
 このディレクトリは公開データのローカル原本でサイズが大きいためGit管理外である。
-現時点の`/admin/seed`はまだこのManifestを入力にするよう切り替えていない。XML datasetからの
-seed接続は次工程とし、本節の同期だけではOpenSearch / Neo4jを変更しない。
+`/admin/seed`は`EGOV_LAW_CORPUS_MANIFEST`（既定は上記`manifest.json`）を入力にし、
+各XMLのSHA-256、法令ID、法令名を検証してからOpenSearch / Neo4jを同時に再構築する。
+seed中にe-Gov APIへアクセスしない。e-Gov上の更新を取り込む場合も、先に`--refresh`で
+新しい不変snapshotを作り、そのmanifestを指定してから一度だけ再seedする。
 
 ```bash
 LAWQA_EVAL_URL=https://raw.githubusercontent.com/digital-go-jp/lawqa_jp/main/data/selection.json \
@@ -1064,6 +1066,14 @@ docker compose up --build -d agent-api
 LAWQA_EVAL_URL=https://raw.githubusercontent.com/digital-go-jp/lawqa_jp/main/data/selection.json \
 SEED_LAWQA_EGOV=true \
 curl -s -X POST http://localhost:8000/admin/seed | jq .
+```
+
+別snapshotを使う場合は、compose起動時にホスト側パスではなくコンテナ内のmanifestパスを指定する。
+
+```bash
+EGOV_LAW_CORPUS_MANIFEST=/workspace/datasets/lawqa_jp/egov_law_corpus/manifests/egov-law-corpus-<hash>.json \
+SEED_LAWQA_EGOV=true \
+docker compose up --build -d agent-api
 ```
 
 ### 非e-Govガイドラインの原本保管と投入

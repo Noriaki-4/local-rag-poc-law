@@ -30,6 +30,12 @@ class Settings:
     }
     lawqa_egov_law_ids = os.getenv("LAWQA_EGOV_LAW_IDS", "")
     egov_api_base_url = os.getenv("EGOV_API_BASE_URL", "https://laws.e-gov.go.jp/api/1")
+    egov_law_corpus_manifest = Path(
+        os.getenv(
+            "EGOV_LAW_CORPUS_MANIFEST",
+            "/workspace/datasets/lawqa_jp/egov_law_corpus/manifest.json",
+        )
+    )
     seed_external_guidance = os.getenv("SEED_EXTERNAL_GUIDANCE", "false").lower() in {
         "1",
         "true",
