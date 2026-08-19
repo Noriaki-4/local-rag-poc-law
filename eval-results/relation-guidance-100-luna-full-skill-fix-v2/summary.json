@@ -1,0 +1,55 @@
+{
+  "evaluationId": "relation-guidance-100-luna-full-skill-fix-v2",
+  "evaluatedAt": "2026-08-19",
+  "model": "gpt-5.6-luna",
+  "maxConcurrentAgents": 2,
+  "freshContext": {
+    "forkTurns": "none",
+    "goldProvidedToWorkersOrReviewers": false,
+    "priorOutputsProvided": false
+  },
+  "legalStructure": {
+    "exact": 94,
+    "total": 94,
+    "contractErrors": 0,
+    "statusCounts": {
+      "valid_pair": 73,
+      "unresolved": 13,
+      "not_reference": 8
+    }
+  },
+  "semanticEnrichment": {
+    "structurallyResolved": 73,
+    "classifiable": 72,
+    "workerExactIncludingDirection": 57,
+    "reviewedExactIncludingDirection": 57,
+    "reviewedPredicateExact": 58,
+    "reviewedDirectionExact": 57,
+    "reviewedContractErrors": 0,
+    "reviewedStatusMismatches": 1,
+    "needsResolutionExact": 1,
+    "needsResolutionTotal": 1,
+    "reviewRequestedChanges": 3,
+    "reviewFixedCases": 1,
+    "reviewRegressedCases": 1,
+    "reviewChangedStillWrongCases": 1,
+    "finalWrongClassifiableCases": 15
+  },
+  "guidanceNavigation": {
+    "exact": 6,
+    "total": 6,
+    "neo4jUpdated": false
+  },
+  "endToEnd": {
+    "exact": 85,
+    "total": 100,
+    "calculation": "21 structurally non-semantic legal cases + 57 exact semantic cases + 1 correct version-resolution case + 6 guidance cases"
+  },
+  "comparison": {
+    "previousRunRescoredAgainstCurrentGold": 62,
+    "previousRunTotalClassifiable": 72,
+    "currentReviewedExact": 57,
+    "delta": -5
+  },
+  "publishDecision": "reject_unreviewed_luna_output"
+}

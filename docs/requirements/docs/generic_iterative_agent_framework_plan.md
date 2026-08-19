@@ -650,6 +650,10 @@ Workerの誤り・不足・根拠不整合を具体的に指摘する。`request
 Programは二条件とfindingの真理値整合、既知ID、成立predicateと根拠件数の対応だけを検証し、
 本文から条件値、predicate、意味方向を決めない。内部`candidateKey`はProgramが入力候補へ
 機械的に対応付け、LLMに未知IDを生成させない。
+`referenceOccurrences`が1件だけなら、その`occurrenceHash`も入力envelopeが所有し、Worker出力後に
+Programがassertionへ機械的に束縛する。複数箇所ならどの参照箇所を根拠にするかは意味判断なので、
+Workerが既知hashから選び、Programは存在だけを検証する。Programはこの束縛でpredicate、方向、
+根拠spanを変更しない。
 
 候補の`referenceSourceArticle / referenceTargetArticle`は原文`REFERENCES`の物理方向だけを表す。
 新seedは同一法令参照と親法令参照の両経路で引用位置を保存する。位置を持たない旧Graphを分類する場合は、

@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "sourcePacket": "/Users/nt/projects/local-rag-poc-law/eval-results/relation-guidance-100-luna-wrong-only-skill-fix-v2/packet.jsonl",
+  "sourcePacketSha256": "630cc18144d664bdfdfad9ccf88dfb699acbe359895a0bb690507274256b20c3",
+  "candidateCount": 12,
+  "shardCount": 2,
+  "shards": [
+    {
+      "shardId": "shard-0000",
+      "file": "shard-0000.jsonl",
+      "candidateCount": 6,
+      "inputCharacters": 62393,
+      "sha256": "d3925f707e544a1ad215e4573d6a08b543a0f96dce03e6ca556a732ee05f9506",
+      "candidateKeys": [
+        "2973096cf6cd1d0a0b6fd83f686c5cd5b74d48926755676b0dd443f965e1e7dd",
+        "5d204ccf9cb123c0fc64b22309079ff6a4bd77b5563e12f63afbd0ce1d32b883",
+        "2581b784801bf945f7a42bb1e715606a847b40b5cdd50c2e1dd42bf29cdee726",
+        "3ee13cd0610495f0516c46b0f77529dfbdc675e442a4eeb76e2233006815e352",
+        "6c4af3025647be3b3c75b89ad74b452ca0f962b6018fee59f068bfb12e464590",
+        "4a5a8546c3dc7d624d991073b72e58d19e6edbb7b6e03ce0daf226e2b2de6d99"
+      ],
+      "basisEdgeIds": [
+        "edge-law-420M60000002078-article-10_2-references-law-323AC0000000025-article-21",
+        "edge-law-405M50000040014-article-16-references-law-323AC0000000025-article-29_2",
+        "edge-law-336M50000100001-article-34_3-references-law-335AC0000000145-article-13_2_2",
+        "edge-law-419M60000002052-article-277-paragraph-3-references-article-278",
+        "edge-law-405M50000040014-suppl-86-article-28-paragraph-1-references-article-11",
+        "edge-law-336M50000100001-suppl-328-article-3-paragraph-1-references-article-15_3"
+      ]
+    },
+    {
+      "shardId": "shard-0001",
+      "file": "shard-0001.jsonl",
+      "candidateCount": 6,
+      "inputCharacters": 58783,
+      "sha256": "f014f6f2f0c38816aa3520fa395c7fb15de33342efba79327b390404213f5d0d",
+      "candidateKeys": [
+        "b52d25446706a89e472c3842f6f406f8b19dff1c6cb9858ce6b85f298e2e8ae1",
+        "571e810ace87907de86abf8c89550391b9e9688a3bfd16f36c8da4bd06903842",
+        "cfad7c4300143efaa3b0385e71687ca33178b63021645729dc6b48f9916022b9",
+        "db76a469b7c1f853d844bfe5dba67332e4f7dc7ee00c7f256782967d0c7b01c4",
+        "d40b74778722df968a6f52125e0231c0b9fd135b0777534e7a02eca76680140c",
+        "b2082ce88ca0e6e941b494321687b846cc8c1659b0ecb38d47a549862aa3838b"
+      ],
+      "basisEdgeIds": [
+        "edge-law-419M60000002059-article-12-references-law-340CO0000000321-article-26_4",
+        "edge-law-340CO0000000321-article-13-references-law-323AC0000000025-article-27_22_2",
+        "edge-law-405M50000040014-article-10_2-references-law-340CO0000000321-article-1_4",
+        "edge-law-323AC0000000025-article-64_7-paragraph-6-references-article-66_25",
+        "edge-law-429M60000002054-article-2-paragraph-2-item-3-references-article-11",
+        "edge-law-348M50000040005-suppl-106-article-2-paragraph-1-references-article-3"
+      ]
+    }
+  ]
+}

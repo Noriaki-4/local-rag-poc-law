@@ -1,0 +1,41 @@
+{
+  "evaluationId": "relation-guidance-100-luna-wrong-only-skill-fix-v3",
+  "evaluatedAt": "2026-08-19",
+  "model": "gpt-5.6-luna",
+  "freshContext": true,
+  "goldProvidedToWorkerOrReviewer": false,
+  "scope": {
+    "priorSemanticErrors": 11,
+    "priorVersionResolutionError": 1,
+    "totalPriorErrors": 12
+  },
+  "corrections": {
+    "skillDecisionBoundary": [
+      "delegated implementation versus independent definition use",
+      "forward-scope definition direction",
+      "operative incorporation versus backward descriptive citation",
+      "historical target-version fitness"
+    ],
+    "deterministicEnvelopeBinding": "A sole known referenceOccurrenceHash is copied from the input packet without changing meaning fields.",
+    "goldCorrection": "Article 34-3 to Act Article 13-2-2 establishes both IMPLEMENTS and USES_DEFINITION under the current contract."
+  },
+  "firstTargetedPass": {
+    "classifiableExactAfterGoldAndEnvelopeCorrections": 10,
+    "classifiableTotal": 11,
+    "versionResolutionExact": 1,
+    "versionResolutionTotal": 1,
+    "remainingSemanticErrors": 1
+  },
+  "secondTargetedPass": {
+    "scope": "the one remaining semantic error only",
+    "workerExact": 1,
+    "workerTotal": 1,
+    "reviewStatus": "approve",
+    "contractErrors": 0
+  },
+  "combinedTargetedCoverage": {
+    "exact": 12,
+    "total": 12,
+    "note": "Combined result across the first 12-case targeted pass and the one-case follow-up; this is not a fresh full-100 regression run."
+  }
+}

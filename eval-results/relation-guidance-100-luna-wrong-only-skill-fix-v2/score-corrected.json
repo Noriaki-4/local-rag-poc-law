@@ -1,0 +1,374 @@
+{
+  "candidateCount": 11,
+  "exactCount": 10,
+  "predicateExactCount": 10,
+  "directionChecked": true,
+  "directionExactCount": 10,
+  "structuralErrorCount": 0,
+  "predicateCounts": {
+    "IMPLEMENTS": {
+      "tp": 4,
+      "tn": 7
+    },
+    "INCORPORATES": {
+      "tn": 8,
+      "fp": 1,
+      "tp": 2
+    },
+    "USES_DEFINITION": {
+      "tn": 6,
+      "tp": 4,
+      "fp": 1
+    },
+    "EXCEPTION_TO": {
+      "tn": 10,
+      "tp": 1
+    },
+    "OVERRIDES": {
+      "tn": 10,
+      "tp": 1
+    }
+  },
+  "results": [
+    {
+      "basisEdgeId": "edge-law-420M60000002078-article-10_2-references-law-323AC0000000025-article-21",
+      "exact": true,
+      "predicateExact": true,
+      "directionExact": true,
+      "expectedPredicates": [
+        "IMPLEMENTS"
+      ],
+      "actualPredicates": [
+        "IMPLEMENTS"
+      ],
+      "missing": [],
+      "extra": [],
+      "structuralErrors": [],
+      "expectedSemanticDirections": [
+        {
+          "proposedPredicate": "IMPLEMENTS",
+          "subjectArticleId": "law-323AC0000000025-article-21",
+          "objectArticleId": "law-420M60000002078-article-10_2"
+        }
+      ],
+      "actualSemanticDirections": [
+        {
+          "proposedPredicate": "IMPLEMENTS",
+          "subjectArticleId": "law-323AC0000000025-article-21",
+          "objectArticleId": "law-420M60000002078-article-10_2"
+        }
+      ]
+    },
+    {
+      "basisEdgeId": "edge-law-405M50000040014-article-16-references-law-323AC0000000025-article-29_2",
+      "exact": true,
+      "predicateExact": true,
+      "directionExact": true,
+      "expectedPredicates": [
+        "USES_DEFINITION"
+      ],
+      "actualPredicates": [
+        "USES_DEFINITION"
+      ],
+      "missing": [],
+      "extra": [],
+      "structuralErrors": [],
+      "expectedSemanticDirections": [
+        {
+          "proposedPredicate": "USES_DEFINITION",
+          "subjectArticleId": "law-405M50000040014-article-16",
+          "objectArticleId": "law-323AC0000000025-article-29_2"
+        }
+      ],
+      "actualSemanticDirections": [
+        {
+          "proposedPredicate": "USES_DEFINITION",
+          "subjectArticleId": "law-405M50000040014-article-16",
+          "objectArticleId": "law-323AC0000000025-article-29_2"
+        }
+      ]
+    },
+    {
+      "basisEdgeId": "edge-law-419M60000002059-article-12-references-law-340CO0000000321-article-26_4",
+      "exact": true,
+      "predicateExact": true,
+      "directionExact": true,
+      "expectedPredicates": [
+        "IMPLEMENTS"
+      ],
+      "actualPredicates": [
+        "IMPLEMENTS"
+      ],
+      "missing": [],
+      "extra": [],
+      "structuralErrors": [],
+      "expectedSemanticDirections": [
+        {
+          "proposedPredicate": "IMPLEMENTS",
+          "subjectArticleId": "law-340CO0000000321-article-26_4",
+          "objectArticleId": "law-419M60000002059-article-12"
+        }
+      ],
+      "actualSemanticDirections": [
+        {
+          "proposedPredicate": "IMPLEMENTS",
+          "subjectArticleId": "law-340CO0000000321-article-26_4",
+          "objectArticleId": "law-419M60000002059-article-12"
+        }
+      ]
+    },
+    {
+      "basisEdgeId": "edge-law-340CO0000000321-article-13-references-law-323AC0000000025-article-27_22_2",
+      "exact": true,
+      "predicateExact": true,
+      "directionExact": true,
+      "expectedPredicates": [],
+      "actualPredicates": [],
+      "missing": [],
+      "extra": [],
+      "structuralErrors": [],
+      "expectedSemanticDirections": [],
+      "actualSemanticDirections": []
+    },
+    {
+      "basisEdgeId": "edge-law-405M50000040014-article-10_2-references-law-340CO0000000321-article-1_4",
+      "exact": true,
+      "predicateExact": true,
+      "directionExact": true,
+      "expectedPredicates": [
+        "IMPLEMENTS"
+      ],
+      "actualPredicates": [
+        "IMPLEMENTS"
+      ],
+      "missing": [],
+      "extra": [],
+      "structuralErrors": [],
+      "expectedSemanticDirections": [
+        {
+          "proposedPredicate": "IMPLEMENTS",
+          "subjectArticleId": "law-340CO0000000321-article-1_4",
+          "objectArticleId": "law-405M50000040014-article-10_2"
+        }
+      ],
+      "actualSemanticDirections": [
+        {
+          "proposedPredicate": "IMPLEMENTS",
+          "subjectArticleId": "law-340CO0000000321-article-1_4",
+          "objectArticleId": "law-405M50000040014-article-10_2"
+        }
+      ]
+    },
+    {
+      "basisEdgeId": "edge-law-336M50000100001-article-34_3-references-law-335AC0000000145-article-13_2_2",
+      "exact": true,
+      "predicateExact": true,
+      "directionExact": true,
+      "expectedPredicates": [
+        "IMPLEMENTS",
+        "USES_DEFINITION"
+      ],
+      "actualPredicates": [
+        "IMPLEMENTS",
+        "USES_DEFINITION"
+      ],
+      "missing": [],
+      "extra": [],
+      "structuralErrors": [],
+      "expectedSemanticDirections": [
+        {
+          "proposedPredicate": "IMPLEMENTS",
+          "subjectArticleId": "law-335AC0000000145-article-13_2_2",
+          "objectArticleId": "law-336M50000100001-article-34_3"
+        },
+        {
+          "proposedPredicate": "USES_DEFINITION",
+          "subjectArticleId": "law-336M50000100001-article-34_3",
+          "objectArticleId": "law-335AC0000000145-article-13_2_2"
+        }
+      ],
+      "actualSemanticDirections": [
+        {
+          "proposedPredicate": "IMPLEMENTS",
+          "subjectArticleId": "law-335AC0000000145-article-13_2_2",
+          "objectArticleId": "law-336M50000100001-article-34_3"
+        },
+        {
+          "proposedPredicate": "USES_DEFINITION",
+          "subjectArticleId": "law-336M50000100001-article-34_3",
+          "objectArticleId": "law-335AC0000000145-article-13_2_2"
+        }
+      ]
+    },
+    {
+      "basisEdgeId": "edge-law-419M60000002052-article-277-paragraph-3-references-article-278",
+      "exact": true,
+      "predicateExact": true,
+      "directionExact": true,
+      "expectedPredicates": [
+        "USES_DEFINITION"
+      ],
+      "actualPredicates": [
+        "USES_DEFINITION"
+      ],
+      "missing": [],
+      "extra": [],
+      "structuralErrors": [],
+      "expectedSemanticDirections": [
+        {
+          "proposedPredicate": "USES_DEFINITION",
+          "subjectArticleId": "law-419M60000002052-article-278",
+          "objectArticleId": "law-419M60000002052-article-277"
+        }
+      ],
+      "actualSemanticDirections": [
+        {
+          "proposedPredicate": "USES_DEFINITION",
+          "subjectArticleId": "law-419M60000002052-article-278",
+          "objectArticleId": "law-419M60000002052-article-277"
+        }
+      ]
+    },
+    {
+      "basisEdgeId": "edge-law-323AC0000000025-article-64_7-paragraph-6-references-article-66_25",
+      "exact": false,
+      "predicateExact": false,
+      "directionExact": false,
+      "expectedPredicates": [],
+      "actualPredicates": [
+        "INCORPORATES",
+        "USES_DEFINITION"
+      ],
+      "missing": [],
+      "extra": [
+        "INCORPORATES",
+        "USES_DEFINITION"
+      ],
+      "structuralErrors": [],
+      "expectedSemanticDirections": [],
+      "actualSemanticDirections": [
+        {
+          "proposedPredicate": "INCORPORATES",
+          "subjectArticleId": "law-323AC0000000025-article-66_25",
+          "objectArticleId": "law-323AC0000000025-article-64_7"
+        },
+        {
+          "proposedPredicate": "USES_DEFINITION",
+          "subjectArticleId": "law-323AC0000000025-article-66_25",
+          "objectArticleId": "law-323AC0000000025-article-64_7"
+        }
+      ]
+    },
+    {
+      "basisEdgeId": "edge-law-429M60000002054-article-2-paragraph-2-item-3-references-article-11",
+      "exact": true,
+      "predicateExact": true,
+      "directionExact": true,
+      "expectedPredicates": [
+        "USES_DEFINITION"
+      ],
+      "actualPredicates": [
+        "USES_DEFINITION"
+      ],
+      "missing": [],
+      "extra": [],
+      "structuralErrors": [],
+      "expectedSemanticDirections": [
+        {
+          "proposedPredicate": "USES_DEFINITION",
+          "subjectArticleId": "law-429M60000002054-article-11",
+          "objectArticleId": "law-429M60000002054-article-2"
+        }
+      ],
+      "actualSemanticDirections": [
+        {
+          "proposedPredicate": "USES_DEFINITION",
+          "subjectArticleId": "law-429M60000002054-article-11",
+          "objectArticleId": "law-429M60000002054-article-2"
+        }
+      ]
+    },
+    {
+      "basisEdgeId": "edge-law-348M50000040005-suppl-106-article-2-paragraph-1-references-article-3",
+      "exact": true,
+      "predicateExact": true,
+      "directionExact": true,
+      "expectedPredicates": [
+        "EXCEPTION_TO",
+        "INCORPORATES",
+        "OVERRIDES"
+      ],
+      "actualPredicates": [
+        "EXCEPTION_TO",
+        "INCORPORATES",
+        "OVERRIDES"
+      ],
+      "missing": [],
+      "extra": [],
+      "structuralErrors": [],
+      "expectedSemanticDirections": [
+        {
+          "proposedPredicate": "EXCEPTION_TO",
+          "subjectArticleId": "law-348M50000040005-suppl-106-article-2",
+          "objectArticleId": "law-348M50000040005-article-3"
+        },
+        {
+          "proposedPredicate": "INCORPORATES",
+          "subjectArticleId": "law-348M50000040005-suppl-106-article-2",
+          "objectArticleId": "law-348M50000040005-article-3"
+        },
+        {
+          "proposedPredicate": "OVERRIDES",
+          "subjectArticleId": "law-348M50000040005-suppl-106-article-2",
+          "objectArticleId": "law-348M50000040005-article-3"
+        }
+      ],
+      "actualSemanticDirections": [
+        {
+          "proposedPredicate": "EXCEPTION_TO",
+          "subjectArticleId": "law-348M50000040005-suppl-106-article-2",
+          "objectArticleId": "law-348M50000040005-article-3"
+        },
+        {
+          "proposedPredicate": "INCORPORATES",
+          "subjectArticleId": "law-348M50000040005-suppl-106-article-2",
+          "objectArticleId": "law-348M50000040005-article-3"
+        },
+        {
+          "proposedPredicate": "OVERRIDES",
+          "subjectArticleId": "law-348M50000040005-suppl-106-article-2",
+          "objectArticleId": "law-348M50000040005-article-3"
+        }
+      ]
+    },
+    {
+      "basisEdgeId": "edge-law-405M50000040014-suppl-86-article-28-paragraph-1-references-article-11",
+      "exact": true,
+      "predicateExact": true,
+      "directionExact": true,
+      "expectedPredicates": [
+        "INCORPORATES"
+      ],
+      "actualPredicates": [
+        "INCORPORATES"
+      ],
+      "missing": [],
+      "extra": [],
+      "structuralErrors": [],
+      "expectedSemanticDirections": [
+        {
+          "proposedPredicate": "INCORPORATES",
+          "subjectArticleId": "law-405M50000040014-suppl-86-article-28",
+          "objectArticleId": "law-405M50000040014-article-11"
+        }
+      ],
+      "actualSemanticDirections": [
+        {
+          "proposedPredicate": "INCORPORATES",
+          "subjectArticleId": "law-405M50000040014-suppl-86-article-28",
+          "objectArticleId": "law-405M50000040014-article-11"
+        }
+      ]
+    }
+  ]
+}

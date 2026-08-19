@@ -242,6 +242,9 @@ Luna Workerは5 predicateを同じ候補について一度に比較し、それ�
 成立時の根拠IDを返す。複数predicateは独立に成立できる。ReviewerはWorkerの回答と同じ候補本文を受け取り、
 誤りを具体的に指摘する。差戻しは1回だけとし、同じWorkerが指摘を参照して全5分類を再確認した後、
 同じReviewerが差分を最終確認する。処理量は候補を複数のWorker / Reviewerペアへ分割して並列化する。
+Worker出力後は`legal-relation-adjudicator/scripts/bind_single_occurrence_ids.py`を実行する。
+参照箇所が1つだけの候補では、Programが入力packetの既知`occurrenceHash`をassertionへ機械的に束縛する。
+複数参照箇所がある候補では選択自体が意味判断になるため補正せず、Workerが選んだ既知hashだけを許可する。
 プログラムは条件とfinding、既知ID、件数の整合を検証してoutcomeと保存対象Assertionへ決定的に投影するだけで、
 predicate・条件値・finding・方向・根拠を補正しない。
 
@@ -392,7 +395,7 @@ Reviewer成果は作業履歴としてauditに残すが、正解の根拠には�
 `USES_DEFINITION`の意味方向が物理`REFERENCES`と逆になることを明示した。正解生成プログラムは
 候補抽出にだけ使い、述語の追加・削除やSUBJECT / OBJECTの選択には使っていない。
 
-成立predicateは`IMPLEMENTS=9`、`INCORPORATES=5`、`USES_DEFINITION=25`、
+成立predicateは`IMPLEMENTS=9`、`INCORPORATES=5`、`USES_DEFINITION=26`、
 `EXCEPTION_TO=5`、`OVERRIDES=2`で、成立なしの負例も含む。Codexの横断監査では、構造監査が見逃した
 「医療法第一条の二」を薬機法第一条の二へ接続した1件を`unresolved`へ修正した。Workerが
 `needs_resolution`で停止したため、この誤接続に意味ラベルは付いていない。

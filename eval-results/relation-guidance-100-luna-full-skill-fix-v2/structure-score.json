@@ -1,0 +1,858 @@
+{
+  "candidateCount": 94,
+  "exactCount": 94,
+  "structuralErrorCount": 0,
+  "confusion": {
+    "not_reference->not_reference": 8,
+    "unresolved->unresolved": 13,
+    "valid_pair->valid_pair": 73
+  },
+  "results": [
+    {
+      "basisEdgeId": "edge-law-420M60000002078-article-10_2-references-law-323AC0000000025-article-21",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-323AC0000000025-article-21",
+      "actualTargetArticleId": "law-323AC0000000025-article-21",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-405M50000040014-article-16-references-law-323AC0000000025-article-29_2",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-323AC0000000025-article-29_2",
+      "actualTargetArticleId": "law-323AC0000000025-article-29_2",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-419M60000002059-article-12-references-law-340CO0000000321-article-26_4",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-340CO0000000321-article-26_4",
+      "actualTargetArticleId": "law-340CO0000000321-article-26_4",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-402M50000040038-article-19-references-law-340CO0000000321-article-13",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-340CO0000000321-article-13",
+      "actualTargetArticleId": "law-340CO0000000321-article-13",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-348M50000040005-article-18_2_2-references-law-323AC0000000025-article-24",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-323AC0000000025-article-24",
+      "actualTargetArticleId": "law-323AC0000000025-article-24",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-419M60000002052-article-38_2-references-law-323AC0000000025-article-32",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-323AC0000000025-article-32",
+      "actualTargetArticleId": "law-323AC0000000025-article-32",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-340CO0000000321-article-13-references-law-323AC0000000025-article-27_22_2",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-323AC0000000025-article-27_22_2",
+      "actualTargetArticleId": "law-323AC0000000025-article-27_22_2",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-336M50000100001-article-69-references-law-335AC0000000145-article-13_3",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-335AC0000000145-article-13_3",
+      "actualTargetArticleId": "law-335AC0000000145-article-13_3",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-405M50000040014-article-10_2-references-law-340CO0000000321-article-1_4",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-340CO0000000321-article-1_4",
+      "actualTargetArticleId": "law-340CO0000000321-article-1_4",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-419M60000002059-article-55_7-references-law-323AC0000000025-article-24",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-323AC0000000025-article-24",
+      "actualTargetArticleId": "law-323AC0000000025-article-24",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-402M50000040038-article-1-references-law-323AC0000000025-article-27_30_2",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-323AC0000000025-article-27_30_2",
+      "actualTargetArticleId": "law-323AC0000000025-article-27_30_2",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-348M50000040005-article-11-references-law-323AC0000000025-article-27",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-323AC0000000025-article-27",
+      "actualTargetArticleId": "law-323AC0000000025-article-27",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-419M60000002052-article-201-references-law-323AC0000000025-article-63_3",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-323AC0000000025-article-63_3",
+      "actualTargetArticleId": "law-323AC0000000025-article-63_3",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-340CO0000000321-article-16_4_2-references-law-323AC0000000025-article-29",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-323AC0000000025-article-29",
+      "actualTargetArticleId": "law-323AC0000000025-article-29",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-336M50000100001-article-228_10_9-references-law-335AC0000000145-article-68_2_4",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-335AC0000000145-article-68_2_4",
+      "actualTargetArticleId": "law-335AC0000000145-article-68_2_4",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-402M50000040038-article-9-references-law-340CO0000000321-article-9_3",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-340CO0000000321-article-9_3",
+      "actualTargetArticleId": "law-340CO0000000321-article-9_3",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-348M50000040005-article-1-references-law-340CO0000000321-article-1_3_4",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-340CO0000000321-article-1_3_4",
+      "actualTargetArticleId": "law-340CO0000000321-article-1_3_4",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-419M60000002052-article-127_2-references-law-340CO0000000321-article-16_11",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-340CO0000000321-article-16_11",
+      "actualTargetArticleId": "law-340CO0000000321-article-16_11",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-340CO0000000321-article-14_3_8-references-law-323AC0000000025-article-27_3",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-323AC0000000025-article-27_3",
+      "actualTargetArticleId": "law-323AC0000000025-article-27_3",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-336M50000100001-article-34_3-references-law-335AC0000000145-article-13_2_2",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-335AC0000000145-article-13_2_2",
+      "actualTargetArticleId": "law-335AC0000000145-article-13_2_2",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-348M50000040005-article-19_7-references-law-323AC0000000025-article-24_7",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-323AC0000000025-article-24_7",
+      "actualTargetArticleId": "law-323AC0000000025-article-24_7",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-419M60000002052-suppl-0-article-16-references-law-323AC0000000025-article-44_3",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-323AC0000000025-article-44_3",
+      "actualTargetArticleId": "law-323AC0000000025-article-44_3",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-403AC0000000090-article-60-references-article-55",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-403AC0000000090-article-55",
+      "actualTargetArticleId": "law-403AC0000000090-article-55",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-417M60000002017-article-1_3-paragraph-1-references-article-1_8",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-417M60000002017-article-1_8",
+      "actualTargetArticleId": "law-417M60000002017-article-1_8",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-340CO0000000321-article-38-paragraph-8-references-article-41_2",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-340CO0000000321-article-41_2",
+      "actualTargetArticleId": "law-340CO0000000321-article-41_2",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-419M60000002052-article-277-paragraph-3-references-article-278",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-419M60000002052-article-278",
+      "actualTargetArticleId": "law-419M60000002052-article-278",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-336M50000100001-article-228_9-paragraph-2-references-article-228_10_3",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-336M50000100001-article-228_10_3",
+      "actualTargetArticleId": "law-336M50000100001-article-228_10_3",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-335AC0000000145-article-69-paragraph-1-references-article-68_7",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-335AC0000000145-article-68_7",
+      "actualTargetArticleId": "law-335AC0000000145-article-68_7",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-323AC0000000025-article-64_7-paragraph-6-references-article-66_25",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-323AC0000000025-article-66_25",
+      "actualTargetArticleId": "law-323AC0000000025-article-66_25",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-340CO0000000321-article-1_4-paragraph-1-item-1-references-article-1_8_2",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-340CO0000000321-article-1_8_2",
+      "actualTargetArticleId": "law-340CO0000000321-article-1_8_2",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-419M60000002052-article-154-paragraph-1-item-4-references-article-153",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-419M60000002052-article-153",
+      "actualTargetArticleId": "law-419M60000002052-article-153",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-336M50000100001-article-114_16-paragraph-2-references-article-114_13",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-336M50000100001-article-114_13",
+      "actualTargetArticleId": "law-336M50000100001-article-114_13",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-335AC0000000145-article-84-paragraph-1-item-20-references-article-62",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-335AC0000000145-article-62",
+      "actualTargetArticleId": "law-335AC0000000145-article-62",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-323AC0000000025-article-200-paragraph-1-item-13-references-article-32_2",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-323AC0000000025-article-32_2",
+      "actualTargetArticleId": "law-323AC0000000025-article-32_2",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-336M50000100001-article-228-paragraph-1-references-article-213",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-336M50000100001-article-213",
+      "actualTargetArticleId": "law-336M50000100001-article-213",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-335AC0000000145-article-69-paragraph-2-references-article-40_4",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-335AC0000000145-article-40_4",
+      "actualTargetArticleId": "law-335AC0000000145-article-40_4",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-323AC0000000025-article-166-paragraph-6-item-4_2-references-article-165",
+      "exact": true,
+      "expectedStatus": "unresolved",
+      "actualStatus": "unresolved",
+      "expectedTargetArticleId": null,
+      "actualTargetArticleId": null,
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-336M50000100001-article-34_3-paragraph-4-references-article-9",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-336M50000100001-article-9",
+      "actualTargetArticleId": "law-336M50000100001-article-9",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-405M50000040014-suppl-18-article-4-references-article-4",
+      "exact": true,
+      "expectedStatus": "not_reference",
+      "actualStatus": "not_reference",
+      "expectedTargetArticleId": null,
+      "actualTargetArticleId": null,
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-419M60000002052-suppl-0-article-51-paragraph-1-item-11-references-suppl-0-article-50",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-419M60000002052-suppl-0-article-50",
+      "actualTargetArticleId": "law-419M60000002052-suppl-0-article-50",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-335AC0000000145-article-1_5-paragraph-2-references-article-1_2",
+      "exact": true,
+      "expectedStatus": "unresolved",
+      "actualStatus": "unresolved",
+      "expectedTargetArticleId": null,
+      "actualTargetArticleId": null,
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-348M50000040005-article-1-paragraph-1-item-24_2-references-article-2",
+      "exact": true,
+      "expectedStatus": "unresolved",
+      "actualStatus": "unresolved",
+      "expectedTargetArticleId": null,
+      "actualTargetArticleId": null,
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-419M60000002059-article-9_3-paragraph-1-item-12-references-article-49",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-419M60000002059-article-49",
+      "actualTargetArticleId": "law-419M60000002059-article-49",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-420M60000002078-article-8-paragraph-2-references-article-5",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-420M60000002078-article-5",
+      "actualTargetArticleId": "law-420M60000002078-article-5",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-429M60000002054-article-2-paragraph-2-item-3-references-article-11",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-429M60000002054-article-11",
+      "actualTargetArticleId": "law-429M60000002054-article-11",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-340CO0000000321-article-1_7_3-paragraph-1-item-5-references-article-2_12_2",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-340CO0000000321-article-2_12_2",
+      "actualTargetArticleId": "law-340CO0000000321-article-2_12_2",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-419M60000002052-article-295-paragraph-1-references-article-310",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-419M60000002052-article-310",
+      "actualTargetArticleId": "law-419M60000002052-article-310",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-323AC0000000025-article-106_6-paragraph-1-references-article-106_3",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-323AC0000000025-article-106_3",
+      "actualTargetArticleId": "law-323AC0000000025-article-106_3",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-340CO0000000321-article-29_3-paragraph-3-references-article-2",
+      "exact": true,
+      "expectedStatus": "unresolved",
+      "actualStatus": "unresolved",
+      "expectedTargetArticleId": null,
+      "actualTargetArticleId": null,
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-419M60000002052-article-9-paragraph-1-item-4-references-article-198",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-419M60000002052-article-198",
+      "actualTargetArticleId": "law-419M60000002052-article-198",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-323AC0000000025-article-173-paragraph-1-item-3-references-article-130",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-323AC0000000025-article-130",
+      "actualTargetArticleId": "law-323AC0000000025-article-130",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-340CO0000000321-article-33_14_2-references-article-33_14_8",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-340CO0000000321-article-33_14_8",
+      "actualTargetArticleId": "law-340CO0000000321-article-33_14_8",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-419M60000002052-article-123-paragraph-1-item-13_2-references-article-2",
+      "exact": true,
+      "expectedStatus": "unresolved",
+      "actualStatus": "unresolved",
+      "expectedTargetArticleId": null,
+      "actualTargetArticleId": null,
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-335AC0000000145-suppl-40-article-38-references-suppl-40-article-37",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-335AC0000000145-suppl-40-article-37",
+      "actualTargetArticleId": "law-335AC0000000145-suppl-40-article-37",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-348M50000040005-suppl-106-article-2-paragraph-1-references-article-3",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-348M50000040005-article-3",
+      "actualTargetArticleId": "law-348M50000040005-article-3",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-405M50000040014-suppl-86-article-28-paragraph-1-references-article-11",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-405M50000040014-article-11",
+      "actualTargetArticleId": "law-405M50000040014-article-11",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-419M60000002052-suppl-75-article-2-references-article-230_2",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-419M60000002052-article-230_2",
+      "actualTargetArticleId": "law-419M60000002052-article-230_2",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-336M50000100001-suppl-328-article-3-paragraph-1-references-article-15_3",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-336M50000100001-article-15_3",
+      "actualTargetArticleId": "law-336M50000100001-article-15_3",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-340CO0000000321-article-43-paragraph-2-item-15-references-article-16_18",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-340CO0000000321-article-16_18",
+      "actualTargetArticleId": "law-340CO0000000321-article-16_18",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-403AC0000000090-article-23-paragraph-1-references-article-13",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-403AC0000000090-article-13",
+      "actualTargetArticleId": "law-403AC0000000090-article-13",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-335AC0000000145-article-50-paragraph-1-item-2-references-article-68_2",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-335AC0000000145-article-68_2",
+      "actualTargetArticleId": "law-335AC0000000145-article-68_2",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-419M60000002052-article-79-paragraph-6-item-2-references-article-80",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-419M60000002052-article-80",
+      "actualTargetArticleId": "law-419M60000002052-article-80",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-323AC0000000025-article-35-paragraph-1-item-8-references-article-2",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-323AC0000000025-article-2",
+      "actualTargetArticleId": "law-323AC0000000025-article-2",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-403AC0000000090-article-23-paragraph-1-references-article-16",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-403AC0000000090-article-16",
+      "actualTargetArticleId": "law-403AC0000000090-article-16",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-335AC0000000145-article-23_2_13-paragraph-1-references-article-23_2_7",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-335AC0000000145-article-23_2_7",
+      "actualTargetArticleId": "law-335AC0000000145-article-23_2_7",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-419M60000002052-article-150-paragraph-1-item-2-references-article-149_2",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-419M60000002052-article-149_2",
+      "actualTargetArticleId": "law-419M60000002052-article-149_2",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-323AC0000000025-article-33-paragraph-2-references-article-33_2",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-323AC0000000025-article-33_2",
+      "actualTargetArticleId": "law-323AC0000000025-article-33_2",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-335AC0000000145-article-61-references-article-42",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-335AC0000000145-article-42",
+      "actualTargetArticleId": "law-335AC0000000145-article-42",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-336M50000100001-suppl-346-article-4-paragraph-1-references-suppl-346-article-3",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-336M50000100001-suppl-346-article-3",
+      "actualTargetArticleId": "law-336M50000100001-suppl-346-article-3",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-340CO0000000321-suppl-86-article-1-references-article-35",
+      "exact": true,
+      "expectedStatus": "unresolved",
+      "actualStatus": "unresolved",
+      "expectedTargetArticleId": null,
+      "actualTargetArticleId": null,
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-419M60000002052-suppl-0-article-16-references-article-16",
+      "exact": true,
+      "expectedStatus": "not_reference",
+      "actualStatus": "not_reference",
+      "expectedTargetArticleId": null,
+      "actualTargetArticleId": null,
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-335AC0000000145-suppl-53-article-1-references-article-60",
+      "exact": true,
+      "expectedStatus": "unresolved",
+      "actualStatus": "unresolved",
+      "expectedTargetArticleId": null,
+      "actualTargetArticleId": null,
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-323AC0000000025-suppl-84-article-104-references-article-104",
+      "exact": true,
+      "expectedStatus": "not_reference",
+      "actualStatus": "not_reference",
+      "expectedTargetArticleId": null,
+      "actualTargetArticleId": null,
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-340CO0000000321-suppl-86-article-14-paragraph-2-references-article-1",
+      "exact": true,
+      "expectedStatus": "unresolved",
+      "actualStatus": "unresolved",
+      "expectedTargetArticleId": null,
+      "actualTargetArticleId": null,
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-419M60000002052-suppl-17-article-1-paragraph-1-item-1-references-article-33",
+      "exact": true,
+      "expectedStatus": "unresolved",
+      "actualStatus": "unresolved",
+      "expectedTargetArticleId": null,
+      "actualTargetArticleId": null,
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-335AC0000000145-suppl-53-article-1-references-article-31",
+      "exact": true,
+      "expectedStatus": "unresolved",
+      "actualStatus": "unresolved",
+      "expectedTargetArticleId": null,
+      "actualTargetArticleId": null,
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-348M50000040005-article-2_9-paragraph-1-references-article-2",
+      "exact": true,
+      "expectedStatus": "unresolved",
+      "actualStatus": "unresolved",
+      "expectedTargetArticleId": null,
+      "actualTargetArticleId": null,
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-336M50000100001-article-15_11-references-article-1_2",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-336M50000100001-article-1_2",
+      "actualTargetArticleId": "law-336M50000100001-article-1_2",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-419M60000002052-article-21-references-article-9",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-419M60000002052-article-9",
+      "actualTargetArticleId": "law-419M60000002052-article-9",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-335AC0000000145-article-23_8-paragraph-1-references-article-23_2_23",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-335AC0000000145-article-23_2_23",
+      "actualTargetArticleId": "law-335AC0000000145-article-23_2_23",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-323AC0000000025-article-178-paragraph-27-references-article-166",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-323AC0000000025-article-166",
+      "actualTargetArticleId": "law-323AC0000000025-article-166",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-336M50000100001-article-228_10_10-paragraph-3-references-article-60",
+      "exact": true,
+      "expectedStatus": "unresolved",
+      "actualStatus": "unresolved",
+      "expectedTargetArticleId": null,
+      "actualTargetArticleId": null,
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-419M60000002052-article-166-paragraph-1-references-article-157",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-419M60000002052-article-157",
+      "actualTargetArticleId": "law-419M60000002052-article-157",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-335AC0000000145-article-23_2_6_3-paragraph-3-references-article-23_2_5",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-335AC0000000145-article-23_2_5",
+      "actualTargetArticleId": "law-335AC0000000145-article-23_2_5",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-323AC0000000025-article-200-paragraph-1-item-15_2-references-article-40_6",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-323AC0000000025-article-40_6",
+      "actualTargetArticleId": "law-323AC0000000025-article-40_6",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-419M60000002052-article-117-paragraph-4-references-article-68",
+      "exact": true,
+      "expectedStatus": "unresolved",
+      "actualStatus": "unresolved",
+      "expectedTargetArticleId": null,
+      "actualTargetArticleId": null,
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-335AC0000000145-article-83_8-references-article-83_6",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-335AC0000000145-article-83_6",
+      "actualTargetArticleId": "law-335AC0000000145-article-83_6",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-323AC0000000025-article-57_18-paragraph-3-references-article-57_12",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-323AC0000000025-article-57_12",
+      "actualTargetArticleId": "law-323AC0000000025-article-57_12",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-336M50000100001-suppl-381-article-2-paragraph-5-references-article-140",
+      "exact": true,
+      "expectedStatus": "valid_pair",
+      "actualStatus": "valid_pair",
+      "expectedTargetArticleId": "law-336M50000100001-article-140",
+      "actualTargetArticleId": "law-336M50000100001-article-140",
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-402M50000040038-suppl-63-article-19-references-article-19",
+      "exact": true,
+      "expectedStatus": "not_reference",
+      "actualStatus": "not_reference",
+      "expectedTargetArticleId": null,
+      "actualTargetArticleId": null,
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-419M60000002052-suppl-119-article-1-references-article-1",
+      "exact": true,
+      "expectedStatus": "not_reference",
+      "actualStatus": "not_reference",
+      "expectedTargetArticleId": null,
+      "actualTargetArticleId": null,
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-419M60000002059-suppl-20-article-1-references-article-1",
+      "exact": true,
+      "expectedStatus": "not_reference",
+      "actualStatus": "not_reference",
+      "expectedTargetArticleId": null,
+      "actualTargetArticleId": null,
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-348M50000040005-suppl-46-article-1-references-article-1",
+      "exact": true,
+      "expectedStatus": "not_reference",
+      "actualStatus": "not_reference",
+      "expectedTargetArticleId": null,
+      "actualTargetArticleId": null,
+      "structuralErrors": []
+    },
+    {
+      "basisEdgeId": "edge-law-405M50000040014-suppl-36-article-1-references-article-1",
+      "exact": true,
+      "expectedStatus": "not_reference",
+      "actualStatus": "not_reference",
+      "expectedTargetArticleId": null,
+      "actualTargetArticleId": null,
+      "structuralErrors": []
+    }
+  ]
+}
