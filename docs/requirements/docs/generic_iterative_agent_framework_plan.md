@@ -1417,6 +1417,11 @@ Codex sessionは最大3つとする。完了済みshardのcontextを次shardへ�
 別候補の追加によって既存候補の判断が変わらないことを受入試験で確認する。
 WorkerとReviewerのmodel、reasoning effort、差戻し上限、skill versionを成果物manifestへ記録する。
 API経由でLunaを呼ばず、Codexサブスクリプションのオペレーター実行とする。
+`reasoning_effort: high`は出力token上限ではなく、各Codex sessionの開始時に指定する推論深度である。
+WorkerとReviewerの双方へ明示し、同じClassificationRun内では変更しない。5 predicateの二条件、意味方向、
+根拠span、構造適合性を一度に照合する品質条件として固定する。別の推論深度を比較する場合は別Run・
+別manifestを作り、代表100件の品質ゲートを再実行する。Coordinatorは推論深度を判定結果から推測せず、
+session起動設定とmanifestの一致だけを検証する。
 
 現行コードのOllama Profileは比較・契約試験用として残る。Gemmaは手動監査14件で5 predicate完全一致が
 4/14だったため、全件Runのpublishには使用しない。Luna方式は既存14件で14/14、新規20件で最終20/20を

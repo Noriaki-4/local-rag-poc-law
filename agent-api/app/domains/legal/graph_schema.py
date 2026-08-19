@@ -48,6 +48,37 @@ class PredicateFinding(StrEnum):
     UNCERTAIN = "uncertain"
 
 
+class AdjudicationStatus(StrEnum):
+    """オフラインWorkerが返す候補単位の意味判定状態。"""
+
+    ACCEPTED = "accepted"
+    NEEDS_REVIEW = "needs_review"
+    NEEDS_RESOLUTION = "needs_resolution"
+
+
+class ReviewStatus(StrEnum):
+    """ReviewerがWorker回答へ返す処理結果。"""
+
+    APPROVE = "approve"
+    REQUEST_CHANGE = "request_change"
+
+
+class ReviewConclusion(StrEnum):
+    """Reviewerによるpredicate単位の確認結果。"""
+
+    CONFIRMED = "confirmed"
+    CHANGE_REQUIRED = "change_required"
+
+
+class ReviewProblemType(StrEnum):
+    """Reviewerが差戻す意味判断上の論点。"""
+
+    CONDITION = "condition"
+    FINDING = "finding"
+    DIRECTION = "direction"
+    GROUNDING = "grounding"
+
+
 CHECKPOINT_OUTCOME_RUN_COUNT_FIELD = {
     ClassificationCheckpointOutcome.CLASSIFIED.value: "classifiedCandidateCount",
     ClassificationCheckpointOutcome.REFERENCE_ONLY.value: "referenceOnlyCount",
@@ -124,6 +155,7 @@ NEO4J_SCHEMA_STATEMENTS = (
 
 
 __all__ = [
+    "AdjudicationStatus",
     "CHECKPOINT_OUTCOME_RUN_COUNT_FIELD",
     "ClassificationCheckpointOutcome",
     "ClassificationRunPhase",
@@ -135,4 +167,7 @@ __all__ = [
     "ProposedPredicate",
     "PredicateFinding",
     "RelationClassificationOutcome",
+    "ReviewConclusion",
+    "ReviewProblemType",
+    "ReviewStatus",
 ]

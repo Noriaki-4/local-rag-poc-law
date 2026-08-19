@@ -10,14 +10,15 @@
 
 ## Gate 0: 契約を固定する
 
-- [ ] WorkerとReviewerは`gpt-5.6-luna`、reasoning effortは`high`で固定した
-- [ ] WorkerとReviewerを別session・別contextにした
-- [ ] 1 sessionの候補上限を5、同時に実行中のsession上限を3にした
-- [ ] 各候補について5 predicateを一度に比較する契約にした
-- [ ] ReviewerはWorkerの全回答を見て`approve / request_change`を返す契約にした
-- [ ] 差戻しは元のWorkerへ1回だけ返し、元のReviewerが差分を最終確認する契約にした
-- [ ] Programがpredicate、condition、finding、意味方向、根拠を補正しないことを契約テストへ固定した
-- [ ] skill version、model、reasoning effort、shard size、session上限、snapshotをmanifestへ記録する契約にした
+- [x] WorkerとReviewerは`gpt-5.6-luna`、reasoning effortは`high`で固定した
+- [x] Worker / Reviewerの各session開始時にreasoning effortを明示し、異なる深度の成果物を同じRunへ混在させない
+- [x] WorkerとReviewerを別session・別contextにした
+- [x] 1 sessionの候補上限を5、同時に実行中のsession上限を3にした
+- [x] 各候補について5 predicateを一度に比較する契約にした
+- [x] ReviewerはWorkerの全回答を見て`approve / request_change`を返す契約にした
+- [x] 差戻しは元のWorkerへ1回だけ返し、元のReviewerが差分を最終確認する契約にした
+- [x] Programがpredicate、condition、finding、意味方向、根拠を補正しないことを契約テストへ固定した
+- [x] skill version、model、reasoning effort、shard size、session上限、snapshotをmanifestへ記録する契約にした
 
 合格条件: 実装計画、RUNBOOK、skill、Pydantic schema、テストfixtureに矛盾がない。
 

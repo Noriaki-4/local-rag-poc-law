@@ -11,11 +11,15 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 
 from .graph_schema import (
+    AdjudicationStatus,
     ClassificationCheckpointOutcome,
     ClassificationRunPhase,
     PredicateFinding,
     ProposedPredicate,
     RelationClassificationOutcome,
+    ReviewConclusion,
+    ReviewProblemType,
+    ReviewStatus,
 )
 
 
@@ -139,6 +143,248 @@ class ProposedRelationAssertion(LegalGraphModel):
     object_article_id: str = Field(min_length=1, max_length=500)
     reference_source_supporting_span_id: str = Field(min_length=1, max_length=500)
     reference_target_supporting_span_id: str = Field(min_length=1, max_length=500)
+
+
+class AdjudicationPredicateAssessment(LegalGraphModel):
+    """Workerが評価するpredicate固有の二条件と結論。"""
+
+    first_condition: PredicateFinding
+    second_condition: PredicateFinding
+    finding: PredicateFinding
+
+    @model_validator(mode="after")
+    def validate_conditions(self) -> AdjudicationPredicateAssessment:
+        _validate_two_conditions(
+            self.finding,
+            self.first_condition,
+            self.second_condition,
+        )
+        return self
+
+
+class AdjudicationPredicateAssessments(LegalGraphModel):
+    """Worker JSONLで必須となる5 predicateの完全な評価集合。"""
+
+    implements: AdjudicationPredicateAssessment = Field(alias="IMPLEMENTS")
+    incorporates: AdjudicationPredicateAssessment = Field(alias="INCORPORATES")
+    uses_definition: AdjudicationPredicateAssessment = Field(alias="USES_DEFINITION")
+    exception_to: AdjudicationPredicateAssessment = Field(alias="EXCEPTION_TO")
+    overrides: AdjudicationPredicateAssessment = Field(alias="OVERRIDES")
+
+    def by_predicate(self) -> dict[ProposedPredicate, AdjudicationPredicateAssessment]:
+        return {
+            ProposedPredicate.IMPLEMENTS: self.implements,
+            ProposedPredicate.INCORPORATES: self.incorporates,
+            ProposedPredicate.USES_DEFINITION: self.uses_definition,
+            ProposedPredicate.EXCEPTION_TO: self.exception_to,
+            ProposedPredicate.OVERRIDES: self.overrides,
+        }
+
+
+class WorkerAdjudicationRecord(LegalGraphModel):
+    """Codex Workerが1候補について返す完全な意味判断。"""
+
+    candidate_key: str = Field(min_length=1, max_length=128)
+    basis_edge_id: str = Field(min_length=1, max_length=500)
+    adjudication_status: AdjudicationStatus
+    predicate_assessments: AdjudicationPredicateAssessments
+    assertions: tuple[ProposedRelationAssertion, ...] = ()
+    note: str | None = Field(default=None, min_length=1, max_length=2000)
+
+    @model_validator(mode="after")
+    def validate_status_and_assertions(self) -> WorkerAdjudicationRecord:
+        assessments = self.predicate_assessments.by_predicate()
+        established = {
+            predicate
+            for predicate, assessment in assessments.items()
+            if assessment.finding is PredicateFinding.ESTABLISHED
+        }
+        uncertain = {
+            predicate
+            for predicate, assessment in assessments.items()
+            if assessment.finding is PredicateFinding.UNCERTAIN
+        }
+        assertion_predicates = [item.proposed_predicate for item in self.assertions]
+        if len(assertion_predicates) != len(set(assertion_predicates)):
+            raise ValueError("each established predicate requires at most one assertion")
+        if set(assertion_predicates) != established:
+            raise ValueError(
+                "assertions must exactly match established predicate assessments"
+            )
+
+        if self.adjudication_status is AdjudicationStatus.ACCEPTED:
+            if uncertain:
+                raise ValueError("accepted adjudication cannot contain uncertainty")
+            if self.note is not None:
+                raise ValueError("accepted adjudication must omit note")
+        elif self.adjudication_status is AdjudicationStatus.NEEDS_REVIEW:
+            if not uncertain:
+                raise ValueError("needs_review requires an uncertain predicate")
+            if self.note is None:
+                raise ValueError("needs_review requires a note")
+        else:
+            if any(
+                assessment.finding is not PredicateFinding.UNCERTAIN
+                for assessment in assessments.values()
+            ):
+                raise ValueError(
+                    "needs_resolution must leave every predicate uncertain"
+                )
+            if self.assertions:
+                raise ValueError("needs_resolution cannot contain assertions")
+            if self.note is None:
+                raise ValueError("needs_resolution requires a note")
+        return self
+
+
+class PredicateReviewCheck(LegalGraphModel):
+    worker_finding: PredicateFinding
+    review_conclusion: ReviewConclusion
+    note: str = Field(min_length=1, max_length=2000)
+
+
+class PredicateReviewChecks(LegalGraphModel):
+    implements: PredicateReviewCheck = Field(alias="IMPLEMENTS")
+    incorporates: PredicateReviewCheck = Field(alias="INCORPORATES")
+    uses_definition: PredicateReviewCheck = Field(alias="USES_DEFINITION")
+    exception_to: PredicateReviewCheck = Field(alias="EXCEPTION_TO")
+    overrides: PredicateReviewCheck = Field(alias="OVERRIDES")
+
+    def by_predicate(self) -> dict[ProposedPredicate, PredicateReviewCheck]:
+        return {
+            ProposedPredicate.IMPLEMENTS: self.implements,
+            ProposedPredicate.INCORPORATES: self.incorporates,
+            ProposedPredicate.USES_DEFINITION: self.uses_definition,
+            ProposedPredicate.EXCEPTION_TO: self.exception_to,
+            ProposedPredicate.OVERRIDES: self.overrides,
+        }
+
+
+class ReviewIssue(LegalGraphModel):
+    predicate: ProposedPredicate
+    problem_type: ReviewProblemType
+    critique: str = Field(min_length=1, max_length=4000)
+    recommended_action: str = Field(min_length=1, max_length=4000)
+    supporting_span_ids: tuple[str, ...] = ()
+
+
+class ReviewerRecord(LegalGraphModel):
+    """ReviewerがWorker回答を見て返す確認結果。"""
+
+    candidate_key: str = Field(min_length=1, max_length=128)
+    basis_edge_id: str = Field(min_length=1, max_length=500)
+    review_status: ReviewStatus
+    predicate_checks: PredicateReviewChecks
+    issues: tuple[ReviewIssue, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_review_shape(self) -> ReviewerRecord:
+        checks = self.predicate_checks.by_predicate()
+        change_required = {
+            predicate
+            for predicate, check in checks.items()
+            if check.review_conclusion is ReviewConclusion.CHANGE_REQUIRED
+        }
+        issue_predicates = {issue.predicate for issue in self.issues}
+        if issue_predicates != change_required:
+            raise ValueError(
+                "change_required predicates must exactly match issue predicates"
+            )
+        expected = (
+            ReviewStatus.REQUEST_CHANGE if change_required else ReviewStatus.APPROVE
+        )
+        if self.review_status is not expected:
+            raise ValueError("review status must match predicate check conclusions")
+        return self
+
+
+class RelationAdjudicationExecutionProfile(LegalGraphModel):
+    """全件実行成果物へ記録するWorker / Reviewerの実行契約。"""
+
+    skill_version: str = Field(min_length=1, max_length=160)
+    worker_model: str = Field(min_length=1, max_length=300)
+    reviewer_model: str = Field(min_length=1, max_length=300)
+    reasoning_effort: str = Field(min_length=1, max_length=80)
+    candidates_per_worker_session: int = Field(ge=1, le=5)
+    candidates_per_reviewer_session: int = Field(ge=1, le=5)
+    max_active_sessions: int = Field(ge=1, le=3)
+    worker_reviewer_separate_contexts: bool
+    max_revision_rounds: int = Field(ge=1, le=1)
+
+    @model_validator(mode="after")
+    def validate_context_boundary(self) -> RelationAdjudicationExecutionProfile:
+        if not self.worker_reviewer_separate_contexts:
+            raise ValueError("Worker and Reviewer must use separate contexts")
+        return self
+
+
+class AdjudicationShardManifest(LegalGraphModel):
+    shard_id: str = Field(min_length=1, max_length=160)
+    file: str = Field(min_length=1, max_length=500)
+    candidate_count: int = Field(ge=1, le=5)
+    input_characters: int = Field(ge=1)
+    sha256: str = Field(min_length=64, max_length=64)
+    candidate_keys: tuple[str, ...] = Field(min_length=1, max_length=5)
+    basis_edge_ids: tuple[str, ...] = Field(min_length=1, max_length=5)
+
+    @model_validator(mode="after")
+    def validate_shard_coverage(self) -> AdjudicationShardManifest:
+        if len(self.candidate_keys) != self.candidate_count:
+            raise ValueError("shard candidate count must match candidate keys")
+        if len(self.basis_edge_ids) != self.candidate_count:
+            raise ValueError("shard candidate count must match basis edge IDs")
+        if len(set(self.candidate_keys)) != len(self.candidate_keys):
+            raise ValueError("shard candidate keys must be unique")
+        if len(set(self.basis_edge_ids)) != len(self.basis_edge_ids):
+            raise ValueError("shard basis edge IDs must be unique")
+        return self
+
+
+class RelationAdjudicationManifest(LegalGraphModel):
+    schema_version: int = Field(ge=1)
+    source_packet: str = Field(min_length=1)
+    source_packet_sha256: str = Field(min_length=64, max_length=64)
+    source_snapshot_id: str = Field(min_length=1, max_length=500)
+    graph_schema_version: int = Field(ge=1)
+    prompt_version: str = Field(min_length=1, max_length=160)
+    candidate_count: int = Field(ge=1)
+    scope_hash: str = Field(min_length=64, max_length=64)
+    sharding_mode: str = Field(pattern="^fixed_candidate_limit$")
+    max_candidates_per_shard: int = Field(ge=1, le=5)
+    shard_count: int = Field(ge=1)
+    execution_profile: RelationAdjudicationExecutionProfile
+    shards: tuple[AdjudicationShardManifest, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_manifest_coverage(self) -> RelationAdjudicationManifest:
+        if len(self.shards) != self.shard_count:
+            raise ValueError("manifest shard count must match shard records")
+        if any(
+            shard.candidate_count > self.max_candidates_per_shard
+            for shard in self.shards
+        ):
+            raise ValueError("shard exceeds max candidates per shard")
+        candidate_keys = [key for shard in self.shards for key in shard.candidate_keys]
+        basis_edge_ids = [
+            basis_id for shard in self.shards for basis_id in shard.basis_edge_ids
+        ]
+        if len(candidate_keys) != self.candidate_count:
+            raise ValueError("manifest candidate count must match all shards")
+        if len(set(candidate_keys)) != len(candidate_keys):
+            raise ValueError("candidate key may appear in only one shard")
+        if len(set(basis_edge_ids)) != len(basis_edge_ids):
+            raise ValueError("basis edge ID may appear in only one shard")
+        if stable_hash(sorted(candidate_keys)) != self.scope_hash:
+            raise ValueError("manifest scope hash must match candidate keys")
+        profile = self.execution_profile
+        if (
+            profile.candidates_per_worker_session
+            != self.max_candidates_per_shard
+            or profile.candidates_per_reviewer_session
+            != self.max_candidates_per_shard
+        ):
+            raise ValueError("manifest shard limit must match execution profile")
+        return self
 
 
 class PredicateFindings(LegalGraphModel):
@@ -452,6 +698,8 @@ class ClassificationRunRecord(LegalGraphModel):
         if self.phase == ClassificationRunPhase.PUBLISHED:
             if self.processed_count != self.input_count:
                 raise ValueError("published run must process its complete input scope")
+            if self.failed_count:
+                raise ValueError("published run cannot contain failed checkpoints")
             if self.published_at is None:
                 raise ValueError("published run requires publishedAt")
         elif self.published_at is not None:
@@ -576,6 +824,74 @@ def validate_classification_decision(
             )
 
 
+def validate_worker_adjudication(
+    candidate: RelationClassificationCandidate,
+    worker: WorkerAdjudicationRecord,
+) -> None:
+    """Worker出力の既知IDだけを検査し、意味判断は変更しない。"""
+
+    if worker.candidate_key != candidate.candidate_key:
+        raise ValueError("Worker references an unknown candidate key")
+    if worker.basis_edge_id != candidate.basis_edge_id:
+        raise ValueError("Worker references an unknown basis edge ID")
+    decision = RelationClassificationDecision(
+        candidate_key=worker.candidate_key,
+        outcome=(
+            RelationClassificationOutcome.CLASSIFIED
+            if worker.assertions
+            else (
+                RelationClassificationOutcome.UNCERTAIN
+                if worker.adjudication_status
+                in {
+                    AdjudicationStatus.NEEDS_REVIEW,
+                    AdjudicationStatus.NEEDS_RESOLUTION,
+                }
+                else RelationClassificationOutcome.REFERENCE_ONLY
+            )
+        ),
+        predicate_findings=PredicateFindings(
+            **{
+                predicate.value.lower(): assessment.finding
+                for predicate, assessment in worker.predicate_assessments.by_predicate().items()
+            }
+        ),
+        assertions=worker.assertions,
+    )
+    validate_classification_decision(candidate, decision)
+
+
+def validate_reviewer_record(
+    candidate: RelationClassificationCandidate,
+    worker: WorkerAdjudicationRecord,
+    review: ReviewerRecord,
+) -> None:
+    """Reviewer出力の対応関係と既知IDだけを検査する。"""
+
+    validate_worker_adjudication(candidate, worker)
+    if review.candidate_key != candidate.candidate_key:
+        raise ValueError("Reviewer references an unknown candidate key")
+    if review.basis_edge_id != candidate.basis_edge_id:
+        raise ValueError("Reviewer references an unknown basis edge ID")
+    worker_findings = {
+        predicate: assessment.finding
+        for predicate, assessment in worker.predicate_assessments.by_predicate().items()
+    }
+    review_checks = review.predicate_checks.by_predicate()
+    if any(
+        review_checks[predicate].worker_finding is not finding
+        for predicate, finding in worker_findings.items()
+    ):
+        raise ValueError("Reviewer must copy every Worker finding exactly")
+    known_span_ids = {
+        span.span_id
+        for article in (candidate.reference_source, candidate.reference_target)
+        for span in article.spans
+    }
+    for issue in review.issues:
+        if any(span_id not in known_span_ids for span_id in issue.supporting_span_ids):
+            raise ValueError("Reviewer issue references an unknown supporting span ID")
+
+
 def build_assertion_records(
     candidate: RelationClassificationCandidate,
     decision: RelationClassificationDecision,
@@ -635,6 +951,9 @@ def build_assertion_records(
 
 
 __all__ = [
+    "AdjudicationPredicateAssessment",
+    "AdjudicationPredicateAssessments",
+    "AdjudicationShardManifest",
     "ArticleSpan",
     "ClassificationArticle",
     "ClassificationCheckpointRecord",
@@ -645,16 +964,25 @@ __all__ = [
     "LegalGraphModel",
     "OverridesClassificationResponse",
     "PredicateFindings",
+    "PredicateReviewCheck",
+    "PredicateReviewChecks",
     "ProposedRelationAssertion",
     "ReferenceOccurrence",
     "RelationAssertionRecord",
+    "RelationAdjudicationExecutionProfile",
+    "RelationAdjudicationManifest",
     "RelationClassificationCandidate",
     "RelationClassificationDecision",
     "RelationClassificationResponse",
     "RelationGroundingResponse",
+    "ReviewerRecord",
+    "ReviewIssue",
     "UsesDefinitionClassificationResponse",
     "assertion_dedupe_key",
     "build_assertion_records",
     "stable_hash",
     "validate_classification_decision",
+    "validate_reviewer_record",
+    "validate_worker_adjudication",
+    "WorkerAdjudicationRecord",
 ]

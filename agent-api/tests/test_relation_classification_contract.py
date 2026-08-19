@@ -3,17 +3,30 @@ from datetime import UTC, datetime
 import pytest
 from app.domains.legal.graph_schema import ClassificationRunPhase, ProposedPredicate
 from app.domains.legal.relation_classification import (
+    AdjudicationPredicateAssessment,
+    AdjudicationPredicateAssessments,
+    AdjudicationShardManifest,
     ArticleSpan,
     ClassificationArticle,
     ClassificationRunRecord,
     PredicateFindings,
+    PredicateReviewCheck,
+    PredicateReviewChecks,
     ProposedRelationAssertion,
     ReferenceOccurrence,
+    RelationAdjudicationExecutionProfile,
+    RelationAdjudicationManifest,
     RelationClassificationCandidate,
     RelationClassificationDecision,
+    ReviewerRecord,
+    ReviewIssue,
+    WorkerAdjudicationRecord,
     assertion_dedupe_key,
     build_assertion_records,
     validate_classification_decision,
+    validate_reviewer_record,
+    validate_worker_adjudication,
+    stable_hash,
 )
 from pydantic import ValidationError
 
@@ -80,6 +93,49 @@ def _candidate(
             )
             for occurrence_hash in occurrence_order
         ),
+    )
+
+
+def _assessment(finding: str = "not_established") -> AdjudicationPredicateAssessment:
+    return AdjudicationPredicateAssessment(
+        first_condition=finding,
+        second_condition=finding,
+        finding=finding,
+    )
+
+
+def _adjudication_assessments(
+    *, implements: str = "not_established"
+) -> AdjudicationPredicateAssessments:
+    return AdjudicationPredicateAssessments.model_validate(
+        {
+            "IMPLEMENTS": _assessment(implements),
+            "INCORPORATES": _assessment(),
+            "USES_DEFINITION": _assessment(),
+            "EXCEPTION_TO": _assessment(),
+            "OVERRIDES": _assessment(),
+        }
+    )
+
+
+def _review_checks(*, implements: str = "confirmed") -> PredicateReviewChecks:
+    return PredicateReviewChecks.model_validate(
+        {
+            predicate.value: PredicateReviewCheck(
+                worker_finding=(
+                    "established"
+                    if predicate is ProposedPredicate.IMPLEMENTS
+                    else "not_established"
+                ),
+                review_conclusion=(
+                    implements
+                    if predicate is ProposedPredicate.IMPLEMENTS
+                    else "confirmed"
+                ),
+                note=f"{predicate.value}を二条件で確認した。",
+            )
+            for predicate in ProposedPredicate
+        }
     )
 
 
@@ -384,4 +440,186 @@ def test_only_complete_run_can_be_published() -> None:
             phase=ClassificationRunPhase.PUBLISHED,
             processed_count=1,
             published_at=datetime.now(UTC),
+        )
+
+
+def test_published_run_rejects_failed_checkpoint_count() -> None:
+    with pytest.raises(ValidationError, match="failed checkpoints"):
+        ClassificationRunRecord(
+            classification_run_id="run-failed",
+            phase="published",
+            source_snapshot_id="snapshot-1",
+            graph_schema_version=9,
+            provider="codex_subscription",
+            model="gpt-5.6-luna",
+            reviewer_model="gpt-5.6-luna",
+            prompt_version="legal-relation-v1",
+            candidates_per_model_call=5,
+            input_count=1,
+            processed_count=1,
+            classified_candidate_count=0,
+            assertion_count=0,
+            reference_only_count=0,
+            uncertain_count=0,
+            failed_count=1,
+            scope_hash="scope-hash",
+            published_at=datetime.now(UTC),
+        )
+
+
+def test_worker_adjudication_requires_five_consistent_predicates_and_grounding() -> (
+    None
+):
+    candidate = _candidate()
+    worker = WorkerAdjudicationRecord(
+        candidate_key=candidate.candidate_key,
+        basis_edge_id=candidate.basis_edge_id,
+        adjudication_status="accepted",
+        predicate_assessments=_adjudication_assessments(implements="established"),
+        assertions=(
+            ProposedRelationAssertion(
+                proposed_predicate="IMPLEMENTS",
+                reference_occurrence_hash="occ-1",
+                subject_article_id=candidate.reference_target.article_id,
+                object_article_id=candidate.reference_source.article_id,
+                reference_source_supporting_span_id=candidate.reference_source.spans[
+                    0
+                ].span_id,
+                reference_target_supporting_span_id=candidate.reference_target.spans[
+                    0
+                ].span_id,
+            ),
+        ),
+    )
+
+    validate_worker_adjudication(candidate, worker)
+
+
+def test_worker_adjudication_does_not_turn_uncertainty_into_accepted() -> None:
+    with pytest.raises(ValidationError, match="cannot contain uncertainty"):
+        WorkerAdjudicationRecord(
+            candidate_key="candidate-1",
+            basis_edge_id="basis-1",
+            adjudication_status="accepted",
+            predicate_assessments=_adjudication_assessments(
+                implements="uncertain"
+            ),
+        )
+
+
+def test_reviewer_must_copy_worker_findings_and_known_span_ids() -> None:
+    candidate = _candidate()
+    worker = WorkerAdjudicationRecord(
+        candidate_key=candidate.candidate_key,
+        basis_edge_id=candidate.basis_edge_id,
+        adjudication_status="accepted",
+        predicate_assessments=_adjudication_assessments(implements="established"),
+        assertions=(
+            ProposedRelationAssertion(
+                proposed_predicate="IMPLEMENTS",
+                reference_occurrence_hash="occ-1",
+                subject_article_id=candidate.reference_target.article_id,
+                object_article_id=candidate.reference_source.article_id,
+                reference_source_supporting_span_id=candidate.reference_source.spans[
+                    0
+                ].span_id,
+                reference_target_supporting_span_id=candidate.reference_target.spans[
+                    0
+                ].span_id,
+            ),
+        ),
+    )
+    review = ReviewerRecord(
+        candidate_key=candidate.candidate_key,
+        basis_edge_id=candidate.basis_edge_id,
+        review_status="request_change",
+        predicate_checks=_review_checks(implements="change_required"),
+        issues=(
+            ReviewIssue(
+                predicate="IMPLEMENTS",
+                problem_type="grounding",
+                critique="根拠spanが参照箇所を支えていない。",
+                recommended_action="既知spanを再確認する。",
+                supporting_span_ids=("unknown-span",),
+            ),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="unknown supporting span"):
+        validate_reviewer_record(candidate, worker, review)
+
+
+def test_relation_adjudication_execution_profile_enforces_session_limits() -> None:
+    profile = RelationAdjudicationExecutionProfile(
+        skill_version="legal-relation-adjudicator-v1",
+        worker_model="gpt-5.6-luna",
+        reviewer_model="gpt-5.6-luna",
+        reasoning_effort="high",
+        candidates_per_worker_session=5,
+        candidates_per_reviewer_session=5,
+        max_active_sessions=3,
+        worker_reviewer_separate_contexts=True,
+        max_revision_rounds=1,
+    )
+    assert profile.max_active_sessions == 3
+    with pytest.raises(ValidationError, match="less than or equal to 5"):
+        profile.model_copy(update={"candidates_per_worker_session": 6}).model_validate(
+            {
+                **profile.model_dump(),
+                "candidates_per_worker_session": 6,
+            }
+        )
+
+
+def test_relation_adjudication_manifest_covers_each_candidate_once() -> None:
+    candidate_keys = ["candidate-1", "candidate-2"]
+    profile = RelationAdjudicationExecutionProfile(
+        skill_version="legal-relation-adjudicator-2026-08-19",
+        worker_model="gpt-5.6-luna",
+        reviewer_model="gpt-5.6-luna",
+        reasoning_effort="high",
+        candidates_per_worker_session=5,
+        candidates_per_reviewer_session=5,
+        max_active_sessions=3,
+        worker_reviewer_separate_contexts=True,
+        max_revision_rounds=1,
+    )
+    manifest = RelationAdjudicationManifest(
+        schema_version=1,
+        source_packet="/tmp/packet.jsonl",
+        source_packet_sha256="a" * 64,
+        source_snapshot_id="snapshot-1",
+        graph_schema_version=9,
+        prompt_version="legal-relation-v1",
+        candidate_count=2,
+        scope_hash=stable_hash(candidate_keys),
+        sharding_mode="fixed_candidate_limit",
+        max_candidates_per_shard=5,
+        shard_count=1,
+        execution_profile=profile,
+        shards=(
+            AdjudicationShardManifest(
+                shard_id="shard-0000",
+                file="shard-0000.jsonl",
+                candidate_count=2,
+                input_characters=100,
+                sha256="b" * 64,
+                candidate_keys=tuple(candidate_keys),
+                basis_edge_ids=("basis-1", "basis-2"),
+            ),
+        ),
+    )
+
+    assert manifest.candidate_count == 2
+    with pytest.raises(ValidationError, match="only one shard"):
+        RelationAdjudicationManifest.model_validate(
+            {
+                **manifest.model_dump(by_alias=True),
+                "candidateCount": 4,
+                "shardCount": 2,
+                "shards": [
+                    manifest.shards[0].model_dump(by_alias=True),
+                    manifest.shards[0].model_dump(by_alias=True),
+                ],
+            }
         )

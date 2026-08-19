@@ -235,6 +235,13 @@ Lunaは高速・大量処理向けのモデルとされている。実行時はC
 監査可能な判定JSONLを返す。
 API経由では実行せず、Agent APIへLunaのmodel IDや認証を組み込まない。
 
+Lunaのreasoning effortはWorker、Reviewerとも`high`に固定する。これはAPIの出力token上限ではなく、
+Codex sessionを開始するときに指定する推論深度である。1候補について5 predicateの二条件、意味方向、
+根拠span、構造適合性をまとめて確認するため、全件Runの途中で`medium`等と混在させない。
+Coordinatorは各sessionの開始時にmodelとreasoning effortを明示し、成果物manifestへ両方を保存する。
+速度比較のため別のreasoning effortを試す場合は別Run・別manifestとし、`high`の成果物へ混ぜない。
+reasoning effortを変えただけでも判定条件が変わったものとして代表100件の品質ゲートを再実行する。
+
 分類単位はArticleペア全体に存在し得る任意の関係ではなく、
 候補の`sourceText` / `sourceTexts`が示す参照箇所群である。Article本文はその文脈として使う。
 OpenSearchの子チャンクが親チャンク本文を再掲する場合は、`parentContentUnitId`で
