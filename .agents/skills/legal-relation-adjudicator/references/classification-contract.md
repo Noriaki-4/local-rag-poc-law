@@ -176,6 +176,12 @@ itself determines who has that role and the supplied occurrence is the scope
 bridge. It does not make every person, period, requirement set, or regulated subject
 a definition.
 
+Forms such as `第X条第Y項の委託を受けた者`, `許可を受けた者`, or `登録を受けた者`
+can therefore be positive when Article X paragraph Y itself creates or identifies
+that reusable role. Do not require a quoted short name in those cases. Compare the
+role-forming act in the defining endpoint with the exact role used around the
+supplied occurrence.
+
 Conversely, `第X条に規定する期間`, `前条各号の要件`, or similar
 cross-references are not definitions merely because they delimit a result. Require
 either a reusable term, role, or status, or an express scope clause that makes the
@@ -188,6 +194,14 @@ second citation to the supplied target occurrence. An endpoint's mere use, listi
 or regulation of a term does not make it the definition source; the endpoint must
 establish that term's meaning or scope, and the supplied occurrence must carry that
 definition to the other endpoint.
+
+A forward-scope clause does not make every reverse citation between the same two
+Articles a definition bridge. When the supplied occurrence is an independent rule
+reference such as `前条に該当する場合`, require the defined term to be used in that
+occurrence's governing sentence or exact structural item. A use elsewhere in the
+Article is insufficient. Conversely, when the defining endpoint expressly projects
+the term to a particular later item and that same item contains both the supplied
+reverse citation and the term use, the occurrence can carry the scope linkage.
 
 An endpoint that only states a right, obligation, requirement, procedure, category,
 or legal effect is not a definition source.

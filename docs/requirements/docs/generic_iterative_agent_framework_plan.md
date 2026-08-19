@@ -19,7 +19,7 @@
 |---|---|---|
 | Phase 0 | 一部完了 | 代表2問の現行baseline、説明付きstatus契約、生成schema・Prompt用語集のfixture |
 | Phase 1 | 一部実装 | `CycleRecord / StepRecord`、discriminator付きCommand、型付きstatusと遷移の一元化、再開契約 |
-| Phase 2 | 実index再構築・Articleペアexport・検証importまで実装 | Gate 6のgold・採点修正と差分再評価、全件Run、Hypothesis別selector、旧自動Graph経路の撤去 |
+| Phase 2 | 実index再構築・Articleペアexport・検証import・Gate 6差分評価まで実装 | Gate 6の運用計測、全件Run、Hypothesis別selector、旧自動Graph経路の撤去 |
 | Phase 3 | 未評価 | 新契約に基づくtrace、再開、入力増加、latencyの完了条件 |
 | Phase 4 | 未完了 | 新経路による代表2問の合格、既定経路切替、旧試作の撤去 |
 
@@ -52,9 +52,14 @@
   4/14だったため、全件publish用の品質経路には採用しない。正本分類はCodexサブスクリプション内の
   `gpt-5.6-luna`をWorker / Reviewerの両方に使い、候補を複数ペアへ分割して並列実行する。
   既存14件、新規20件、法令94件＋ガイド6件の代表100件でこの方式を確認している。
-  Articleペア単位にしたGate 6初回はstatus `73/73`、5 predicate `355/365`だったが、
-  gold移行誤りと複数の妥当な根拠spanを扱えない採点不備が判明したため未合格である。
-  教師データ・採点契約を修正し、差分候補の再評価を完了するまで全件Runへ進めない。
+  Articleペア単位にしたGate 6初回はstatus `73/73`、5 predicate `355/365`だった。
+  その後、gold移行誤りと複数の妥当な根拠spanを扱えない採点不備を修正した。
+  単一edgeを含む人手overrideと、候補・predicate単位の明示grounding許容集合を扱う評価契約は実装済みである。
+  訂正goldによる同じv2成果物の監査値は5 predicate `356/365`、候補完全一致`63/73`であり、
+  残る10候補を新規contextで差分再評価した。本文監査で2件のgoldを訂正し、pair-v3で`7/10`、
+  一般化したUSES_DEFINITION境界を加えたpair-v4で残り`3/3`を確認した。評価用に承認済み差分を合成した
+  最終値はstatus `73/73`、5 predicate `365/365`、方向 `62/62`、grounding `62/62`、候補完全一致
+  `73/73`である。異なるskill versionの成果物は評価時にだけ合成し、同一ClassificationRunへは混在させない。
   分類skillの正本はリポジトリ内の`.agents/skills/legal-relation-adjudicator`へ移し、
   コード・契約・補助スクリプトを同じrevisionで管理する。ユーザー共通skillを正本にしない。
   判定JSONLはReviewer承認証跡付きで`ClassificationRun`へ取り込む検証importを実装済みである。
@@ -685,7 +690,9 @@ Workerが既知hashから選び、Programは存在だけを検証する。Progra
 評価goldでは、同じ意味関係を直接支えるspanが複数存在し得る。正解生成者が本文を確認して明示した
 grounding許容集合を評価成果物に保存し、scorerは完全一致する既知IDが集合内にあるかだけを検査する。
 隣接spanや親子spanをProgramが自動で許容集合へ追加してはならない。これにより、採点の都合で意味判断を
-Programへ移さず、妥当な別根拠を単一gold spanとの差だけで誤答にしない。
+Programへ移さず、妥当な別根拠を単一gold spanとの差だけで誤答にしない。許容集合はcanonical goldを必ず含み、
+入力packetにないcandidate、predicate、occurrence、source/target span IDを受け付けない。単一edge候補も
+人手overrideを適用できるが、overrideがない単一edgeだけを旧監査goldから機械的に移行する。
 
 候補の`referenceSourceArticle / referenceTargetArticle`は原文`REFERENCES`の物理方向だけを表す。
 新seedは同一法令参照と親法令参照の両経路で引用位置を保存する。位置を持たない旧Graphを分類する場合は、

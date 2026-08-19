@@ -55,7 +55,12 @@ For every Worker record:
    Treat a delegated slot and its subordinate enumeration as IMPLEMENTS only unless
    there is a separate reusable term definition. Conversely, always scan
    forward-scope markers such as `第Y条において同じ`; they commonly reverse semantic
-   direction.
+   direction. Do not dismiss a forward-scoped term as a mere prior-Article
+   requirements reference until you compare the exact later Article, paragraph, or
+   item named by the scope clause with the governing source item. Also do not extend
+   that scope through an unrelated `前条` occurrence elsewhere in the source
+   Article. Require the supplied occurrence and the term use to share the exact
+   governing sentence or structural item.
 5. Independently compare delegation matter for `IMPLEMENTS`, even when the Worker
    established another predicate for the pair. Record why the delegated and
    supplied matters match or do not match.
@@ -156,7 +161,9 @@ Rules:
   source sentence does not use it. `No defining endpoint` alone is insufficient.
   The note must also say which supplied occurrence carries the scope. A provision
   that constitutes a reusable role or status may define its scope without a quoted
-  short name; a mere period, requirement list, or delegated slot does not.
+  short name; forms such as `第X条第Y項の委託を受けた者`, `許可を受けた者`, and
+  `登録を受けた者` may identify such a role. A mere period, requirement list, or
+  delegated slot does not.
 - For `IMPLEMENTS`, the check note must compare the delegated matter and supplied
   matter. For a negative, it must quote or identify the closest delegation phrase
   found in the complete higher-authority Article and explain the matter mismatch. If

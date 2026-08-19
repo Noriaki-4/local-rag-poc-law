@@ -130,6 +130,8 @@ manifest schemaは2、promptは`legal-relation-5predicate-v20-pair`、skillは
 上記v2は初回Gate 6成果物の再現用versionである。その差分監査後に契約を更新し、正本skillを
 `.agents/skills/legal-relation-adjudicator`へ移した。次の差分再評価からは
 `legal-relation-adjudicator-2026-08-19-pair-v3`を使用し、v2成果物と同じRunへ混在させない。
+差分再評価で判明した無名の法的役割、前方スコープ、無関係な逆参照の境界は
+`legal-relation-adjudicator-2026-08-19-pair-v4`へ一般則として反映した。
 
 ## Gate 6: 代表100件を最大3並列で再評価する
 
@@ -137,8 +139,8 @@ manifest schemaは2、promptは`legal-relation-5predicate-v20-pair`、skillは
 - [x] 新しいWorker / Reviewer sessionを使い、過去評価のcontextを引き継いでいない
 - [x] 1 shard最大5候補、同時に実行中のsession最大3を守った
 - [x] 構造レーン94件が`94/94`である
-- [ ] 意味分類可能な全候補でstatus・5 predicate・SUBJECT / OBJECT・groundingが正解と一致する
-- [ ] ガイドレーン6件が`6/6`である
+- [x] 意味分類可能な全候補でstatus・5 predicate・SUBJECT / OBJECT・groundingが正解と一致する
+- [x] ガイドレーン6件が`6/6`である
 - [x] final Review後のworkflow上の`unresolved`が0件である
 - [x] 全JSONLがGate 3・4のIF検証を通る
 - [ ] Worker / Reviewer / revision別の時間、差戻し率、context使用量を記録した
@@ -162,6 +164,20 @@ workflow上の最終`unresolved`は0、statusは`73/73`一致、5 predicateは`3
 `referenceOccurrence`が両端の意味役割を実際に橋渡しすることをWorker / Reviewerへ要求する。
 goldはCodexによる本文再監査で修正し、複数の妥当なgroundingは人が明示した許容集合として保存する。
 Programは許容集合とのID一致だけを検査し、新しい意味や許容spanを推測しない。
+
+評価IFは修正済みである。単一edge 3件を含む計18件の人手overrideを旧goldより優先し、
+6 candidate/predicateのgrounding許容集合を別成果物として検証する。同じv2 Luna成果物を再採点した
+監査値はstatus `73/73`、5 predicate `356/365`、候補完全一致`63/73`、grounding `54/62`となった。
+これは過去出力の再採点であり、v3の新規実行ではない。
+
+残る10候補をgold・過去出力なしの新規Luna Worker / Reviewer contextで再評価した。本文監査により、
+第140条2項の期間を再利用可能な定義としたgoldと、対象Articleを直接`適用しない`のにOVERRIDESを
+否定したgoldの2件を訂正した。pair-v3は訂正goldに`7/10`、残る3件へ一般化した境界規則を加えた
+pair-v4は`3/3`だった。v2の一致63件、v3の一致7件、v4の一致3件を評価用に合成した最終採点は、
+status `73/73`、5 predicate `365/365`、方向 `62/62`、grounding `62/62`、候補完全一致`73/73`である。
+成果物は`eval-results/relation-guidance-100-pair-v3-diff/`と
+`eval-results/relation-guidance-100-pair-v4-diff/`に保存する。異なるskill versionの結果は
+同一ClassificationRunへimportしない。
 
 `adjudicationStatus=needs_resolution`は「入力Articleペアを意味分類できない」というLLM判断であり、
 final Review後のworkflow `unresolved`は「差戻し1回後もReviewerが承認しなかった」という実行結果である。

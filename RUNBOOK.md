@@ -514,12 +514,45 @@ workflow `unresolved`は差戻し1回後もReviewerが承認しなかった実�
 - `docs/requirements/samples/eval/legal_relation_94_adjudicated_fixture.jsonl`
 - `docs/requirements/samples/eval/legal_relation_94_adjudication_audit.jsonl`
 
-Articleペア化後の複数edge候補の意味goldは
+Articleペア化後に人が再監査した意味goldは
 `docs/requirements/samples/eval/legal_relation_73_pair_overrides.jsonl`で明示的に上書きする。
-Gate 6差分監査で単一edge候補にも訂正対象が見つかったため、同じ明示overrideを単一edgeにも適用できるよう
-builder契約を修正中である。このファイルはProgramが意味を生成する規則ではなく、CodexがArticle全文を
-確認した監査結果である。groundingの許容集合も同様に別の監査成果物へ明示し、scorerが隣接spanから
-自動生成してはならない。修正と差分再試験が終わるまで、このpair-level goldを確定版として扱わない。
+builderは複数edgeだけでなく単一edgeの明示overrideも旧edge goldより優先する。現在は複数edge 15件と
+単一edge 3件の計18件である。このファイルはProgramが意味を生成する規則ではなく、CodexがArticle全文を
+確認した監査結果である。複数の妥当なgroundingは
+`docs/requirements/samples/eval/legal_relation_73_grounding_allowances.jsonl`へ候補・predicate単位で明示する。
+scorerは既知occurrence/span IDとcanonical goldを含むことを検証したうえで集合との完全一致だけを調べ、
+隣接spanや親子spanから許容値を自動生成しない。これらの評価成果物はWorker / Reviewerへ渡さない。
+
+初回Luna v2成果物を、訂正したgoldと6件のgrounding許容集合で再採点した監査値は、status `73/73`、
+5 predicate `356/365`、候補完全一致`63/73`、grounding `54/62`である。これは同じLuna出力の再採点であり、
+v3契約による再実行結果ではない。
+
+残る10候補は、gold・過去出力を見ない新規Luna Worker / Reviewer contextで差分再評価した。
+本文監査で2件のgold誤りを訂正した後、pair-v3は`7/10`一致した。残る3件について、特定Articleの
+正解ではなく、無名の法的役割、前方スコープが及ぶ正確な構造単位、無関係な逆参照を区別する一般則を
+pair-v4へ追加し、`3/3`一致した。v2の一致63件、v3の一致7件、v4の一致3件を評価用途で合成した結果は、
+status `73/73`、5 predicate `365/365`、方向 `62/62`、grounding `62/62`、候補完全一致`73/73`である。
+差分成果物は`eval-results/relation-guidance-100-pair-v3-diff/`と
+`eval-results/relation-guidance-100-pair-v4-diff/`に保存した。skill versionが異なるため、これらを
+同一ClassificationRunへimportしてはならない。
+
+gold再構築と再採点は次で行う。`--output`は既存成果物を上書きしないため、新しいパスを指定する。
+
+```bash
+agent-api/.venv/bin/python scripts/build_relation_pair_gold.py \
+  --packet eval-results/relation-guidance-100-pair-v2/semantic-blind-packet.jsonl \
+  --legacy-audit docs/requirements/samples/eval/legal_relation_94_adjudication_audit.jsonl \
+  --pair-overrides docs/requirements/samples/eval/legal_relation_73_pair_overrides.jsonl \
+  --output /tmp/semantic-pair-gold.jsonl
+
+agent-api/.venv/bin/python scripts/score_relation_pair_output.py \
+  --packet eval-results/relation-guidance-100-pair-v2/semantic-blind-packet.jsonl \
+  --gold /tmp/semantic-pair-gold.jsonl \
+  --actual eval-results/relation-guidance-100-pair-v2/semantic-approved/*.jsonl \
+  --grounding-allowances docs/requirements/samples/eval/legal_relation_73_grounding_allowances.jsonl
+```
+
+`--actual`は複数ファイルを受け付け、別ディレクトリを加える場合はオプション自体を繰り返せる。
 
 ガイド6件は既存の
 `docs/requirements/samples/eval/guidance_navigation_fixture.jsonl`を参照する。100件fixtureの件数、

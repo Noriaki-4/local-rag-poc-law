@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""単一edge正解と人手確認済みpair overrideからArticleペア正解を作る。"""
+"""旧edge正解と人手確認済みoverrideからArticleペア正解を作る。"""
 
 from __future__ import annotations
 
@@ -103,6 +103,68 @@ def _expand_pair_override(override: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_pair_gold_records(
+    packets: list[RelationAdjudicationCandidatePacket],
+    legacy_records: list[dict[str, Any]],
+    override_records: list[dict[str, Any]],
+) -> tuple[tuple[WorkerAdjudicationRecord, ...], dict[str, int]]:
+    """人手overrideを優先し、残る単一edgeだけを旧goldから移行する。"""
+
+    legacy_by_basis = _index(legacy_records, "basisEdgeId", label="legacy audit")
+    overrides = _index(override_records, "candidateKey", label="pair overrides")
+
+    output: list[WorkerAdjudicationRecord] = []
+    used_overrides: set[str] = set()
+    singleton_override_count = 0
+    multi_edge_override_count = 0
+    for packet in packets:
+        override = overrides.get(packet.candidate_key)
+        if override is not None:
+            raw_decision = _expand_pair_override(override)
+            used_overrides.add(packet.candidate_key)
+            if len(packet.basis_edge_ids) == 1:
+                singleton_override_count += 1
+            else:
+                multi_edge_override_count += 1
+        elif len(packet.basis_edge_ids) == 1:
+            selected_legacy = [
+                legacy_by_basis[basis_id]
+                for basis_id in packet.basis_edge_ids
+                if basis_id in legacy_by_basis
+                and legacy_by_basis[basis_id].get("semanticDecision") is not None
+            ]
+            if len(selected_legacy) != 1:
+                raise ValueError(
+                    "singleton candidate must map to exactly one legacy gold row: "
+                    f"{packet.candidate_key}"
+                )
+            raw_decision = _without_legacy_identity(
+                dict(selected_legacy[0]["semanticDecision"]),
+                candidate_key=packet.candidate_key,
+            )
+        else:
+            raise ValueError(
+                f"multi-edge candidate requires a reviewed override: {packet.candidate_key}"
+            )
+
+        decision = WorkerAdjudicationRecord.model_validate(raw_decision)
+        validate_worker_adjudication(packet.to_candidate(), decision)
+        output.append(decision)
+
+    unused = set(overrides).difference(used_overrides)
+    if unused:
+        raise ValueError(f"unused pair overrides: {sorted(unused)}")
+
+    ordered = tuple(sorted(output, key=lambda item: item.candidate_key))
+    return ordered, {
+        "candidateCount": len(ordered),
+        "singletonMigratedCount": len(ordered) - len(used_overrides),
+        "pairOverrideCount": len(used_overrides),
+        "singletonOverrideCount": singleton_override_count,
+        "multiEdgeOverrideCount": multi_edge_override_count,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--packet", type=Path, required=True)
@@ -115,48 +177,11 @@ def main() -> int:
         RelationAdjudicationCandidatePacket.model_validate(record)
         for record in _load_jsonl(args.packet)
     ]
-    legacy_by_basis = _index(
-        _load_jsonl(args.legacy_audit), "basisEdgeId", label="legacy audit"
+    output, stats = build_pair_gold_records(
+        packets,
+        _load_jsonl(args.legacy_audit),
+        _load_jsonl(args.pair_overrides),
     )
-    overrides = _index(
-        _load_jsonl(args.pair_overrides), "candidateKey", label="pair overrides"
-    )
-
-    output: list[WorkerAdjudicationRecord] = []
-    used_overrides: set[str] = set()
-    for packet in packets:
-        selected_legacy = [
-            legacy_by_basis[basis_id]
-            for basis_id in packet.basis_edge_ids
-            if basis_id in legacy_by_basis
-            and legacy_by_basis[basis_id].get("semanticDecision") is not None
-        ]
-        if len(selected_legacy) != 1:
-            raise ValueError(
-                f"candidate must map to exactly one legacy gold row: {packet.candidate_key}"
-            )
-
-        if len(packet.basis_edge_ids) == 1:
-            raw_decision = _without_legacy_identity(
-                dict(selected_legacy[0]["semanticDecision"]),
-                candidate_key=packet.candidate_key,
-            )
-        else:
-            override = overrides.get(packet.candidate_key)
-            if override is None:
-                raise ValueError(
-                    f"multi-edge candidate requires a reviewed override: {packet.candidate_key}"
-                )
-            raw_decision = _expand_pair_override(override)
-            used_overrides.add(packet.candidate_key)
-
-        decision = WorkerAdjudicationRecord.model_validate(raw_decision)
-        validate_worker_adjudication(packet.to_candidate(), decision)
-        output.append(decision)
-
-    unused = set(overrides).difference(used_overrides)
-    if unused:
-        raise ValueError(f"unused pair overrides: {sorted(unused)}")
 
     data = "".join(
         json.dumps(
@@ -171,9 +196,7 @@ def main() -> int:
     print(
         json.dumps(
             {
-                "candidateCount": len(output),
-                "singletonMigratedCount": len(output) - len(used_overrides),
-                "pairOverrideCount": len(used_overrides),
+                **stats,
                 "output": str(args.output.resolve()),
             },
             ensure_ascii=False,

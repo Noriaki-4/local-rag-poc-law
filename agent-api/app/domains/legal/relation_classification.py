@@ -214,6 +214,29 @@ class ProposedRelationAssertion(LegalGraphModel):
     reference_target_supporting_span_id: str = Field(min_length=1, max_length=500)
 
 
+class EvaluationGrounding(LegalGraphModel):
+    """人が確認した、評価時だけ使用できる物理根拠IDの組。"""
+
+    reference_occurrence_hash: str = Field(min_length=1, max_length=128)
+    reference_source_supporting_span_id: str = Field(min_length=1, max_length=500)
+    reference_target_supporting_span_id: str = Field(min_length=1, max_length=500)
+
+
+class PredicateGroundingAllowance(LegalGraphModel):
+    """1候補・1predicateについて人が明示した妥当なgrounding集合。"""
+
+    candidate_key: str = Field(min_length=64, max_length=64)
+    predicate: ProposedPredicate
+    allowed_groundings: tuple[EvaluationGrounding, ...] = Field(min_length=1)
+    audit_note: str = Field(min_length=1, max_length=4000)
+
+    @model_validator(mode="after")
+    def validate_unique_groundings(self) -> PredicateGroundingAllowance:
+        if len(self.allowed_groundings) != len(set(self.allowed_groundings)):
+            raise ValueError("allowed groundings must be unique")
+        return self
+
+
 class AdjudicationPredicateAssessment(LegalGraphModel):
     """Workerが評価するpredicate固有の二条件と結論。"""
 
@@ -1128,12 +1151,14 @@ __all__ = [
     "ClassificationArticle",
     "ClassificationCheckpointRecord",
     "ClassificationRunRecord",
+    "EvaluationGrounding",
     "ExceptionToClassificationResponse",
     "ImplementsClassificationResponse",
     "IncorporatesClassificationResponse",
     "LegalGraphModel",
     "OverridesClassificationResponse",
     "PredicateFindings",
+    "PredicateGroundingAllowance",
     "PredicateReviewCheck",
     "PredicateReviewChecks",
     "ProposedRelationAssertion",

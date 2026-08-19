@@ -17,6 +17,8 @@ sys.path.insert(0, str(REPO_ROOT / "agent-api"))
 from app.domains.legal.graph_schema import ProposedPredicate  # noqa: E402
 from app.domains.legal.relation_classification import (  # noqa: E402
     ApprovedAdjudicationRecord,
+    EvaluationGrounding,
+    PredicateGroundingAllowance,
     RelationAdjudicationCandidatePacket,
     WorkerAdjudicationRecord,
     validate_worker_adjudication,
@@ -74,11 +76,87 @@ def _assertions_by_predicate(
     }
 
 
+def _grounding(assertion: dict[str, Any]) -> EvaluationGrounding:
+    return EvaluationGrounding(
+        reference_occurrence_hash=assertion["referenceOccurrenceHash"],
+        reference_source_supporting_span_id=assertion[
+            "referenceSourceSupportingSpanId"
+        ],
+        reference_target_supporting_span_id=assertion[
+            "referenceTargetSupportingSpanId"
+        ],
+    )
+
+
+def _grounding_allowances(
+    records: list[PredicateGroundingAllowance],
+    *,
+    packets: dict[str, RelationAdjudicationCandidatePacket],
+    gold: dict[str, WorkerAdjudicationRecord],
+) -> dict[tuple[str, ProposedPredicate], frozenset[EvaluationGrounding]]:
+    indexed: dict[
+        tuple[str, ProposedPredicate], frozenset[EvaluationGrounding]
+    ] = {}
+    for record in records:
+        key = (record.candidate_key, record.predicate)
+        if key in indexed:
+            raise ValueError(
+                "duplicate grounding allowance: "
+                f"{record.candidate_key} {record.predicate.value}"
+            )
+        packet = packets.get(record.candidate_key)
+        expected = gold.get(record.candidate_key)
+        if packet is None or expected is None:
+            raise ValueError(
+                f"grounding allowance is outside gold scope: {record.candidate_key}"
+            )
+        expected_assertion = _assertions_by_predicate(expected).get(record.predicate)
+        if expected_assertion is None:
+            raise ValueError(
+                "grounding allowance requires an established gold predicate: "
+                f"{record.candidate_key} {record.predicate.value}"
+            )
+
+        occurrence_source_spans = {
+            occurrence.occurrence_hash: set(occurrence.source_span_ids)
+            for occurrence in packet.reference_occurrences
+        }
+        target_spans = {
+            span.span_id for span in packet.reference_target_article.spans
+        }
+        allowed = frozenset(record.allowed_groundings)
+        for grounding in allowed:
+            source_spans = occurrence_source_spans.get(
+                grounding.reference_occurrence_hash
+            )
+            if source_spans is None:
+                raise ValueError("grounding allowance uses an unknown occurrence hash")
+            if grounding.reference_source_supporting_span_id not in source_spans:
+                raise ValueError(
+                    "grounding allowance source span does not belong to occurrence"
+                )
+            if grounding.reference_target_supporting_span_id not in target_spans:
+                raise ValueError("grounding allowance uses an unknown target span")
+        if _grounding(expected_assertion) not in allowed:
+            raise ValueError(
+                "grounding allowance must include the canonical gold grounding"
+            )
+        indexed[key] = allowed
+    return indexed
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--packet", type=Path, required=True)
     parser.add_argument("--gold", type=Path, required=True)
-    parser.add_argument("--actual", type=Path, action="append", required=True)
+    parser.add_argument(
+        "--actual",
+        type=Path,
+        action="append",
+        nargs="+",
+        required=True,
+    )
+    parser.add_argument("--grounding-allowances", type=Path)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
 
@@ -100,10 +178,24 @@ def main() -> int:
         actual = _index(
             [
                 _actual_worker(record)
-                for path in args.actual
+                for paths in args.actual
+                for path in paths
                 for record in _load_jsonl(path)
             ],
             label="actual",
+        )
+        allowance_records = (
+            [
+                PredicateGroundingAllowance.model_validate(record)
+                for record in _load_jsonl(args.grounding_allowances)
+            ]
+            if args.grounding_allowances is not None
+            else []
+        )
+        allowances = _grounding_allowances(
+            allowance_records,
+            packets=packets,
+            gold=gold,
         )
     except ValueError as error:
         parser.error(str(error))
@@ -172,20 +264,28 @@ def main() -> int:
                 and actual_assertion["objectArticleId"]
                 == expected_assertion["objectArticleId"]
             )
-            grounding_match = all(
-                actual_assertion[field] == expected_assertion[field]
-                for field in (
-                    "referenceOccurrenceHash",
-                    "referenceSourceSupportingSpanId",
-                    "referenceTargetSupportingSpanId",
-                )
+            allowed_groundings = allowances.get(
+                (candidate_key, predicate),
+                frozenset({_grounding(expected_assertion)}),
             )
+            grounding_match = _grounding(actual_assertion) in allowed_groundings
             direction_correct += int(direction_match)
             grounding_correct += int(grounding_match)
             if not direction_match or not grounding_match:
                 assertion_differences[predicate.value] = {
                     "expected": expected_assertion,
                     "actual": actual_assertion,
+                    "allowedGroundings": [
+                        grounding.model_dump(by_alias=True, mode="json")
+                        for grounding in sorted(
+                            allowed_groundings,
+                            key=lambda item: (
+                                item.reference_occurrence_hash,
+                                item.reference_source_supporting_span_id,
+                                item.reference_target_supporting_span_id,
+                            ),
+                        )
+                    ],
                 }
         if set(actual_assertions).difference(expected_assertions):
             assertion_differences["unexpectedPredicates"] = sorted(
@@ -212,6 +312,10 @@ def main() -> int:
         "directionCorrectCount": direction_correct,
         "groundingCorrectCount": grounding_correct,
         "expectedAssertionCount": assertion_total,
+        "groundingAllowanceCount": len(allowances),
+        "groundingAlternativeCount": sum(
+            len(values) - 1 for values in allowances.values()
+        ),
         "mismatches": mismatches,
     }
     rendered = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
