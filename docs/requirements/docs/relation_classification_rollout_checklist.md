@@ -96,19 +96,26 @@ Worker JSONLはPydantic契約を通らず、Assertionへ変換できない。
 
 ## Gate 5: 保存済みsnapshotから再構築する
 
-- [ ] e-Gov APIを再取得せず、保存済みXML snapshotを使用する
-- [ ] 検証環境の回答処理を停止している
-- [ ] 同じmanifestからOpenSearchとNeo4jを再構築した
-- [ ] 両方の`sourceSnapshotId`、Article ID、revision、content hashが対応する
-- [ ] Graph schema inventoryに旧`MENTIONS / APPLIED_BY`がない
-- [ ] 代表94件の構造評価を再実行して`94/94`を確認した
+- [x] e-Gov APIを再取得せず、保存済みXML snapshotを使用する
+- [x] 検証環境の回答処理を停止している
+- [x] 同じmanifestからOpenSearchとNeo4jを再構築した
+- [x] 両方の`sourceSnapshotId`、Article ID、revision、content hashが対応する
+- [x] Graph schema inventoryに旧`MENTIONS / APPLIED_BY`がない
+- [x] 代表94件の構造評価を再実行して`94/94`を確認した
 - [ ] 再構築後の正式な候補総数とshard数を記録した
 
 合格条件: 不一致snapshotを公開せず、再構築後の構造監査がすべて成功する。
 
-`EGOV_LAW_CORPUS_MANIFEST`から各XMLのSHA-256・法令ID・法令名を検証してseedする経路は実装済み。
-実データ14法令（14,742 OpenSearch文書相当）のread-only parseも完了した。上記項目は
-実際の再構築と監査が成功した時点で完了にする。
+2026-08-19に保存manifest
+`egov-law-corpus-4458d52586f9a2a4233e05ffc7e06f07c9c5429a4916043ad233908a4d911e1c`
+から再構築した。結果はOpenSearch 16,459文書、Neo4j 17,254 node / 34,214 edge、
+共通`sourceSnapshotId=snapshot-1e9f9f5c1ac849f7ddffdd7480f80c9f771db7c00efea06a612fc286f8c3d27e`、
+schema version 9、Graph監査違反0、構造評価`94/94`だった。
+
+ただし現exportは`REFERENCES`出現16,972件をそのまま16,972候補・3,395 shardへ投影していた。
+同一Articleペアは14,460組（最大31出現）であり、「Articleペアをまとめ、全参照出現を文脈として渡す」
+契約と不一致である。`basisEdgeId`単数契約を、候補内の複数basis edgeと各occurrenceの対応を表す契約へ
+修正し、再exportするまで正式候補総数とは扱わない。誤ったpacketは全件Lunaへ渡していない。
 
 ## Gate 6: 代表100件を最大3並列で再評価する
 

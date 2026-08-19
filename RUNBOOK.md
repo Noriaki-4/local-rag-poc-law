@@ -845,7 +845,7 @@ LLM_RESEARCH_EVIDENCE_CHARS=30000
 seed済みGraphのnode/edge種別・件数、registryとの一致、authorityTypeの分布を出す。
 
 ```bash
-uv run --with neo4j --with requests python scripts/graph_inventory.py
+PYTHONPATH=agent-api agent-api/.venv/bin/python scripts/graph_inventory.py
 ```
 
 `ordinance_unspecified` が残る法令は、省令か内閣府令かを人手で確認して

@@ -44,6 +44,9 @@
 - Luna用のlabel-free候補packetと最大5件のshardを決定的に生成するIFは実装済みである。
   packetはsnapshot、schema、prompt、Worker / Reviewer model、両Article全文、全参照出現を含み、
   goldやexpected predicateを型上受け付けない。実indexでのexportは再seed後に行う。
+  実indexでの初回exportにより、現IFがArticleペアではなく物理`REFERENCES`出現ごとに候補化する
+  不一致を検出した。複数basis edgeと各参照出現の対応を1つのArticleペア候補へ束ねるまで、
+  全件Luna実行へ進めない。
 - 現行CLIのOllama `gemma4:e4b`経路はローカル契約試験用であり、手動監査14件の5 predicate完全一致が
   4/14だったため、全件publish用の品質経路には採用しない。正本分類はCodexサブスクリプション内の
   `gpt-5.6-luna`をWorker / Reviewerの両方に使い、候補を複数ペアへ分割して並列実行する。
