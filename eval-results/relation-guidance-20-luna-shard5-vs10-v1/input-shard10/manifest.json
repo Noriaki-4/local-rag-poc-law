@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "sourcePacket": "/Users/nt/projects/local-rag-poc-law/eval-results/relation-guidance-20-luna-shard5-vs10-v1/selected-packet.jsonl",
+  "sourcePacketSha256": "f4455452789ebcf303e93172232c37cbbeef537643d70307128c81dc8627b182",
+  "candidateCount": 20,
+  "shardCount": 2,
+  "shards": [
+    {
+      "shardId": "shard-0000",
+      "file": "shard-0000.jsonl",
+      "candidateCount": 10,
+      "inputCharacters": 135121,
+      "sha256": "a930dc27fdd62a830572188447f5f292e89e4f45ac8bd959c5dc6be3f53778f2",
+      "candidateKeys": [
+        "cad19a74dc0509cfbf534cb20bda344f0dcc163be9fb88b6dede3921d897dad7",
+        "deb8f9f55903e3be8a8d11195dca5eb90c4196c952b6928fc99f8da9944e0142",
+        "b2082ce88ca0e6e941b494321687b846cc8c1659b0ecb38d47a549862aa3838b",
+        "6c4af3025647be3b3c75b89ad74b452ca0f962b6018fee59f068bfb12e464590",
+        "4d0b6f26d7498a67ed391297433079b7d47bdb8adb3094676b6366890b5446c4",
+        "341c37a1b43e11103bb100f4eb9678a5d66b32c25bbaf9ec62190f55931d1866",
+        "cfad7c4300143efaa3b0385e71687ca33178b63021645729dc6b48f9916022b9",
+        "2973096cf6cd1d0a0b6fd83f686c5cd5b74d48926755676b0dd443f965e1e7dd",
+        "74beca2159f87f6d3483cb0cf80b324c81af9df9080c1c4ca104f30e30963013",
+        "f593149c7dce27d6d04016aa209203f2fd9726918b6d0e55aa730b309f4e35c7"
+      ],
+      "basisEdgeIds": [
+        "edge-law-336M50000100001-article-114_16-paragraph-2-references-article-114_13",
+        "edge-law-336M50000100001-article-228-paragraph-1-references-article-213",
+        "edge-law-348M50000040005-suppl-106-article-2-paragraph-1-references-article-3",
+        "edge-law-405M50000040014-suppl-86-article-28-paragraph-1-references-article-11",
+        "edge-law-419M60000002052-suppl-75-article-2-references-article-230_2",
+        "edge-law-403AC0000000090-article-23-paragraph-1-references-article-13",
+        "edge-law-405M50000040014-article-10_2-references-law-340CO0000000321-article-1_4",
+        "edge-law-420M60000002078-article-10_2-references-law-323AC0000000025-article-21",
+        "edge-law-323AC0000000025-article-178-paragraph-27-references-article-166",
+        "edge-law-323AC0000000025-article-35-paragraph-1-item-8-references-article-2"
+      ]
+    },
+    {
+      "shardId": "shard-0001",
+      "file": "shard-0001.jsonl",
+      "candidateCount": 10,
+      "inputCharacters": 135212,
+      "sha256": "fbfc3cbf67719c8a826fe101cb62833b2f74a02e88cae1aa814ca392b07fff54",
+      "candidateKeys": [
+        "985e709be62d0300a05a4c18a4578ac88a45ad9125f003aa98ba3e7c36ba93cc",
+        "a66b47552cf92b0f8c3e6e0cfec464d4fee4a4a5544183a755e97d5d9901b218",
+        "40fcaa79c9bda41ae173870627d840a8ac10598836c04e4dadf3fbe986d6beb1",
+        "1b3de9bd6db1485fff33c6c40b4910955bef68cadbdd683efc67163d4727eac7",
+        "cdcd8083582bd34d5b955a5ea060998853acb0860a23f742f913918741ba22be",
+        "88cd43dd111249e9d748fc14affbc6cc01aba922b1a5945ef1aa7b5b414be56b",
+        "5d204ccf9cb123c0fc64b22309079ff6a4bd77b5563e12f63afbd0ce1d32b883",
+        "598e1fe7adc886ef324d7a690261f7397d16e608a70d5c88971bc29fc40ebbe4",
+        "aa00256fdd2932eac4af3ae35aac401c8810623b2f589f1ae7c8e194bed78511",
+        "a0398a039ec8929941ea8d8a4477a0fa45d35a164f24a9c6f0d1fd38ebeb8d61"
+      ],
+      "basisEdgeIds": [
+        "edge-law-336M50000100001-article-34_3-paragraph-4-references-article-9",
+        "edge-law-403AC0000000090-article-23-paragraph-1-references-article-16",
+        "edge-law-323AC0000000025-article-57_18-paragraph-3-references-article-57_12",
+        "edge-law-419M60000002052-article-38_2-references-law-323AC0000000025-article-32",
+        "edge-law-348M50000040005-article-19_7-references-law-323AC0000000025-article-24_7",
+        "edge-law-419M60000002059-article-9_3-paragraph-1-item-12-references-article-49",
+        "edge-law-405M50000040014-article-16-references-law-323AC0000000025-article-29_2",
+        "edge-law-348M50000040005-article-1-references-law-340CO0000000321-article-1_3_4",
+        "edge-law-340CO0000000321-article-38-paragraph-8-references-article-41_2",
+        "edge-law-419M60000002052-article-9-paragraph-1-item-4-references-article-198"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "evaluationId": "relation-guidance-6-luna-small-shard-v1",
+  "evaluatedAt": "2026-08-19",
+  "baseCommit": "a55e49b",
+  "model": "gpt-5.6-luna",
+  "reasoningEffort": "high",
+  "freshContextPerShard": true,
+  "goldProvidedToWorkersOrReviewers": false,
+  "selection": {
+    "candidateCount": 6,
+    "basis": "Six previously incorrect classifiable candidates covering missed predicates, false positives, and semantic direction",
+    "baselineLargeShards": [
+      {"candidateCount": 36, "inputCharacters": 326745},
+      {"candidateCount": 37, "inputCharacters": 328763}
+    ],
+    "smallShards": [
+      {"candidateCount": 1, "inputCharacters": 33331},
+      {"candidateCount": 5, "inputCharacters": 21583}
+    ]
+  },
+  "scores": {
+    "baselineLargeShardWorkerExactIncludingDirection": "0/6",
+    "baselineLargeShardFinalExactIncludingDirection": "0/6",
+    "smallShardWorkerExactIncludingDirection": "6/6",
+    "smallShardFinalExactIncludingDirection": "5/6"
+  },
+  "review": {
+    "initialApprovals": 5,
+    "requestedChanges": 1,
+    "finalApprovalsAfterRevision": 1,
+    "unresolved": 0,
+    "regressionsAgainstGold": 1,
+    "regressionBasisEdgeId": "edge-law-336M50000100001-article-15_11-references-article-1_2",
+    "regressionNote": "The initial Worker correctly found USES_DEFINITION. The Reviewer over-bound the definition to the cited item and missed the target Article's forward-scoped definition, causing the revised Worker to remove the correct assertion."
+  },
+  "conclusion": "The six-case targeted result supports the small-shard hypothesis for Worker accuracy, but the sample is selected and small. Reviewer behavior remains an independent error source."
+}

@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 1,
+  "candidateCount": 20,
+  "shard5": {
+    "shardCount": 4,
+    "candidatesPerShard": 5,
+    "workerExact": 18,
+    "finalExact": 19,
+    "workerPredicateExact": 18,
+    "finalPredicateExact": 19,
+    "review": {
+      "approve": 16,
+      "requestChange": 4
+    },
+    "comparison": {
+      "fixes": [
+        "edge-law-405M50000040014-article-10_2-references-law-340CO0000000321-article-1_4",
+        "edge-law-348M50000040005-article-1-references-law-340CO0000000321-article-1_3_4"
+      ],
+      "regressions": [
+        "edge-law-340CO0000000321-article-38-paragraph-8-references-article-41_2"
+      ],
+      "changedStillWrong": [],
+      "unchangedWrong": []
+    },
+    "initialWorkerUsage": {
+      "sessionCount": 4,
+      "peakUsedPercentMin": 25.3,
+      "peakUsedPercentMax": 32.8,
+      "durationSeconds": [
+        269.3,
+        249.8,
+        269.7,
+        278.6
+      ],
+      "compactionEvents": 0
+    },
+    "initialReviewerUsage": {
+      "sessionCount": 4,
+      "peakUsedPercentMin": 27.4,
+      "peakUsedPercentMax": 37.9,
+      "durationSeconds": [
+        276.9,
+        241.9,
+        287.0,
+        399.1
+      ],
+      "compactionEvents": 0
+    }
+  },
+  "shard10": {
+    "shardCount": 2,
+    "candidatesPerShard": 10,
+    "workerExact": 17,
+    "finalExact": 19,
+    "workerPredicateExact": 17,
+    "finalPredicateExact": 19,
+    "review": {
+      "approve": 18,
+      "requestChange": 2
+    },
+    "comparison": {
+      "fixes": [
+        "edge-law-348M50000040005-suppl-106-article-2-paragraph-1-references-article-3",
+        "edge-law-419M60000002052-suppl-75-article-2-references-article-230_2"
+      ],
+      "regressions": [],
+      "changedStillWrong": [],
+      "unchangedWrong": [
+        "edge-law-405M50000040014-suppl-86-article-28-paragraph-1-references-article-11"
+      ]
+    },
+    "initialWorkerUsage": {
+      "sessionCount": 2,
+      "peakUsedPercentMin": 42.6,
+      "peakUsedPercentMax": 47.5,
+      "durationSeconds": [
+        459.5,
+        406.6
+      ],
+      "compactionEvents": 0
+    },
+    "initialReviewerUsage": {
+      "sessionCount": 2,
+      "peakUsedPercentMin": 39.3,
+      "peakUsedPercentMax": 42.0,
+      "durationSeconds": [
+        249.1,
+        1475.2
+      ],
+      "compactionEvents": 0
+    }
+  },
+  "allSessionPeakUsedPercent": 49.6,
+  "allSessionMinRemainingPercent": 50.4,
+  "allSessionCompactionEvents": 0,
+  "postHocStructureAudit": {
+    "basisEdgeId": "edge-law-340CO0000000321-article-38-paragraph-8-references-article-41_2",
+    "finding": "benchmark_target_is_wrong",
+    "rawGoldScoreTreatsShard5DetectionAsRegression": true,
+    "canonicalFixtureChanged": false
+  },
+  "adjustedEvaluation": {
+    "structurallyClassifiableCandidateCount": 19,
+    "shard5": {
+      "workerSemanticExact": 17,
+      "finalSemanticExact": 19,
+      "structuralDefectsDetected": 1,
+      "structuralDefectsMissed": 0
+    },
+    "shard10": {
+      "workerSemanticExact": 16,
+      "finalSemanticExact": 18,
+      "structuralDefectsDetected": 0,
+      "structuralDefectsMissed": 1
+    }
+  }
+}
