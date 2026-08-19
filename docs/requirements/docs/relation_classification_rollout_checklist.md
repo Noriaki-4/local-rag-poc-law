@@ -124,6 +124,7 @@
 - [ ] SolverがHypothesisに沿った1 predicate・1 direction・構造filterを明示する
 - [ ] Programが別predicateを追加しない
 - [ ] raw `REFERENCES`と`semantic_assertion`を混同しない
+- [ ] 最初の検索動作確認はReviewer無効、research/integrationともOllama `gemma4:e4b`で行う
+- [ ] 検索失敗時は別モデルへ切り替える前に、実装、契約、Prompt、入力、traceを確認する
 - [ ] 公開買付けを含む代表2問で必要条文へ到達する
 - [ ] 問題があればClassificationRunを上書きせず、新しいRunとして再分類する
-

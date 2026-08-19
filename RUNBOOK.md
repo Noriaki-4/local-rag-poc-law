@@ -813,12 +813,26 @@ UI では回答、検索ルート、citations、Graph paths、trace を確認で
 `AGENT_FRAMEWORK_ACTIVE=false`のままでも、`/answer/framework`は新Frameworkだけを実行する。
 現行経路との取り違えを避けるため、新Frameworkの移行評価ではこのendpointを使う。
 Reviewerは`AGENT_FRAMEWORK_REVIEWER_ENABLED=true`を明示した場合だけ有効になり、既定値は`false`。
+検索時にLLMを使う最初の動作確認は、Ollama `gemma4:e4b`をresearchとintegrationの両方へ設定して行う。
+この確認を通す前にHaiku、Sonnet、Lunaへ切り替えない。不具合時はモデル性能だけを原因とせず、実装、
+契約、Prompt、入力、`trace.agentFramework`を先に調べる。Gemmaで一連の経路が動いた後、必要な場合だけ
+別Profileで品質・性能を比較する。これはLunaを使う非同期Relation分類とは別の運用である。
 初回の作業分解とTool選択には`AGENT_FRAMEWORK_RESEARCH_MODEL`、ToolResult取得後の意味評価・
 状態統合・追加調査または終了の判断には`AGENT_FRAMEWORK_INTEGRATION_MODEL`を使う。
 旧`AGENT_FRAMEWORK_FINALIZE_MODEL`も互換設定として読めるが、新規設定ではintegration名を使う。
 両用途のsystem promptには`solver_common.md`を合成し、質問観点の再確認、法令階層・委任先の
 追跡、Evidence利用、完了条件を全サイクルで共通にする。`solver_research.md`は初回の作業分解、
 `solver_integration.md`はToolResult取得後の更新という段階固有の指示だけを追加する。
+
+最初の検索動作確認用設定:
+
+```bash
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://host.docker.internal:11434
+AGENT_FRAMEWORK_RESEARCH_MODEL=gemma4:e4b
+AGENT_FRAMEWORK_INTEGRATION_MODEL=gemma4:e4b
+AGENT_FRAMEWORK_REVIEWER_ENABLED=false
+```
 
 ```bash
 curl -s http://localhost:8000/answer/framework \

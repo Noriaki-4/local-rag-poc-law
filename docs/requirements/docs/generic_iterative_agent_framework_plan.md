@@ -1340,6 +1340,14 @@ Reviewer有効時にReviewer自体がtimeoutまたは契約違反になった場
 ### 7.1 役割ではなく呼び出し用途でモデルを選ぶ
 
 同一provider内で、research、integration、reviewのモデルを別々に設定できるようにする。
+検索・回答経路の初回動作確認には、ローカルOllamaの`gemma4:e4b`をresearchとintegrationの両方へ使い、
+Reviewerは無効にする。ここで確認するのは、契約、Prompt、Tool選択、検索、Cycle引継ぎ、根拠利用が
+一連で動くことである。不具合時は先に実装、契約、Prompt、入力、traceを調査し、モデル性能だけを
+原因にしない。Gemmaでこの動作確認を通した後に限り、必要な品質・性能比較として同一provider内の
+別モデルまたは別providerのProfileを実行する。
+
+この検索時の確認Profileは、後述する非同期Relation分類のLuna Worker / Reviewerとは別用途である。
+検索確認のためにLunaを使わず、Relation分類の精度評価をGemmaの結果で代替しない。
 
 ```yaml
 name: legal-default
@@ -2114,9 +2122,12 @@ publishする別単位とする。Graph schema、抽出規則、入力データ�
 
 ### Phase 4: 実モデル評価と切替
 
-- Reviewer無効、research/integrationともHaikuでPhase 0に固定した自然言語2問を1回ずつ実行する。
+- 最初にReviewer無効、research/integrationともOllama `gemma4:e4b`で、Phase 0に固定した自然言語2問を
+  1回ずつ実行する。実装、契約、Prompt、Tool選択、検索、Cycle引継ぎ、根拠利用の動作確認を目的とし、
+  失敗を直ちにモデル性能の問題としない。
 - 必要根拠、回答要点、総時間、LLM呼び出し数、Tool時間をbaselineと比較する。
-- 上記2問の品質合格後、登録済み自然言語12問を各3回、同一設定・逐次実行して36件のRun全体latencyを集め、
+- 上記2問の動作確認合格後、必要なら対象環境で使用する別Profileの品質・性能比較を行う。
+  登録済み自然言語12問を各3回、同一設定・逐次実行して36件のRun全体latencyを集め、
   外部provider障害を除くRunのp90を測る。Frameworkの予算timeout、protocol error、限定回答は除外せず
   性能・品質失敗として数える。外部provider障害も件数と理由を別記する。
 - 必要ならReviewer有効を別試験として1回だけ実行し、品質差と時間差を測る。
