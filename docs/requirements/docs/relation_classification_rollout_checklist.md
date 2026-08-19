@@ -127,6 +127,10 @@ manifest schemaは2、promptは`legal-relation-5predicate-v20-pair`、skillは
 `legal-relation-adjudicator-2026-08-19-pair-v2`で固定した。全basis edgeはmanifestで一度ずつ被覆され、
 最大shard入力は210,366文字だった。誤った旧packetは全件Lunaへ渡していない。
 
+上記v2は初回Gate 6成果物の再現用versionである。その差分監査後に契約を更新し、正本skillを
+`.agents/skills/legal-relation-adjudicator`へ移した。次の差分再評価からは
+`legal-relation-adjudicator-2026-08-19-pair-v3`を使用し、v2成果物と同じRunへ混在させない。
+
 ## Gate 6: 代表100件を最大3並列で再評価する
 
 - [x] goldをWorker・Reviewerへ渡していない

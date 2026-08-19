@@ -55,6 +55,8 @@
   Articleペア単位にしたGate 6初回はstatus `73/73`、5 predicate `355/365`だったが、
   gold移行誤りと複数の妥当な根拠spanを扱えない採点不備が判明したため未合格である。
   教師データ・採点契約を修正し、差分候補の再評価を完了するまで全件Runへ進めない。
+  分類skillの正本はリポジトリ内の`.agents/skills/legal-relation-adjudicator`へ移し、
+  コード・契約・補助スクリプトを同じrevisionで管理する。ユーザー共通skillを正本にしない。
   判定JSONLはReviewer承認証跡付きで`ClassificationRun`へ取り込む検証importを実装済みである。
   詳しい比較結果と運用手順は[RUNBOOK](../../../RUNBOOK.md)を正とする。
 - 旧`legal-relation-classifier-v8`は、schema version 7の旧`IMPLEMENTS`候補を

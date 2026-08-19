@@ -230,8 +230,8 @@ Ollamaの`gemma4:e4b`だが、この経路を全件意味分類の品質承認�
 全件登録用の意味判定は、Codexサブスクリプション内の`gpt-5.6-luna`を
 Worker / Reviewerの両方に使うオペレーター実行とする。
 [OpenAI公式モデル説明](https://developers.openai.com/api/docs/models/gpt-5.6-luna)では、
-Lunaは高速・大量処理向けのモデルとされている。実行時はCodexのローカル
-`legal-relation-adjudicator` skillの入出力契約に従い、リポジトリの分類候補JSONLを読み、
+Lunaは高速・大量処理向けのモデルとされている。実行時はリポジトリ固有の
+`.agents/skills/legal-relation-adjudicator` skillの入出力契約に従い、分類候補JSONLを読み、
 監査可能な判定JSONLを返す。
 API経由では実行せず、Agent APIへLunaのmodel IDや認証を組み込まない。
 
@@ -276,7 +276,8 @@ Luna Workerは5 predicateを同じ候補について一度に比較し、それ�
 成立時の根拠IDを返す。複数predicateは独立に成立できる。ReviewerはWorkerの回答と同じ候補本文を受け取り、
 誤りを具体的に指摘する。差戻しは1回だけとし、同じWorkerが指摘を参照して全5分類を再確認した後、
 同じReviewerが差分を最終確認する。処理量は候補を複数のWorker / Reviewerペアへ分割して並列化する。
-Worker出力後は`legal-relation-adjudicator/scripts/bind_single_occurrence_ids.py`を実行する。
+Worker出力後は
+`.agents/skills/legal-relation-adjudicator/scripts/bind_single_occurrence_ids.py`を実行する。
 参照箇所が1つだけの候補では、Programが入力packetの既知`occurrenceHash`をassertionへ機械的に束縛する。
 複数参照箇所がある候補では選択自体が意味判断になるため補正せず、Workerが選んだ既知hashだけを許可する。
 プログラムは条件とfinding、既知ID、件数の整合を検証してoutcomeと保存対象Assertionへ決定的に投影するだけで、

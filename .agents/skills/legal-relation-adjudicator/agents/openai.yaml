@@ -1,0 +1,4 @@
+interface:
+  display_name: "Legal Relation Adjudicator"
+  short_description: "Classify verified legal Article pairs into five predicates"
+  default_prompt: "Use $legal-relation-adjudicator to classify the provided verified Article pairs and write an auditable JSONL result."
