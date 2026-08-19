@@ -669,9 +669,11 @@ predicate enum、端点が入力内にあること、選択span IDが対応Artic
 件数だけを検証し、predicate・finding・方向を補正しない。
 `REFERENCE_ONLY / UNCERTAIN / FAILED`はRelationAssertionに変換せず、ClassificationRunの監査件数へ記録する。
 
-分類LLMは既定で1候補・5 predicateのWorker呼出しとし、成立時の根拠選択も同じ構造化回答に含める。
-複数候補を1回のLLM入力へ束ねない。候補間の並列化は、互いに独立したWorker / Reviewerペアへ
-候補シャードを割り当てることで行う。LLM入力単位とは別に候補単位の保存checkpointを持ち、
+分類LLMは各候補について5 predicateを一度に比較し、成立時の根拠選択も同じ候補の回答に含める。
+Codexオペレーター実行では1つのWorker sessionへ最大5候補のshardを渡すが、各候補を独立に読み、
+候補ごとに1つの判定recordを返す。他候補の本文・判断を根拠へ流用しない。Reviewerも同じ5候補以下の
+shardとWorkerの候補別回答を別sessionで検査する。候補間の並列化はshardを独立したWorker / Reviewerペアへ
+割り当てることで行う。sessionの処理単位とは別に候補単位の保存checkpointを持ち、
 分類jobは`sourceSnapshotId + 参照元/参照先Article ID・content hash + basisEdgeId + 正規化した全reference occurrence hash + promptVersion + provider + model + reviewer model + graphSchemaVersion`で
 再開・cache可能にする。
 この組を正規化してhash化した`candidateKey`を分類入力の冪等キーとする。1候補から複数predicateが返り得るため、
@@ -1391,14 +1393,20 @@ relation_adjudication:
   reviewer_model: gpt-5.6-luna
   reasoning_effort: high
   predicates_per_candidate: 5
-  candidates_per_model_call: 1
+  candidates_per_worker_session: 5
+  candidates_per_reviewer_session: 5
+  checkpoint_granularity: candidate
+  max_active_sessions: 3
+  worker_reviewer_separate_contexts: true
   max_revision_rounds: 1
-  parallel_worker_reviewer_pairs: configurable
 ```
 
 Reviewerは最終回答を検査する6章の任意Reviewerではなく、オフライン意味分類専用である。
-`candidates_per_model_call`の1はGraph Reviewのpageサイズや1 Stepの本文取得数とは無関係である。
-複数ペアは候補シャードを並列処理するが、1回のLLM入力には1候補だけを含める。
+5件は回答AgentのGraph Review pageサイズや1 Stepの本文取得数とは無関係である。WorkerとReviewerは
+別session・別contextとし、差戻しは元のWorker、差分再Reviewは元のReviewerへ戻す。同時に実行中の
+Codex sessionは最大3つとする。完了済みshardのcontextを次shardへ再利用せず、最後のshardだけ5件未満を許す。
+同じsessionに5候補を提示しても、候補別record、候補別checkpoint、候補別合否を維持し、候補順の変更や
+別候補の追加によって既存候補の判断が変わらないことを受入試験で確認する。
 WorkerとReviewerのmodel、reasoning effort、差戻し上限、skill versionを成果物manifestへ記録する。
 API経由でLunaを呼ばず、Codexサブスクリプションのオペレーター実行とする。
 
@@ -1917,6 +1925,8 @@ Phase 1の主要な実装リスクは`contract_rendering.py`である。Enum、�
 ### Phase 2: 法令の薄い縦切り
 
 Phase 2は、実装途中のschemaで全データを作り直さない。次の順序を固定する。
+全件実行時の具体的な確認項目と停止条件は
+[`relation_classification_rollout_checklist.md`](relation_classification_rollout_checklist.md)を使う。
 
 1. 新Graph契約、型、Constraint、監査をfixtureへ実装する。この時点では既存の実データを更新しない。
 2. `/admin/seed`を決定的処理だけにし、1つの入力manifestから同じ`sourceSnapshotId`を持つ
@@ -1964,8 +1974,9 @@ publishする別単位とする。Graph schema、抽出規則、入力データ�
   保存する。`candidateKey`と`assertionDedupeKey`を決定的に生成し、後者の一意制約で同一Run・候補・predicateの
   二重登録を防ぐ。再開時に同じkeyと同じpayloadがあれば処理済みとして再利用し、同じkeyでpayloadが違えば
   Runを失敗させて上書きしない。旧`fromArticleId / toArticleId / suggestedType / status`を新schemaの正本にしない。
-- 分類LLMは既定1候補・5 predicateのWorker判定とし、保存checkpointは候補単位にする。
-  複数候補を同じPromptへ入れず、候補シャードを独立したWorker / Reviewerペアへ割り当てて並列化する。
+- 分類LLMは各候補の5 predicateを一度に比較し、保存checkpointは候補単位にする。
+  Codexオペレーター実行では最大5候補を1 sessionへ割り当て、候補別recordを独立生成する。
+  Worker / Reviewerは別sessionとし、同時実行は最大3 session、差戻しは同じWorkerへ1回だけとする。
   Reviewer差戻しは1候補につき最大1回とし、再差戻しは`unresolved`へ分離する。
 - Case開始時に`sourceSnapshotId / graphSchemaVersion / classificationRunId`を固定し、検索時案件判断は
   CaseStoreだけへ保存する。分類jobと検索時Solverの責務を混同しない。
@@ -2016,8 +2027,8 @@ publishする別単位とする。Graph schema、抽出規則、入力データ�
   候補がtargetごとの別LLM入力になり、Programが全参照先へ同じpredicateを複製しない。
   同一候補内で同じ参照文字列が複数回現れるfixtureは全出現spanを提示し、最初の一致だけに固定しない。
   分類再開・cache・Run単位publishを確認する。
-- 2候補を同じPromptへ入れると結果が変わるfixtureで、既定Profileが1候補・5 predicateの入力単位を維持し、
-  Article ID付きspanが候補間で衝突せず、保存checkpointから再開できる。
+- 5候補shardの順序入替え、単件実行との比較、別候補の追加を行うfixtureで、候補別の5 predicate、方向、
+  groundingが変わらず、Article ID付きspanが候補間で衝突せず、候補単位checkpointから再開できる。
 - Workerの誤りをReviewerが指摘するfixtureで、同じWorkerが指摘を参照して1回だけ全5 predicateを再確認し、
   同じReviewerが差分を確認する。2回目も不合格なら再実行せず`unresolved`になる。
 - Provider schemaで各predicateが固有名の二必要条件とfindingを持ち、条件とfindingの不整合を拒否する。
@@ -2077,7 +2088,7 @@ publishする別単位とする。Graph schema、抽出規則、入力データ�
 - logical model callとtransport retryを分けて計測する。
 - 非同期Relation分類は候補ごとのmodel latency、一次`UNCERTAIN`率、再分類回数、checkpoint保存時間、
   Worker / Reviewer別の判定時間、差戻し率、未解消率、再開skip件数を記録する。最初に代表100件を
-  1候補・5 predicateのWorker判定と必要なReviewer判定で測り、全候補の所要時間を再見積りしてから
+  5候補/session・最大3 active sessionのWorker / Reviewer判定で測り、全候補の所要時間を再見積りしてから
   全Runを開始する。速度のためにProgramがpredicateを補完したり、未評価候補を処理済みにしない。
 - cycle phase・goal・strategy、step番号・phase、frontier、探索Node/Link/depth、model用途、Tool時間を構造化ログとAPI traceへ出す。
 - 秘匿情報が通常ログへ出ないことをテストする。

@@ -207,6 +207,9 @@ OpenSearch index と Neo4j graph を作り直す。レスポンスの`sourceSnap
 
 ### 非同期Relation分類
 
+全件実行前後の順序と停止条件は
+[非同期Relation分類 全件実行チェックリスト](docs/requirements/docs/relation_classification_rollout_checklist.md)に従う。
+
 `/admin/seed`は決定的に抽出できる構造と原文Relationまでを作り、LLMを呼ばない。
 意味分類はseed後の独立した再開可能jobが、原文`REFERENCES`を候補化し、5種類の
 `proposedPredicate`を持つ未確認`RelationAssertion`として別の`ClassificationRun`へ登録する。
@@ -320,8 +323,8 @@ python3 scripts/evaluate_legal_relation_5predicate.py
 2026-08-18のv19では、内部candidate keyをLLM入力から除外し、根拠spanを原文参照の物理方向で
 選択する契約に改めた。民法618条→617条の`INCORPORATES`、603条→602条の
 `REFERENCE_ONLY`、619条→622条の2の`USES_DEFINITION`かつ非`EXCEPTION_TO`を3/3で確認した。
-これは観測済み誤分類の回帰fixtureであり、5 predicate全体の受入fixtureや全4,323候補の精度評価を
-代替しない。
+これは観測済み誤分類の回帰fixtureであり、5 predicate全体の受入fixtureや全候補の精度評価を
+代替しない。候補総数は参照構造修正後の再seedで確定し、旧4,323件を現行値として使わない。
 
 手動で参照先と意味関係を確認した20件について、Graphの参照先解決とLLMの意味分類を
 分離して評価する場合は次を実行する。既定では構造だけを監査し、`--classify`を付けた場合も、
@@ -368,6 +371,12 @@ ReviewerはWorkerの回答を見たうえで誤りと根拠を指摘し、Worker
 1回の差戻しで修正して最終20/20、未解消0件となった。新規20件はさらに人手相当の全件監査を行い、
 確定fixture
 `docs/requirements/samples/eval/legal_relation_parallel_20_adjudicated_fixture.jsonl`と全件一致した。
+
+全件用の最終運用では、1 Worker sessionと1 Reviewer sessionへそれぞれ最大5候補を渡し、候補ごとに
+独立したJSONL recordとcheckpointを作る。WorkerとReviewerは別contextである。差戻しは元のWorkerへ
+1回だけ返し、同じReviewerが差分を最終確認する。同時に実行中のCodex sessionは最大3つとし、
+完了した枠へ次shardを割り当てる。5件版で代表100件を再評価し、構造・意味・方向・groundingの
+品質ゲートを通過するまでは全件分類を開始しない。
 
 #### 代表100件の構造・意味評価データセット（2026-08-19）
 
@@ -456,7 +465,7 @@ v8ではspan IDをArticle ID付きで一意化し、Article本文を候補内へ
 追加した府令4件は、法律→府令の正例・負例、施行令→府令、複数参照箇所を含む。
 同日の`gemma4:e4b`によるv8全34件評価は34/34だった（一次`uncertain` 1件を同モデルの
 Reviewerが再検討）。府令タグは法律→府令3/3、施行令→府令1/1、公開買付け3/3である。
-このfixtureは明確な文言の候補を選んだ機能試験であり、全4,323候補の正確な
+このfixtureは明確な文言の候補を選んだ機能試験であり、参照構造修正後に確定する全候補の正確な
 正答率推定には使わない。現時点で全候補の一括登録は行わない。
 
 ### 日本語Analyzer索引
