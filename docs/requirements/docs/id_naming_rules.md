@@ -82,6 +82,32 @@ law-<法令番号>-suppl-<附則index>-article-<条番号>-paragraph-<項番号>
 第二号の二   -> ...-item-2_2
 ```
 
+枝番を持つ条は、元の条の配下にある子要素ではない。法改正等で条と条の間へ規定を追加するための
+独立した条であり、正式な条番号全体を使って別々の`Article` nodeとして識別する。
+
+```text
+Document
+├─ Article 第2条       (article-2)
+├─ Article 第2条の2    (article-2_2)
+├─ ...
+├─ Article 第2条の12   (article-2_12)
+├─ Article 第2条の13   (article-2_13)
+└─ Article 第3条       (article-3)
+```
+
+したがって、`第2条の12`と`第2条の13`を複数の「第2条」として扱わず、また
+`Article 第2条`から`Article 第2条の12`への親子関係も作らない。いずれも同じDocumentに属する
+同階層のArticleであり、それぞれが自身のParagraphとItemを持つ。
+
+```text
+第2条の12第1項第二号の二
+-> article-2_12-paragraph-1-item-2_2
+```
+
+枝番と構造階層も混同しない。`第2条の12`は`article-2_12`、`第2条第12項`は
+`article-2-paragraph-12`であり、別のContent Unitである。アンダースコアは1つの条番号・号番号の
+内部にある枝番、ハイフン付きの`paragraph`・`item`は条・項・号の包含階層を表す。
+
 MVPでは、Graph nodeの`graphNodeId`は対応する`contentUnitId`と同一でよい。文書ノードは`documentId`と同一にする。
 
 ## 4. edge ID

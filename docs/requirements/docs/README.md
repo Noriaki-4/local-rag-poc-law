@@ -1,6 +1,6 @@
 # 設計文書ガイド
 
-> 更新日: 2026-08-19
+> 更新日: 2026-08-20
 
 このディレクトリには、データ投入、検索、Graph、Agent、評価、将来移行に関する設計文書がある。
 すべてが同じ世代の現行仕様ではないため、本書では各文書の役割と位置づけを整理する。
@@ -55,6 +55,7 @@
 |---|---|---|
 | [dataset_design.md](dataset_design.md) | lawqa_jp、再利用可能なe-Gov XML snapshot、外部ガイド、RAG対象外データ、原本・派生成果物、投入対象 | 「何を投入するか」の中心文書。旧Relation名が残る箇所よりGraph構築仕様を優先する |
 | [graph_edge_construction.md](graph_edge_construction.md) | schema version 9、共通snapshot、`HAS_CONTENT_UNIT / REFERENCES / EXPLAINS`の決定的seed、非同期RelationAssertionとの境界 | Neo4jとOpenSearchを同じsnapshotから再構築する現行仕様の正本 |
+| [legal_structure_and_graph_search_visual.md](legal_structure_and_graph_search_visual.md) | e-Govの条・項・号、OpenSearch文書、Neo4j Node、Article単位の参照・意味関係、現行Graph検索と再計画案を箱と矢印で示す | 人間向けの構造・検索ガイド。再計画案は正本への反映前であり、現行仕様判断には各正本文書を優先する |
 | [retrieval_config.md](retrieval_config.md) | embedding、Article/Paragraphチャンク、OpenSearchドキュメント、mapping、Hybrid検索 | OpenSearch索引の基本設計 |
 | [japanese_legal_search_analysis_plan.md](japanese_legal_search_analysis_plan.md) | Kuromoji、N-gram、BM25・Vector・RRF、v2索引、再シード、shadow比較 | 当初の実装前レビュー文書。v2索引は既定化済みのため、現行設定と操作はRUNBOOK・コードを優先する |
 | [id_naming_rules.md](id_naming_rules.md) | 法令・条・項・号・附則・枝番・Graph edgeのID、dangling禁止 | OpenSearchとNeo4jで共有するID規約 |
@@ -86,6 +87,7 @@
 
 | 文書 | 内容 | 現在の位置づけ |
 |---|---|---|
+| [second_phase_development_memo.md](second_phase_development_memo.md) | 自治体職員の利用像、小規模データセット、法令検索表現、仮説別Graph selector、連続1ホップ、e-Gov構造、意味分類再利用、処理別シーケンス・データ構造図をまとめた第二期再計画 | 第二期開発の備忘録。詳細契約の正本ではなく、確定事項は汎用反復型Agent実装計画へ反映する |
 | [step1_implementation_plan.md](step1_implementation_plan.md) | ローカルDocker、MinIO、OpenSearch、Neo4j、Agent API、UI、評価ランナー | プロジェクト開始時のStep1全体計画 |
 | [step2_transition_plan.md](step2_transition_plan.md) | MinIOからS3、Neo4jからNeptune、ローカルOpenSearchからAWS、AgentCore/ECS/Lambdaへの対応 | 将来のAWS移行計画 |
 
@@ -101,6 +103,7 @@
 │  ├─ id_naming_rules
 │  ├─ retrieval_config
 │  ├─ japanese_legal_search_analysis_plan
+│  ├─ legal_structure_and_graph_search_visual  構造・検索の人間向け図解
 │  └─ graph_edge_construction
 │
 ├─ 法令検索Domain
@@ -114,6 +117,9 @@
 │  ├─ llm_directed_legal_retrieval            現行旧経路
 │  └─ llm_research_case_store...              置換済み・移行確認用
 │
+├─ 第二期再計画
+│  └─ second_phase_development_memo            重要変更の備忘録
+│
 ├─ 評価・運用
 │  ├─ evaluation_design
 │  ├─ samples/eval/legal_relation_guidance_100_manifest
@@ -126,15 +132,16 @@
 
 ## 7. 推奨読順
 
-1. Agent全体像: [generic_iterative_agent_framework_plan_visual.md](generic_iterative_agent_framework_plan_visual.md)
-2. Agent実装仕様: [generic_iterative_agent_framework_plan.md](generic_iterative_agent_framework_plan.md)
-3. 投入対象: [dataset_design.md](dataset_design.md)
-4. Graph構築: [graph_edge_construction.md](graph_edge_construction.md)
-5. 現在の実装・再投入・評価結果: [RUNBOOK.md](../../../RUNBOOK.md)
-6. OpenSearchの基本設計: [retrieval_config.md](retrieval_config.md)
-7. 旧法令検索経路を調べる場合だけ:
+1. 第二期の変更概要: [second_phase_development_memo.md](second_phase_development_memo.md)
+2. Agent全体像: [generic_iterative_agent_framework_plan_visual.md](generic_iterative_agent_framework_plan_visual.md)
+3. Agent実装仕様: [generic_iterative_agent_framework_plan.md](generic_iterative_agent_framework_plan.md)
+4. 投入対象: [dataset_design.md](dataset_design.md)
+5. Graph構築: [graph_edge_construction.md](graph_edge_construction.md)
+6. 現在の実装・再投入・評価結果: [RUNBOOK.md](../../../RUNBOOK.md)
+7. OpenSearchの基本設計: [retrieval_config.md](retrieval_config.md)
+8. 旧法令検索経路を調べる場合だけ:
    [layered_legal_evidence_retrieval_plan.md](layered_legal_evidence_retrieval_plan.md)
-8. QA・検索評価: [evaluation_design.md](evaluation_design.md)
+9. QA・検索評価: [evaluation_design.md](evaluation_design.md)
 
 ## 8. 文書を更新するときの注意
 
