@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "datasetId": "public-tender-offer-three-layer-mini-v1",
+  "datasetType": "egov_article_subset_scenario",
+  "datasetSnapshotId": "public-tender-offer-mini-1bf7d65f0c426c8423e1de1dcef8c293caf03d2bad70a71c905e8b366a4443a4",
+  "parentDatasetSnapshotId": "egov-law-corpus-4458d52586f9a2a4233e05ffc7e06f07c9c5429a4916043ad233908a4d911e1c",
+  "sourceReusePolicy": "frozen_local_xml_only",
+  "articleAllowlistPath": "article_allowlist.json",
+  "evaluationArtifacts": [
+    "eval/expected_references.jsonl",
+    "eval/navigation_expectations.jsonl",
+    "eval/questions.jsonl"
+  ],
+  "laws": [
+    {
+      "lawId": "323AC0000000025",
+      "title": "金融商品取引法",
+      "authorityType": "act",
+      "familyRoot": "323AC0000000025",
+      "sourcePath": "datasets/lawqa_jp/egov_law_corpus/documents/323AC0000000025/04ee3ac58d200f9908c6391806d087090ce54bebc6f4568a1e797207c70fe1cb.xml",
+      "sourceSha256": "sha256:04ee3ac58d200f9908c6391806d087090ce54bebc6f4568a1e797207c70fe1cb"
+    },
+    {
+      "lawId": "340CO0000000321",
+      "title": "金融商品取引法施行令",
+      "authorityType": "cabinet_order",
+      "familyRoot": "323AC0000000025",
+      "sourcePath": "datasets/lawqa_jp/egov_law_corpus/documents/340CO0000000321/575982afba368dd8750149e6852934f69206a3ae93b1516e49e891d124bd1123.xml",
+      "sourceSha256": "sha256:575982afba368dd8750149e6852934f69206a3ae93b1516e49e891d124bd1123"
+    },
+    {
+      "lawId": "402M50000040038",
+      "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+      "authorityType": "cabinet_office_ordinance",
+      "familyRoot": "323AC0000000025",
+      "sourcePath": "datasets/lawqa_jp/egov_law_corpus/documents/402M50000040038/2889d3017c9385bb3728cba51f6014e5efe11a345a7e1a288b037641218d714f.xml",
+      "sourceSha256": "sha256:2889d3017c9385bb3728cba51f6014e5efe11a345a7e1a288b037641218d714f"
+    }
+  ]
+}

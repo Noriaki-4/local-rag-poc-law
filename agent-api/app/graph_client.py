@@ -218,11 +218,12 @@ class GraphClient:
         article_ids: list[str],
         *,
         edge_types: list[str] | None = None,
+        direction: str | None = None,
         user_clearance_level: int = 3,
         limit: int = 50,
         timeout_sec: float | None = None,
     ) -> list[dict[str, Any]]:
-        """指定Articleの入出力に接続する正式Graph関係を候補として取得する。
+        """指定Articleから指定方向に接続する正式Graph関係を候補として取得する。
 
         下位法令から親法令へのREFERENCESのように、起点Articleから見て
         入力側にある関係も検索ナビゲーションに必要なため双方向を返す。
@@ -232,6 +233,8 @@ class GraphClient:
             return []
         if timeout_sec is not None and timeout_sec <= 0:
             return []
+        if direction not in {None, "outgoing", "incoming"}:
+            raise ValueError("direction must be outgoing or incoming")
         allowed_types = [
             edge_type
             for edge_type in dict.fromkeys(edge_types or expandable_edge_types())
@@ -242,14 +245,14 @@ class GraphClient:
         query = """
         MATCH (from:GraphNode)-[relation]->(to:GraphNode)
         WHERE (
-          any(articleId IN $articleIds WHERE
+          ($direction IN ['', 'outgoing'] AND any(articleId IN $articleIds WHERE
             from.graphNodeId = articleId
             OR from.graphNodeId STARTS WITH articleId + '-'
-          )
-          OR any(articleId IN $articleIds WHERE
+          ))
+          OR ($direction IN ['', 'incoming'] AND any(articleId IN $articleIds WHERE
             to.graphNodeId = articleId
             OR to.graphNodeId STARTS WITH articleId + '-'
-          )
+          ))
         )
         AND type(relation) IN $edgeTypes
         AND from.nodeType IN ['Article', 'Paragraph', 'Item']
@@ -278,6 +281,7 @@ class GraphClient:
         parameters = {
             "articleIds": list(dict.fromkeys(article_ids)),
             "edgeTypes": allowed_types,
+            "direction": direction or "",
             "userClearanceLevel": user_clearance_level,
             "limit": max(1, min(limit, 500)),
         }
@@ -297,65 +301,61 @@ class GraphClient:
         self,
         article_ids: list[str],
         *,
-        suggested_types: list[str] | None = None,
+        proposed_predicate: str,
+        direction: str,
+        classification_run_id: str = "",
         user_clearance_level: int = 3,
         limit: int = 50,
         timeout_sec: float | None = None,
     ) -> list[dict[str, Any]]:
-        """指定Articleを一方の端点に持つ未確認関係候補を取得する。
-
-        候補は方向を確定関係として利用せず、LLMが親子双方の本文を取得するための
-        ナビゲーション情報としてだけ返す。
-        """
+        """published runの意味関係をpredicate・方向を固定して取得する。"""
         if not article_ids:
             return []
         if timeout_sec is not None and timeout_sec <= 0:
             return []
-        allowed_types = [
-            edge_type
-            for edge_type in dict.fromkeys(suggested_types or [])
-            if edge_type in expandable_edge_types()
-        ]
-        if suggested_types and len(allowed_types) != len(set(suggested_types)):
-            raise ValueError("unregistered or unimplemented suggested relation type")
+        from .domains.legal.graph_schema import GraphDirection, ProposedPredicate
+
+        try:
+            predicate = ProposedPredicate(proposed_predicate).value
+            search_direction = GraphDirection(direction).value
+        except ValueError as exc:
+            raise ValueError("invalid semantic assertion selector") from exc
         query = """
         MATCH (assertion:RelationAssertion)
-        MATCH (from:Article {graphNodeId: assertion.fromArticleId})
-        MATCH (to:Article {graphNodeId: assertion.toArticleId})
-        WHERE (
-          assertion.fromArticleId IN $articleIds
-          OR assertion.toArticleId IN $articleIds
-        )
-        AND assertion.status IN $visibleStatuses
-        AND coalesce(assertion.clearanceLevel, 3) <= $userClearanceLevel
-        AND coalesce(from.clearanceLevel, 3) <= $userClearanceLevel
-        AND coalesce(to.clearanceLevel, 3) <= $userClearanceLevel
+        MATCH (assertion)-[:SUBJECT]->(subject:Article)
+        MATCH (assertion)-[:OBJECT]->(object:Article)
+        MATCH (assertion)-[:CLASSIFIED_IN]->(run:ClassificationRun)
+        WHERE run.phase = 'published'
+        AND ($classificationRunId = '' OR run.classificationRunId = $classificationRunId)
+        AND assertion.proposedPredicate = $proposedPredicate
         AND (
-          size($suggestedTypes) = 0
-          OR assertion.suggestedType IN $suggestedTypes
+          ($direction = 'from_subject' AND subject.graphNodeId IN $articleIds)
+          OR ($direction = 'to_subject' AND object.graphNodeId IN $articleIds)
         )
-        OPTIONAL MATCH (fromDocument:GraphNode {graphNodeId: from.documentId})
-        OPTIONAL MATCH (toDocument:GraphNode {graphNodeId: to.documentId})
+        AND coalesce(subject.clearanceLevel, 3) <= $userClearanceLevel
+        AND coalesce(object.clearanceLevel, 3) <= $userClearanceLevel
+        OPTIONAL MATCH (subjectDocument:GraphNode {graphNodeId: subject.documentId})
+        OPTIONAL MATCH (objectDocument:GraphNode {graphNodeId: object.documentId})
         RETURN assertion {
           .*,
-          fromDocumentId: from.documentId,
-          fromTitle: coalesce(from.title, fromDocument.title),
-          fromHeading: from.heading,
-          toDocumentId: to.documentId,
-          toTitle: coalesce(to.title, toDocument.title),
-          toHeading: to.heading
+          subjectArticleId: subject.graphNodeId,
+          objectArticleId: object.graphNodeId,
+          fromDocumentId: subject.documentId,
+          fromTitle: coalesce(subject.title, subjectDocument.title),
+          fromHeading: subject.heading,
+          toDocumentId: object.documentId,
+          toTitle: coalesce(object.title, objectDocument.title),
+          toHeading: object.heading,
+          classificationRunId: run.classificationRunId
         } AS assertion
         ORDER BY assertion.assertionId
         LIMIT $limit
         """
         parameters = {
             "articleIds": list(dict.fromkeys(article_ids)),
-            "suggestedTypes": allowed_types,
-            "visibleStatuses": [
-                RELATION_STATUS_UNVERIFIED,
-                RELATION_STATUS_LLM_UNCERTAIN,
-                RELATION_STATUS_LLM_IMPLEMENTS,
-            ],
+            "proposedPredicate": predicate,
+            "direction": search_direction,
+            "classificationRunId": classification_run_id,
             "userClearanceLevel": user_clearance_level,
             "limit": max(1, min(limit, 500)),
         }

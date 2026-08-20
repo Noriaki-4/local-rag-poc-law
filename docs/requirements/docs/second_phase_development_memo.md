@@ -16,7 +16,8 @@ Agent Frameworkの`Phase 2`や、AWS移行の`step2_transition_plan.md`とは別
 
 主な利用者像は自治体職員とする。上位法令の改正を起点に、関係する条例、規則、要綱を探し、
 改正要否の確認へつなげる利用を中心に考える。自治体例規を取得できない間は、構造の近い小規模な
-法令集合で仕組みを検証する。小規模データセットの具体的な範囲は別途決める。
+法令集合で仕組みを検証する。第二期Step 1では、保存済みe-Gov XMLから作る公開買付け3階層
+ミニデータセットを使用する。
 
 ## 2. 第一期からの重要な変更
 
@@ -32,6 +33,88 @@ Agent Frameworkの`Phase 2`や、AWS移行の`step2_transition_plan.md`とは別
 | 意味分類 | 全件を繰り返し分類すると費用がかかる | snapshot単位で一度分類し、checkpointと成果を再利用する |
 | Agent構成 | 役割追加により契約とPromptが複雑化しやすかった | 回答AgentはSolverと任意Reviewerだけにする。Reviewerは既定無効 |
 | 保守性 | status、schema、Promptが分散し、変更時に修正漏れが起きた | 型付き契約を正本にし、Provider schemaとPrompt用語集を同期する |
+
+### 2.1 第二期Step 1：公開買付け3階層ミニデータセット
+
+Step 1では、`datasets/scenarios/public_tender_offer_three_layer_v1/`を固定入力として、
+「法律→施行令→府令」の連続1ホップ探索を実装・検証する。架空条文やgold本文は作らず、既に保存した
+3法令のe-Gov XMLから本則Article全文を選ぶ。
+
+| 法令 | 対象Article | 主な検証目的 |
+|---|---|---|
+| 金融商品取引法 | 27条の2、27条の3、27条の4 | 公開買付け義務、公告・届出、比較候補 |
+| 金融商品取引法施行令 | 6条、7条、8条、9条の3 | 対象、適用除外、期間、公告の周辺規定 |
+| 公開買付府令 | 2条の4、2条の5、2条の6、9条、10条、11条 | 少数所有者の条件、公告事項、隣接候補 |
+
+検索・seed入力は`manifest.json`、`article_allowlist.json`、保存済みXMLだけとする。
+`eval/`の期待参照、意味関係、質問別必要Articleは採点専用であり、OpenSearch、Neo4j、Solver Prompt、
+意味分類LLMへ渡さない。対象外Articleへの参照は`outside_dataset_scope`として監査し、別Articleへの補正や
+dangling edgeを作らない。
+
+Step 1の代表経路は次とする。
+
+```text
+金商法27条の2 ── IMPLEMENTS ──→ 施行令7条
+金商法27条の2 ← EXCEPTION_TO ── 施行令7条
+施行令7条     ── IMPLEMENTS ──→ 公開買付府令2条の5
+金商法27条の3 ── IMPLEMENTS ──→ 公開買付府令10条
+```
+
+金商法27条の2と施行令7条は、委任具体化と例外という別々の必要条件を満たすため、2つの意味候補を
+併存させる。複数predicateから同じArticleへ到達しても、本文取得はArticle IDで1回にまとめ、
+Hypothesisごとの到達理由はDiscoveryLinkとして別々に残す。
+
+Step 1の実行順と完了条件は次のとおり。
+
+1. 保存済みXML hash、Article全体、明示参照、gold分離、subset snapshotをローカルvalidatorで検証する。
+2. 条・項・号の構造保持、参照抽出、Graph schemaまたは投入ロジックを変更した後、同じsnapshotから
+   OpenSearchとNeo4jを両方再構築する。Neo4jの現行データは消去してよいが、片方だけの更新は成功としない。
+3. 小規模対象だけを非同期意味分類し、publishする。採点用期待値を分類入力へ混ぜない。
+4. OpenSearch検索、仮説selector、連続1ホップGraph探索、Article全文取得を3つの代表質問で検証する。
+5. trace上で必要Articleへの到達、重複本文取得の不在、対象外参照の扱い、OpenSearch／Neo4jの
+   `datasetSnapshotId`一致を確認する。
+
+インデックス構築前のデータセット検証コマンドは次である。
+
+```bash
+python3 scripts/validate_public_tender_offer_mini_dataset.py
+```
+
+2026-08-21時点では、全件ではなくこのsubsetだけを再indexした。専用OpenSearch indexは69文書、
+Neo4jは3 Document、13 Article、46 Paragraph、20 Item、100構造Relationである。17分類候補は
+Luna Worker / Reviewerで17/17承認され、24 RelationAssertionを
+`classification-run-public-tender-mini-v1-v23`としてpublishした。固定selectorの直接確認では、
+金商法27条の2から施行令7条、施行令7条から府令2条の5、金商法27条の3から府令10条へ到達できる。
+
+回答経路はLegal Profile v64で、Graph要求を1ホップ、Graph由来Articleを後続stepの起点として許可する。
+本文取得後の下位規範チェックリストは、法的根拠をHypothesis / Evidenceへ一本化し、監査statusと
+追加ToolRequest参照だけをDependencyDecisionへ保存する。Gemmaは本文取得・完了判断が安定せず、Haikuは
+必要本文取得まで進んだが、v53への簡素化後も検索候補を本文根拠へ誤用する修復不備が残った。v54では
+navigation-only Evidenceを根拠にせず本文取得へ戻す指示と、継続可能なopen WorkItemを残したfinalizeを
+修復schemaで許可しない制約を追加した。v55では、この修復で要求する本文を1 Request、残りCycle枠内へ
+まとめる指示も追加した。
+v56では、Article全文を構成する全Paragraph / ItemをHypothesis根拠へ入れたまま一部だけ引用する不整合を、
+LLMが根拠選択を再評価して修復できるようにした。Haiku、Reviewer offの
+`公開買付けによらない主な場合`は1 Cycleで完了し、必要Article 3/3、回答観点3/3へ到達した。
+複合的な全体問題では180秒内に契約修復後の統合を完了できなかったため、v57で全体上限を240秒へ変更した。
+契約修復用の通常時間を使い切った場合は即時失敗せず、予約済みの最終化時間へ制御を戻す。
+Anthropicでは配列の`maxItems`がprovider schemaから除かれるため、Promptだけでは4 Article上限を
+繰り返し超過した。v58では本文取得を最大4個の固定slotを持つ単一`article_fetch`として受け取り、
+LLMが選んだIDをAdapterが1件の`fetch_articles`へ復元する。ProgramはArticleを選び直さない。
+v60ではその他のToolRequestを固定数のJSON object文字列slotで輸送し、Adapterで復元後に共通契約を
+完全検証する。完全なToolRequest schemaをslotごとに複製する方式はAnthropicのgrammar上限を超えたため
+採用しない。Legal初期値は検索系4要求と`article_fetch` 1要求を合わせた1 step最大5件で、本文取得量は
+1 Request・1 Cycleとも最大4 Articleである。どのToolを各slotへ入れるかはLLMが判断する。
+v64では、同じ下位法令の別Articleを委任事項の具体化規定として代用せず、委任元と末端の具体化規定を
+それぞれ直接Evidenceで確認する規則を追加した。未取得Articleの内容を学習済み知識で補って完了してはならない。
+また、`lower_norm=resolved`は委任元と末端の2つ以上の異なるArticle本文Evidenceを要求する。
+Cycle境界ではAnthropic / compact輸送schemaも新規Tool slotを0件にし、共通契約のTool禁止を保持する。
+Anthropic輸送ではCaseUpdateのJSON文字列と、Hypothesisが選ぶEvidence IDの小さな構造化sidecarを分ける。
+sidecarだけを提示済みIDへ制限してCaseUpdateへ機械転記し、CaseUpdate全体の構造化でgrammar上限を
+超えることを避ける。ToolRequestも固定JSON文字列slotを維持する。
+ただし、この実行はOpenSearchだけで金商法27条の2、施行令7条、府令2条の5を発見し、Graph要求は0件だった。
+固定selectorの直接Tool確認とは別に、OpenSearchだけでは下位Articleを発見できない質問で、Solverが
+Graph由来Articleを次の1ホップ起点にするE2E試験を残す。これを確認するまで全件へ戻らない。
 
 ## 3. 目標とする検索の流れ
 
@@ -62,8 +145,8 @@ Solverが候補を選び、OpenSearchからArticle全文を取得する
 Graph候補をProgramが自動再帰展開しない。検索爆発は累積ホップ数で一律に止めるのではなく、
 1要求1方向・1関係、重複scope禁止、1 stepの候補数、本文取得数、Tool数、Cycle時間で抑える。
 
-この方針は、現行の汎用実装計画にある「Case全体の累積depth上限」と「Graph由来Articleを同一Cycleで
-再展開しない」という記述を変更する。詳細契約へ反映するまでは、再計画案と現行仕様を混同しない。
+この方針は汎用実装計画へ反映済みである。`minimum_depth`は監査・可視化には残すが、Graph実行可否の
+上限判定には使わない。
 
 ## 4. 処理別シーケンス図とデータ構造図
 
@@ -566,8 +649,8 @@ ReviewerはWorker回答を見て具体的に指摘し、差戻しは1回だけ�
 
 ## 9. 直近の実装順
 
-1. 小規模データセットと代表的な自治体業務質問を決める。
-2. e-Gov XML構造、参照先、OpenSearch本文、Neo4j構造を同じsnapshotで監査する。
+1. 公開買付け3階層ミニデータセットの固定snapshotとgold分離を検証する。
+2. e-Gov XML構造、参照先、OpenSearch本文、Neo4j構造を同じsnapshotで再構築・監査する。
 3. Solverによる法令検索表現生成を契約・Prompt・評価へ追加する。
 4. Hypothesis別Graph selectorと、選択Articleを次の起点にできる1ホップTool契約を実装する。
 5. 非同期意味分類を小規模対象へ実行し、検索時selectorへ接続する。
@@ -693,6 +776,8 @@ N対Mで結ぶisomorphism、解釈を来歴・Contextとともに保持する考
 - [ ] 5種類それぞれが実際の検索Hypothesis・方向と対応することをfixtureで示す。
 - [ ] 合理的な意味候補を広めに拾う新Prompt・skill・評価基準を同じversionで固定する。
 - [ ] 複数predicateが成立する読替え・委任・定義利用の境界fixtureを通す。
+- [ ] 委任された例外を具体化する関係で`IMPLEMENTS`と`EXCEPTION_TO`を独立評価し、
+  公開買付けfixtureでは両方から同じ施行令7条へ到達できる。
 - [ ] 意味候補の再現率、候補増加数、逆引きfan-inを同時に測る。
 - [ ] Graph候補だけを回答根拠にせず、選択後に両端Article全文を取得する。
 - [ ] 検索時Solverが`relationExplanation`と根拠原文を読み、質問における採否を判断する。
@@ -700,7 +785,6 @@ N対Mで結ぶisomorphism、解釈を来歴・Contextとともに保持する考
 
 ## 11. 詳細化が必要な事項
 
-- 小規模データセットの法令・例規範囲
 - 検索仮説チェックリストの具体語彙と、適用不要時の扱い
 - 連続1ホップ探索のCycle内上限と時間予約
 - 逆引き意味分類coverage不足時の限定`REFERENCES` fallback

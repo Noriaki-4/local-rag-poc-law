@@ -5,13 +5,18 @@ from __future__ import annotations
 import hashlib
 import json
 from time import perf_counter
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from app.agent_framework.ports.tool import ToolDefinition, ToolExecution
 from app.agent_framework.state import Evidence, ToolRequest, ToolResult
 from app.config import settings
+from app.domains.legal.graph_schema import (
+    GraphDirection,
+    GraphSearchMode,
+    ProposedPredicate,
+)
 from app.graph_client import GraphClient
 from app.opensearch_client import OpenSearchClient, RequirementSearchSpec
 
@@ -44,13 +49,29 @@ class _GraphNeighborsArguments(BaseModel):
         min_length=1,
         max_length=_MAX_ARTICLES_PER_FETCH,
     )
-    edge_types: tuple[str, ...] = ()
+    mode: GraphSearchMode
+    predicate: ProposedPredicate | None = None
+    direction: Literal["from_subject", "to_subject", "outgoing", "incoming"]
     max_relations: int = Field(
         default=50,
         ge=1,
         le=50,
         description="Maximum navigation relations returned for each seed article.",
     )
+
+    @model_validator(mode="after")
+    def validate_selector(self) -> "_GraphNeighborsArguments":
+        semantic_directions = {item.value for item in GraphDirection}
+        if self.mode is GraphSearchMode.SEMANTIC_ASSERTION:
+            if self.predicate is None or self.direction not in semantic_directions:
+                raise ValueError(
+                    "semantic_assertion requires one predicate and a semantic direction"
+                )
+        elif self.predicate is not None or self.direction in semantic_directions:
+            raise ValueError(
+                "physical graph modes forbid predicate and require outgoing/incoming"
+            )
+        return self
 
 
 class LegalSearchTool:
@@ -221,7 +242,6 @@ class LegalGraphNeighborsTool:
     ) -> ToolExecution:
         started = perf_counter()
         arguments = _parse_arguments(_GraphNeighborsArguments, request.arguments)
-        edge_types = list(arguments.edge_types) or None
         # Scan a larger mechanical pool because several paragraph/item edges may
         # collapse into one Article-pair candidate before max_relations applies.
         lookup_limit = min(max(arguments.max_relations * 10, 100), 500)
@@ -238,30 +258,35 @@ class LegalGraphNeighborsTool:
             remaining = timeout_sec - (perf_counter() - started)
             if remaining <= 0.1:
                 break
-            formal = (
-                formal_lookup(
+            formal: list[dict[str, Any]] = []
+            assertions: list[dict[str, Any]] = []
+            if arguments.mode is GraphSearchMode.SEMANTIC_ASSERTION:
+                if callable(assertion_lookup):
+                    assertions = assertion_lookup(
+                        [article_id],
+                        proposed_predicate=arguments.predicate.value,
+                        direction=arguments.direction,
+                        classification_run_id=(
+                            settings.legal_relation_classification_run_id
+                        ),
+                        user_clearance_level=self._user_clearance_level,
+                        limit=lookup_limit,
+                        timeout_sec=max(0.1, remaining),
+                    )
+            elif callable(formal_lookup):
+                edge_type = (
+                    "REFERENCES"
+                    if arguments.mode is GraphSearchMode.EXPLICIT_REFERENCE
+                    else "EXPLAINS"
+                )
+                formal = formal_lookup(
                     [article_id],
-                    edge_types=edge_types,
+                    edge_types=[edge_type],
+                    direction=arguments.direction,
                     user_clearance_level=self._user_clearance_level,
                     limit=lookup_limit,
                     timeout_sec=max(0.1, remaining),
                 )
-                if callable(formal_lookup)
-                else []
-            )
-
-            remaining = timeout_sec - (perf_counter() - started)
-            assertions = (
-                assertion_lookup(
-                    [article_id],
-                    suggested_types=edge_types,
-                    user_clearance_level=self._user_clearance_level,
-                    limit=lookup_limit,
-                    timeout_sec=max(0.1, remaining),
-                )
-                if callable(assertion_lookup) and remaining > 0.1
-                else []
-            )
             evidence_groups.append(
                 _graph_navigation_evidence(
                     formal,

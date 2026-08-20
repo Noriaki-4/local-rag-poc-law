@@ -62,7 +62,7 @@ def main() -> int:
     parser.add_argument("--max-active-sessions", type=int, default=3)
     parser.add_argument(
         "--skill-version",
-        default="legal-relation-adjudicator-2026-08-20-pair-v7",
+        default="legal-relation-adjudicator-2026-08-21-pair-v8",
     )
     parser.add_argument("--reasoning-effort", default="high")
     args = parser.parse_args()

@@ -3,18 +3,26 @@
 1. **取得結果の評価**
    - 直前の全ToolResultとmaterial_evidenceを読み、対応するWorkItemとHypothesisを更新します。
    - search_navigationの本文抜粋は次のTool選択にだけ使い、judgmentやresolutionの根拠にしません。
-   - 取得本文に付随する1ホップGraph候補も確認します。検索候補やGraph候補だけを根拠にせず、質問に関係し得るArticle本文が未取得なら取得対象にします。
+   - 要求して取得した1ホップGraph候補も確認します。検索候補やGraph候補だけを根拠にせず、質問に関係し得るArticle本文が未取得なら取得対象にします。
 
 2. **下位規範監査**
    - 元の質問が求める観点と、取得本文中の「政令で定める」「内閣府令で定める」「省令で定める」等を照合します。
    - 範囲・要件・例外・手続を委任先が具体化する場合、その本文を確認するまで対応するHypothesisをunresolved、WorkItemをopenのままにします。
    - 目的条項・総則条項・無関係な条項を委任先本文の代用にしません。
+   - required_dependency_kind=lower_normなら、required_dependency_work_item_idsの各WorkItemについてdependency_decisionsを1件ずつ返します。これは検索内容を強制する一覧ではなく、取得本文を読んだSolver自身による下位規範確認のチェックリストです。
+   - not_requiredは、取得本文を根拠に、質問で求める観点について下位規範の具体化を確認する必要がないと判断した場合だけ使います。取得本文に質問で求める範囲・要件・例外・手続の委任が残る場合は使いません。
+   - 委任先Articleが不明ならneeds_actionとします。既知の委任元Articleから意味関係を説明できる場合は、legal_graph_neighborsのsemantic_assertion、predicate=IMPLEMENTS、direction=from_subjectを同じDecisionで要求します。意味関係を特定できない場合は、委任元の文言・法令名・具体化事項を含むlegal_searchを要求します。いずれもそのrequest_idをaction_request_idへ指定します。
+   - Graphで得た委任先Articleも、その本文に質問で求める事項の再委任が残るなら、本文取得後の次stepで新しい起点として同じ監査を行います。1回のGraph要求を1ホップに保ったまま連鎖を辿ります。
+   - 委任先Article IDが既知で本文だけ未取得ならneeds_actionとしてfetch_articlesを要求し、委任先本文まで確認済みならresolvedとします。
+   - basis_evidence_idsには監査判断に使った取得本文だけを指定します。下位規範のArticle、探索方法、法的根拠はToolRequest、Hypothesis、Evidence、回答citationで管理し、DependencyDecisionへ重複登録しません。
+   - 同じ法令の別Articleを取得済みでも代用しません。resolvedは委任元と、その委任事項を実際に具体化する末端までのArticle本文を取得した場合だけ選び、basis_evidence_idsには委任元と具体化規定の双方を含めます。具体化規定がさらに下位規範へ委任していればneeds_actionです。
+   - not_requiredとresolvedではaction_request_id=null、needs_actionでは同じDecisionのToolRequest IDを指定します。
 
 3. **追加調査の編成**
    - finalize_only=falseで回答に影響する未確認事項があり、残りサイクルで実行可能ならcontinueします。
    - 既知Article本文にはfetch_articles、Article IDが不明ならlegal_searchを使います。検索本文に参照先の条番号があっても、そのArticle IDがfetchable_article_idsにない場合はfetch_articlesではなくlegal_searchを使います。
    - 複数のlegal_search結果から最初の本文を選ぶときは、候補を各open WorkItemへ対応付けます。同じArticleが複数観点を直接扱う場合を除き、利用者が明示した観点の一部だけへ取得枠を偏らせず、各観点を直接定めるArticleを優先します。見出しや近接性だけで、発動要件のArticleを公告・届出のArticleへ置き換えません。
-   - Graph候補として発見されていない起点Articleのfetch_articlesにだけ1ホップGraph取得が自動で伴います。Graph候補Articleの本文は取得しますが、そこからGraphを再展開しません。
+   - 既知Articleから現在のHypothesisに必要な関係の種類と方向を説明できる場合だけlegal_graph_neighborsを要求します。各要求は1ホップです。Graph候補Articleの本文取得後、そのArticleからさらに1ホップ必要とSolverが判断した場合は、後続stepで新しいselectorを明示して要求します。
    - 新規・再採用・新Link差分のGraph候補は専用モードで評価されます。通常Integrationでは取得済み本文とgraph_review_ledgerを評価し、relevant_deferredの既知Articleまたはselectedかつfailed/timeoutの再試行を、Cycleのremaining_fetch_capacity内で本文取得できます。
    - Cycle境界では、本文未取得のactiveなrelevant_deferredを1件も黙って捨てず、全件へdeferred_frontier_resolutionsを返します。次Cycle最初に取得する候補はfetch_next_cycleにしてstart_next_cycle=trueとします。そのArticleはProgramが1つのfetch_articlesへ機械転記するため、同じToolRequestを重ねて返しません。取得上限等で後続へ残す候補はcarry_forwardにします。この選択に作業分解や仮説の大幅変更は不要です。不要と判断した候補はno_longer_needed、次Cycleを開始できない上限時の未確認候補はunresolved_at_limitにします。
    - graph_review_batch.candidates=[]かつremaining_unreviewed_count>0なら、詳細未提示のGraph候補が保持されています。Cycle境界ではunreviewed_graph_resolutionを必ず返します。意味評価が回答に必要ならreview_next_cycleとToolRequestなしのstart_next_cycle=trueで引き継ぎ、不要と判断してfinalizeする場合だけno_longer_needed、次Cycle不能の限定回答だけunresolved_at_limitにします。
@@ -25,6 +33,7 @@
    - finalizeを選ぶ直前に、WorkItem、Hypothesis、answer、limitationsを相互照合します。
    - 適用要件、数値基準、例外、義務・手続のうち回答する観点が、それぞれ独立に検証されているか確認します。
    - answerとresolutionの各法的主張に直接対応するgrounding Evidenceがなければ確認済みにしません。
+   - answer、resolution、DependencyDecision.reasonでArticleの内容を述べる場合、そのArticle自身のmetadata.articleIdを持つEvidenceを照合します。別ArticleのEvidenceや学習済み知識で未取得Articleの内容を補いません。
    - resolved WorkItemのbasis Hypothesisが宣言したEvidenceを、最終回答のcitation_idsから落としません。
    - 回答、resolution、gaps、limitationsに未確認の別法令が回答へ影響すると書く場合、finalize_only=falseならそのWorkItemをopenのままcontinueします。
    - limitationsは未確認事項専用です。通常のfinalizeではlimitationsとunresolved ID欄を空にします。次Cycle不能の限定回答では、未完了WorkItemとHypothesisをopen/unresolvedのまま保ち、その既知IDをanswer.unresolved_work_item_idsとunresolved_hypothesis_idsへ指定します。

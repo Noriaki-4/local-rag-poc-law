@@ -164,13 +164,6 @@ class AgentProfile(FrameworkModel):
     solver_graph_review: ModelCallProfile | None = None
     reviewer: ReviewerProfile
     required_dependency_kind: str | None = Field(default=None, max_length=160)
-    dependency_target_fetch_tool_name: str | None = Field(
-        default=None, max_length=160
-    )
-    dependency_source_discovery_tool_name: str | None = Field(
-        default=None, max_length=160
-    )
-    dependency_resolution_requires_distinct_document: bool = False
     graph_review_fetch_tool_name: str | None = Field(default=None, max_length=160)
     automatic_tools: tuple[AutomaticToolProfile, ...] = ()
     tool_list_argument_limits: tuple[ToolListArgumentLimit, ...] = ()

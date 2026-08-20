@@ -13,12 +13,6 @@ HypothesisJudgment = Literal["supported", "contradicted", "unresolved"]
 ToolStatus = Literal["succeeded", "failed", "timeout"]
 ReviewVerdict = Literal["accept", "revise"]
 DependencyStatus = Literal["not_required", "needs_action", "resolved"]
-DependencyAction = Literal[
-    "discover_source",
-    "assess_source",
-    "discover_target",
-    "fetch_target",
-]
 FrontierReviewStatus = Literal[
     "unreviewed",
     "selected",
@@ -106,11 +100,8 @@ class DependencyDecision(FrameworkModel):
     work_item_id: str = Field(min_length=1, max_length=160)
     status: DependencyStatus
     reason: str = Field(min_length=1, max_length=1000)
-    source_evidence_ids: tuple[str, ...] = ()
-    action: DependencyAction | None = None
+    basis_evidence_ids: tuple[str, ...] = ()
     action_request_id: str | None = Field(default=None, max_length=160)
-    target_article_ids: tuple[str, ...] = ()
-    evidence_ids: tuple[str, ...] = ()
 
 
 class GraphFrontierDecision(FrameworkModel):

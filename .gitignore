@@ -3,4 +3,8 @@ __pycache__/
 *.py[cod]
 /eval-results/
 .env
-datasets/
+datasets/*
+!datasets/scenarios/
+datasets/scenarios/*
+!datasets/scenarios/public_tender_offer_three_layer_v1/
+!datasets/scenarios/public_tender_offer_three_layer_v1/**

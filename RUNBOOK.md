@@ -205,6 +205,44 @@ curl -s -X POST http://localhost:8000/admin/seed | jq .
 OpenSearch index と Neo4j graph を作り直す。レスポンスの`sourceSnapshotId`は両方で共通である。
 検証環境の再投入用であり、本番運用向けの差分投入や無停止切替ではないため、実行中は回答処理を止める。
 
+### 公開買付け3階層ミニデータセット
+
+第二期Step 1では、全件を再投入せず、保存済みe-Gov XMLから選んだ3法令13 Articleだけで
+OpenSearchとNeo4jの接続を検証する。まず、ネットワークやDBを使わず固定snapshotを監査する。
+
+```bash
+python3 scripts/validate_public_tender_offer_mini_dataset.py
+```
+
+専用indexでAgent APIを起動し、seedする。
+
+```bash
+OPENSEARCH_INDEX=legal-rag-public-tender-mini-v1 \
+SEED_SCENARIO_MANIFEST=/workspace/datasets/scenarios/public_tender_offer_three_layer_v1/manifest.json \
+docker compose up -d --build agent-api
+
+curl -s -X POST http://localhost:8000/admin/seed | jq .
+```
+
+このseedは専用OpenSearch indexを再作成し、Neo4j全体をミニデータセットへ置き換える。
+既存の全件OpenSearch indexは削除しない。全件Graphと切り替えて併用する仕組みではないため、
+元に戻す場合は対象の環境変数を戻してAgent APIを再起動し、全件seedを改めて実行する。
+ミニデータセットseedでは、MinIOの別snapshot由来vector文書を削除しない。
+
+2026-08-21の確認値は、OpenSearch 69文書、Neo4j 82 node
+（Document 3、Article 13、Paragraph 46、Item 20）、構造Relation 100件である。
+意味分類はseedと分離し、監査済みRunだけをpublishする。同日の検証Run
+`classification-run-public-tender-mini-v1-v23`は17候補すべて承認、24 RelationAssertionである。
+回答経路でこのRunを固定する場合は、Agent API起動時に次も設定する。
+
+```bash
+LEGAL_RELATION_CLASSIFICATION_RUN_ID=classification-run-public-tender-mini-v1-v23
+```
+
+データセットの範囲、gold分離、期待経路は
+[`datasets/scenarios/public_tender_offer_three_layer_v1/README.md`](datasets/scenarios/public_tender_offer_three_layer_v1/README.md)
+を参照する。
+
 ### 非同期Relation分類
 
 全件実行前後の順序と停止条件は
@@ -1035,11 +1073,14 @@ curl -s http://localhost:8000/answer/framework \
 `trace.agentFramework`の`reviewerEnabled`、`researchCycleCount`、`modelCalls`、`toolCalls`、
 `graphCandidateReviews`、`runStatus`を確認する。`runStatus=completed`は実行完了だけを表し、
 回答の法的十分性を意味しない。
-`toolCalls`には本文を含めず、Solverが指定した検索・本文取得と、本文取得に連動して実行された
-1ホップGraph取得の`arguments`と`purpose`を残す。
-Legal ProfileのGraph上限は1ホップである。起点Articleでだけ1ホップを自動取得し、
-Graph候補Articleの本文取得からGraphを再展開しない。その先が必要ならSolverが`legal_search`を選ぶ。
+`toolCalls`には本文を含めず、Solverが指定した検索・本文取得・1ホップGraph取得の`arguments`と
+`purpose`を残す。本文取得だけではGraphを自動実行しない。
+Legal ProfileのGraph要求は1回1ホップである。SolverがHypothesisに対応するpredicate・方向・起点を
+明示して`legal_graph_neighbors`を要求する。Graph候補Articleの本文取得後、その先が必要なら、Solverは
+そのArticleを新しい起点にして次の1ホップを要求できる。Programは累積depthや発見元を理由に除外しない。
 `fetch_articles`1回のArticle IDは最大4個、1 Cycleの本文取得成功数も重複なしで最大4件とする。
+Legal Profileの1 Solver Decisionは検索系Toolを最大4要求、`fetch_articles`を最大1要求とし、
+合計上限は5要求である。本文取得量の4 Article上限とは別の制約である。
 Graph Reviewから1 stepで選ぶ候補は最大3件とし、残りの関連候補はdeferして後続stepまたは次Cycleへ残す。
 プログラムは超過分を選別せず契約違反として返す。
 `modelCalls[].purpose`は初回が`research`、通常のTool実行後は`integration`になる。新しい1ホップ候補が
@@ -1078,8 +1119,10 @@ SolverDecisionの`next`、focus、保持ID、answer、`dependency_decisions`はp
 複雑な`update`と`tool_requests`だけを個別のJSON文字列として輸送し、Adapterが復元する。
 長い回答本文を二重エンコードせず、provider schemaも過大にしない。その後は同じSolverDecision契約で検証する。
 SolverDecisionが未知ID、上限超過、未終了WorkItem等の構造契約に違反した場合、状態へ適用せず、
-違反理由と直前Decisionを同じ用途のLLMへ1回だけ返す。LLMが意味判断を保って自己修復し、
-2回目も不正なら`protocol_error`で終了する。プログラムによるID補正や超過分の切捨ては行わない。
+違反理由と直前Decisionを同じ用途のLLMへ返す。初回を含む最大3回でLLMが意味判断を保って自己修復し、
+3回目も不正なら`protocol_error`で終了する。プログラムによるID補正や超過分の切捨ては行わない。
+Legal Profileの全体上限は既定240秒である。通常探索・契約修復用の時間を使い切った場合も、予約済みの
+最終化時間へ制御を戻し、未確認事項を限定回答として明示する。時間切れを法的完了へ読み替えない。
 
 新FrameworkのLegal Domainは、法令検索の第1位Articleについて取得済み一致chunkを検索順位どおり
 最大5000文字の範囲でまとめてSolverへ返し、他のArticle候補は代表chunkを最大400文字で返す。

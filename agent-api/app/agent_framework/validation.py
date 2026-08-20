@@ -28,10 +28,8 @@ def apply_solver_decision(
     finalize_only: bool,
     fetchable_article_ids: Collection[str] | None = None,
     required_dependency_kind: str | None = None,
+    required_dependency_work_item_ids: Collection[str] | None = None,
     require_dependency_decisions: bool = False,
-    dependency_target_fetch_tool_name: str | None = None,
-    dependency_source_discovery_tool_name: str | None = None,
-    dependency_resolution_requires_distinct_document: bool = False,
     tool_list_argument_limits: Mapping[tuple[str, str], int] | None = None,
     required_graph_review_request_ids: Collection[str] = (),
     graph_candidate_article_ids: Collection[str] = (),
@@ -106,9 +104,11 @@ def apply_solver_decision(
         )
     changed_hypothesis_ids: set[str] = set()
     added_work_item_ids = {item.work_item_id for item in decision.update.add_work_items}
-    dependency_scope_ids = {
-        item.work_item_id for item in state.work_items if item.state == "open"
-    }
+    dependency_scope_ids = (
+        set(required_dependency_work_item_ids)
+        if required_dependency_work_item_ids is not None
+        else {item.work_item_id for item in state.work_items if item.state == "open"}
+    )
 
     _reject_duplicate_delta_ids(
         (item.work_item_id for item in decision.update.add_work_items),
@@ -620,180 +620,44 @@ def apply_solver_decision(
                 f"dependency decision references unknown work item: "
                 f"{dependency.work_item_id}"
             )
-        source_may_be_unknown = (
-            dependency.status == "needs_action"
-            and dependency.action == "discover_source"
+        if not dependency.basis_evidence_ids:
+            raise ContractViolation("dependency decision requires basis evidence")
+        if len(dependency.basis_evidence_ids) != len(
+            set(dependency.basis_evidence_ids)
+        ):
+            raise ContractViolation("dependency basis evidence IDs must be unique")
+        unknown_dependency_evidence = (
+            set(dependency.basis_evidence_ids) - material_ids
         )
-        if not dependency.source_evidence_ids and not source_may_be_unknown:
-            raise ContractViolation("dependency decision requires source evidence")
-        if source_may_be_unknown and dependency.source_evidence_ids:
+        if unknown_dependency_evidence:
             raise ContractViolation(
-                "discover_source dependency cannot name source evidence"
-            )
-        if len(dependency.source_evidence_ids) != len(
-            set(dependency.source_evidence_ids)
-        ):
-            raise ContractViolation("dependency source evidence IDs must be unique")
-        if len(dependency.evidence_ids) != len(set(dependency.evidence_ids)):
-            raise ContractViolation("dependency evidence IDs must be unique")
-        if len(dependency.target_article_ids) != len(
-            set(dependency.target_article_ids)
-        ):
-            raise ContractViolation("dependency target Article IDs must be unique")
-        if set(dependency.source_evidence_ids).intersection(
-            dependency.evidence_ids
-        ):
-            raise ContractViolation(
-                "dependency source and resolution evidence must differ"
-            )
-        unknown_dependency_sources = set(dependency.source_evidence_ids) - material_ids
-        if unknown_dependency_sources:
-            raise ContractViolation(
-                "dependency source evidence was not shown in full: "
-                f"{sorted(unknown_dependency_sources)}"
+                "dependency basis evidence was not shown in full: "
+                f"{sorted(unknown_dependency_evidence)}"
             )
         if dependency.status == "needs_action":
-            if dependency.action is None:
-                raise ContractViolation(
-                    "needs_action dependency requires an action type"
-                )
-            if dependency.evidence_ids:
-                raise ContractViolation(
-                    "needs_action dependency cannot use resolution evidence"
-                )
-            if dependency.action == "fetch_target" and not dependency.target_article_ids:
-                raise ContractViolation(
-                    "fetch_target dependency requires target Article IDs"
-                )
-            if dependency.action != "fetch_target" and dependency.target_article_ids:
-                raise ContractViolation(
-                    "only fetch_target may name target Article IDs"
-                )
             if dependency.action_request_id not in new_requests_by_id:
                 raise ContractViolation(
                     "dependency action must reference a ToolRequest in the same decision"
                 )
-            dependency_request = new_requests_by_id[dependency.action_request_id]
-            if dependency.action == "discover_source" and (
-                dependency_request.tool_name
-                != dependency_source_discovery_tool_name
-            ):
-                raise ContractViolation(
-                    "discover_source dependency action must use "
-                    f"{dependency_source_discovery_tool_name}"
-                )
-            if dependency_request.tool_name == dependency_target_fetch_tool_name:
-                source_article_ids = {
-                    str(evidence_by_id[evidence_id].metadata.get("articleId") or "")
-                    for evidence_id in dependency.source_evidence_ids
-                } - {""}
-                target_article_ids = {
-                    str(article_id)
-                    for article_id in dependency_request.arguments.get(
-                        "article_ids", ()
-                    )
-                }
-                requested_source_overlap = source_article_ids.intersection(
-                    target_article_ids
-                )
-                if dependency.action == "discover_target":
-                    raise ContractViolation(
-                        "discover_target dependency action must use a discovery tool"
-                    )
-                if dependency.action == "assess_source" and not requested_source_overlap:
-                    raise ContractViolation(
-                        "assess_source dependency action must fetch its declared "
-                        "source article"
-                    )
-                if dependency.action == "fetch_target":
-                    declared_target_ids = set(dependency.target_article_ids)
-                    source_overlap = source_article_ids.intersection(
-                        declared_target_ids
-                    )
-                    if source_overlap:
-                        raise ContractViolation(
-                            "dependency target Article repeats its source article: "
-                            f"{sorted(source_overlap)}"
-                        )
-                    missing_targets = declared_target_ids - target_article_ids
-                    if missing_targets:
-                        raise ContractViolation(
-                            "dependency target fetch does not include declared target "
-                            f"Articles: {sorted(missing_targets)}"
-                        )
-            elif dependency.action in {"assess_source", "fetch_target"}:
-                raise ContractViolation(
-                    f"{dependency.action} dependency action must use "
-                    f"{dependency_target_fetch_tool_name}"
-                )
-        elif dependency.status == "resolved":
-            if dependency.action is not None or dependency.action_request_id is not None:
-                raise ContractViolation(
-                    "resolved dependency cannot require an action"
-                )
-            if not dependency.target_article_ids or not dependency.evidence_ids:
-                raise ContractViolation(
-                    "resolved dependency requires target Articles and evidence"
-                )
-            unknown_dependency_evidence = (
-                set(dependency.evidence_ids) - material_ids
-            )
-            if unknown_dependency_evidence:
-                raise ContractViolation(
-                    "resolved dependency uses evidence not shown in full: "
-                    f"{sorted(unknown_dependency_evidence)}"
-                )
-            navigation_dependency_evidence = (
-                set(dependency.evidence_ids) - citable_evidence_ids
-            )
-            if navigation_dependency_evidence:
-                raise ContractViolation(
-                    "resolved dependency uses navigation-only evidence: "
-                    f"{sorted(navigation_dependency_evidence)}"
-                )
-            if dependency_resolution_requires_distinct_document:
-                source_document_ids = {
-                    str(evidence_by_id[evidence_id].metadata.get("documentId") or "")
-                    for evidence_id in dependency.source_evidence_ids
-                } - {""}
-                resolution_document_ids = {
-                    str(evidence_by_id[evidence_id].metadata.get("documentId") or "")
-                    for evidence_id in dependency.evidence_ids
-                } - {""}
-                if not source_document_ids or not resolution_document_ids:
-                    raise ContractViolation(
-                        "resolved dependency requires document provenance for both "
-                        "source and resolution evidence"
-                    )
-                shared_document_ids = source_document_ids.intersection(
-                    resolution_document_ids
-                )
-                if shared_document_ids:
-                    raise ContractViolation(
-                        "resolved dependency must use evidence from a document distinct "
-                        f"from its source: {sorted(shared_document_ids)}"
-                    )
-            resolved_article_ids = {
-                str(evidence_by_id[evidence_id].metadata.get("articleId") or "")
-                for evidence_id in dependency.evidence_ids
-            } - {""}
-            missing_resolved_targets = set(dependency.target_article_ids) - (
-                resolved_article_ids
-            )
-            if missing_resolved_targets:
-                raise ContractViolation(
-                    "resolved dependency has no grounding evidence for target Articles: "
-                    f"{sorted(missing_resolved_targets)}"
-                )
-        elif (
-            dependency.action is not None
-            or dependency.action_request_id is not None
-            or dependency.target_article_ids
-            or dependency.evidence_ids
-        ):
+        elif dependency.action_request_id is not None:
             raise ContractViolation(
-                "not_required dependency cannot name action, target, or evidence"
+                "completed dependency decision cannot reference an action request"
             )
+        if (
+            dependency.status == "resolved"
+            and dependency.dependency_kind == required_dependency_kind
+        ):
+            basis_article_ids = {
+                str(evidence_by_id[evidence_id].metadata.get("articleId") or "")
+                for evidence_id in dependency.basis_evidence_ids
+            }
+            basis_article_ids.discard("")
+            if len(basis_article_ids) < 2:
+                raise ContractViolation(
+                    "resolved dependency requires full-text evidence from at least "
+                    "two distinct Articles: the delegating source and the terminal "
+                    "target"
+                )
         dependency_by_key[
             (dependency.dependency_kind, dependency.work_item_id)
         ] = dependency
@@ -808,7 +672,7 @@ def apply_solver_decision(
             missing = sorted(dependency_scope_ids - provided_scope_ids)
             extra = sorted(provided_scope_ids - dependency_scope_ids)
             raise ContractViolation(
-                f"{required_dependency_kind} decisions do not match open work items; "
+                f"{required_dependency_kind} decisions do not match required work items; "
                 f"missing={missing}, extra={extra}"
             )
 

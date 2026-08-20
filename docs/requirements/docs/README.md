@@ -53,7 +53,7 @@
 
 | 文書 | 内容 | 現在の位置づけ |
 |---|---|---|
-| [dataset_design.md](dataset_design.md) | lawqa_jp、再利用可能なe-Gov XML snapshot、外部ガイド、RAG対象外データ、原本・派生成果物、投入対象 | 「何を投入するか」の中心文書。旧Relation名が残る箇所よりGraph構築仕様を優先する |
+| [dataset_design.md](dataset_design.md) | lawqa_jp、再利用可能なe-Gov XML snapshot、第二期Step 1の公開買付け3階層ミニデータセット、外部ガイド、RAG対象外データ、原本・派生成果物、投入対象 | 「何を投入するか」の中心文書。旧Relation名が残る箇所よりGraph構築仕様を優先する |
 | [graph_edge_construction.md](graph_edge_construction.md) | schema version 9、共通snapshot、`HAS_CONTENT_UNIT / REFERENCES / EXPLAINS`の決定的seed、非同期RelationAssertionとの境界 | Neo4jとOpenSearchを同じsnapshotから再構築する現行仕様の正本 |
 | [legal_structure_and_graph_search_visual.md](legal_structure_and_graph_search_visual.md) | e-Govの条・項・号、OpenSearch文書、Neo4j Node、Article単位の参照・意味関係、現行Graph検索と再計画案を箱と矢印で示す | 人間向けの構造・検索ガイド。再計画案は正本への反映前であり、現行仕様判断には各正本文書を優先する |
 | [retrieval_config.md](retrieval_config.md) | embedding、Article/Paragraphチャンク、OpenSearchドキュメント、mapping、Hybrid検索 | OpenSearch索引の基本設計 |

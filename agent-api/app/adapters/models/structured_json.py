@@ -31,7 +31,24 @@ class StructuredJSONModelAdapter:
         context: SolverContext,
         profile: ModelCallProfile,
     ) -> SolverCallResult:
-        base_prompt = _solver_prompt(context, profile.system_prompt)
+        provider = getattr(self._client, "provider", None)
+        compact_transport = provider == "ollama"
+        structured_tool_transport = provider == "anthropic"
+        base_prompt = _solver_prompt(
+            context,
+            profile.system_prompt,
+            compact_transport=compact_transport,
+            structured_tool_transport=structured_tool_transport,
+        )
+        transport_schema = (
+            _solver_compact_transport_schema(context)
+            if compact_transport
+            else (
+                _solver_anthropic_transport_schema(context)
+                if structured_tool_transport
+                else _solver_transport_schema(context)
+            )
+        )
         prompt = base_prompt
         input_tokens = 0
         output_tokens = 0
@@ -48,7 +65,7 @@ class StructuredJSONModelAdapter:
             try:
                 result = self._client.generate_structured_json(
                     prompt=prompt,
-                    schema=_solver_transport_schema(context),
+                    schema=transport_schema,
                     model=profile.model,
                     max_tokens=profile.max_output_tokens,
                     timeout_sec=max(1, round(remaining_timeout)),
@@ -72,7 +89,8 @@ class StructuredJSONModelAdapter:
             else:
                 try:
                     normalized = _normalize_solver_payload(result.payload)
-                    if _preserve_previous_update_for_cycle_repair(context):
+                    _normalize_absent_context_branches(normalized, context)
+                    if _preserve_previous_update_for_contract_repair(context):
                         normalized["update"] = (
                             context.contract_feedback.previous_decision.update
                         )
@@ -95,7 +113,16 @@ class StructuredJSONModelAdapter:
                 _ensure_solver_prompt_capacity(prompt, context.max_solver_input_chars)
 
         if isinstance(last_error, ValidationError):
-            raise ModelProtocolError("solver decision violates schema") from last_error
+            detail = last_error.errors(
+                include_url=False,
+                include_input=False,
+            )[0]
+            location = ".".join(str(item) for item in detail.get("loc", ()))
+            message = str(detail.get("msg") or "validation failed")
+            raise ModelProtocolError(
+                "solver decision violates schema: "
+                f"{location or '<root>'}: {message}"
+            ) from last_error
         if isinstance(last_error, ModelProtocolError):
             raise last_error
         raise ModelProtocolError("solver decision is unavailable")
@@ -132,7 +159,13 @@ class StructuredJSONModelAdapter:
         )
 
 
-def _solver_prompt(context: SolverContext, system_prompt: str) -> str:
+def _solver_prompt(
+    context: SolverContext,
+    system_prompt: str,
+    *,
+    compact_transport: bool = False,
+    structured_tool_transport: bool = False,
+) -> str:
     payload = json.dumps(
         context.model_dump(mode="json"),
         ensure_ascii=False,
@@ -162,6 +195,14 @@ def _solver_prompt(context: SolverContext, system_prompt: str) -> str:
             "violationがunknown evidence IDを示す場合は、そのIDを削除するか、"
             "solver_context.grounding_evidence_idsに完全一致するIDだけへ置き換えてください。"
             "検索候補本文中の番号やsourceContentUnitIdをEvidence IDとして使ってはいけません。\n"
+            "violationがnavigation-only evidenceを示す場合、そのEvidenceは候補発見にだけ使い、"
+            "Hypothesisをsupportedまたはcontradictedにする根拠やWorkItemの解決根拠にしません。"
+            "対応Article IDがfetchable_article_idsにあればfetch_articlesを要求し、本文取得まで"
+            "Hypothesisをunresolved、WorkItemをopenのままにしてください。継続可能な状態で"
+            "未解決WorkItemを残したfinalizeへ変更してはいけません。複数Articleを取得する場合も"
+            "fetch_articlesは同じDecision内で正確に1 Requestへ統合し、article_idsは重複なしで"
+            "min(4, solver_context.remaining_fetch_capacity)件以内に意味選択します。枠外の候補を"
+            "rejectや解決済みにせず、後続Decisionで評価できる状態に残してください。\n"
             "violationがunknown Article IDを示す場合は、そのIDを削除し、"
             "solver_context.fetchable_article_idsに完全一致するIDだけへ置き換えてください。"
             "前回Decisionの既知IDは維持し、未知IDの条番号を修正した別IDや新しいIDを追加しません。"
@@ -169,23 +210,23 @@ def _solver_prompt(context: SolverContext, system_prompt: str) -> str:
             "修復後のfetch_articlesの全IDをfetchable_article_idsと文字列の完全一致で再確認してください。"
             "未知IDを除くとarticle_idsが空になる、または必要な参照先IDが同一覧にない場合は、"
             "fetch_articlesを残さず、表示済みの法令名・条番号・確認事項をqueryにしたlegal_searchを返してください。"
-            "下位規範のDependencyDecisionは、委任元が既知ならdiscover_target、"
-            "委任元候補も未発見ならdiscover_sourceとして、そのlegal_searchのrequest_idを"
+            "下位規範のDependencyDecisionでneeds_actionを選ぶ場合は、必要な検索・Graph・"
+            "本文取得のToolRequestを同じDecisionへ含め、そのrequest_idを"
             "action_request_idへ指定してください。\n"
             "violationがfocusまたはToolRequestのWorkItem・Hypothesis参照を示す場合は、"
             "前回Decisionのupdateで実際に追加・更新したIDとSolverContextの既知IDを"
             "文字列の完全一致で使ってください。質問文から別表記のIDを作り直さず、"
             "参照先に合わせてnext_focus_work_item_ids、work_item_id、hypothesis_idsだけを"
             "修復してください。どの作業・仮説へ結び付けるかはあなたが判断します。\n"
-            "violationがdependency target Article repeats its source articleを示す場合、"
-            "同じArticle本文を取得するRequestならaction=assess_source、target_article_ids=[]へ"
-            "修正してください。委任先を取得したいが正確な別Article IDが未特定なら、"
-            "action=discover_targetとしてlegal_searchを返してください。"
-            "委任元Articleをfetch_targetとして残してはいけません。\n"
             "violationがfetch_articles.article_ids exceeds the profile limitを示す場合は、"
             "未確認の命題に直接必要なArticleを4個以下に意味選択してください。"
             "プログラムは候補を選別しません。上限回避のためにfetch_articlesを"
             "複数Requestへ分割せず、残りは後続Decisionの候補として残します。\n"
+            "violationがArticle body fetches in one SolverDecision must be consolidatedまたは"
+            "Article body fetch exceeds the remaining Cycle capacityを示す場合も、全fetch_articlesを"
+            "正確に1 Requestへ統合し、article_idsを重複なしの"
+            "min(4, solver_context.remaining_fetch_capacity)件以内へ意味選択してください。"
+            "Programへ切捨てや優先順位付けを要求しません。\n"
             "violationがremaining Cycle capacityまたはCycle boundaryを示す場合は、"
             "現CycleへToolを追加しません。取得済み結果を評価し、can_start_next_cycle=trueなら"
             "次に検証する命題・方針を明示してstart_next_cycle=true、falseならfinalizeします。\n"
@@ -193,13 +234,14 @@ def _solver_prompt(context: SolverContext, system_prompt: str) -> str:
             "判断開始時にopenだった各WorkItemへちょうど1件ずつ返してください。"
             "必要な種別とWorkItem IDはsolver_context.required_dependency_kindと"
             "required_dependency_work_item_idsに列挙されています。"
-            "委任元候補が未発見ならsource_evidence_ids=[]かつdiscover_source、"
-            "それ以外のneeds_actionならassess_source / discover_target / fetch_targetのactionと、"
-            "同じDecision内のToolRequest IDをaction_request_idへ、"
-            "fetch_targetならその一括Request中の委任先Articleだけをtarget_article_idsへ、"
-            "resolvedならsolver_context.grounding_evidence_idsに完全一致する根拠IDを"
-            "evidence_idsへ指定してください。not_required / needs_action / resolvedのどれが"
+            "basis_evidence_idsにはsolver_context.grounding_evidence_idsから判断に使った本文を指定し、"
+            "needs_actionなら同じDecision内のToolRequest IDをaction_request_idへ指定してください。"
+            "not_requiredとresolvedではaction_request_id=nullにします。どのstatusが"
             "妥当かはあなたが意味を判断してください。\n"
+            "violationがresolved dependency requires full-text evidence from at least two distinct Articlesを"
+            "示す場合、同じArticleのParagraphを増やして通そうとしません。委任元Articleと、委任事項を"
+            "実際に具体化する末端Articleの本文Evidenceをbasis_evidence_idsへ含めます。末端Articleが"
+            "未取得ならresolvedを維持せずneeds_actionとし、Graph・検索・本文取得のToolRequestを返してください。\n"
             "violationがgraph reviewを示す場合は、required_graph_review_request_idsと"
             "graph_review_batchの全link_idを各対応欄へ完全一致でコピーしてください。"
             "batchの全frontier_item_idへselect/defer/rejectを1件ずつ返し、selectは"
@@ -222,21 +264,60 @@ def _solver_prompt(context: SolverContext, system_prompt: str) -> str:
             "調査継続可能ならopen WorkItemを保ってcontinueし、継続不能なら"
             "limitationsと、それに対応するopen WorkItem・unresolved Hypothesisの既知IDを"
             "answerへ返してください。\n"
+            "violationがfinal answer citations omit Evidence declared as resolved WorkItem basisを"
+            "示す場合は、解決根拠として選んだ各Hypothesis.evidence_idsを回答の各主張と再照合します。"
+            "全Evidenceが直接根拠ならanswer.citation_idsへ全て含め、直接根拠でないEvidenceが混在するなら"
+            "Hypothesis.evidence_idsを実際に使う根拠だけへ更新してください。無関係なEvidenceを機械的に"
+            "引用へ追加せず、Article全文が提示されたという理由だけで全Paragraph・Itemを根拠にしません。"
+            "finalize時のretain_evidence_idsは空でよく、citation_idsとは別の引継ぎ欄です。\n"
         )
+    transport_instruction = (
+        "以下は現在のSolverContextです。コンパクト輸送schemaに従い、"
+        "復元後SolverDecisionのうちupdateを構造化object、tool_requestsを"
+        "構造化配列として直接返してください。各ToolRequestのargumentsだけは"
+        "arguments_jsonへ1個のJSON object文字列として格納します。"
+        "legal_searchのarguments_jsonは例として"
+        "{\"query\":\"公開買付け 公告 届出\",\"doc_types\":[\"law\"],\"document_ids\":[]}"
+        "の形にし、scope、tool_input、mode、predicate等を追加しません。"
+        "update_jsonとtool_requests_jsonは返しません。Adapterがarguments_jsonを"
+        "復元し、SolverDecisionとして上記契約で完全検証します。\n"
+        if compact_transport
+        else (
+            "以下は現在のSolverContextです。Anthropic軽量輸送schemaに従い、"
+            "update全体はupdate_jsonへJSON object文字列として格納します。"
+            "add_hypothesesとupdate_hypothesesのevidence_idsはupdate_json内では空配列にし、"
+            "実際に選ぶ既知Evidence IDはhypothesis_evidence_bindingsへ返してください。"
+            "legal_search、legal_graph_neighbors、load_evidenceはtool_requestsへ"
+            "固定slotとして返してください。各tool_request_N_jsonにはrequest_id、"
+            "work_item_id、tool_name、arguments、purpose、hypothesis_idsを持つToolRequest objectを"
+            "1個のJSON文字列として格納し、使わないslotはnullにします。"
+            "fetch_articlesだけはtool_requestsへ入れず、"
+            "article_fetchへ1件だけ返し、article_id_1から順に既知IDを指定してください。"
+            "不要な残りslotはnullにします。"
+            "各ToolRequest内のargumentsはJSON objectのまま格納し、arguments_jsonと"
+            "tool_requests_jsonは返しません。"
+            "Adapterがupdate_json、Evidence対応、各ToolRequest文字列、article_fetchを復元し、SolverDecisionとして"
+            "上記契約で完全検証します。\n"
+            if structured_tool_transport
+            else (
+                "以下は現在のSolverContextです。Provider輸送schemaに従い、"
+                "next、next_focus_work_item_ids、retain_evidence_ids、answerは直接返し、"
+                "update全体をupdate_json、tool_requests全体をtool_requests_jsonへ"
+                "JSON文字列化し、dependency_decisionsはschemaどおりの配列として直接"
+                "返し、graph_candidate_review、frontier_re_adoptions、"
+                "deferred_frontier_resolutions、unreviewed_graph_resolutionもschemaどおり直接返してください。"
+                "Adapterが2つのJSON文字列を復元し、"
+                "SolverDecisionとして上記契約で完全検証します。\n"
+            )
+        )
+    )
     prompt = (
         f"{system_prompt}\n\n"
         f"{_SOLVER_CONTRACT}\n\n"
         "contract_feedbackがある場合、直前Decisionは状態へ適用されていません。"
         "適合している意味判断は保ち、violationと矛盾する制御値・参照だけを修正してください。\n"
         f"{contract_repair_instruction}"
-        "以下は現在のSolverContextです。Provider輸送schemaに従い、"
-        "next、next_focus_work_item_ids、retain_evidence_ids、answerは直接返し、"
-        "update全体をupdate_json、tool_requests全体をtool_requests_jsonへ"
-        "JSON文字列化し、dependency_decisionsはschemaどおりの配列として直接"
-        "返し、graph_candidate_review、frontier_re_adoptions、"
-        "deferred_frontier_resolutions、unreviewed_graph_resolutionもschemaどおり直接返してください。"
-        "Adapterが2つのJSON文字列を復元し、"
-        "SolverDecisionとして上記契約で完全検証します。\n"
+        f"{transport_instruction}"
         f"<solver_context>{payload}</solver_context>"
     )
     _ensure_solver_prompt_capacity(prompt, context.max_solver_input_chars)
@@ -302,38 +383,33 @@ def _solver_transport_schema(context: SolverContext) -> dict:
             "unresolved_hypothesis_ids": string_array,
         }
     )
+    required_dependency_kind = context.required_dependency_kind
+    required_dependency_work_item_ids = context.required_dependency_work_item_ids
     dependency_decision = _strict_object(
         {
-            "dependency_kind": {"type": "string"},
-            "work_item_id": {"type": "string"},
+            "dependency_kind": (
+                {"type": "string", "enum": [required_dependency_kind]}
+                if required_dependency_kind is not None
+                else {"type": "string"}
+            ),
+            "work_item_id": _enum_string(required_dependency_work_item_ids),
             "status": {
                 "type": "string",
                 "enum": ["not_required", "needs_action", "resolved"],
             },
             "reason": {"type": "string"},
-            "source_evidence_ids": string_array,
-            "action": {
-                "anyOf": [
-                    {
-                        "type": "string",
-                        "enum": [
-                            "discover_source",
-                            "assess_source",
-                            "discover_target",
-                            "fetch_target",
-                        ],
-                    },
-                    {"type": "null"},
-                ]
+            "basis_evidence_ids": {
+                **_bounded_enum_array(context.grounding_evidence_ids),
+                "description": (
+                    "Grounding body Evidence used by the LLM for this audit decision"
+                ),
             },
             "action_request_id": {
                 "anyOf": [{"type": "string"}, {"type": "null"}]
             },
-            "target_article_ids": string_array,
-            "evidence_ids": string_array,
         }
     )
-    required_dependency_count = len(context.required_dependency_work_item_ids)
+    required_dependency_count = len(required_dependency_work_item_ids)
     dependency_decisions = (
         {
             "type": "array",
@@ -499,8 +575,18 @@ def _solver_transport_schema(context: SolverContext) -> dict:
         }
     )
     force_next_cycle_repair = _preserve_previous_update_for_cycle_repair(context)
+    force_continue_repair = _force_continue_after_open_finalize_repair(context)
+    tool_requests_forbidden = (
+        graph_review_mode
+        or context.finalize_only
+        or context.cycle_close_required
+        or force_next_cycle_repair
+    )
+    preserve_previous_update = _preserve_previous_update_for_contract_repair(
+        context
+    )
     repair_update_json: str | None = None
-    if force_next_cycle_repair:
+    if preserve_previous_update:
         repair_update_json = "{}"
     repair_open_work_item_ids: tuple[str, ...] = ()
     if context.contract_feedback is not None:
@@ -543,13 +629,15 @@ def _solver_transport_schema(context: SolverContext) -> dict:
                 "type": "string",
                 "enum": (
                     ["continue"]
-                    if graph_review_mode or force_next_cycle_repair
+                    if graph_review_mode
+                    or force_next_cycle_repair
+                    or force_continue_repair
                     else ["continue", "finalize"]
                 ),
             },
             "start_next_cycle": (
                 {"type": "boolean", "enum": [False]}
-                if graph_review_mode
+                if graph_review_mode or force_continue_repair
                 else (
                     {"type": "boolean", "enum": [True]}
                     if force_next_cycle_repair
@@ -570,11 +658,14 @@ def _solver_transport_schema(context: SolverContext) -> dict:
                 if context.contract_feedback is not None
                 else string_array
             ),
-            "retain_evidence_ids": string_array,
+            "retain_evidence_ids": _bounded_enum_array(
+                tuple(item.evidence_id for item in context.evidence_manifest),
+                max_items=context.max_retained_evidence,
+            ),
             "tool_requests_json": {
                 "type": "string",
                 "description": "ToolRequest array encoded as one JSON array string",
-                **({"enum": ["[]"]} if force_next_cycle_repair else {}),
+                **({"enum": ["[]"]} if tool_requests_forbidden else {}),
             },
             "dependency_decisions": dependency_decisions,
             "graph_candidate_review": (
@@ -608,7 +699,9 @@ def _solver_transport_schema(context: SolverContext) -> dict:
             ),
             "answer": (
                 {"type": "null"}
-                if graph_review_mode or force_next_cycle_repair
+                if graph_review_mode
+                or force_next_cycle_repair
+                or force_continue_repair
                 else {"anyOf": [answer, {"type": "null"}]}
             ),
         },
@@ -627,6 +720,318 @@ def _solver_transport_schema(context: SolverContext) -> dict:
             "answer",
         ],
     }
+
+
+def _solver_compact_transport_schema(context: SolverContext) -> dict:
+    """provider共通の、長い二重JSONを避けた参照なし輸送schemaを返す。"""
+
+    schema = _solver_transport_schema(context)
+    properties = schema["properties"]
+    if context.research_cycle_count == 0:
+        properties["start_next_cycle"] = {
+            "type": "boolean",
+            "enum": [False],
+        }
+    tool_requests_forbidden = properties["tool_requests_json"].get("enum") == [
+        "[]"
+    ]
+    properties.pop("update_json")
+    properties.pop("tool_requests_json")
+    properties["update"] = (
+        _empty_case_update_transport_schema()
+        if _preserve_previous_update_for_contract_repair(context)
+        else _case_update_transport_schema()
+    )
+    if not context.work_tree and context.contract_feedback is None:
+        properties["update"]["properties"]["add_work_items"]["minItems"] = 1
+        properties["update"]["properties"]["add_hypotheses"]["minItems"] = 1
+    projected_open_work_item_ids = _repair_open_work_item_ids(context)
+    evidence_ids = tuple(item.evidence_id for item in context.evidence_manifest)
+    properties["retain_evidence_ids"] = _bounded_enum_array(
+        evidence_ids,
+        max_items=context.max_retained_evidence,
+    )
+    if projected_open_work_item_ids:
+        properties["next_focus_work_item_ids"] = _bounded_enum_array(
+            projected_open_work_item_ids
+        )
+    properties["tool_requests"] = (
+        _empty_array_schema()
+        if tool_requests_forbidden
+        else _tool_requests_transport_schema(context)
+    )
+    schema["required"] = [
+        "update" if item == "update_json" else (
+            "tool_requests" if item == "tool_requests_json" else item
+        )
+        for item in schema["required"]
+    ]
+    return schema
+
+
+def _solver_anthropic_transport_schema(context: SolverContext) -> dict:
+    """Anthropicのgrammar上限内でTool参照とArticle取得枠を構造化する。"""
+
+    schema = _solver_transport_schema(context)
+    properties = schema["properties"]
+    properties["hypothesis_evidence_bindings"] = (
+        {
+            "type": "array",
+            "items": _strict_object(
+                {
+                    "hypothesis_id": {"type": "string"},
+                    "evidence_ids": _bounded_enum_array(
+                        context.grounding_evidence_ids
+                    ),
+                }
+            ),
+        }
+        if context.grounding_evidence_ids
+        else _empty_array_schema()
+    )
+    tool_requests_forbidden = properties["tool_requests_json"].get("enum") == [
+        "[]"
+    ]
+    properties.pop("tool_requests_json")
+    article_fetch_schema = _anthropic_article_fetch_schema(context)
+    non_fetch_capacity = (
+        0
+        if tool_requests_forbidden
+        else context.max_tool_requests_per_step
+        - (0 if article_fetch_schema == {"type": "null"} else 1)
+    )
+    properties["tool_requests"] = _strict_object(
+        {
+            f"tool_request_{index}_json": {
+                "anyOf": [
+                    {
+                        "type": "string",
+                        "description": (
+                            "one ToolRequest JSON object; fetch_articles is "
+                            "forbidden here and must use article_fetch"
+                        ),
+                    },
+                    {"type": "null"},
+                ]
+            }
+            for index in range(1, non_fetch_capacity + 1)
+        }
+    )
+    properties["article_fetch"] = article_fetch_schema
+    properties["retain_evidence_ids"] = _bounded_enum_array(
+        tuple(item.evidence_id for item in context.evidence_manifest),
+        max_items=context.max_retained_evidence,
+    )
+    answer_schema = properties.get("answer")
+    if isinstance(answer_schema, dict):
+        variants = answer_schema.get("anyOf") or (answer_schema,)
+        for variant in variants:
+            if not isinstance(variant, dict) or variant.get("type") != "object":
+                continue
+            variant["properties"]["citation_ids"] = _bounded_enum_array(
+                context.grounding_evidence_ids
+            )
+    schema["required"] = [
+        "tool_requests" if item == "tool_requests_json" else item
+        for item in schema["required"]
+    ]
+    schema["required"].append("hypothesis_evidence_bindings")
+    schema["required"].append("article_fetch")
+    return schema
+
+
+def _anthropic_article_fetch_schema(context: SolverContext) -> dict[str, Any]:
+    graph_review_mode = bool(
+        context.graph_review_batch.candidates and not context.finalize_only
+    )
+    capacity = min(
+        4,
+        context.remaining_fetch_capacity,
+        len(context.fetchable_article_ids),
+    )
+    if (
+        context.finalize_only
+        or context.cycle_close_required
+        or graph_review_mode
+        or capacity < 1
+    ):
+        return {"type": "null"}
+
+    article_properties: dict[str, Any] = {
+        "request_id": {"type": "string"},
+        "work_item_id": _enum_string(_repair_open_work_item_ids(context)),
+        "purpose": {"type": "string"},
+        "hypothesis_ids": _bounded_enum_array(_repair_hypothesis_ids(context)),
+    }
+    for index in range(1, capacity + 1):
+        article_schema = _enum_string(context.fetchable_article_ids)
+        article_properties[f"article_id_{index}"] = (
+            article_schema
+            if index == 1
+            else {"anyOf": [article_schema, {"type": "null"}]}
+        )
+    return {
+        "anyOf": [
+            _strict_object(article_properties),
+            {"type": "null"},
+        ]
+    }
+
+
+def _tool_requests_transport_schema(context: SolverContext) -> dict[str, Any]:
+    projected_open_work_item_ids = _repair_open_work_item_ids(context)
+    projected_hypothesis_ids = _repair_hypothesis_ids(context)
+    return {
+        "type": "array",
+        "items": _strict_object(
+            {
+                "request_id": {"type": "string"},
+                "work_item_id": _enum_string(projected_open_work_item_ids),
+                "tool_name": {"type": "string"},
+                "arguments_json": {
+                    "type": "string",
+                    "description": (
+                        "one exact Tool arguments object encoded as JSON; "
+                        "legal_search allows only query, doc_types, document_ids; "
+                        "fetch_articles allows only article_ids; "
+                        "legal_graph_neighbors allows only article_ids, mode, "
+                        "predicate when semantic, direction, max_relations"
+                    ),
+                },
+                "purpose": {"type": "string"},
+                "hypothesis_ids": (
+                    _bounded_enum_array(projected_hypothesis_ids)
+                    if projected_hypothesis_ids
+                    else _string_array_schema()
+                ),
+            }
+        ),
+    }
+
+
+def _case_update_transport_schema() -> dict[str, Any]:
+    string_array = _string_array_schema()
+    nullable_string = {
+        "anyOf": [{"type": "string"}, {"type": "null"}],
+    }
+    work_item = _strict_object(
+        {
+            "work_item_id": {"type": "string"},
+            "parent_work_item_id": nullable_string,
+            "question": {"type": "string"},
+            "state": {
+                "type": "string",
+                "enum": ["open"],
+            },
+            "resolution": {"type": "null"},
+            "basis_hypothesis_ids": string_array,
+            "replaces_work_item_id": nullable_string,
+        }
+    )
+    work_item_update = _strict_object(
+        {
+            "work_item_id": {"type": "string"},
+            "state": {
+                "type": "string",
+                "enum": ["open", "resolved", "dropped"],
+            },
+            "resolution": nullable_string,
+            "basis_hypothesis_ids": string_array,
+        }
+    )
+    hypothesis = _strict_object(
+        {
+            "hypothesis_id": {"type": "string"},
+            "work_item_id": {"type": "string"},
+            "statement": {"type": "string"},
+            "judgment": {
+                "type": "string",
+                "enum": ["supported", "contradicted", "unresolved"],
+            },
+            "evidence_ids": string_array,
+            "gaps": string_array,
+        }
+    )
+    hypothesis_update = _strict_object(
+        {
+            "hypothesis_id": {"type": "string"},
+            "judgment": {
+                "type": "string",
+                "enum": ["supported", "contradicted", "unresolved"],
+            },
+            "evidence_ids": string_array,
+            "gaps": string_array,
+        }
+    )
+    impact = _strict_object(
+        {
+            "work_item_id": {"type": "string"},
+            "action": {
+                "type": "string",
+                "enum": ["retain", "replace", "drop"],
+            },
+            "reason": {"type": "string"},
+            "new_basis_hypothesis_ids": string_array,
+            "replacement_work_item_id": nullable_string,
+            "drop_subtree": {"type": "boolean"},
+        }
+    )
+    return _strict_object(
+        {
+            "add_work_items": {"type": "array", "items": work_item},
+            "update_work_items": {
+                "type": "array",
+                "items": work_item_update,
+            },
+            "add_hypotheses": {"type": "array", "items": hypothesis},
+            "update_hypotheses": {
+                "type": "array",
+                "items": hypothesis_update,
+            },
+            "impact_decisions": {"type": "array", "items": impact},
+        }
+    )
+
+
+def _empty_case_update_transport_schema() -> dict[str, Any]:
+    schema = _case_update_transport_schema()
+    for value in schema["properties"].values():
+        value["maxItems"] = 0
+    return schema
+
+
+def _repair_open_work_item_ids(context: SolverContext) -> tuple[str, ...]:
+    states = {item.work_item_id: item.state for item in context.work_tree}
+    if context.contract_feedback is not None:
+        previous = context.contract_feedback.previous_decision
+        for item in previous.update.add_work_items:
+            states[item.work_item_id] = item.state
+        for item in previous.update.update_work_items:
+            if item.work_item_id in states:
+                states[item.work_item_id] = item.state
+    return tuple(key for key, value in states.items() if value == "open")
+
+
+def _repair_hypothesis_ids(context: SolverContext) -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys(
+            (
+                *(item.hypothesis_id for item in context.hypotheses),
+                *(
+                    item.hypothesis_id
+                    for item in (
+                        context.contract_feedback.previous_decision.update.add_hypotheses
+                        if context.contract_feedback is not None
+                        else ()
+                    )
+                ),
+            )
+        )
+    )
+
+
+def _string_array_schema() -> dict[str, Any]:
+    return {"type": "array", "items": {"type": "string"}}
 
 
 def _strict_object(properties: dict[str, Any]) -> dict[str, Any]:
@@ -648,6 +1053,40 @@ def _preserve_previous_update_for_cycle_repair(context: SolverContext) -> bool:
     )
 
 
+def _force_continue_after_open_finalize_repair(context: SolverContext) -> bool:
+    """継続可能なのにopenを残したfinalizeの再出力をschemaでも防ぐ。"""
+
+    feedback = context.contract_feedback
+    return bool(
+        feedback is not None
+        and "finalize must account for every open WorkItem" in feedback.violation
+        and not context.finalize_only
+        and context.can_start_next_cycle
+        and not context.cycle_close_required
+    )
+
+
+def _preserve_previous_update_for_contract_repair(
+    context: SolverContext,
+) -> bool:
+    feedback = context.contract_feedback
+    if feedback is None:
+        return False
+    if _preserve_previous_update_for_cycle_repair(context):
+        return True
+    return any(
+        marker in feedback.violation
+        for marker in (
+            "focus must reference open WorkItem IDs",
+            "tool requests must reference open WorkItem IDs",
+            "tool requests reference unknown Hypothesis IDs",
+            "unknown retained evidence IDs",
+            "retained evidence count exceeds the profile limit",
+            "completed dependency decision cannot reference an action request",
+        )
+    )
+
+
 def _empty_array_schema() -> dict[str, Any]:
     return {
         "type": "array",
@@ -657,12 +1096,20 @@ def _empty_array_schema() -> dict[str, Any]:
     }
 
 
-def _bounded_enum_array(values: tuple[str, ...]) -> dict[str, Any]:
+def _bounded_enum_array(
+    values: tuple[str, ...],
+    *,
+    max_items: int | None = None,
+) -> dict[str, Any]:
     items = _enum_string(values)
     return {
         "type": "array",
         "items": items,
-        "maxItems": len(values),
+        "maxItems": (
+            min(len(values), max_items)
+            if max_items is not None
+            else len(values)
+        ),
     }
 
 
@@ -694,6 +1141,9 @@ def _normalize_solver_payload(payload: dict) -> dict:
             expected_type=dict,
             label="update_json",
         )
+    evidence_bindings = normalized.pop("hypothesis_evidence_bindings", None)
+    if evidence_bindings is not None:
+        _apply_hypothesis_evidence_bindings(normalized, evidence_bindings)
     if "tool_requests_json" in normalized:
         normalized["tool_requests"] = _decode_transport_json(
             normalized.pop("tool_requests_json"),
@@ -706,6 +1156,59 @@ def _normalize_solver_payload(payload: dict) -> dict:
             expected_type=list,
             label="dependency_decisions_json",
         )
+    if isinstance(normalized.get("tool_requests"), dict):
+        request_slots = normalized["tool_requests"]
+        normalized_requests = []
+        for key in sorted(request_slots):
+            value = request_slots[key]
+            if value is None:
+                continue
+            normalized_requests.append(
+                _decode_transport_json(
+                    value,
+                    expected_type=dict,
+                    label=key,
+                )
+            )
+        normalized["tool_requests"] = normalized_requests
+    article_fetch = normalized.pop("article_fetch", None)
+    # `next` is the LLM's control decision. The unused answer branch is only
+    # transport noise, so remove it without changing that control decision.
+    if normalized.get("next") == "continue":
+        normalized["answer"] = None
+    elif normalized.get("next") == "finalize":
+        normalized["start_next_cycle"] = False
+        normalized["tool_requests"] = []
+        normalized["frontier_re_adoptions"] = []
+    if normalized.get("next") == "continue" and isinstance(article_fetch, dict):
+        article_ids = [
+            article_fetch[key]
+            for key in sorted(article_fetch)
+            if key.startswith("article_id_")
+            and isinstance(article_fetch[key], str)
+            and article_fetch[key]
+        ]
+        normalized.setdefault("tool_requests", []).append(
+            {
+                "request_id": article_fetch.get("request_id"),
+                "work_item_id": article_fetch.get("work_item_id"),
+                "tool_name": "fetch_articles",
+                "arguments": {"article_ids": article_ids},
+                "purpose": article_fetch.get("purpose"),
+                "hypothesis_ids": article_fetch.get("hypothesis_ids") or [],
+            }
+        )
+    dependency_decisions = []
+    for raw_dependency in normalized.get("dependency_decisions") or []:
+        if not isinstance(raw_dependency, dict):
+            dependency_decisions.append(raw_dependency)
+            continue
+        dependency = dict(raw_dependency)
+        status = dependency.get("status")
+        if status in {"not_required", "resolved"}:
+            dependency["action_request_id"] = None
+        dependency_decisions.append(dependency)
+    normalized["dependency_decisions"] = dependency_decisions
     requests = []
     for raw_request in normalized.get("tool_requests") or []:
         if not isinstance(raw_request, dict):
@@ -713,6 +1216,16 @@ def _normalize_solver_payload(payload: dict) -> dict:
             continue
         request = dict(raw_request)
         arguments = request.get("arguments")
+        if "arguments_json" in request:
+            if arguments is not None:
+                raise ModelProtocolError(
+                    "tool request cannot contain both arguments and arguments_json"
+                )
+            arguments = _decode_transport_json(
+                request.pop("arguments_json"),
+                expected_type=dict,
+                label="arguments_json",
+            )
         if isinstance(arguments, str):
             try:
                 arguments = json.loads(arguments)
@@ -726,6 +1239,96 @@ def _normalize_solver_payload(payload: dict) -> dict:
         requests.append(request)
     normalized["tool_requests"] = requests
     return normalized
+
+
+def _apply_hypothesis_evidence_bindings(
+    normalized: dict[str, Any],
+    raw_bindings: Any,
+) -> None:
+    """Apply only the Evidence IDs selected in the provider-constrained sidecar."""
+
+    if not isinstance(raw_bindings, list):
+        raise ModelProtocolError("hypothesis_evidence_bindings must be an array")
+    bindings: dict[str, list[str]] = {}
+    for index, raw_binding in enumerate(raw_bindings):
+        if not isinstance(raw_binding, dict):
+            raise ModelProtocolError(
+                f"hypothesis_evidence_bindings[{index}] must be an object"
+            )
+        hypothesis_id = raw_binding.get("hypothesis_id")
+        evidence_ids = raw_binding.get("evidence_ids")
+        if not isinstance(hypothesis_id, str) or not hypothesis_id:
+            raise ModelProtocolError(
+                f"hypothesis_evidence_bindings[{index}].hypothesis_id is invalid"
+            )
+        if hypothesis_id in bindings:
+            raise ModelProtocolError(
+                "hypothesis_evidence_bindings hypothesis IDs must be unique"
+            )
+        if not isinstance(evidence_ids, list) or any(
+            not isinstance(evidence_id, str) for evidence_id in evidence_ids
+        ):
+            raise ModelProtocolError(
+                f"hypothesis_evidence_bindings[{index}].evidence_ids is invalid"
+            )
+        if len(evidence_ids) != len(set(evidence_ids)):
+            raise ModelProtocolError(
+                "hypothesis_evidence_bindings evidence IDs must be unique"
+            )
+        bindings[hypothesis_id] = evidence_ids
+
+    update = normalized.get("update")
+    if not isinstance(update, dict):
+        raise ModelProtocolError(
+            "hypothesis_evidence_bindings requires a decoded update object"
+        )
+    referenced_hypothesis_ids: set[str] = set()
+    for field_name in ("add_hypotheses", "update_hypotheses"):
+        raw_items = update.get(field_name) or []
+        if not isinstance(raw_items, list):
+            raise ModelProtocolError(f"update.{field_name} must be an array")
+        normalized_items = []
+        for index, raw_item in enumerate(raw_items):
+            if not isinstance(raw_item, dict):
+                raise ModelProtocolError(
+                    f"update.{field_name}[{index}] must be an object"
+                )
+            item = dict(raw_item)
+            hypothesis_id = item.get("hypothesis_id")
+            if isinstance(hypothesis_id, str):
+                referenced_hypothesis_ids.add(hypothesis_id)
+                item["evidence_ids"] = bindings.get(hypothesis_id, [])
+            normalized_items.append(item)
+        update[field_name] = normalized_items
+    unknown_binding_ids = set(bindings) - referenced_hypothesis_ids
+    if unknown_binding_ids:
+        raise ModelProtocolError(
+            "hypothesis_evidence_bindings reference hypotheses absent from update: "
+            f"{sorted(unknown_binding_ids)}"
+        )
+
+
+def _normalize_absent_context_branches(
+    normalized: dict[str, Any],
+    context: SolverContext,
+) -> None:
+    """参照対象が存在しないGraph制御欄だけを機械的に空へ揃える。"""
+
+    if not context.graph_review_batch.candidates:
+        normalized["graph_candidate_review"] = None
+    if not context.graph_review_ledger:
+        normalized["frontier_re_adoptions"] = []
+    active_deferred = tuple(
+        item
+        for item in context.graph_review_ledger
+        if item.review_status == "relevant_deferred"
+        and item.content_status in {"not_requested", "failed", "timeout"}
+        and item.deferred_resolution_action != "no_longer_needed"
+    )
+    if not active_deferred:
+        normalized["deferred_frontier_resolutions"] = []
+    if context.graph_review_batch.remaining_unreviewed_count == 0:
+        normalized["unreviewed_graph_resolution"] = None
 
 
 def _decode_transport_json(value: Any, *, expected_type: type, label: str) -> Any:
@@ -754,7 +1357,7 @@ _SOLVER_CONTRACT = """
   },
   "next_focus_work_item_ids": [str],
   "retain_evidence_ids": [str],
-  "dependency_decisions": [{"dependency_kind": str, "work_item_id": str, "status": "not_required"|"needs_action"|"resolved", "reason": str, "source_evidence_ids": [str], "action": "discover_source"|"assess_source"|"discover_target"|"fetch_target"|null, "action_request_id": str|null, "target_article_ids": [str], "evidence_ids": [str]}],
+  "dependency_decisions": [{"dependency_kind": str, "work_item_id": str, "status": "not_required"|"needs_action"|"resolved", "reason": str, "basis_evidence_ids": [str], "action_request_id": str|null}],
   "graph_candidate_review": {"graph_request_ids": [str], "reviewed_link_ids": [str], "frontier_decisions": [{"frontier_item_id": str, "article_id": str, "work_item_id": str, "hypothesis_id": str|null, "action": "select"|"defer"|"reject", "reason": str}], "reason": str} | null,
   "frontier_re_adoptions": [{"article_id": str, "work_item_id": str, "hypothesis_id": str, "reason": str}],
   "deferred_frontier_resolutions": [{"frontier_item_id": str, "article_id": str, "work_item_id": str, "hypothesis_id": str|null, "action": "fetch_next_cycle"|"carry_forward"|"no_longer_needed"|"unresolved_at_limit", "reason": str}],
@@ -788,10 +1391,10 @@ continueは原則1件以上のtool_requests、graph_candidate_review、frontier_
 - Cycle境界では、本文未取得のactiveなrelevant_deferred全件へdeferred_frontier_resolutionsを返す。fetch_next_cycleは次Cycle最初の本文取得に含める判断で、start_next_cycle=trueを必要とする。そのArticleはProgramが1つのfetch_articlesへ機械転記するため、同じToolRequestを重ねて返さない。carry_forwardは取得上限等により次Cycle以降のactive候補として保持する判断で、start_next_cycle=trueを必要とする。no_longer_neededは後続Evidenceを踏まえて質問への回答に不要と判断した状態である。unresolved_at_limitは上限により次Cycleを開始できず未確認のまま最終化する状態で、answer.limitationsへ明記する。Programは既知ID・全件性・次動作との参照整合だけを検証し、どのactionが法的に妥当かは判断しない。
 - graph_review_batch.candidates=[]かつremaining_unreviewed_count>0のCycle境界ではunreviewed_graph_resolutionを必ず返す。review_next_cycleは次Cycleで差分Review、no_longer_neededは質問への回答に不要とのSolver判断、unresolved_at_limitは次Cycle不能のため未確認のまま限定回答する判断である。Programはactionとnext、start_next_cycle、limitationsの構造整合だけを検証する。
 - content_statusは本文取得状態である。not_requestedは未要求、pendingは結果待ち、succeededは取得成功、failedはエラー終了、timeoutは時間切れを示し、法的関連性や根拠採用を意味しない。
-- Graph探索の上限は1ホップである。Graph候補Articleの本文は取得・評価できるが、そのArticleからGraphを再展開しない。その先の確認が必要ならSolverがlegal_searchを要求する。
+- Graph探索は1回のlegal_graph_neighbors要求につき1ホップである。Graph候補Articleも、Solverが次のHypothesis検証に必要と判断すれば後続stepの新しい起点にできる。起点の由来を理由に再探索を禁止しない。各要求は1 mode・1 predicate（semantic_assertion時）・1 directionに限定する。
 - grounding_evidence_idsは意味判断と引用に使える本文Evidence、navigation_evidence_idsはGraph以外の候補発見専用Evidence、fetchable_article_idsはfetch_articlesへ完全一致で渡せるArticle IDである。
 - search_navigationの本文抜粋は次のTool選択専用であり、Hypothesisのjudgment、WorkItemのresolution、確認済みの主張、answerの根拠に使わない。必要な命題がsearch_navigationにしかなければunresolved/openを維持し、Article本文を取得する。
-- dependency_decisions.status: not_requiredは当該依存確認が回答に不要、needs_actionは必要だが追加Toolが必要、resolvedは依存先本文まで確認済み。actionはdiscover_source=依存元候補の発見、assess_source=依存元本文の確認、discover_target=依存先候補の発見、fetch_target=既知依存先本文の取得を表す。required_dependency_kind=nullならこの契約は使わずdependency_decisions=[]とする。
+- dependency_decisions.status: not_requiredは当該依存確認が回答に不要、needs_actionは必要だが追加Toolが必要、resolvedは質問に関係する下位規範まで確認済み。lower_normは、質問で求める範囲・要件・例外・手続を具体化する下位規範の確認を表す。basis_evidence_idsには判断に使った取得本文を入れる。needs_actionだけ同じDecisionのToolRequestをaction_request_idで参照し、not_requiredとresolvedはnullにする。どの検索・Article・根拠が必要かはToolRequestとHypothesisで表し、DependencyDecisionへ重複登録しない。required_dependency_kind=nullならこの契約は使わずdependency_decisions=[]とする。
 
 ID用途契約:
 - update_hypotheses.evidence_idsとanswer.citation_idsは、solver_context.grounding_evidence_idsから完全一致でコピーする。
@@ -805,8 +1408,8 @@ ID用途契約:
 - retain_evidence_idsは全取得結果の列挙欄ではない。次回以降も本文が必要なEvidenceだけをSolverが選び、solver_context.max_retained_evidence以下にする。
 - tool_requestsはsolver_context.max_tool_requests_per_step以下にする。これは1 Solver Decisionの上限であり、Cycle累計本文数ではない。プログラムは超過分を選別・切捨てしない。
 - 1 Cycleの本文取得成功数はmax_fetched_resources_per_cycle、残りはremaining_fetch_capacityである。cycle_close_required=trueなら現Cycleへ新しいToolを追加せず、取得済み結果を評価する。can_start_next_cycle=trueなら次の命題・方針を示してstart_next_cycleを選べるが、falseならfinalizeする。
-- 同じDecisionで取得する既知Article IDは、WorkItemが異なっても4個以内なら1つのfetch_articlesへ統合する。4個は上限であり目標ではない。WorkItemごとにRequestを分けて自動1ホップGraphを重複実行しない。
+- 同じDecisionで取得する既知Article IDは、WorkItemが異なっても4個以内なら1つのfetch_articlesへ統合する。4個は上限であり目標ではない。fetch_articlesだけではGraph探索は行われない。
 - 1つのDecisionにfetch_articlesを複数返さず、Article IDを重複させない。4個を超える候補はプログラムに統合・切捨てさせず、Solverが今回検証する4個以下を選ぶ。
 - solver_context.required_dependency_kindがnullならdependency_decisions=[]とする。nullでなければrequired_dependency_work_item_idsと同じ件数を返し、各IDをちょうど1回使う。dependency_kindはrequired_dependency_kindへ一致させる。
-- 判断対象となった委任元・依存元本文をsource_evidence_idsへ指定する。委任元候補自体が未発見ならneeds_actionのdiscover_sourceだけはsource_evidence_ids=[]とし、同じDecision内のlegal_searchを参照できる。委任元本文の取得ならassess_source、接続先探索ならdiscover_target、接続先本文取得ならfetch_targetをactionへ指定する。fetch_targetでは一括Request中のどれを委任先として取得するかtarget_article_idsへ指定する。resolvedでも確認済み委任先をtarget_article_idsへ、その本文をevidence_idsへ指定する。resolvedのevidence_idsは委任元と異なる文書のsolver_context.grounding_evidence_idsだけを使う。
+- basis_evidence_idsはsolver_context.grounding_evidence_idsから、監査判断に実際に使った本文だけを選ぶ。needs_actionでは同じDecisionに必要なlegal_search、legal_graph_neighbors、fetch_articles等を返し、そのrequest_idをaction_request_idへ指定する。not_requiredまたはresolvedではaction_request_id=nullとする。下位規範のArticleと法的根拠は通常のToolRequest、Hypothesis、Evidence、回答citationで管理し、DependencyDecisionへ別のtarget・source証明を重複させない。
 """.strip()

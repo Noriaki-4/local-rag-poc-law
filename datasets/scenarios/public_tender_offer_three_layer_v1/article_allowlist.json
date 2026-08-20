@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "datasetId": "public-tender-offer-three-layer-mini-v1",
+  "selectionUnit": "complete_main_provision_article",
+  "articles": [
+    {
+      "articleId": "law-323AC0000000025-article-27_2",
+      "lawId": "323AC0000000025",
+      "provisionType": "main",
+      "articleNum": "27_2"
+    },
+    {
+      "articleId": "law-323AC0000000025-article-27_3",
+      "lawId": "323AC0000000025",
+      "provisionType": "main",
+      "articleNum": "27_3"
+    },
+    {
+      "articleId": "law-323AC0000000025-article-27_4",
+      "lawId": "323AC0000000025",
+      "provisionType": "main",
+      "articleNum": "27_4"
+    },
+    {
+      "articleId": "law-340CO0000000321-article-6",
+      "lawId": "340CO0000000321",
+      "provisionType": "main",
+      "articleNum": "6"
+    },
+    {
+      "articleId": "law-340CO0000000321-article-7",
+      "lawId": "340CO0000000321",
+      "provisionType": "main",
+      "articleNum": "7"
+    },
+    {
+      "articleId": "law-340CO0000000321-article-8",
+      "lawId": "340CO0000000321",
+      "provisionType": "main",
+      "articleNum": "8"
+    },
+    {
+      "articleId": "law-340CO0000000321-article-9_3",
+      "lawId": "340CO0000000321",
+      "provisionType": "main",
+      "articleNum": "9_3"
+    },
+    {
+      "articleId": "law-402M50000040038-article-2_4",
+      "lawId": "402M50000040038",
+      "provisionType": "main",
+      "articleNum": "2_4"
+    },
+    {
+      "articleId": "law-402M50000040038-article-2_5",
+      "lawId": "402M50000040038",
+      "provisionType": "main",
+      "articleNum": "2_5"
+    },
+    {
+      "articleId": "law-402M50000040038-article-2_6",
+      "lawId": "402M50000040038",
+      "provisionType": "main",
+      "articleNum": "2_6"
+    },
+    {
+      "articleId": "law-402M50000040038-article-9",
+      "lawId": "402M50000040038",
+      "provisionType": "main",
+      "articleNum": "9"
+    },
+    {
+      "articleId": "law-402M50000040038-article-10",
+      "lawId": "402M50000040038",
+      "provisionType": "main",
+      "articleNum": "10"
+    },
+    {
+      "articleId": "law-402M50000040038-article-11",
+      "lawId": "402M50000040038",
+      "provisionType": "main",
+      "articleNum": "11"
+    }
+  ]
+}

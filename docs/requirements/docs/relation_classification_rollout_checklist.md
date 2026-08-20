@@ -149,8 +149,9 @@ manifest schemaは2、promptは`legal-relation-5predicate-v20-pair`、skillは
 差分再評価で判明した無名の法的役割、前方スコープ、無関係な逆参照の境界は
 `legal-relation-adjudicator-2026-08-19-pair-v4`へ一般則として反映した。
 2026-08-20の読替適用境界修正後は、Luna用prompt
-`legal-relation-5predicate-v22-pair`、skill
-`legal-relation-adjudicator-2026-08-20-pair-v7`を使用する。ローカルOllama経路の旧prompt version 21とは
+`legal-relation-5predicate-v23-pair`、skill
+`legal-relation-adjudicator-2026-08-21-pair-v8`を使用する。v23/v8では、委任された例外条件を
+具体化するArticleペアについて`IMPLEMENTS`と`EXCEPTION_TO`を独立評価する。ローカルOllama経路の旧prompt version 21とは
 成果物を混在させない。
 
 ## Gate 6: 代表100件を最大3並列で再評価する

@@ -303,21 +303,23 @@ class TestAssertionsAndInventory:
         graph, recorder = client
         graph.relation_assertions_touching(
             ["law-a-article-27_2"],
-            suggested_types=["IMPLEMENTS"],
+            proposed_predicate="IMPLEMENTS",
+            direction="from_subject",
+            classification_run_id="run-published",
             user_clearance_level=2,
             timeout_sec=1.5,
         )
-        assert "assertion.fromArticleId IN $articleIds" in recorder["query"]
-        assert "assertion.toArticleId IN $articleIds" in recorder["query"]
-        assert "assertion.status IN $visibleStatuses" in recorder["query"]
-        assert recorder["kwargs"]["visibleStatuses"] == [
-            "unverified",
-            "llm_classified_uncertain",
-            "llm_classified_implements",
-        ]
-        assert "coalesce(from.clearanceLevel, 3)" in recorder["query"]
-        assert "coalesce(to.clearanceLevel, 3)" in recorder["query"]
-        assert recorder["kwargs"]["suggestedTypes"] == ["IMPLEMENTS"]
+        assert "(assertion)-[:SUBJECT]->(subject:Article)" in recorder["query"]
+        assert "(assertion)-[:OBJECT]->(object:Article)" in recorder["query"]
+        assert "(assertion)-[:CLASSIFIED_IN]->(run:ClassificationRun)" in recorder["query"]
+        assert "run.phase = 'published'" in recorder["query"]
+        assert "subject.graphNodeId IN $articleIds" in recorder["query"]
+        assert "object.graphNodeId IN $articleIds" in recorder["query"]
+        assert "coalesce(subject.clearanceLevel, 3)" in recorder["query"]
+        assert "coalesce(object.clearanceLevel, 3)" in recorder["query"]
+        assert recorder["kwargs"]["proposedPredicate"] == "IMPLEMENTS"
+        assert recorder["kwargs"]["direction"] == "from_subject"
+        assert recorder["kwargs"]["classificationRunId"] == "run-published"
         assert recorder["kwargs"]["userClearanceLevel"] == 2
         assert recorder["timeout"] == 1.5
 
@@ -328,6 +330,7 @@ class TestAssertionsAndInventory:
         graph.article_relations_touching(
             ["law-a-article-27_2"],
             edge_types=["REFERENCES", "IMPLEMENTS"],
+            direction="incoming",
             user_clearance_level=2,
             timeout_sec=1.5,
         )
@@ -337,6 +340,7 @@ class TestAssertionsAndInventory:
         assert "to.graphNodeId STARTS WITH articleId + '-'" in recorder["query"]
         assert "type(relation) IN $edgeTypes" in recorder["query"]
         assert recorder["kwargs"]["edgeTypes"] == ["REFERENCES", "IMPLEMENTS"]
+        assert recorder["kwargs"]["direction"] == "incoming"
         assert recorder["kwargs"]["userClearanceLevel"] == 2
         assert recorder["timeout"] == 1.5
 
@@ -350,14 +354,26 @@ class TestAssertionsAndInventory:
                 edge_types=["EXCEPTION_TO"],
             )
 
-    def test_touching_assertions_rejects_unimplemented_type(
+    def test_touching_assertions_rejects_unknown_predicate(
         self, client: tuple[GraphClient, dict[str, Any]]
     ) -> None:
         graph, _ = client
         with pytest.raises(ValueError):
             graph.relation_assertions_touching(
                 ["law-a-article-1"],
-                suggested_types=["EXCEPTION_TO"],
+                proposed_predicate="UNKNOWN",
+                direction="from_subject",
+            )
+
+    def test_touching_assertions_rejects_physical_direction(
+        self, client: tuple[GraphClient, dict[str, Any]]
+    ) -> None:
+        graph, _ = client
+        with pytest.raises(ValueError):
+            graph.relation_assertions_touching(
+                ["law-a-article-1"],
+                proposed_predicate="IMPLEMENTS",
+                direction="incoming",
             )
 
     def test_classification_updates_only_assertion_properties(

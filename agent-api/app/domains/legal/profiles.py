@@ -5,7 +5,6 @@ from pathlib import Path
 from app.agent_framework.profiles import (
     AgentLimits,
     AgentProfile,
-    AutomaticToolProfile,
     ModelCallProfile,
     ReviewerProfile,
     ToolListArgumentLimit,
@@ -19,7 +18,7 @@ def legal_agent_profile() -> AgentProfile:
     common_solver_prompt = _read_prompt("solver_common.md")
     return AgentProfile(
         name="legal-default",
-        version="50",
+        version="64",
         provider=settings.llm_provider,
         solver_research=ModelCallProfile(
             model=settings.agent_framework_research_model,
@@ -56,25 +55,15 @@ def legal_agent_profile() -> AgentProfile:
             timeout_sec=settings.agent_framework_model_timeout_sec,
             system_prompt=_read_prompt("reviewer.md"),
         ),
-        automatic_tools=(
-            AutomaticToolProfile(
-                trigger_tool_name="fetch_articles",
-                tool_name="legal_graph_neighbors",
-                copied_argument_names=("article_ids",),
-                fixed_arguments={
-                    "edge_types": ["REFERENCES", "IMPLEMENTS", "APPLIED_BY"],
-                    "max_relations": 50,
-                },
-                deduplicate_list_argument="article_ids",
-                one_hop_candidate_metadata_key="neighborArticleId",
-                independent_root_metadata_key="articleId",
-                independent_root_evidence_role="search_navigation",
-                purpose="本文取得対象Articleの1ホップ関係を取得する",
-            ),
-        ),
+        required_dependency_kind="lower_norm",
         tool_list_argument_limits=(
             ToolListArgumentLimit(
                 tool_name="fetch_articles",
+                argument_name="article_ids",
+                max_items=4,
+            ),
+            ToolListArgumentLimit(
+                tool_name="legal_graph_neighbors",
                 argument_name="article_ids",
                 max_items=4,
             ),

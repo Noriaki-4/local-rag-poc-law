@@ -376,7 +376,7 @@ def test_manifest_builds_luna_classification_run_and_import_records(tmp_path) ->
     assert run.provider == "codex_subscription"
     assert run.model == "gpt-5.6-luna"
     assert run.reviewer_model == "gpt-5.6-luna"
-    assert run.skill_version == "legal-relation-adjudicator-2026-08-20-pair-v7"
+    assert run.skill_version == "legal-relation-adjudicator-2026-08-21-pair-v8"
     assert run.reasoning_effort == "high"
     assert run.candidates_per_model_call == 5
     assert run.input_count == 2

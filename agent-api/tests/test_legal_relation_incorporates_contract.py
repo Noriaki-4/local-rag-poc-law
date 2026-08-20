@@ -64,7 +64,7 @@ def test_read_as_application_contract_requires_independent_dual_check() -> None:
     assert "confirm both `INCORPORATES` and `OVERRIDES`" in review
     assert "exact read-as occurrence establishes `OVERRIDES`" in skill
     assert RELATION_ADJUDICATION_PROMPT_VERSION == (
-        "legal-relation-5predicate-v22-pair"
+        "legal-relation-5predicate-v23-pair"
     )
     assert RELATION_CLASSIFICATION_PROMPT_VERSION == (
         "legal-relation-5predicate-v21-pair"

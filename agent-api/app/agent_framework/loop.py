@@ -212,6 +212,13 @@ class AgentLoop:
                 self._store.save(state)
 
             integration_call = bool(state.research_cycle_count or reviewer_findings)
+            dependency_audit_work_item_ids = (
+                _dependency_audit_work_item_ids(state)
+                if integration_call
+                and self._profile.required_dependency_kind is not None
+                else ()
+            )
+            dependency_audit_required = bool(dependency_audit_work_item_ids)
             contract_feedback: SolverContractFeedback | None = None
             cycle_step_timed_out = False
             for contract_attempt in range(MAX_SOLVER_CONTRACT_ATTEMPTS):
@@ -220,7 +227,17 @@ class AgentLoop:
                 if not finalize_only:
                     model_budget -= self._profile.limits.finalization_reserve_sec
                 if model_budget <= 0:
-                    raise TimeoutError("solver contract repair time exhausted")
+                    if finalize_only:
+                        raise TimeoutError("solver contract repair time exhausted")
+                    state = self._replace_state(
+                        state,
+                        cycle_step_timeout=True,
+                        stop_reason="cycle_step_timeout",
+                        updated_at=utc_now(),
+                    )
+                    self._store.save(state)
+                    cycle_step_timed_out = True
+                    break
                 context = build_solver_context(
                     state,
                     self._profile.limits,
@@ -230,17 +247,12 @@ class AgentLoop:
                     contract_feedback=contract_feedback,
                     required_dependency_kind=(
                         self._profile.required_dependency_kind
-                        if integration_call
+                        if dependency_audit_required
                         else None
                     ),
                     required_dependency_work_item_ids=(
-                        tuple(
-                            item.work_item_id
-                            for item in state.work_items
-                            if item.state == "open"
-                        )
-                        if integration_call
-                        and self._profile.required_dependency_kind is not None
+                        dependency_audit_work_item_ids
+                        if dependency_audit_required
                         else ()
                     ),
                 )
@@ -257,6 +269,8 @@ class AgentLoop:
                             "evidence_manifest": (),
                             "material_evidence": (),
                             "omitted_evidence_ids": (),
+                            "required_dependency_kind": None,
+                            "required_dependency_work_item_ids": (),
                         }
                     )
                 base_call_profile = (
@@ -328,18 +342,12 @@ class AgentLoop:
                         known_tool_names=self._read_only_tool_names,
                         material_evidence_ids=context.material_evidence_ids,
                         fetchable_article_ids=context.fetchable_article_ids,
-                        required_dependency_kind=(
-                            self._profile.required_dependency_kind
+                        required_dependency_kind=context.required_dependency_kind,
+                        required_dependency_work_item_ids=(
+                            context.required_dependency_work_item_ids
                         ),
-                        require_dependency_decisions=integration_call,
-                        dependency_target_fetch_tool_name=(
-                            self._profile.dependency_target_fetch_tool_name
-                        ),
-                        dependency_source_discovery_tool_name=(
-                            self._profile.dependency_source_discovery_tool_name
-                        ),
-                        dependency_resolution_requires_distinct_document=(
-                            self._profile.dependency_resolution_requires_distinct_document
+                        require_dependency_decisions=bool(
+                            context.required_dependency_work_item_ids
                         ),
                         tool_list_argument_limits={
                             (item.tool_name, item.argument_name): item.max_items
@@ -1048,3 +1056,40 @@ class AgentLoop:
             and first.title == second.title
             and first.metadata == second.metadata
         )
+
+
+def _dependency_audit_work_item_ids(state: CaseState) -> tuple[str, ...]:
+    """LLMが本文取得へ関連付けたopen WorkItemだけを監査対象へ投影する。"""
+
+    open_work_item_ids = {
+        item.work_item_id for item in state.work_items if item.state == "open"
+    }
+    hypothesis_work_item_ids = {
+        item.hypothesis_id: item.work_item_id for item in state.hypotheses
+    }
+    grounding_evidence_ids = {
+        evidence.evidence_id
+        for evidence in state.evidence
+        if evidence.metadata.get("citationEligible") is not False
+    }
+    grounding_request_ids = {
+        result.request_id
+        for result in state.tool_results
+        if result.status == "succeeded"
+        and grounding_evidence_ids.intersection(result.evidence_ids)
+    }
+    projected: list[str] = []
+    for request in state.tool_requests:
+        if request.request_id not in grounding_request_ids:
+            continue
+        candidates = (
+            request.work_item_id,
+            *(hypothesis_work_item_ids.get(item) for item in request.hypothesis_ids),
+        )
+        for work_item_id in candidates:
+            if (
+                work_item_id in open_work_item_ids
+                and work_item_id not in projected
+            ):
+                projected.append(work_item_id)
+    return tuple(projected)

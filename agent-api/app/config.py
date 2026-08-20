@@ -14,6 +14,9 @@ class Settings:
     neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
     neo4j_user = os.getenv("NEO4J_USER", "neo4j")
     neo4j_password = os.getenv("NEO4J_PASSWORD", "password")
+    legal_relation_classification_run_id = os.getenv(
+        "LEGAL_RELATION_CLASSIFICATION_RUN_ID", ""
+    ).strip()
     minio_endpoint = os.getenv("MINIO_ENDPOINT", "localhost:9000")
     minio_access_key = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
     minio_secret_key = os.getenv("MINIO_SECRET_KEY", "minioadmin")
@@ -35,6 +38,12 @@ class Settings:
             "EGOV_LAW_CORPUS_MANIFEST",
             "/workspace/datasets/lawqa_jp/egov_law_corpus/manifest.json",
         )
+    )
+    _seed_scenario_manifest_value = os.getenv("SEED_SCENARIO_MANIFEST", "").strip()
+    seed_scenario_manifest = (
+        Path(_seed_scenario_manifest_value)
+        if _seed_scenario_manifest_value
+        else None
     )
     seed_external_guidance = os.getenv("SEED_EXTERNAL_GUIDANCE", "false").lower() in {
         "1",
@@ -378,7 +387,7 @@ class Settings:
         min(
             int(
                 os.getenv("AGENT_FRAMEWORK_MAX_TOOL_REQUESTS_PER_STEP")
-                or os.getenv("AGENT_FRAMEWORK_MAX_TOOL_REQUESTS_PER_CYCLE", "4")
+                or os.getenv("AGENT_FRAMEWORK_MAX_TOOL_REQUESTS_PER_CYCLE", "5")
             ),
             16,
         ),
@@ -478,7 +487,7 @@ class Settings:
     agent_framework_max_wall_time_sec = max(
         agent_framework_finalization_reserve_sec + 1,
         min(
-            int(os.getenv("AGENT_FRAMEWORK_MAX_WALL_TIME_SEC", "180")),
+            int(os.getenv("AGENT_FRAMEWORK_MAX_WALL_TIME_SEC", "240")),
             600,
         ),
     )

@@ -263,12 +263,14 @@ rule that makes the target applicable only from a stated date creates a temporal
 exception for the excluded pre-effective scope when the supplied occurrence governs
 that exact target.
 
-Do not classify a subordinate provision as an exception when it only supplies the
-criteria, method, or detail for an alternative that the target rule itself expressly
-authorizes through delegation. That realizes a branch already contained in the
-target and is evaluated under `IMPLEMENTS`. `EXCEPTION_TO` additionally requires
-the source to narrow a target rule or effect beyond merely filling in its delegated
-condition.
+A subordinate provision may establish both `IMPLEMENTS` and `EXCEPTION_TO` when it
+supplies criteria for an exception expressly delegated by the target and those
+criteria directly determine when the target's general rule or legal effect does not
+apply. Evaluate both predicates independently: delegation and same-matter supply
+establish `IMPLEMENTS`; direct narrowing of the target rule establishes
+`EXCEPTION_TO`. Do not add `EXCEPTION_TO` merely because the subordinate Article
+contains `ただし`, `除く`, or another exception concerning a different rule inside
+that Article.
 
 ### OVERRIDES
 

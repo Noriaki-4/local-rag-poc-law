@@ -1,6 +1,6 @@
 # シンプルな汎用反復型エージェント基盤 実装計画
 
-> 更新日: 2026-08-20
+> 更新日: 2026-08-21
 >
 > 本書を新しい実装ロードマップの正本とする。
 > 人間向けの概念図と処理イメージは、対になる
@@ -9,7 +9,7 @@
 > 過去の実装計画やProfile変更履歴は本書へ残さない。現在のコードから目標仕様へ移すために
 > 必要な差分、実装順、完了条件だけを記載する。
 
-## 実装状況（2026-08-20）
+## 実装状況（2026-08-21）
 
 この節は変更履歴ではなく、12章の完了条件に対する差分だけを示す。個別のProfile version、
 不具合修正、実測結果はGit履歴、[RUNBOOK](../../../RUNBOOK.md)、
@@ -19,7 +19,7 @@
 |---|---|---|
 | Phase 0 | 一部完了 | 代表2問の現行baseline、説明付きstatus契約、生成schema・Prompt用語集のfixture |
 | Phase 1 | 一部実装 | `CycleRecord / StepRecord`、discriminator付きCommand、型付きstatusと遷移の一元化、再開契約 |
-| Phase 2 | 実index再構築・Articleペアexport・検証import・Gate 6差分評価を完了。全件Runは中間構造監査のためbuilding状態で停止中 | 参照scope差分監査、全件Run再開・監査・publish、Hypothesis別selector、旧自動Graph経路の撤去 |
+| Phase 2 | 全件Runは中間構造監査のためbuilding状態で停止中。別に、公開買付け3階層ミニsnapshotの両index、意味分類publish、Hypothesis別Graph Toolまで実装済み | ミニsnapshotの実モデル完了、探索契約の単純化、全件Runの参照scope差分監査・再開・publish |
 | Phase 3 | 未評価 | 新契約に基づくtrace、再開、入力増加、latencyの完了条件 |
 | Phase 4 | 未完了 | 新経路による代表2問の合格、既定経路切替、旧試作の撤去 |
 
@@ -28,12 +28,11 @@
 - `agent_framework`、`InMemoryCaseStore`、用途別Model Profile、read-only Tool並列実行、
   任意Reviewer、法令Tool Adapter、Feature Flag付き経路は存在する。
 - Reviewerの既定値は無効で、新経路のFeature Flagも既定では無効である。
-- 現行Legal Profileは本文取得に旧Graph検索を自動連動し、
-  `domains/legal/profiles.py`の`automatic_tools.fixed_arguments`で
-  `REFERENCES / IMPLEMENTS / APPLIED_BY`の3種を固定指定する。別に、`legal_ontology.py`の
-  `expandable_edge_types()`は`EDGE_REGISTRY`から`EXPLAINS`を含む4種を導出するが、現行Legal Profileの
-  自動Graph設定はこの関数を使用していない。本書が目標とする
-  Hypothesis別selector、`from_subject / to_subject`、5 predicateの新Graph契約ではない。
+- 現行Legal Profile v64は本文取得後の自動Graph連動を持たず、`automatic_tools=()`である。
+  Solverは`legal_graph_neighbors`へ、既知起点Article、`semantic_assertion / explicit_reference / explains`の
+  いずれか1 mode、意味関係なら5 predicateのうち1つ、方向を明示する。意味方向は
+  `from_subject / to_subject`、原文関係は`outgoing / incoming`で、1要求は1ホップである。
+  Graph由来Articleも後続stepの新しい起点にできる。Programはpredicate、方向、次の起点を補完しない。
 - 現行CaseStateはWorkItem、Hypothesis、Evidence、Graph review履歴を保持するが、
   本書の`ExplorationState / CycleRecord / StepRecord`と説明付きstatus契約は未実装である。
 - schema version 9のseedは、同じsnapshotのOpenSearch本文とNeo4jの構造・
@@ -43,6 +42,42 @@
   2026-08-19に実データを再seedし、代表94件の構造監査`94/94`を確認した。
   `改正前の / 改正前における`で明示された旧版Articleを現行Articleへ誤接続しない修正も反映済みである。
   全件意味分類のpublishと検索時selectorへの接続はまだ行っていない。
+- 第二期Step 1用の`public_tender_offer_three_layer_v1`は、保存済みe-Gov XMLから3法令13 Articleだけを
+  選ぶ固定subsetとして実装済みである。専用OpenSearch indexは69文書、Neo4jはDocument 3、Article 13、
+  Paragraph 46、Item 20と構造Relation 100件を持つ。17候補をLunaで判定した
+  `classification-run-public-tender-mini-v1-v23`は17/17承認・24 Assertionでpublish済みである。
+  `IMPLEMENTS/from_subject`と`EXCEPTION_TO/to_subject`の直接Tool確認では、金商法27条の2→施行令7条、
+  施行令7条→府令2条の5、金商法27条の3→府令10条へ到達できる。全件indexはこの検証では再構築しない。
+- 回答経路では、Ollama用compact transportとAnthropic用hybrid transport、Graph差分Review、
+  `lower_norm`依存監査を実装済みである。Gemmaは候補検索後の本文取得・完了判断が安定せず、Haikuでは
+  必要本文取得まで進んだが、旧DependencyDecisionの委任元・委任先Evidence二重管理と180秒上限で
+  完了が安定しなかった。v53ではDependencyDecisionをstatus、reason、判断根拠、追加ToolRequest参照だけへ
+  簡素化し、法的根拠の正本をHypothesis / Evidenceへ戻した。v54では検索候補をsemantic judgmentへ
+  誤用した場合の本文取得指示と、継続可能なのにopen WorkItemを残してfinalizeした場合の修復schemaを追加した。
+  v55では同じ修復時の本文取得を1 Request・残りCycle枠内へまとめ、枠外候補を後続へ残す指示を加えた。
+  v56ではArticle全文を構成する全Paragraph / Itemを自動的な解決根拠とせず、LLMが回答に使うEvidenceだけを
+  Hypothesisの根拠へ残すか、実際に全て使うなら全件を引用する形へ再判断できるようにした。
+  v57ではLegal Profileの全体上限を240秒へ変更し、通常探索・契約修復用の時間を使い切っても、予約した
+  最終化時間へ制御を戻す。時間切れを法的な完了判断へ変換せず、未解決範囲は限定回答へ残す。
+  v58ではAnthropicが配列の`maxItems`を構造化出力で強制しない差を吸収するため、Article本文取得を
+  `article_id_1`から最大4個の固定slotを持つ単一`article_fetch`として輸送する。各IDはLLMが選び、
+  Adapterは1件の`fetch_articles`へ復元するだけで、候補の切捨てや優先順位付けを行わない。
+  v60ではその他のToolRequestを、固定数のJSON object文字列slotで輸送する。完全なToolRequest schemaを
+  slotごとに複製するとAnthropicのgrammar上限を超えるためであり、Adapterで復元後に共通契約を完全検証する。
+  `article_fetch`が利用可能なstepではその1枠を予約し、Legal初期値では非fetch Toolを最大4枠、
+  本文取得を合わせて最大5要求とする。本文取得は1 Request・1 Cycleとも最大4 Articleである。
+  v64では、同じ下位法令の別Articleを委任事項の具体化規定として代用せず、委任元から末端までの
+  Article本文を直接確認し、未取得Articleの内容を学習済み知識で補わない規則を共通Promptへ追加した。
+  `lower_norm=resolved`は委任元と末端の2つ以上の異なるArticle本文Evidenceを必要とする構造契約も追加した。
+  また、Cycle境界で共通schemaが禁止した新規ToolをAnthropic / compact輸送schemaが再び許可しないよう、
+  Tool slotを0件へ固定する。Cycleを閉じるか次Cycleへ進む意味判断はSolverが行う。
+  Anthropic輸送ではCaseUpdateのJSON文字列と、Hypothesisが選ぶEvidence IDの小さな構造化sidecarを分ける。
+  sidecarだけを提示済みIDへ制限して機械転記し、CaseUpdate全体の構造化でgrammar上限を超えることを避ける。
+  ToolRequestも固定JSON文字列slotを維持する。
+  v56、Haiku、Reviewer offの`公開買付けによらない主な場合`では1 Cycleで完了し、goldの必要Article
+  3/3（金商法27条の2、施行令7条、府令2条の5）と回答観点3/3へ到達した。この実行はOpenSearchで
+  3 Articleを発見したためGraph要求は0件であり、Solverによる連続1ホップ探索のE2E確認とは区別する。
+  全件へ広げる前に、OpenSearchだけでは下位Articleを発見できない質問でGraph連鎖を確認する。
 - Luna用のlabel-free候補packetと最大5件のshardを決定的に生成するIFは実装済みである。
   packetはsnapshot、schema、prompt、Worker / Reviewer model、両Article全文、全参照出現を含み、
   goldやexpected predicateを型上受け付けない。実indexのexportは有向Articleペア単位へ修正済みで、
@@ -510,7 +545,7 @@ class StepRecord:
    本文取得枠に入れない`defer`、現在のHypothesisに不要な`reject`を返す。
 4. Decisionに現れないfrontierは削除せず`unreviewed`のまま残す。`defer`は
    `relevant_deferred`として同じCycleの後続stepまたは次Cycleへ残す。
-5. ProgramはID、selector allowlist、件数、depth、Toolの成功済み重複だけを検証し、
+5. ProgramはID、selector allowlist、件数、scope、Toolの成功済み重複だけを検証し、
    関連度、優先度、Hypothesisと関係種別の対応を計算しない。
 6. 1ホップGraphは、対応Intentが明示したmode・predicateまたは原文relation・direction・構造filterだけを取得して
    同じstepの観察へ追加する。新しい隣接Node本文は同じCycleの
@@ -523,14 +558,13 @@ class StepRecord:
    別Hypothesisが同じ物理scopeを要求した場合は既存Linkを再利用して新しいfrontierを作り、Neo4jを再実行しない。
    page cursorとrequest IDは同じExpansionSliceへ蓄積し、pageごとに別scopeを作らない。
 9. `partial`と`next_cursor`があるscopeを`complete`として扱わない。未提示候補の不存在を推測しない。
-10. `max_exploration_depth`はProfileで`1`または`2`だけを許可する。OpenSearch起点を深さ0、Graph関係を
-   1辺たどるごとに深さを1増やす。最大depthのNodeは本文取得とSolverの意味評価を許可するが、そこを
-   起点とするGraph展開は実行しない。Programは`minimum_depth < max_exploration_depth`であり、
-   かつ既知のrelation用ExplorationIntentがある場合だけ1ホップGraphを実行する。
-11. 後から短い経路が見つかった場合、ProgramはNodeと対応frontierの`minimum_depth`だけを小さく更新し、
-    過去LinkやCycleRecordを削除しない。
-12. `max_exploration_depth`はCase全体に適用する。同じOpenSearch起点からの探索を次Cycleへ引き継いでも
-    depthを0へ戻さない。次Cycleの異なる検索で新たに発見したOpenSearch候補だけを新しい深さ0の起点にする。
+10. 1回のGraph Tool要求は常に1ホップに固定する。Graphから発見して本文を確認したArticleも、Solverが
+    次のHypothesis検証に必要と判断し、新しいrelation Intentを返せば、後続stepの1ホップ起点にできる。
+    発見元がGraphであることや累積depthを理由にProgramが起点から除外しない。
+11. `minimum_depth`は探索経路の監査・可視化用に保持する。後から短い経路が見つかった場合はNodeと対応
+    frontierの値だけを小さく更新し、過去LinkやCycleRecordを削除しない。ただしGraph実行可否の上限判定には使わない。
+12. 連鎖の停止は、Solverの完了判断、open WorkItem・Hypothesis、成功済み`scope_key`の重複排除、
+    Cycle・Step・本文取得・時間上限で行う。ProgramがCase全体の累積hop数で意味探索を打ち切らない。
 13. 1 stepの選択件数と1回のGraph取得件数はProfileの機械的上限とし、上限超過候補は削除せず
     `partial`なExpansionSliceの未取得page、または未処理frontierとして残す。Neo4jから取得済みの
     未処理Graph frontierは決定的に分割し、未提示pageを不存在と扱わない。
@@ -540,12 +574,8 @@ class StepRecord:
 15. 一度`reject`したfrontierをProgramが別Hypothesisへ自動転用しない。Solverが別Hypothesisの
     検証に再採用した場合は、同じNodeを参照する新しい`unreviewed` FrontierItemを作る。
 
-設定値ごとの到達範囲は次のとおり。
-
-| `max_exploration_depth` | 取得・評価できる範囲 | Graph展開できる起点 |
-|---|---|---|
-| `1` | 深さ0、1の本文 | 深さ0だけ |
-| `2` | 深さ0、1、2の本文 | 深さ0、1 |
+この設計の「1ホップ」は1 Tool要求の範囲であり、Case全体の到達深度上限ではない。例えば
+`法律 → 政令`を1要求で取得し、政令本文を評価した後、別の1要求で`政令 → 府令`を取得できる。
 
 案件内探索GraphをNeo4jへ書き戻さない。Neo4jは共有法令Graph、ExplorationStateはCaseStoreに属する
 案件固有の探索履歴である。CaseStoreには全Node・Link・FrontierDecisionを保持するが、
@@ -647,13 +677,17 @@ predicateと向きを次に固定する。
 
 | `proposedPredicate` | SUBJECT | OBJECT | 例 |
 |---|---|---|---|
-| `IMPLEMENTS` | 抽象的な親規定 | 具体化する下位規定 | 金商法27条の3 → 公開買付府令10条 |
+| `IMPLEMENTS` | 抽象的な親規定 | 具体化する下位規定 | 金商法27条の2 → 施行令7条、金商法27条の3 → 公開買付府令10条 |
 | `INCORPORATES` | 他規定を準用・読み替える規定 | 取り込まれる規定 | BがAを準用する場合のB → A |
 | `USES_DEFINITION` | 定義を利用する規定 | 定義を置く規定 | 利用条文 → 定義条文 |
 | `EXCEPTION_TO` | 例外・適用除外を定める規定 | 一般規定 | 施行令7条 → 金商法27条の2 |
 | `OVERRIDES` | 優先して適用される規定 | 排除・修正される規定 | 特則 → 一般則 |
 
 この5 predicateは排他的ではない。同じArticleペアでも、別々の必要条件と根拠参照が成立すれば複数を保存できる。
+委任元が例外となる分岐を明示し、下位規定がその適用除外条件を具体化する場合は、同じArticleペアに
+`IMPLEMENTS`と`EXCEPTION_TO`が併存し得る。前者は委任事項の供給、後者は一般規律の適用範囲を
+直接狭めることをそれぞれ独立に検査する。検索時に両predicateから同じArticleへ到達しても、本文取得は
+Article IDで重複排除し、Hypothesisごとの到達経路はDiscoveryLinkとして保持する。
 特に`第X条の規定の適用については、同条中「A」とあるのは「B」とする`という対象固有の読替えは、
 読替後もX条の規律を現在の場面へ適用するため`INCORPORATES`となり、同時に対象文言を置換するため
 `OVERRIDES`にもなり得る。一方、`第X条の規定にかかわらず`別規律を置く場合やX条を直接`適用しない`
@@ -1342,6 +1376,13 @@ Reviewer差戻し後の判断はintegration profileを使い、直前結果の�
 どの委任が質問に関係するか、どの本文で確認できたかはSolverが判断し、プログラムは既知ID、
 ToolRequest、grounding Evidenceの参照整合だけを検証する。
 
+本文取得後は、その取得RequestへSolver自身が結び付けたopen WorkItemだけを`lower_norm`監査対象にする。
+Solverは各対象へ`not_required / needs_action / resolved`を1件返し、判断に使った本文を
+`basis_evidence_ids`へ示す。`needs_action`だけ同じDecisionのToolRequestを`action_request_id`で参照する。
+委任元・委任先Articleや法的根拠はToolRequest、Hypothesis、Evidence、citationが正本であり、
+DependencyDecisionへsource/target Evidenceを重複保存しない。Programは対象ID、件数、既知Evidence、
+同一DecisionのRequest参照だけを検証し、statusを選ばない。
+
 Legal Profileは`legal_graph_neighbors`をread-only Toolとして登録する。Solverはrelation用
 `ExplorationIntent`へ、対象Hypothesis、既知の起点Article、Graph mode、1つのpredicateまたは原文relation、
 1つのdirection、必要な構造filterを明示する。ProgramはCaseに固定された`classificationRunId`を加えて
@@ -1350,10 +1391,10 @@ Tool引数へ機械的に投影し、本文取得を選んだという理由だ�
 relation Intentが明示された場合は同じStepの観察へまとめる。本文を読んで初めて関係探索が必要と判明した場合は、
 直後のSolver判断で新しいIntentを作り、同じCycleの次Stepで実行する。
 
-選択Nodeが最大depthならGraphを実行しない。同じArticle・scopeのGraphは成功後に重複実行せず、別Hypothesisが
-同一scopeを要求した場合は保存済みLinkを再利用する。取得した1ホップは各隣接ArticleをExplorationStateの
-Node・Link・frontierへ保存する。Solverがfrontierから選んだArticle本文を同じCycleの次stepで取得しても、
-relation Intentがなく、または最大depthなら、そのArticleからGraphを再展開しない。
+同じArticle・scopeのGraphは成功後に重複実行せず、別Hypothesisが同一scopeを要求した場合は保存済みLinkを
+再利用する。取得した1ホップは各隣接ArticleをExplorationStateのNode・Link・frontierへ保存する。
+Solverがfrontierから選んだArticle本文を同じCycleの次stepで取得し、新しいrelation Intentを返した場合、
+そのArticleを次の1ホップ起点にできる。relation IntentがなければProgramは自動で再展開しない。
 
 Solverは5つの`proposedPredicate`、原文`REFERENCES / EXPLAINS`、起点から見た
 `from_subject / to_subject`を共通Promptの定義どおりに解釈する。候補表示だけで法的結論を出さず、
@@ -1361,12 +1402,12 @@ Solverは5つの`proposedPredicate`、原文`REFERENCES / EXPLAINS`、起点か�
 `select`する。Graph Reviewの初期選択上限は3件とし、関連するが今回の取得枠に入れない候補は
 `defer`として短いledgerへ残す。同じhopの未評価候補や別枝も削除せず、機械的pageまたは
 次Cycleへ残す。候補の関連性、取得順、
-`reject`はSolver、Node・Linkの重複排除、depth、取得済み判定、Tool実行はプログラムが担当する。
+`reject`はSolver、Node・Linkの重複排除、scope、取得済み判定、Tool実行はプログラムが担当する。
 
 Graphは発見経路の1つであり、必要条文到達の唯一の経路にしない。質問で明示された観点に対応する
-open WorkItemが残り、関連するGraph候補がない、最大depthへ達した、または既存のGraph方針を探し切った場合、
+open WorkItemが残り、関連するGraph候補がない、または既存のGraph方針を探し切った場合、
 SolverはそのWorkItem、確認済み本文の委任・参照表現、法令名、条番号等を基に`legal_search`を要求できる。
-その検索結果は新しい深さ0の起点となる。検索語の作成と検索へ切り替える判断はSolverが行い、
+その検索結果は新しい探索起点となる。検索語の作成と検索へ切り替える判断はSolverが行い、
 プログラムは未解決WorkItemから検索語や必要条文を生成しない。
 
 Solverは`graph_review_batch`に提示された新規・再評価差分と、`graph_review_ledger`の
@@ -1476,19 +1517,18 @@ limits:
   max_fetched_resources_per_cycle: 4
   max_steps_per_cycle: 4
   max_total_steps: 8
-  max_tool_requests_per_step: 4
+  max_tool_requests_per_step: 5
   max_parallel_tools: 4
   max_selected_frontier_per_step: 3
   max_graph_candidates_per_scope_page: 20
   max_graph_candidates_per_review_batch: 20
-  max_exploration_depth: 1
   max_material_evidence_chars: 50000
   max_solver_input_chars: 240000
   max_retained_evidence: 12
   cycle_close_reserve_sec: 15
   min_next_cycle_budget_sec: 25
   finalization_reserve_sec: 35
-  max_wall_time_sec: 180
+  max_wall_time_sec: 240
 ```
 
 回答Agentとは別に行う正本Relation分類は、次のオペレーター実行Profileを使う。
@@ -1549,10 +1589,9 @@ Evidence利用、Cycle・Stepの意味、完了条件のようにサイクル間
 モデルID、token上限、timeout、Reviewer有効・無効はProfileだけで変更する。
 AgentLoopや法令ツールへmodel IDをハードコードしない。
 
-`limits.max_exploration_depth`はFrameworkのProfile契約として整数`1`または`2`だけを受け付けるが、
-Legal Profileは`1`に固定する。未設定、`0`、`3`以上、整数以外はProfile読込み時の設定エラーとし、実行中に丸めたり既定値へ
-補正したりしない。設定値はRun開始時に解決してCaseへ固定し、途中のProfile変更で進行中Caseの
-到達範囲を変えない。
+Graphのhop上限はCase全体のdepth値にせず、Tool契約で「1要求=1ホップ」に固定する。後続Articleを
+次の起点にするかはSolverが新しいrelation Intentで判断する。Cycle・Step・本文取得・時間上限はProfileで
+Run開始時に固定し、Programは同じscopeの成功済み再実行だけを防ぐ。
 
 Graph pageの上限は意味的な枝刈りではなく、Neo4jから1回に取得する機械的な件数上限である。Programは
 `minimum_depth`、`discovered_cycle`、`frontier_item_id`の安定順で候補を保存する。Graph page上限に
@@ -1664,10 +1703,9 @@ research・integrationの両方へ必ず合成する。次の契約語彙には�
 Legal Domain Packの共通Promptには次を追加する。
 
 ```text
-- max_exploration_depthはOpenSearch起点をdepth 0としてGraph関係をたどれる最大depthであり、Legal Profileでは1に固定する。
-  depthが上限未満で、relation用ExplorationIntentに既知の起点Articleと明示selectorがある場合だけ、Programが
-  そのscopeの1ホップ候補を取得する。上限depthのArticleは本文を取得・評価できるが、そこからGraph候補は増えない。
-  Cycle変更は既存起点のdepthをリセットしない。
+- Graph探索は1回のTool要求につき1ホップである。Graph候補Articleも、本文評価後にSolverが既知起点と
+  明示selectorを持つ新しいrelation Intentを返せば、後続stepの起点にできる。起点の発見元や累積depthを
+  理由にProgramが拒否しない。同じscopeの成功済み取得だけを再実行しない。
 - 候補発見・Graph展開・本文取得の各ToolRequestは、今回検証する既知WorkItem・Hypothesisと
   ExplorationIntentへ結び付ける。具体的Hypothesisを立てる前の初回検索だけは、理由を示したWorkItem単位の
   search Intentを許可し、Graph Intentには使わない。
@@ -1676,8 +1714,8 @@ Legal Domain Packの共通Promptには次を追加する。
   全種別を要求しない。predicateを選べない場合は、Graphを全探索せずOpenSearchで関係を示す本文または新しい起点を探す。
 - Hypothesisとpredicateの対応、検索語、filter、方向、優先度はSolverが判断する。Programへ補完を要求しない。
   検索結果は指定scope内の候補であり、Hypothesisの支持を意味しない。本文取得後に意味を判断する。
-- Graph候補がない、最大depthへ達した、または現在のGraph方針を探し切ってもopen WorkItemが残る場合は、
-  その問いと確認済み本文の委任・参照表現を使ってlegal_searchを要求し、新しいdepth 0起点を探す。
+- Graph候補がない、または現在のGraph方針を探し切ってもopen WorkItemが残る場合は、
+  その問いと確認済み本文の委任・参照表現を使ってlegal_searchを要求し、新しい探索起点を探す。
   Programに必要条文や検索語の推測を任せない。
 - graph_review_batchは今回評価が必要な新規候補、再採用候補、新Linkが加わった既評価候補の差分である。
   `review_trigger`は`new_frontier / re_adopted / new_link`のいずれかであり、新Link差分では直前の判断を
@@ -1941,8 +1979,8 @@ focusへ接続するNode・Link、直近ToolResult、新規・保持EvidenceをC
 - Case→再帰WorkItem→Hypothesis→Exploration Node/Link/frontier→CycleRecord→StepRecord→ToolResult/Evidenceの参照fixtureを作る。
 - 7.3の全LLM-visible statusが共通PromptまたはDomain Promptへ定義される契約テストを作る。
 - Reviewerの既定値が`false`であることを設定契約へ固定する。
-- Framework Profileの`max_exploration_depth`が`1`と`2`だけを受理し、Legal Profileは`1`に固定され、
-  未設定、`0`、`3`以上、整数以外を拒否するfixtureを作る。
+- Graph Toolが1要求で1ホップだけを返し、Graph由来Articleを後続stepの新しい起点にできるfixtureを作る。
+  同じscopeは再実行せず、異なるselectorは別scopeとして実行できることを確認する。
 - Legal Profileの`max_material_evidence_chars`初期値を50,000文字へ固定し、本文枠とGraph review batch・ledgerが
   別に計上される契約fixtureを作る。
 - `max_solver_input_chars`初期値を240,000文字とし、本文上限より大きいことをProfile検証へ追加する。
@@ -2017,9 +2055,8 @@ Phase 1の主要な実装リスクは`contract_rendering.py`である。Enum、�
 - 同じResourceを複数Linkから発見してもNodeは1件で、Linkはすべて保持される。
 - Graph navigationのArticle・Link投影がSolver向けの唯一表示となり、manifest・ToolResult・ID一覧に同じGraph Evidenceが重複しない。
 - 循環Linkを保存しても、成功済みNode・scopeを再展開しない。
-- 汎用fixtureの`max_exploration_depth=1 / 2`で各上限depthからGraph展開せず、
-  Legal Profileの実行では深さ1本文を取得できるが深さ1からGraph展開しない。
-- 次Cycleへ移っても同じ起点のdepthをリセットせず、別のOpenSearch結果だけを新しい深さ0起点にする。
+- 1回のGraph Toolが1ホップを超えず、取得・選択した隣接Articleを別stepの1ホップ起点にできる。
+- 次Cycleへ移っても成功済みscopeを再実行せず、別Hypothesis・別selectorによる新scopeは実行できる。
 - Solver Decisionに現れないfrontierが消えない。
 - 50,000文字以内のEvidence本文が決定的な順序で提示され、過去・保持Evidenceの上限外本文はmanifestから
   再取得できる。新規取得Articleは全chunkを原子的な提示単位とし、途中だけを表示しない。
@@ -2123,7 +2160,8 @@ publishする別単位とする。Graph schema、抽出規則、入力データ�
 - 同じDecisionで本文取得とrelation Intentが明示された場合は1ホップGraphを同じStepの観察へ入れる。
   本文から必要性が判明した場合は次Stepのrelation Intentとして実行する。隣接本文取得は現Cycleの
   残り本文取得枠内でSolverが`select`した対象に限定し、枠外の関連候補は`defer`して次Cycleへ残す。
-- Profileの`max_exploration_depth`に達したArticleでは本文だけを取得し、relation IntentがあってもGraphを抑止する。
+- Graph由来Articleも、Solverが別stepで新しいrelation Intentを返せば1ホップ起点にする。
+  Programは起点の由来で抑止せず、成功済み同一scopeだけを重複排除する。
 - Graphのmode・predicateまたは原文relation・direction・classification run・構造filter・cursor・policy versionを
   ExpansionSliceのscopeへ対応付ける。
 - Graphの全Article・Link・Review履歴をCaseStoreに保持し、SolverContextへは
@@ -2177,8 +2215,9 @@ publishする別単位とする。Graph schema、抽出規則、入力データ�
   現れないことを確認する。Neo4jのfrom/toは変更せず、起点がfromなら`from_subject`、toなら`to_subject`になる。
 - seed後のGraph inventory、Legal Tool allowlist、Prompt、Provider schemaに`APPLIED_BY / MENTIONS`が存在せず、
   明示的なガイド・条文対応の`EXPLAINS`は維持されることを確認する。
-- 公開買付けfixtureで、`EXCEPTION_TO/to_subject`により金商法27条の2から施行令7条、
-  `IMPLEMENTS/from_subject`により施行令7条から府令2条の5、金商法27条の3から府令10条を候補取得できる。
+- 公開買付けfixtureで、`IMPLEMENTS/from_subject`と`EXCEPTION_TO/to_subject`の双方により
+  金商法27条の2から施行令7条へ到達でき、複数経路でも同じArticle本文を1回だけ取得する。
+  さらに`IMPLEMENTS/from_subject`により施行令7条から府令2条の5、金商法27条の3から府令10条を候補取得できる。
   Graph候補だけを根拠にせず、取得した両端本文をSolverが評価する。
 - raw `REFERENCES/to_subject`の高fan-in fixtureは通常QA selectorとして拒否または`scope_too_broad`になり、
   候補を任意の上位N件へ切り捨てない。
@@ -2188,9 +2227,10 @@ publishする別単位とする。Graph schema、抽出規則、入力データ�
   `Node × Hypothesis` frontierを作る。
 - 同じArticleへ複数経路があるfixtureで本文取得は1回、DiscoveryLinkは複数残る。
 - A→B→Aの循環fixtureで再帰展開が停止する。
-- `max_exploration_depth=1`で、1ホップ候補の本文取得と、その候補からのGraph非実行を確認する。
-- 最大depthまたはGraph関係欠落のfixtureで、Solverがopen WorkItemに基づく`legal_search`を選び、
-  結果を新しい深さ0起点として同じCaseで探索できる。
+- 法律から政令を1ホップ取得し、政令本文を評価した後、政令を新しい起点に府令を別の1ホップで
+  取得できることを確認する。各要求が2ホップを一括取得しないことも確認する。
+- Graph関係欠落のfixtureで、Solverがopen WorkItemに基づく`legal_search`を選び、
+  結果を新しい探索起点として同じCaseで探索できる。
 - 関係するとSolverが判断した未確認frontierが残る場合、通常の`finalize`を選ばないPrompt契約を確認する。
 - Evidence本文が省略されても、当該Graph review batchにはArticle ID、法令名、条番号・見出し、
   content status、depth、起点Article・Link、mode・predicateまたは原文relation・direction・
@@ -2259,7 +2299,8 @@ publishする別単位とする。Graph schema、抽出規則、入力データ�
 - 通常問題のp90を120秒以内とする。外部provider障害は別集計する。
 - baselineより回答品質を落とさず、LLM呼び出し数を大幅に削減する。
 
-`max_wall_time_sec=180`は異常な長時間実行を止め、Cycle終了と限定回答の時間を残す安全上限であり、
+`max_wall_time_sec=240`は複合問題で複数Cycleと契約修復を許しつつ、異常な長時間実行を止め、
+Cycle終了と限定回答の時間を残す安全上限であり、
 p90 120秒は通常問題の性能目標である。安全上限以内なら性能合格という意味ではない。p90を超えた場合は、
 用途別の入力・出力token、重複投影、LLM呼出し数、Tool並列性をtraceで分解する。Evidence本文枠や
 `max_output_tokens`を調整する場合も、新規Article全文、Graph差分候補、必要根拠を欠落させない契約テストと

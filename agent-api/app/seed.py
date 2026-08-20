@@ -28,6 +28,7 @@ from .legal_ontology import (
 from .legal_relation_classifier import without_repeated_parent_context_with_offset
 from .legal_relation_resolver import assess_implements, classify_reference_kind
 from .opensearch_client import OpenSearchClient
+from .scenario_dataset import ScenarioDataset, load_scenario_dataset
 
 EGOV_LAW_ID_PATTERN = re.compile(r"laws\.e-gov\.go\.jp/law/([^/?#]+)")
 ARTICLE_REFERENCE_PATTERN = re.compile(
@@ -123,14 +124,44 @@ def seed_all(os_client: OpenSearchClient, graph_client: GraphClient) -> dict[str
         mapping_path = samples_dir / mapping_path
     mapping = _read_json(mapping_path)
 
-    external_guidance_sources = _external_guidance_sources()
-    documents, source_snapshot_id = _with_seed_identity(
-        _opensearch_documents(samples_dir, external_guidance_sources)
+    scenario = _configured_scenario_dataset()
+    if scenario is not None and (
+        settings.seed_lawqa_egov or settings.seed_external_guidance
+    ):
+        raise ValueError(
+            "SEED_SCENARIO_MANIFEST cannot be combined with "
+            "SEED_LAWQA_EGOV or SEED_EXTERNAL_GUIDANCE"
+        )
+    external_guidance_sources = (
+        [] if scenario is not None else _external_guidance_sources()
     )
+    if scenario is None:
+        seed_documents = _opensearch_documents(
+            samples_dir, external_guidance_sources
+        )
+    else:
+        seed_documents = _opensearch_documents(
+            samples_dir,
+            external_guidance_sources,
+            scenario=scenario,
+        )
+    documents, source_snapshot_id = _with_seed_identity(seed_documents)
 
-    nodes = _read_jsonl(samples_dir / "metadata" / "nodes.sample.jsonl")
-    edges = _read_jsonl(samples_dir / "metadata" / "edges.sample.jsonl")
-    law_family_roots = _law_family_roots(samples_dir)
+    nodes = (
+        []
+        if scenario is not None
+        else _read_jsonl(samples_dir / "metadata" / "nodes.sample.jsonl")
+    )
+    edges = (
+        []
+        if scenario is not None
+        else _read_jsonl(samples_dir / "metadata" / "edges.sample.jsonl")
+    )
+    law_family_roots = (
+        scenario.family_roots
+        if scenario is not None
+        else _law_family_roots(samples_dir)
+    )
     egov_nodes, egov_edges = _graph_artifacts_from_documents(documents, law_family_roots)
     guidance_nodes, guidance_edges = _guidance_graph_artifacts(documents, law_family_roots)
     nodes = _dedupe_by_key([*nodes, *egov_nodes, *guidance_nodes], "graphNodeId")
@@ -158,11 +189,20 @@ def seed_all(os_client: OpenSearchClient, graph_client: GraphClient) -> dict[str
     graph_client.seed_nodes(nodes)
     graph_client.seed_edges(edges)
 
-    minio_count, minio_stale_removed = _seed_minio(
-        samples_dir,
-        persisted_documents,
-        external_guidance_sources,
-    )
+    if scenario is None:
+        minio_count, minio_stale_removed = _seed_minio(
+            samples_dir,
+            persisted_documents,
+            external_guidance_sources,
+        )
+    else:
+        minio_count, minio_stale_removed = _seed_minio(
+            samples_dir,
+            persisted_documents,
+            external_guidance_sources,
+            prune_vector_objects=False,
+            include_samples=False,
+        )
 
     return {
         "opensearchDocuments": len(documents),
@@ -175,10 +215,15 @@ def seed_all(os_client: OpenSearchClient, graph_client: GraphClient) -> dict[str
         "graphSchemaVersion": GRAPH_SCHEMA_VERSION,
         "sourceSnapshotId": source_snapshot_id,
         "egovDatasetSnapshotId": (
-            _egov_corpus_manifest()["datasetSnapshotId"]
-            if settings.seed_lawqa_egov
-            else None
+            scenario.dataset_snapshot_id
+            if scenario is not None
+            else (
+                _egov_corpus_manifest()["datasetSnapshotId"]
+                if settings.seed_lawqa_egov
+                else None
+            )
         ),
+        "scenarioDatasetId": scenario.dataset_id if scenario is not None else None,
         "edgeTypeCounts": _count_by_key(edges, "edgeType"),
         "nodeTypeCounts": _count_by_key(nodes, "nodeType"),
         "authorityTypeCounts": _count_by_key(nodes, "authorityType"),
@@ -312,7 +357,14 @@ def _count_by_key(items: list[dict[str, Any]], key: str) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
-def _opensearch_documents(samples_dir: Path, external_guidance_sources: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+def _opensearch_documents(
+    samples_dir: Path,
+    external_guidance_sources: list[dict[str, Any]] | None = None,
+    *,
+    scenario: ScenarioDataset | None = None,
+) -> list[dict[str, Any]]:
+    if scenario is not None:
+        return _scenario_egov_documents(scenario)
     sample = _read_json(samples_dir / "metadata" / "opensearch_document.sample.json")
     law_fsa = _with_authority_type(dict(sample), _law_registry_entries(samples_dir))
     law_fsa["embedding"] = embed_text(_embedding_text(law_fsa))
@@ -325,6 +377,56 @@ def _opensearch_documents(samples_dir: Path, external_guidance_sources: list[dic
         for document, embedding in zip(batch, embeddings, strict=True):
             document["embedding"] = embedding
     documents.extend(guidance_documents)
+    return _dedupe_by_key(documents, "contentUnitId")
+
+
+def _configured_scenario_dataset() -> ScenarioDataset | None:
+    manifest_path = settings.seed_scenario_manifest
+    if manifest_path is None:
+        return None
+    return load_scenario_dataset(Path(manifest_path))
+
+
+def _scenario_egov_documents(scenario: ScenarioDataset) -> list[dict[str, Any]]:
+    """Build only the complete Articles selected by a frozen scenario allowlist."""
+
+    registry_entries = {
+        law.law_id: {
+            "lawId": law.law_id,
+            "title": law.title,
+            "authorityType": law.authority_type,
+            "familyRoot": law.family_root,
+        }
+        for law in scenario.laws
+    }
+    documents: list[dict[str, Any]] = []
+    selected_ids = scenario.article_ids
+    for law in scenario.laws:
+        payload = law.source_path.read_bytes()
+        law_documents = _egov_law_documents_from_xml(
+            payload,
+            law_id_spec=law.law_id,
+            source_url=f"dataset://{scenario.dataset_id}/{law.law_id}",
+            registry_entries=registry_entries,
+        )
+        documents.extend(
+            document
+            for document in law_documents
+            if _article_id(document) in selected_ids
+        )
+
+    actual_article_ids = {_article_id(document) for document in documents}
+    if actual_article_ids != selected_ids:
+        missing = sorted(selected_ids.difference(actual_article_ids))
+        unexpected = sorted(actual_article_ids.difference(selected_ids))
+        raise ValueError(
+            "scenario Article selection mismatch: "
+            f"missing={missing}, unexpected={unexpected}"
+        )
+    for batch in _chunks(documents, settings.embedding_batch_size):
+        embeddings = embed_texts([_embedding_text(document) for document in batch])
+        for document, embedding in zip(batch, embeddings, strict=True):
+            document["embedding"] = embedding
     return _dedupe_by_key(documents, "contentUnitId")
 
 
@@ -2827,6 +2929,9 @@ def _seed_minio(
     samples_dir: Path,
     documents: list[dict[str, Any]],
     external_guidance_sources: list[dict[str, Any]] | None = None,
+    *,
+    prune_vector_objects: bool = True,
+    include_samples: bool = True,
 ) -> tuple[int, int]:
     client = _minio_client()
     try:
@@ -2839,7 +2944,11 @@ def _seed_minio(
         str(document["processedObjectUri"]).replace("minio://knowledge-root/", "")
         for document in documents
     }
-    stale_removed = _remove_stale_vector_objects(client, expected_vector_objects)
+    stale_removed = (
+        _remove_stale_vector_objects(client, expected_vector_objects)
+        if prune_vector_objects
+        else 0
+    )
 
     count = 0
     for document in documents:
@@ -2861,16 +2970,22 @@ def _seed_minio(
         client.put_object(settings.minio_bucket, object_name, data=_Bytes(data), length=len(data), content_type="application/pdf")
         count += 1
 
-    for path in samples_dir.rglob("*"):
-        if path.is_file():
-            relative_path = path.relative_to(samples_dir)
-            if relative_path.parts[0] == "source-documents":
-                object_name = str(relative_path)
-            else:
-                object_name = f"eval-data/samples/{relative_path}"
-            data = path.read_bytes()
-            client.put_object(settings.minio_bucket, object_name, data=_Bytes(data), length=len(data))
-            count += 1
+    if include_samples:
+        for path in samples_dir.rglob("*"):
+            if path.is_file():
+                relative_path = path.relative_to(samples_dir)
+                if relative_path.parts[0] == "source-documents":
+                    object_name = str(relative_path)
+                else:
+                    object_name = f"eval-data/samples/{relative_path}"
+                data = path.read_bytes()
+                client.put_object(
+                    settings.minio_bucket,
+                    object_name,
+                    data=_Bytes(data),
+                    length=len(data),
+                )
+                count += 1
     return count, stale_removed
 
 

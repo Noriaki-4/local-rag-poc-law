@@ -220,15 +220,6 @@ class DuplicatePairGraph:
                 "toArticleId": "law-act-article-27_2",
                 "toDocumentId": "law-act",
             },
-            {
-                "graphEdgeId": "edge-applied-by",
-                "edgeType": "APPLIED_BY",
-                "derivedFromEdgeId": "edge-reference-paragraph-1",
-                "fromArticleId": "law-act-article-27_2",
-                "fromDocumentId": "law-act",
-                "toArticleId": "law-order-article-7",
-                "toDocumentId": "law-order",
-            },
         ]
 
     def relation_assertions_touching(self, article_ids, **kwargs):
@@ -333,7 +324,7 @@ def test_fetch_articles_rejects_more_than_four_article_ids() -> None:
         )
 
 
-def test_graph_tool_returns_both_relation_kinds_as_navigation_only() -> None:
+def test_graph_tool_returns_selected_semantic_relation_as_navigation_only() -> None:
     graph = FakeGraph()
     execution = LegalGraphNeighborsTool(
         graph,  # type: ignore[arg-type]
@@ -343,29 +334,30 @@ def test_graph_tool_returns_both_relation_kinds_as_navigation_only() -> None:
             "legal_graph_neighbors",
             {
                 "article_ids": ["law-act-article-27_2"],
-                "edge_types": ["REFERENCES", "IMPLEMENTS"],
+                "mode": "semantic_assertion",
+                "predicate": "USES_DEFINITION",
+                "direction": "from_subject",
             },
         ),
         cycle_no=2,
         timeout_sec=10,
     )
 
-    assert graph.formal_args["article_ids"] == ["law-act-article-27_2"]
+    assert graph.formal_args == {}
     assert graph.assertion_args["article_ids"] == ["law-act-article-27_2"]
-    assert len(execution.evidence) == 2
+    assert graph.assertion_args["proposed_predicate"] == "USES_DEFINITION"
+    assert graph.assertion_args["direction"] == "from_subject"
+    assert len(execution.evidence) == 1
     assert all(
         item.metadata["citationEligible"] is False for item in execution.evidence
     )
-    assert "law-order-article-7" in execution.evidence[0].content
-    assert "law-ordinance-article-2_5" in execution.evidence[1].content
-    assert '"direction":"from_subject"' in execution.evidence[1].content
-    assert '"edgeType":"USES_DEFINITION"' in execution.evidence[1].content
+    assert "law-ordinance-article-2_5" in execution.evidence[0].content
+    assert '"direction":"from_subject"' in execution.evidence[0].content
+    assert '"edgeType":"USES_DEFINITION"' in execution.evidence[0].content
     assert "SUBJECTが使う対象株券等の範囲をOBJECTが定義する" in (
-        execution.evidence[1].content
+        execution.evidence[0].content
     )
-    assert "対象株券等とは、次に掲げるものをいう" in execution.evidence[1].content
-    assert execution.evidence[0].metadata["neighborTitle"] == "金融商品取引法施行令"
-    assert execution.evidence[0].metadata["neighborHeading"] == "第七条"
+    assert "対象株券等とは、次に掲げるものをいう" in execution.evidence[0].content
 
 
 def test_graph_tool_keeps_an_independent_relation_window_for_each_seed() -> None:
@@ -381,7 +373,8 @@ def test_graph_tool_keeps_an_independent_relation_window_for_each_seed() -> None
                     "law-act-article-27_2",
                     "law-act-article-27_3",
                 ],
-                "edge_types": ["REFERENCES"],
+                "mode": "explicit_reference",
+                "direction": "incoming",
             },
         ),
         cycle_no=2,
@@ -392,10 +385,7 @@ def test_graph_tool_keeps_an_independent_relation_window_for_each_seed() -> None
         ["law-act-article-27_2"],
         ["law-act-article-27_3"],
     ]
-    assert graph.assertion_calls == [
-        ["law-act-article-27_2"],
-        ["law-act-article-27_3"],
-    ]
+    assert graph.assertion_calls == []
     contents = [item.content for item in execution.evidence]
     assert any("law-ordinance-article-2_5" in content for content in contents)
     assert any("law-ordinance-article-10" in content for content in contents)
@@ -410,7 +400,8 @@ def test_graph_tool_collapses_duplicate_relations_into_one_article_pair() -> Non
             "legal_graph_neighbors",
             {
                 "article_ids": ["law-act-article-27_2"],
-                "edge_types": ["REFERENCES", "IMPLEMENTS", "APPLIED_BY"],
+                "mode": "explicit_reference",
+                "direction": "incoming",
             },
         ),
         cycle_no=2,
@@ -420,13 +411,45 @@ def test_graph_tool_collapses_duplicate_relations_into_one_article_pair() -> Non
     assert len(execution.evidence) == 1
     content = execution.evidence[0].content
     assert '"neighborArticleId":"law-order-article-7"' in content
-    assert content.count('"kind":"formal_relation"') == 3
-    assert content.count('"kind":"relation_assertion"') == 1
-    assert execution.evidence[0].metadata["edgeTypes"] == (
-        "REFERENCES",
-        "APPLIED_BY",
-        "IMPLEMENTS",
-    )
+    assert content.count('"kind":"formal_relation"') == 2
+    assert '"kind":"relation_assertion"' not in content
+    assert execution.evidence[0].metadata["edgeTypes"] == ("REFERENCES",)
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    (
+        {
+            "article_ids": ["law-act-article-27_2"],
+            "mode": "semantic_assertion",
+            "direction": "from_subject",
+        },
+        {
+            "article_ids": ["law-act-article-27_2"],
+            "mode": "explicit_reference",
+            "predicate": "IMPLEMENTS",
+            "direction": "incoming",
+        },
+        {
+            "article_ids": ["law-act-article-27_2"],
+            "mode": "semantic_assertion",
+            "predicate": "IMPLEMENTS",
+            "direction": "incoming",
+        },
+    ),
+)
+def test_graph_tool_rejects_mixed_or_incomplete_selector(
+    arguments: dict[str, Any],
+) -> None:
+    with pytest.raises(ValueError, match="tool arguments violate schema"):
+        LegalGraphNeighborsTool(
+            FakeGraph(),  # type: ignore[arg-type]
+            user_clearance_level=2,
+        ).execute(
+            _request("legal_graph_neighbors", arguments),
+            cycle_no=2,
+            timeout_sec=10,
+        )
 
 
 def test_graph_navigation_evidence_cannot_be_cited() -> None:
