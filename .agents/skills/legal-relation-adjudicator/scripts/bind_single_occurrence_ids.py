@@ -45,7 +45,13 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
-    packets = _load_jsonl(args.packet)
+    packet_envelopes = _load_jsonl(args.packet)
+    packets = []
+    for envelope in packet_envelopes:
+        candidate = envelope.get("originalCandidate", envelope)
+        if not isinstance(candidate, dict):
+            parser.error("originalCandidate must be an object")
+        packets.append(candidate)
     workers = _load_jsonl(args.worker)
     if len(packets) != len(workers):
         parser.error("packet and worker counts must match")

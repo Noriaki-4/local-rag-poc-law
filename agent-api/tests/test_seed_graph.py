@@ -4,9 +4,11 @@ from hashlib import sha256
 from types import SimpleNamespace
 
 from app.seed import (
+    _REFERENCE_SCOPE_BOUNDARY,
     _article_chunks,
     _docling_guidance_chunks,
     _drop_dangling_guidance_edges,
+    _element_sentence_text,
     _delegation_edges,
     _delegation_relation_assertions,
     _external_guidance_documents,
@@ -19,6 +21,7 @@ from app.seed import (
     _incorporation_edges,
     _parent_law_article_reference_ids,
     _parent_order_article_reference_ids,
+    _persisted_seed_document,
     _reference_edges,
     _remove_stale_vector_objects,
     _related_articles_for_chunk,
@@ -218,6 +221,150 @@ def test_supplementary_references_stay_in_the_same_supplement_group() -> None:
     }
 
 
+def test_named_external_act_scope_is_inherited_across_article_range() -> None:
+    documents = [
+        {**_document("7", "第七条 現行法。"), "title": "試験法"},
+        {**_document("132", "第百三十二条 現行法。"), "title": "試験法"},
+        {
+            **_document(
+                "20",
+                (
+                    "第二十条 商業登記法第二条から第五条まで、第七条から"
+                    "第十五条まで、第二十四条（第十四号を除く。）及び"
+                    "第百三十二条から第百三十七条までの"
+                    "規定を準用する。"
+                ),
+            ),
+            "title": "試験法",
+        },
+    ]
+
+    assert _reference_edges(documents) == []
+
+
+def test_long_current_law_name_scope_is_inherited_across_article_range() -> None:
+    long_title = "医薬品、医療機器等の品質、有効性及び安全性の確保等に関する法律"
+    documents = [
+        {**_document("23_2_6_2", "第二十三条の二の六の二 現行法。"), "title": long_title},
+        {
+            **_document(
+                "30",
+                (
+                    "第三十条 この法律による改正後の"
+                    f"{long_title}（以下「新法」という。）第十四条又は"
+                    "第二十三条の二の六の二の規定を適用する。"
+                ),
+            ),
+            "title": long_title,
+        },
+    ]
+
+    assert any(
+        edge["toGraphNodeId"] == "law-test-article-23_2_6_2"
+        for edge in _reference_edges(documents)
+    )
+
+
+def test_supplementary_next_article_does_not_skip_missing_article_numbers() -> None:
+    def supplementary(article: str, text: str) -> dict:
+        article_id = f"law-test-suppl-7-article-{article}"
+        return {
+            **_document(article, text),
+            "contentUnitId": article_id,
+            "articleContentUnitId": article_id,
+            "sectionKey": "suppl-7",
+            "title": "試験府令",
+        }
+
+    documents = [
+        supplementary("1", "第一条 次条において「改正法」という。"),
+        supplementary("5", "第五条 経過措置。"),
+    ]
+
+    assert _reference_edges(documents) == []
+
+
+def test_next_article_does_not_skip_a_missing_first_branch_article() -> None:
+    documents = [
+        _document("1", "第一条 次条に定める。"),
+        _document("1_3", "第一条の三 別の規定。"),
+        _document("2", "第二条 後続規定。"),
+    ]
+
+    assert not any(
+        edge["fromGraphNodeId"] == "law-test-article-1"
+        and edge["toGraphNodeId"] == "law-test-article-1_3"
+        for edge in _reference_edges(documents)
+    )
+
+
+def test_next_article_connects_consecutive_branch_articles() -> None:
+    documents = [
+        _document("1", "第一条 次条に定める。"),
+        _document("1_2", "第一条の二 次条に定める。"),
+        _document("1_3", "第一条の三 別の規定。"),
+    ]
+
+    pairs = {
+        (edge["fromGraphNodeId"], edge["toGraphNodeId"])
+        for edge in _reference_edges(documents)
+    }
+    assert ("law-test-article-1", "law-test-article-1_2") in pairs
+    assert ("law-test-article-1_2", "law-test-article-1_3") in pairs
+
+
+def test_supplementary_amending_article_reference_does_not_target_current_main() -> (
+    None
+):
+    source_id = "law-test-suppl-8-article-2"
+    documents = [
+        {**_document("1", "第一条 現行本則。"), "title": "試験規則"},
+        {
+            **_document("1", "第一条 様式を改正する。"),
+            "contentUnitId": "law-test-suppl-8-article-1",
+            "articleContentUnitId": "law-test-suppl-8-article-1",
+            "sectionKey": "suppl-8",
+            "title": "試験規則",
+        },
+        {
+            **_document(
+                "2",
+                "第二条 第一条（様式の改正規定に限る。）の規定の施行の際の経過措置を定める。",
+            ),
+            "contentUnitId": source_id,
+            "articleContentUnitId": source_id,
+            "sectionKey": "suppl-8",
+            "title": "試験規則",
+        },
+    ]
+
+    assert _reference_edges(documents) == []
+
+
+def test_egov_sentence_boundaries_are_graph_only_metadata() -> None:
+    item = ET.fromstring(
+        """
+        <Item>
+          <Subitem2><Subitem2Sentence><Sentence>法第四十条の五第二項</Sentence></Subitem2Sentence></Subitem2>
+          <Subitem2><Subitem2Sentence><Sentence>第七十九条第一項第一号</Sentence></Subitem2Sentence></Subitem2>
+        </Item>
+        """
+    )
+
+    text = _element_sentence_text(item)
+    reference_text = _element_sentence_text(
+        item, sentence_separator=_REFERENCE_SCOPE_BOUNDARY
+    )
+
+    assert text == "法第四十条の五第二項第七十九条第一項第一号"
+    assert reference_text == (
+        f"法第四十条の五第二項{_REFERENCE_SCOPE_BOUNDARY}第七十九条第一項第一号"
+    )
+    assert "_referenceText" not in _persisted_seed_document(
+        {"text": text, "_referenceText": reference_text}
+    )
+
+
 def test_supplementary_amending_law_articles_do_not_connect_to_current_main() -> (
     None
 ):
@@ -372,6 +519,44 @@ def test_historical_revision_reference_does_not_connect_to_current_article() -> 
     assert matching_edges[0]["sourceSpanStarts"] == [
         documents[2]["text"].rfind("第十一条")
     ]
+
+
+def test_old_named_law_reference_does_not_connect_to_current_article() -> None:
+    source_id = "law-test-suppl-10-article-2"
+    documents = [
+        {**_document("12", "第十二条 現行規定。"), "title": "試験法"},
+        {
+            **_document("2", "第二条 旧試験法第十二条の申請を処理する。"),
+            "contentUnitId": source_id,
+            "articleContentUnitId": source_id,
+            "sectionKey": "suppl-10",
+            "title": "試験法",
+            "heading": "附則 第二条（経過措置）",
+        },
+    ]
+
+    assert _reference_edges(documents) == []
+
+
+def test_long_pre_amendment_law_name_does_not_connect_to_current_article() -> None:
+    title = "医薬品、医療機器等の品質、有効性及び安全性の確保等に関する法律"
+    source_id = "law-test-suppl-11-article-4"
+    documents = [
+        {**_document("23_6", "第二十三条の六 現行規定。"), "title": title},
+        {
+            **_document(
+                "4",
+                f"第四条 第五条の規定による改正前の{title}第二十三条の六を適用する。",
+            ),
+            "contentUnitId": source_id,
+            "articleContentUnitId": source_id,
+            "sectionKey": "suppl-11",
+            "title": title,
+            "heading": "附則 第四条（経過措置）",
+        },
+    ]
+
+    assert _reference_edges(documents) == []
 
 
 def test_named_authority_scope_does_not_cross_a_flattened_table_cell() -> None:
@@ -535,6 +720,30 @@ def test_delegation_edges_do_not_resolve_other_laws_douhou_as_parent_law():
             "7",
             "会社法第百七十九条第二項に規定する請求に併せて、"
             "同法第百七十九条第三項の請求をする。",
+        ),
+        "documentId": "law-order",
+        "contentUnitId": "law-order-article-7",
+        "title": "金融商品取引法施行令",
+    }
+
+    edges = _delegation_edges(
+        [parent, subordinate],
+        {"law-test": "law-test", "law-order": "law-test"},
+    )
+
+    assert edges == []
+
+
+def test_delegation_edges_do_not_resolve_long_other_law_douhou_as_parent_law():
+    parent = {
+        **_document("58", "第五十八条 親法律の規定。"),
+        "title": "金融商品取引法",
+    }
+    subordinate = {
+        **_document(
+            "7",
+            "社債、株式等の振替に関する法律第二条第五項に規定する機関の"
+            "誤記載等（同法第五十八条に規定する誤記載等をいう。）を扱う。",
         ),
         "documentId": "law-order",
         "contentUnitId": "law-order-article-7",

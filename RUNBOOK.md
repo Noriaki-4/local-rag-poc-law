@@ -259,6 +259,48 @@ python3 scripts/shard_relation_adjudication_packet.py \
   --reasoning-effort high
 ```
 
+全件のCodex subscription sessionは、再開可能queueから起動する。既定では計画だけを表示し、
+`--execute`を付けた場合だけLuna sessionを開始する。`--apply`は承認済みshardをbuilding Runへ
+checkpoint保存するが、publishは行わない。最初は`--max-shards`で小さく通し、安定後だけ
+`--all-shards`を明示する。
+
+```bash
+# 次の3 shardを確認するだけ
+python3 scripts/run_relation_adjudication_codex_queue.py \
+  --run-root eval-results/relation-full-v22-pair-v7 \
+  --run-id classification-run-... \
+  --max-shards 3
+
+# 次の3 shardを最大3 sessionで処理し、checkpoint保存する
+python3 scripts/run_relation_adjudication_codex_queue.py \
+  --run-root eval-results/relation-full-v22-pair-v7 \
+  --run-id classification-run-... \
+  --max-shards 3 \
+  --max-active-sessions 3 \
+  --execute --apply
+
+# 残り全shardを同じRunで再開する
+python3 scripts/run_relation_adjudication_codex_queue.py \
+  --run-root eval-results/relation-full-v22-pair-v7 \
+  --run-id classification-run-... \
+  --all-shards \
+  --max-active-sessions 3 \
+  --max-consecutive-failures 3 \
+  --execute --apply
+```
+
+queueはskill、分類契約、対象shardを1回のpromptへ展開し、Lunaには外部toolを使わせず、
+strict structured outputだけを返させる。これは意味判断をProgramへ移す変更ではない。
+Programは回答をJSONLへ保存し、既知ID、件数、enum、条件代数を既存binder / Pydantic契約で検証する。
+WorkerとReviewerは別の新規sessionであり、thread IDを`orchestration/state.json`へ保存する。
+意味差戻し時は同じWorkerを1回だけresumeし、同じReviewerが最終差分確認する。
+
+未知ID、候補件数、occurrence hash、5 predicate網羅等でWorker JSONが機械契約を通らない場合は
+同じWorkerへ、Review JSONが通らない場合は同じReviewerへ検証エラーを返し、完全なrecordを
+それぞれ1回だけ再出力させる。これは意味差戻し回数を増やす処理ではなく、ProgramがIDや意味を
+推測・置換しないための契約修復である。連続3 shardが失敗した場合はqueueを止め、
+残りを未着手のまま保持する。成果物があるshardとimport済みcheckpointは再利用される。
+
 どちらも既存成果物を上書きしない。中断後はWorkerの承認済みJSONLを
 `--completed-jsonl`でexportへ渡し、同じ候補集合の完了済みkeyだけを除外する。
 別snapshotや別modelのkeyが混じった場合は再開とせず失敗する。

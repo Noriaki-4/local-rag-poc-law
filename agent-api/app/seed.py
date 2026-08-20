@@ -46,6 +46,8 @@ SUPPLEMENTARY_CHAIN_BRIDGE_PATTERN = re.compile(
 )
 ARTICLE_LIST_CHAIN_BRIDGE_PATTERN = re.compile(
     r"(?:\s|、|，|,|及び|並びに|又は|若しくは|から|まで|ないし|乃至|"
+    r"(?:第)?[一二三四五六七八九十百千〇零\d]+条"
+    r"(?:の[一二三四五六七八九十百千〇零\d]+)*|"
     r"(?:第)?[一二三四五六七八九十百千〇零\d]+(?:項|号))*"
 )
 PARENTHETICAL_TEXT_PATTERN = re.compile(r"（[^（）]*）")
@@ -76,6 +78,9 @@ JAPANESE_UNITS = {"十": 10, "百": 100, "千": 1000}
 FULLWIDTH_DIGITS = str.maketrans("０１２３４５６７８９", "0123456789")
 # 号チャンクに前置する柱書きの上限文字数。EMBEDDING_MAX_CHARS(既定1000)の中で号本文の場所を残す。
 _ITEM_INTRO_MAX_CHARS = 300
+# Graph参照scopeの解析だけに使うe-Gov Sentence境界。OpenSearch本文・hash・
+# 監査offsetには保存しない。
+_REFERENCE_SCOPE_BOUNDARY = "\x1e"
 # ガイドラインPDF内「(法第N条(のM)第P項第K号関係)」形式の条文参照を抽出するためのパターン。
 RELATION_PAREN_PATTERN = re.compile(r"[（(]([^（）()]{0,80}関係)[）)]")
 # 括弧内が「法」等の自己参照トークンで始まる場合のみ抽出対象にする(他法令名は v1 対象外)。
@@ -143,8 +148,9 @@ def seed_all(os_client: OpenSearchClient, graph_client: GraphClient) -> dict[str
     if not audit.ok:
         raise ValueError(f"Graph audit failed before seed: {audit.violations}")
 
+    persisted_documents = [_persisted_seed_document(document) for document in documents]
     os_client.recreate_index(mapping)
-    for document in documents:
+    for document in persisted_documents:
         os_client.index_document(document)
     os_client.refresh()
     graph_client.clear()
@@ -154,7 +160,7 @@ def seed_all(os_client: OpenSearchClient, graph_client: GraphClient) -> dict[str
 
     minio_count, minio_stale_removed = _seed_minio(
         samples_dir,
-        documents,
+        persisted_documents,
         external_guidance_sources,
     )
 
@@ -182,6 +188,8 @@ def seed_all(os_client: OpenSearchClient, graph_client: GraphClient) -> dict[str
 
 _SEED_IDENTITY_FIELDS = frozenset(
     {
+        "_referenceText",
+        "_authorityAliases",
         "embedding",
         "contentHash",
         "articleContentHash",
@@ -191,6 +199,12 @@ _SEED_IDENTITY_FIELDS = frozenset(
         "graphSchemaVersion",
     }
 )
+
+
+def _persisted_seed_document(document: dict[str, Any]) -> dict[str, Any]:
+    """Graph抽出専用の内部表現をOpenSearch/MinIOへ保存しない。"""
+
+    return {key: value for key, value in document.items() if not key.startswith("_")}
 
 
 def _with_seed_identity(
@@ -942,6 +956,7 @@ def _egov_law_documents_from_xml(
             section_key="main",
             authority_type=authority.authority_type,
             authority_source=authority.authority_source,
+            authority_aliases=tuple(entry.get("aliases") or ()),
         )
     )
     # 範囲指定時は該当法令の一部条文だけが目的のため、附則（別条番号体系の経過措置等）は対象外にする。
@@ -960,6 +975,7 @@ def _egov_law_documents_from_xml(
                     section_label=_suppl_label(suppl),
                     authority_type=authority.authority_type,
                     authority_source=authority.authority_source,
+                    authority_aliases=tuple(entry.get("aliases") or ()),
                 )
             )
     return documents
@@ -1006,6 +1022,7 @@ def _section_documents(
     section_label: str | None = None,
     authority_type: str | None = None,
     authority_source: str | None = None,
+    authority_aliases: tuple[str, ...] = (),
 ) -> list[dict[str, Any]]:
     documents: list[dict[str, Any]] = []
     for article in articles:
@@ -1042,6 +1059,7 @@ def _section_documents(
             "lawNum": law_num,
             "authorityType": authority_type,
             "authoritySource": authority_source,
+            "_authorityAliases": authority_aliases,
         }
         for chunk in _article_chunks(article, article_content_unit_id, heading, caption):
             content_unit_id = chunk["contentUnitId"]
@@ -1065,6 +1083,9 @@ def _article_chunks(
 ) -> list[dict[str, Any]]:
     full_heading = f"{heading} {caption or ''}".strip()
     full_text = _article_text(article)
+    full_reference_text = _article_text(
+        article, sentence_separator=_REFERENCE_SCOPE_BOUNDARY
+    )
     paragraphs = article.findall("Paragraph")
     if len(paragraphs) <= 1 and len(full_text) <= settings.embedding_max_chars:
         return [
@@ -1076,6 +1097,7 @@ def _article_chunks(
                 "paragraphNumber": None,
                 "itemNumber": None,
                 "text": full_text,
+                "_referenceText": full_reference_text,
                 "chunkStrategy": "law_article_v2",
             }
         ]
@@ -1086,9 +1108,15 @@ def _article_chunks(
         paragraph_num = _japanese_number_to_int(paragraph_num_text) or paragraph_index
         paragraph_id = f"{article_content_unit_id}-paragraph-{paragraph_num}"
         paragraph_text = _paragraph_text(paragraph)
+        paragraph_reference_text = _paragraph_text(
+            paragraph, sentence_separator=_REFERENCE_SCOPE_BOUNDARY
+        )
         items = paragraph.findall("Item")
         if items and len(paragraph_text) > settings.embedding_max_chars:
             intro_text = _direct_sentence_text(paragraph)
+            intro_reference_text = _direct_sentence_text(
+                paragraph, sentence_separator=_REFERENCE_SCOPE_BOUNDARY
+            )
             if intro_text:
                 chunks.append(
                     {
@@ -1099,17 +1127,24 @@ def _article_chunks(
                         "paragraphNumber": paragraph_num,
                         "itemNumber": None,
                         "text": f"{paragraph_num}{intro_text}",
+                        "_referenceText": f"{paragraph_num}{intro_reference_text}",
                         "chunkStrategy": "law_article_paragraph_item_split_v2",
                     }
                 )
             # 号は「国債証券」のような短い列挙になりがちで、単体では検索文脈を失う。
             # 親項の柱書き(導入文)を前置して意味的な検索可能性を回復する。
             item_prefix = intro_text[:_ITEM_INTRO_MAX_CHARS]
+            item_reference_prefix = _truncate_reference_text(
+                intro_reference_text, _ITEM_INTRO_MAX_CHARS
+            )
             for item_index, item in enumerate(items, start=1):
                 item_num_text = (item.get("Num") or item.findtext("ItemTitle") or str(item_index)).strip()
                 # 枝番の号（例: '2_2' = 第二号の二）は int 化すると隣の号と衝突するため接尾辞のまま使う。
                 item_suffix = _num_suffix(item_num_text, item_index)
                 item_text = _element_sentence_text(item)
+                item_reference_text = _element_sentence_text(
+                    item, sentence_separator=_REFERENCE_SCOPE_BOUNDARY
+                )
                 if not item_text:
                     continue
                 item_label = f"第{item_suffix.replace('_', 'の')}号"
@@ -1122,6 +1157,11 @@ def _article_chunks(
                         "paragraphNumber": paragraph_num,
                         "itemNumber": _int_or_none(item_suffix.split("_")[0]),
                         "text": f"{item_prefix}\n{item_label}　{item_text}" if item_prefix else item_text,
+                        "_referenceText": (
+                            f"{item_reference_prefix}\n{item_label}　{item_reference_text}"
+                            if item_reference_prefix
+                            else item_reference_text
+                        ),
                         "chunkStrategy": "law_article_paragraph_item_split_v2",
                     }
                 )
@@ -1135,6 +1175,7 @@ def _article_chunks(
                     "paragraphNumber": paragraph_num,
                     "itemNumber": None,
                     "text": paragraph_text,
+                    "_referenceText": paragraph_reference_text,
                     "chunkStrategy": "law_article_paragraph_split_v2",
                 }
             )
@@ -1147,12 +1188,13 @@ def _article_chunks(
             "paragraphNumber": None,
             "itemNumber": None,
             "text": full_text,
+            "_referenceText": full_reference_text,
             "chunkStrategy": "law_article_v2",
         }
     ]
 
 
-def _article_text(article: ET.Element) -> str:
+def _article_text(article: ET.Element, *, sentence_separator: str = "") -> str:
     parts = []
     caption = article.findtext("ArticleCaption")
     title = article.findtext("ArticleTitle")
@@ -1170,27 +1212,47 @@ def _article_text(article: ET.Element) -> str:
         if not sentences:
             continue
         prefix = paragraph_num.strip() if paragraph_num and paragraph_num.strip() else ""
-        paragraph_text = "".join(sentences)
+        paragraph_text = sentence_separator.join(sentences)
         parts.append(f"{prefix}{paragraph_text}")
     return "\n".join(parts).strip()
 
 
-def _paragraph_text(paragraph: ET.Element) -> str:
+def _paragraph_text(paragraph: ET.Element, *, sentence_separator: str = "") -> str:
     paragraph_num = (paragraph.findtext("ParagraphNum") or "").strip()
-    text = _element_sentence_text(paragraph)
+    text = _element_sentence_text(paragraph, sentence_separator=sentence_separator)
     return f"{paragraph_num}{text}".strip()
 
 
-def _direct_sentence_text(paragraph: ET.Element) -> str:
+def _direct_sentence_text(
+    paragraph: ET.Element, *, sentence_separator: str = ""
+) -> str:
     sentences = paragraph.findall("./ParagraphSentence//Sentence")
-    return "".join("".join(sentence.itertext()).strip() for sentence in sentences)
+    return sentence_separator.join(
+        "".join(sentence.itertext()).strip() for sentence in sentences
+    )
 
 
-def _element_sentence_text(element: ET.Element) -> str:
-    return "".join(
+def _element_sentence_text(
+    element: ET.Element, *, sentence_separator: str = ""
+) -> str:
+    return sentence_separator.join(
         "".join(sentence.itertext()).strip()
         for sentence in element.iter("Sentence")
     )
+
+
+def _truncate_reference_text(value: str, max_text_chars: int) -> str:
+    """scope境界を文字数に数えず、保存本文と同じ位置で内部表現を切る。"""
+
+    result: list[str] = []
+    text_chars = 0
+    for character in value:
+        if character != _REFERENCE_SCOPE_BOUNDARY:
+            if text_chars >= max_text_chars:
+                break
+            text_chars += 1
+        result.append(character)
+    return "".join(result)
 
 
 def _article_num_from_title(title: str | None) -> str | None:
@@ -1655,14 +1717,15 @@ def _reference_edges(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
             source_article_id = document.get("articleContentUnitId") or document.get("parentContentUnitId") or source_id
             ids = section_article_ids[section_key]
             index = section_index[section_key][source_article_id]
-            raw_text = str(document.get("text") or "")
+            raw_text = str(document.get("_referenceText") or document.get("text") or "")
             parent = documents_by_id.get(str(document.get("parentContentUnitId") or ""))
             if parent is None:
                 text = raw_text
                 source_offset = 0
             else:
                 text, source_offset = without_repeated_parent_context_with_offset(
-                    raw_text, str(parent.get("text") or "").strip()
+                    raw_text,
+                    str(parent.get("_referenceText") or parent.get("text") or "").strip(),
                 )
             occurrences_by_target: dict[
                 str, list[tuple[str, int, int, str]]
@@ -1674,8 +1737,15 @@ def _reference_edges(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 heading=str(document.get("heading") or ""),
                 section_key=str(section_key),
                 source_article_id=str(source_article_id),
-                current_revision_aliases=current_revision_aliases_by_article.get(
-                    str(source_article_id), ()
+                current_revision_aliases=tuple(
+                    dict.fromkeys(
+                        (
+                            *(document.get("_authorityAliases") or ()),
+                            *current_revision_aliases_by_article.get(
+                                str(source_article_id), ()
+                            ),
+                        )
+                    )
                 ),
                 text=text,
                 main_article_ids=main_article_ids,
@@ -1687,29 +1757,45 @@ def _reference_edges(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 occurrences_by_target.setdefault(target_id, []).append(
                     (
                         citation,
-                        start + source_offset,
-                        end + source_offset,
+                        _reference_offset_to_text(raw_text, start + source_offset),
+                        _reference_offset_to_text(raw_text, end + source_offset),
                         method,
                     )
                 )
-            if "前条" in text and index > 0:
+            if (
+                "前条" in text
+                and index > 0
+                and _relative_articles_are_adjacent(
+                    source_article_id, ids[index - 1]
+                )
+            ):
                 target_id = ids[index - 1]
                 occurrences_by_target.setdefault(target_id, []).extend(
                     (
                         "前条",
-                        match.start() + source_offset,
-                        match.end() + source_offset,
+                        _reference_offset_to_text(
+                            raw_text, match.start() + source_offset
+                        ),
+                        _reference_offset_to_text(raw_text, match.end() + source_offset),
                         "previous_article",
                     )
                     for match in re.finditer("前条", text)
                 )
-            if "次条" in text and index + 1 < len(ids):
+            if (
+                "次条" in text
+                and index + 1 < len(ids)
+                and _relative_articles_are_adjacent(
+                    source_article_id, ids[index + 1]
+                )
+            ):
                 target_id = ids[index + 1]
                 occurrences_by_target.setdefault(target_id, []).extend(
                     (
                         "次条",
-                        match.start() + source_offset,
-                        match.end() + source_offset,
+                        _reference_offset_to_text(
+                            raw_text, match.start() + source_offset
+                        ),
+                        _reference_offset_to_text(raw_text, match.end() + source_offset),
                         "next_article",
                     )
                     for match in re.finditer("次条", text)
@@ -1741,6 +1827,12 @@ def _reference_edges(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     }
                 )
     return edges
+
+
+def _reference_offset_to_text(reference_text: str, offset: int) -> int:
+    """内部scope境界を除いた、保存本文上のoffsetへ戻す。"""
+
+    return offset - reference_text[:offset].count(_REFERENCE_SCOPE_BOUNDARY)
 
 
 def _same_document_reference_occurrences(
@@ -1836,6 +1928,11 @@ def _same_document_reference_occurrences(
             )
             continue
 
+        if _reference_uses_unavailable_amending_instrument_scope(text, match):
+            # e-Govの統合本文に改正法本則のArticle nodeはない。同番号の現行本則・
+            # 附則Articleへ推測接続せず、構造監査でunresolvedとして扱う。
+            continue
+
         if _reference_uses_external_authority_scope(
             text,
             match,
@@ -1867,6 +1964,57 @@ def _same_document_reference_occurrences(
             )
         )
     return occurrences
+
+
+def _relative_articles_are_adjacent(source_id: str, target_id: str) -> bool:
+    """前条・次条を、番号体系上隣接しない「次に存在するNode」へ接続しない。"""
+
+    def parts(value: str) -> tuple[int, ...] | None:
+        suffix = value.rsplit("-article-", 1)[-1]
+        if not re.fullmatch(r"\d+(?:_\d+)*", suffix):
+            return None
+        return tuple(int(item) for item in suffix.split("_"))
+
+    source = parts(source_id)
+    target = parts(target_id)
+    if source is None or target is None or source == target:
+        return False
+    # section内の直前・直後Nodeであることは呼出側で保証される。ただし同じ基本
+    # 条番号なら、基本条→最初の枝番又は連続する枝番だけを隣接とする。
+    if source[0] == target[0]:
+        if len(source) == 1 or len(target) == 1:
+            branch = target if len(source) == 1 else source
+            return len(branch) == 2 and branch[1] == 2
+        return (
+            len(source) == len(target)
+            and source[:-1] == target[:-1]
+            and abs(source[-1] - target[-1]) == 1
+        )
+    return abs(source[0] - target[0]) == 1
+
+
+def _reference_uses_unavailable_amending_instrument_scope(
+    text: str, match: re.Match[str]
+) -> bool:
+    """改正法本則の条番号を、統合後法令の同番号Articleと区別する。"""
+
+    depths = _parenthesis_depths(text)
+    sentence_end = next(
+        (
+            index
+            for index in range(match.end(), len(text))
+            if text[index]
+            in {"。", "\n", "；", _REFERENCE_SCOPE_BOUNDARY}
+            and depths[index] == 0
+        ),
+        len(text),
+    )
+    suffix = text[match.end() : min(sentence_end, match.end() + 240)]
+    return bool(
+        re.match(r"(?:の規定)?（[^（）]{0,200}改正規定[^（）]{0,200}）", suffix)
+        or re.match(r"(?:の規定)?による改正(?:前|後)", suffix)
+        or re.match(r"中[^。；\n]{0,200}改正規定", suffix)
+    )
 
 
 def _current_revision_aliases(text: str) -> tuple[str, ...]:
@@ -1966,21 +2114,36 @@ def _reference_uses_external_authority_scope(
     anchor = _nearest_named_authority_anchor(text, match)
     if anchor is not None:
         title = anchor.group("title")
-        if _named_authority_has_historical_revision_modifier(
-            text,
-            max(
-                text.rfind(delimiter, 0, match.start())
-                for delimiter in ("。", "\n", "；")
-            )
-            + 1
-            + anchor.start(),
-            authority_title=title,
-        ):
-            return True
         current_titles = tuple(
             item for item in (document_title, *current_revision_aliases) if item
         )
-        return not any(title.endswith(item) for item in current_titles)
+        sentence_start = _top_level_sentence_start(text, match.start())
+        authority_start = sentence_start + 1 + anchor.start()
+        authority_end = sentence_start + 1 + anchor.end()
+        historical_title = title
+        for current_title in current_titles:
+            full_title_start = text.rfind(
+                current_title,
+                sentence_start + 1,
+                match.start(),
+            )
+            if (
+                full_title_start >= 0
+                and full_title_start + len(current_title) == authority_end
+            ):
+                authority_start = full_title_start
+                historical_title = current_title
+                break
+        if _named_authority_has_historical_revision_modifier(
+            text,
+            authority_start,
+            authority_title=historical_title,
+            current_authority_titles=current_titles,
+        ):
+            return True
+        return not any(
+            _authority_titles_match(title, item) for item in current_titles
+        )
     if authority_type != AUTHORITY_ACT and any(
         inherited.start() == match.start()
         for inherited, _ in _prefixed_scope_matches(text, PARENT_LAW_ARTICLE_PATTERN)
@@ -2007,7 +2170,26 @@ def _reference_uses_current_named_authority_scope(
     current_titles = tuple(
         item for item in (document_title, *current_revision_aliases) if item
     )
-    return bool(title and any(title.endswith(item) for item in current_titles))
+    return bool(
+        title
+        and any(_authority_titles_match(title, item) for item in current_titles)
+    )
+
+
+def _authority_titles_match(observed: str, known: str) -> bool:
+    """長い法令名がregex上限で前方欠落しても、十分長い共通suffixなら同一と扱う。"""
+
+    observed_value = "".join(observed.split())
+    known_value = "".join(known.split())
+    if observed_value == known_value:
+        return True
+    return bool(
+        min(len(observed_value), len(known_value)) >= 4
+        and (
+            observed_value.endswith(known_value)
+            or known_value.endswith(observed_value)
+        )
+    )
 
 
 def _nearest_named_authority_title(
@@ -2022,9 +2204,7 @@ def _nearest_named_authority_anchor(
     text: str,
     match: re.Match[str],
 ) -> re.Match[str] | None:
-    sentence_start = max(
-        text.rfind(delimiter, 0, match.start()) for delimiter in ("。", "\n", "；")
-    )
+    sentence_start = _top_level_sentence_start(text, match.start())
     prefix = text[sentence_start + 1 : match.start()]
     direct_anchor = DIRECT_NAMED_AUTHORITY_PATTERN.search(prefix)
     if direct_anchor is not None:
@@ -2042,18 +2222,43 @@ def _nearest_named_authority_anchor(
     return None
 
 
+def _top_level_sentence_start(text: str, position: int) -> int:
+    """括弧内の句点を文境界として扱わず、直前のtop-level境界を返す。"""
+
+    depths = _parenthesis_depths(text)
+    return max(
+        (
+            index
+            for index, character in enumerate(text[:position])
+            if character
+            in {"。", "\n", "；", _REFERENCE_SCOPE_BOUNDARY}
+            and depths[index] == 0
+        ),
+        default=-1,
+    )
+
+
 def _named_authority_has_historical_revision_modifier(
     text: str,
     authority_start: int,
     *,
     authority_title: str = "",
+    current_authority_titles: tuple[str, ...] = (),
 ) -> bool:
     """明示法令名が「改正前の」で修飾される場合は現行Articleへ接続しない。"""
 
     if authority_title.startswith(("改正前の", "改正前における")):
         return True
+    if authority_title.startswith("旧"):
+        without_old = authority_title.removeprefix("旧")
+        if not current_authority_titles or any(
+            _authority_titles_match(without_old, current)
+            and not _authority_titles_match(authority_title, current)
+            for current in current_authority_titles
+        ):
+            return True
     prefix = text[max(0, authority_start - 12) : authority_start].rstrip()
-    return prefix.endswith(("改正前の", "改正前における"))
+    return prefix.endswith(("旧", "改正前の", "改正前における"))
 
 
 def _incorporation_edges(
@@ -2474,6 +2679,8 @@ def _prefixed_scope_matches(
 
 
 def _is_article_list_chain_bridge(value: str) -> bool:
+    if _REFERENCE_SCOPE_BOUNDARY in value:
+        return False
     without_parentheticals = value
     while True:
         reduced = PARENTHETICAL_TEXT_PATTERN.sub("", without_parentheticals)
@@ -2507,9 +2714,7 @@ def _relative_reference_targets_expected_authority(
     if not matched.startswith(("同法", "同令")):
         return True
 
-    sentence_start = max(
-        text.rfind(delimiter, 0, match.start()) for delimiter in ("。", "\n", "；")
-    )
+    sentence_start = _top_level_sentence_start(text, match.start())
     prefix = text[sentence_start + 1 : match.start()]
     anchors: list[tuple[int, bool]] = []
     standalone_pattern = (
@@ -2531,7 +2736,10 @@ def _relative_reference_targets_expected_authority(
     # 会社法). Treat such an explicit title as a non-parent anchor. Ambiguous
     # relative tokens never become a confirmed REFERENCES edge.
     suffix = "(?:法律|法)" if matched.startswith("同法") else "(?:政令|令)"
-    named_pattern = re.compile(rf"(?<![一-鿏])([一-鿏々]{{1,50}}{suffix})第")
+    named_pattern = re.compile(
+        rf"(?<![一-鿏ぁ-んァ-ヶー・、])"
+        rf"([一-鿏々ぁ-んァ-ヶー・、]{{1,100}}{suffix})第"
+    )
     for item in named_pattern.finditer(prefix):
         anchors.append(
             (

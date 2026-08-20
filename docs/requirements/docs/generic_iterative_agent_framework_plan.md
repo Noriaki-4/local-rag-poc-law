@@ -1,6 +1,6 @@
 # シンプルな汎用反復型エージェント基盤 実装計画
 
-> 更新日: 2026-08-19
+> 更新日: 2026-08-20
 >
 > 本書を新しい実装ロードマップの正本とする。
 > 人間向けの概念図と処理イメージは、対になる
@@ -9,7 +9,7 @@
 > 過去の実装計画やProfile変更履歴は本書へ残さない。現在のコードから目標仕様へ移すために
 > 必要な差分、実装順、完了条件だけを記載する。
 
-## 実装状況（2026-08-19）
+## 実装状況（2026-08-20）
 
 この節は変更履歴ではなく、12章の完了条件に対する差分だけを示す。個別のProfile version、
 不具合修正、実測結果はGit履歴、[RUNBOOK](../../../RUNBOOK.md)、
@@ -19,7 +19,7 @@
 |---|---|---|
 | Phase 0 | 一部完了 | 代表2問の現行baseline、説明付きstatus契約、生成schema・Prompt用語集のfixture |
 | Phase 1 | 一部実装 | `CycleRecord / StepRecord`、discriminator付きCommand、型付きstatusと遷移の一元化、再開契約 |
-| Phase 2 | 実index再構築・Articleペアexport・検証import・Gate 6差分評価まで実装 | Gate 6の運用計測、全件Run、Hypothesis別selector、旧自動Graph経路の撤去 |
+| Phase 2 | 実index再構築・Articleペアexport・検証import・Gate 6差分評価を完了。全件Runは中間構造監査のためbuilding状態で停止中 | 参照scope差分監査、全件Run再開・監査・publish、Hypothesis別selector、旧自動Graph経路の撤去 |
 | Phase 3 | 未評価 | 新契約に基づくtrace、再開、入力増加、latencyの完了条件 |
 | Phase 4 | 未完了 | 新経路による代表2問の合格、既定経路切替、旧試作の撤去 |
 
@@ -67,6 +67,16 @@
   分類skillの正本はリポジトリ内の`.agents/skills/legal-relation-adjudicator`へ移し、
   コード・契約・補助スクリプトを同じrevisionで管理する。ユーザー共通skillを正本にしない。
   判定JSONLはReviewer承認証跡付きで`ClassificationRun`へ取り込む検証importを実装済みである。
+  Codex subscription sessionを最大3並列で起動する再開可能queueも実装済みである。queueはskill、契約、
+  対象shardを1回の入力へ展開し、Lunaのstrict structured outputを保存する。Programは意味を補正せず、
+  既知ID・件数・enum・条件代数だけを検証する。Worker / Reviewerのthread IDを保持し、意味差戻しは
+  元Workerへ1回、最終差分確認は元Reviewerへ戻す。未知ID等の出力契約違反はProgramで置換せず、
+  同じAgentへ機械エラーを返す契約修復を1回だけ許可する。
+  全件Runは1,615 checkpoint時点の中間監査で、e-Gov `Sentence`境界を失った参照scope漏れと、
+  改正法本則を同番号の統合後Articleへ接続する構造不備を確認したため停止中である。
+  修正はOpenSearch本文・content hash・snapshotを変えず、Graph抽出専用の構造境界を保持する。
+  Worker契約違反も同じWorker sessionへ1回だけ返して完全recordを再出力させ、Programでは補正しない。
+  Neo4j、OpenSearch、承認済み成果物へはまだ反映していない。
   詳しい比較結果と運用手順は[RUNBOOK](../../../RUNBOOK.md)を正とする。
 - 旧`legal-relation-classifier-v8`は、schema version 7の旧`IMPLEMENTS`候補を
   `implements / reference_only / uncertain`へ分類する移行用機能である。
@@ -1512,6 +1522,13 @@ WorkerとReviewerの双方へ明示し、同じClassificationRun内では変更�
 根拠span、構造適合性を一度に照合する品質条件として固定する。別の推論深度を比較する場合は別Run・
 別manifestを作り、代表100件の品質ゲートを再実行する。Coordinatorは推論深度を判定結果から推測せず、
 session起動設定とmanifestの一致だけを検証する。
+
+全件queueは、skill・契約・対象shardを各sessionの最初の入力へ展開し、外部toolを使わないstrict
+structured outputとしてWorker / Reviewer recordを受け取る。これはLunaの意味判断をProgramへ移すものではなく、
+Codex tool transcriptの反復再送を避ける運用上の最適化である。Programは返されたrecordをそのままJSONL化し、
+既存binderとPydantic契約で検証する。入力にないspan等が返った場合はProgramが類似IDへ修正せず、同じAgentへ
+検証エラーを返して完全なrecordを1回だけ再出力させる。この契約修復は意味差戻しの`max_revision_rounds`へ
+加算しないが、堂々巡りを避けるため同じ段階で1回を上限とする。
 
 現行コードのOllama Profileは比較・契約試験用として残る。Gemmaは手動監査14件で5 predicate完全一致が
 4/14だったため、全件Runのpublishには使用しない。Luna方式は既存14件で14/14、新規20件で最終20/20を

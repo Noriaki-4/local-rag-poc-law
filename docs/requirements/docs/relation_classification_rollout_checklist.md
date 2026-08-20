@@ -33,10 +33,18 @@
 - [x] 正しい候補がcatalogにない参照は`unresolved`として除外する
 - [x] 代表94件の構造評価が`94/94`になった
 - [x] 直近20件比較で見つかった誤った教師targetを正本fixtureで修正した
+- [x] OpenSearch本文・content hashを変えず、e-Gov `Sentence`境界をGraph参照scope解析だけに保持する実装と回帰テストを追加した
+- [x] 改正法本則がcatalogにない参照を、同番号の現行本則・附則へ推測接続しない実装にした
+- [ ] 修正後の全`REFERENCES`差分と、処理済み候補への影響を全件監査した
 
 2026-08-19に保存済みe-Gov XML snapshot（14法令、16,949 Content Unit）からshadow構築し、
 正解73組を全て保持し、`not_reference / unresolved`の21組を全て除外したことを確認した。
 Gate 5でOpenSearch / Neo4jを実際に再構築した後、同じ`94/94`を再確認する。
+
+2026-08-20のGate 7中間監査では、1,596件の承認済み成果物中119件が
+`needs_resolution`であり、附則・改正法・外部法令scopeの誤接続を実例で確認した。
+保存済みXMLから作るshadow Graphで修正を検証中であり、Neo4j、OpenSearch、承認済み成果物は
+まだ変更していない。この差分監査が終わるまでGate 1を再び未合格とし、全件Runを再開しない。
 
 合格条件: 意味分類へ渡す全候補が、構造的に検証済みのArticleペアである。
 
@@ -69,6 +77,13 @@ Gate 5の再構築後にlive indexの実成果物でhashを再確認する。
 - [x] revisionは同じcandidate keyの完全な置換recordである
 - [x] final Reviewで再度`request_change`なら`unresolved`へ分離し、2回目の差戻しを行わない
 - [x] 単件、5件、候補順入替えで候補別判断・ID対応が変わらないfixtureが通る
+- [x] Lunaへskill・契約・shardを1回で渡し、tool transcriptの再送なしでstrict structured outputを取得するqueueを用意した
+- [x] Worker / Reviewerのthread IDを保存し、意味差戻しは元sessionを1回だけresumeする
+- [x] 未知ID等の機械契約違反はProgramで補正せず、同じAgentへ1回だけ契約修復を要求する
+
+契約修復はWorkerとReviewerの双方に適用する。Workerの候補key、occurrence hash、端点、件数、
+5 predicate網羅が不正な場合も、同じWorker sessionへ機械エラーを1回だけ返す。これは意味差戻しの
+1回には数えず、ProgramはIDや意味を生成・置換しない。
 
 `prepare_adjudication_revisions`と`merge_once_revised_adjudications`はReviewerの状態に従って
 成果物を振り分けるだけで、predicate、condition、finding、方向、根拠を修正しない。
@@ -191,15 +206,16 @@ final Review後のworkflow `unresolved`は「差戻し1回後もReviewerが承�
 ### Gate 6追加回帰（2026-08-20、pair-v7）
 
 読替適用、不適用、置換を伴わない直接適用の3境界を、goldを除去した新規Luna Worker / Reviewer
-contextで再評価した。predicate完全一致`3/3`、Reviewer承認`3/3`、差戻し0件で、ローカル全テストは
-`768 passed`だった。成果物は`eval-results/relation-incorporates-regression-pair-v7-complete/`に保存した。
+contextで再評価した。predicate完全一致`3/3`、Reviewer承認`3/3`、差戻し0件だった。
+当時のローカル全テストは`768 passed`、凍結時点の構造・queue回帰追加後は`781 passed`である。
+成果物は`eval-results/relation-incorporates-regression-pair-v7-complete/`に保存した。
 旧20件fixtureの第137条の77→第137条の47は、準用に加えて様式の読替えも行うため、
 `INCORPORATES`のみから`INCORPORATES + OVERRIDES`へ教師データを訂正した。
 
 ## Gate 7: 全件分類を最大3並列で実行する
 
-- [ ] `phase=building`のClassificationRunを作成した
-- [ ] 5件shardをキューへ登録した
+- [x] `phase=building`のClassificationRunを作成した
+- [x] 5件shardをキューへ登録した
 - [ ] 最大3 active sessionでWorker→Reviewer→必要時revision→final Reviewを実行した
 - [ ] 各shard完了時に候補別成果物を検証し、checkpointへimportした
 - [ ] 中断時は新しいRunを作らず同じRunを再開した
@@ -208,6 +224,25 @@ contextで再評価した。predicate完全一致`3/3`、Reviewer承認`3/3`、�
 - [ ] `failed=0`を確認した
 - [ ] 抜き取り監査と高リスク候補監査を完了した
 - [ ] 明示的なpublish操作でだけ`published`へ遷移した
+
+2026-08-20に
+`classification-run-31d3e444232c594230ce1306232d750a`をbuilding状態で開始した。
+対象は14,454候補、2,891 shard、source snapshot
+`snapshot-1e9f9f5c1ac849f7ddffdd7480f80c9f771db7c00efea06a612fc286f8c3d27e`である。
+最初の75候補をcheckpoint保存し、`failed=0`、意味関係あり41、参照のみ28、
+`needs_resolution / needs_review`相当6、Assertion 54を確認した。workflowの最終request_change未解消は0である。
+
+その後の全件queueは、2026-08-20に新規shard投入を停止した。停止時点は323 shard import済み、
+33 shard failed、2 shard Worker完了、1 shard初回Review完了、checkpoint 1,615件、Assertion 1,089件である。
+保存済みcheckpointの機械監査では不正な端点・ID・重複を検出しなかったが、抜き取り監査で
+参照構造の誤接続を確認したためGate 1へ戻した。33 failed shardにはWorkerの未知候補key、未知occurrence hash、
+端点・件数・predicate網羅違反が含まれ、同じWorkerへの契約修復不足を修正した。実データと承認済み成果物は
+変更せず、構造差分監査とqueue回帰が終わるまで再開しない。
+
+初期CLI実証ではAgentがファイルを逐次tool取得したため、5候補のWorkerで約103万、Reviewerで約67万の
+入力tokenが再送された。queueをsingle-input structured outputへ変更した後の代表shardでは、Worker約4.9万、
+Reviewer約5.4万まで減少した。3並列pilotでは完了したWorkerの枠からReviewerを開始し、active session上限3を
+維持した。未知span IDは保存せず、同じReviewerへの契約修復1回で解消した。
 
 ## Gate 8: 検索へ接続する
 
