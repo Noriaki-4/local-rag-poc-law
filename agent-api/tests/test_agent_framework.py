@@ -431,6 +431,81 @@ def test_solver_can_start_second_cycle_without_forcing_a_third() -> None:
     ]
 
 
+def test_cycle_boundary_hands_retained_evidence_to_next_cycle_planning() -> None:
+    def close_first_cycle(
+        context: SolverContext,
+        _: ModelCallProfile,
+    ) -> SolverDecision:
+        assert context.research_cycle_count == 1
+        return SolverDecision(
+            next="continue",
+            start_next_cycle=True,
+            update=CaseUpdate(
+                update_hypotheses=(
+                    HypothesisUpdate(
+                        hypothesis_id="h1",
+                        judgment="unresolved",
+                        evidence_ids=("e_r1",),
+                        gaps=("追加本文が必要",),
+                    ),
+                ),
+            ),
+            next_focus_work_item_ids=("w1",),
+            retain_evidence_ids=("e_r1",),
+        )
+
+    def plan_second_cycle(
+        context: SolverContext,
+        _: ModelCallProfile,
+    ) -> SolverDecision:
+        assert context.research_cycle_count == 2
+        assert context.material_evidence_ids == {"e_r1"}
+        assert context.hypotheses[0].evidence_ids == ("e_r1",)
+        return SolverDecision(
+            next="continue",
+            next_focus_work_item_ids=("w1",),
+            retain_evidence_ids=("e_r1",),
+            tool_requests=(_request("r2"),),
+        )
+
+    model = FakeModel(
+        [
+            _first_research((_request("r1"),)),
+            close_first_cycle,
+            plan_second_cycle,
+            SolverDecision(
+                next="finalize",
+                update=CaseUpdate(
+                    update_work_items=(
+                        WorkItemUpdate(
+                            work_item_id="w1",
+                            state="resolved",
+                            resolution="2 Cycleの本文を確認した",
+                            basis_hypothesis_ids=("h1",),
+                        ),
+                    ),
+                    update_hypotheses=(
+                        HypothesisUpdate(
+                            hypothesis_id="h1",
+                            judgment="supported",
+                            evidence_ids=("e_r1", "e_r2"),
+                        ),
+                    ),
+                ),
+                answer=FinalAnswer(
+                    text="2件を統合した回答",
+                    citation_ids=("e_r1", "e_r2"),
+                ),
+            ),
+        ]
+    )
+
+    state, _ = _run(model, tools=(FakeReadTool(),))
+
+    assert state.run_status == "completed"
+    assert state.research_cycle_count == 2
+
+
 def test_contract_repair_budget_exhaustion_returns_to_reserved_finalization() -> None:
     class ManualClock:
         now = 0.0
@@ -2624,6 +2699,107 @@ def test_required_dependency_decision_must_cover_open_work_and_reference_action(
 
     assert updated.dependency_decisions[0].status == "needs_action"
 
+    cycle_boundary = apply_solver_decision(
+        state,
+        SolverDecision(
+            next="continue",
+            start_next_cycle=True,
+            dependency_decisions=(
+                DependencyDecision(
+                    dependency_kind="lower_law",
+                    work_item_id="w1",
+                    status="needs_action",
+                    reason="次Cycleで下位法令候補を確認する",
+                    basis_evidence_ids=(source_evidence.evidence_id,),
+                    action_request_id=None,
+                ),
+            ),
+        ),
+        limits=AgentLimits(),
+        known_tool_names={"legal_graph_neighbors"},
+        material_evidence_ids=(source_evidence.evidence_id,),
+        fetchable_article_ids=("law-a-article-1",),
+        required_dependency_kind="lower_law",
+        require_dependency_decisions=True,
+        cycle_close_required=True,
+        finalize_only=False,
+    )
+
+    assert cycle_boundary.dependency_decisions[0].action_request_id is None
+
+
+def test_fetched_article_can_be_reused_as_a_graph_origin_but_not_refetched() -> None:
+    source = Evidence(
+        evidence_id="source-article-body",
+        source_ref="fake:source",
+        content="委任先を確認する。",
+        created_cycle=1,
+        metadata={
+            "articleId": "law-a-article-1",
+            "citationEligible": True,
+        },
+    )
+    state = CaseState(
+        case_id="case-1",
+        question="質問",
+        research_cycle_count=1,
+        work_items=(WorkItem(work_item_id="w1", question="下位法令を確認する"),),
+        evidence=(source,),
+    )
+    graph_request = ToolRequest(
+        request_id="graph-1",
+        work_item_id="w1",
+        tool_name="legal_graph_neighbors",
+        arguments={"article_ids": ["law-a-article-1"]},
+        purpose="取得済みArticleを起点に1ホップ確認する",
+    )
+
+    updated = apply_solver_decision(
+        state,
+        SolverDecision(next="continue", tool_requests=(graph_request,)),
+        limits=AgentLimits(),
+        known_tool_names={"legal_graph_neighbors", "fetch_articles"},
+        material_evidence_ids=(source.evidence_id,),
+        fetchable_article_ids=(),
+        graph_review_fetch_tool_name="fetch_articles",
+        finalize_only=False,
+    )
+
+    assert updated.tool_requests[-1] == graph_request
+
+    refetch_request = graph_request.model_copy(
+        update={"request_id": "fetch-1", "tool_name": "fetch_articles"}
+    )
+    with pytest.raises(ContractViolation, match="unknown Article IDs"):
+        apply_solver_decision(
+            state,
+            SolverDecision(next="continue", tool_requests=(refetch_request,)),
+            limits=AgentLimits(),
+            known_tool_names={"legal_graph_neighbors", "fetch_articles"},
+            material_evidence_ids=(source.evidence_id,),
+            fetchable_article_ids=(),
+            graph_review_fetch_tool_name="fetch_articles",
+            finalize_only=False,
+        )
+
+    unknown_graph_request = graph_request.model_copy(
+        update={
+            "request_id": "graph-unknown",
+            "arguments": {"article_ids": ["law-a-article-unknown"]},
+        }
+    )
+    with pytest.raises(ContractViolation, match="unknown Article IDs"):
+        apply_solver_decision(
+            state,
+            SolverDecision(next="continue", tool_requests=(unknown_graph_request,)),
+            limits=AgentLimits(),
+            known_tool_names={"legal_graph_neighbors", "fetch_articles"},
+            material_evidence_ids=(source.evidence_id,),
+            fetchable_article_ids=(),
+            graph_review_fetch_tool_name="fetch_articles",
+            finalize_only=False,
+        )
+
 
 def test_completed_dependency_cannot_reference_an_action_request() -> None:
     source_evidence = Evidence(
@@ -2728,7 +2904,10 @@ def test_resolved_dependency_requires_current_grounding_evidence() -> None:
                 ),
             ),
         ),
-        answer=FinalAnswer(text="回答", citation_ids=(evidence.evidence_id,)),
+        answer=FinalAnswer(
+            text="回答",
+            citation_ids=(source_evidence.evidence_id, evidence.evidence_id),
+        ),
     )
 
     updated = apply_solver_decision(
@@ -2798,7 +2977,10 @@ def test_resolved_dependency_requires_source_and_target_articles() -> None:
 
     with pytest.raises(
         ContractViolation,
-        match="at least two distinct Articles",
+        match=(
+            "work item 'w1' requires full-text evidence from at least two "
+            "distinct Articles"
+        ),
     ):
         apply_solver_decision(
             state,
@@ -2846,36 +3028,42 @@ def test_resolved_dependency_leaves_document_meaning_to_the_solver() -> None:
         evidence=(source_evidence, other_article_same_document),
     )
 
-    updated = apply_solver_decision(
-            state,
-            SolverDecision(
-                next="finalize",
-                update=CaseUpdate(
-                    update_work_items=(
-                        WorkItemUpdate(
-                            work_item_id="w1",
-                            state="resolved",
-                            resolution="確認済み",
-                        ),
-                    ),
-                ),
-                dependency_decisions=(
-                    DependencyDecision(
-                        dependency_kind="lower_law",
-                        work_item_id="w1",
-                        status="resolved",
-                        reason="別Articleで確認した",
-                        basis_evidence_ids=(
-                            source_evidence.evidence_id,
-                            other_article_same_document.evidence_id,
-                        ),
-                    ),
-                ),
-                answer=FinalAnswer(
-                    text="回答",
-                    citation_ids=(other_article_same_document.evidence_id,),
+    decision = SolverDecision(
+        next="finalize",
+        update=CaseUpdate(
+            update_work_items=(
+                WorkItemUpdate(
+                    work_item_id="w1",
+                    state="resolved",
+                    resolution="確認済み",
                 ),
             ),
+        ),
+        dependency_decisions=(
+            DependencyDecision(
+                dependency_kind="lower_law",
+                work_item_id="w1",
+                status="resolved",
+                reason="別Articleで確認した",
+                basis_evidence_ids=(
+                    source_evidence.evidence_id,
+                    other_article_same_document.evidence_id,
+                ),
+            ),
+        ),
+        answer=FinalAnswer(
+            text="回答",
+            citation_ids=(other_article_same_document.evidence_id,),
+        ),
+    )
+
+    with pytest.raises(
+        ContractViolation,
+        match="citations omit Articles declared as a resolved dependency basis",
+    ):
+        apply_solver_decision(
+            state,
+            decision,
             limits=AgentLimits(),
             known_tool_names=(),
             material_evidence_ids=(
@@ -2886,6 +3074,30 @@ def test_resolved_dependency_leaves_document_meaning_to_the_solver() -> None:
             require_dependency_decisions=True,
             finalize_only=False,
         )
+
+    updated = apply_solver_decision(
+        state,
+        decision.model_copy(
+            update={
+                "answer": FinalAnswer(
+                    text="回答",
+                    citation_ids=(
+                        source_evidence.evidence_id,
+                        other_article_same_document.evidence_id,
+                    ),
+                )
+            }
+        ),
+        limits=AgentLimits(),
+        known_tool_names=(),
+        material_evidence_ids=(
+            source_evidence.evidence_id,
+            other_article_same_document.evidence_id,
+        ),
+        required_dependency_kind="lower_law",
+        require_dependency_decisions=True,
+        finalize_only=False,
+    )
 
     assert updated.dependency_decisions[0].status == "resolved"
 

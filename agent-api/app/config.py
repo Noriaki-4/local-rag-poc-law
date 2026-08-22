@@ -399,7 +399,7 @@ class Settings:
     agent_framework_max_fetched_resources_per_cycle = max(
         1,
         min(
-            int(os.getenv("AGENT_FRAMEWORK_MAX_FETCHED_RESOURCES_PER_CYCLE", "4")),
+            int(os.getenv("AGENT_FRAMEWORK_MAX_FETCHED_RESOURCES_PER_CYCLE", "3")),
             32,
         ),
     )

@@ -83,6 +83,8 @@ def apply_solver_decision(
         state,
         decision,
         fetchable_article_ids=fetchable_article_ids,
+        graph_known_article_ids=graph_known_article_ids,
+        article_fetch_tool_name=graph_review_fetch_tool_name,
         unreviewed_graph_candidate_count=unreviewed_graph_candidate_count,
     )
 
@@ -276,15 +278,22 @@ def apply_solver_decision(
                     f"tool request references unknown hypothesis: {hypothesis_id}"
                 )
         requested_article_ids = request.arguments.get("article_ids")
-        if fetchable_article_ids is not None and requested_article_ids is not None:
+        if requested_article_ids is not None:
             if not isinstance(requested_article_ids, list) or any(
                 not isinstance(item, str) for item in requested_article_ids
             ):
                 raise ContractViolation("tool article_ids must be a string list")
-            unknown_article_ids = set(requested_article_ids) - set(
-                fetchable_article_ids
+            allowed_article_ids = _allowed_tool_article_ids(
+                state,
+                request.tool_name,
+                fetchable_article_ids=fetchable_article_ids,
+                graph_known_article_ids=graph_known_article_ids,
+                article_fetch_tool_name=graph_review_fetch_tool_name,
             )
-            if unknown_article_ids:
+            if (
+                allowed_article_ids is not None
+                and (unknown_article_ids := set(requested_article_ids) - allowed_article_ids)
+            ):
                 raise ContractViolation(
                     "tool request references unknown Article IDs: "
                     f"{sorted(unknown_article_ids)}"
@@ -635,7 +644,13 @@ def apply_solver_decision(
                 f"{sorted(unknown_dependency_evidence)}"
             )
         if dependency.status == "needs_action":
-            if dependency.action_request_id not in new_requests_by_id:
+            if decision.start_next_cycle:
+                if dependency.action_request_id is not None:
+                    raise ContractViolation(
+                        "cycle-boundary dependency action cannot reference a "
+                        "ToolRequest before the next cycle"
+                    )
+            elif dependency.action_request_id not in new_requests_by_id:
                 raise ContractViolation(
                     "dependency action must reference a ToolRequest in the same decision"
                 )
@@ -654,9 +669,10 @@ def apply_solver_decision(
             basis_article_ids.discard("")
             if len(basis_article_ids) < 2:
                 raise ContractViolation(
-                    "resolved dependency requires full-text evidence from at least "
-                    "two distinct Articles: the delegating source and the terminal "
-                    "target"
+                    "resolved dependency for work item "
+                    f"{dependency.work_item_id!r} requires full-text evidence from "
+                    "at least two distinct Articles: the delegating source and the "
+                    f"terminal target; actual Article IDs={sorted(basis_article_ids)}"
                 )
         dependency_by_key[
             (dependency.dependency_kind, dependency.work_item_id)
@@ -687,6 +703,29 @@ def apply_solver_decision(
             raise ContractViolation(
                 f"answer cites navigation-only evidence: {sorted(navigation_citations)}"
             )
+        citation_article_ids = {
+            str(evidence_by_id[evidence_id].metadata.get("articleId") or "")
+            for evidence_id in decision.answer.citation_ids
+        }
+        citation_article_ids.discard("")
+        for dependency in decision.dependency_decisions:
+            work_item = work_items[dependency.work_item_id]
+            if dependency.status != "resolved" or work_item.state != "resolved":
+                continue
+            dependency_article_ids = {
+                str(evidence_by_id[evidence_id].metadata.get("articleId") or "")
+                for evidence_id in dependency.basis_evidence_ids
+            }
+            dependency_article_ids.discard("")
+            missing_dependency_articles = (
+                dependency_article_ids - citation_article_ids
+            )
+            if missing_dependency_articles:
+                raise ContractViolation(
+                    "final answer citations omit Articles declared as a resolved "
+                    f"dependency basis for work item {dependency.work_item_id!r}: "
+                    f"{sorted(missing_dependency_articles)}"
+                )
 
         unresolved_work_item_ids = set(decision.answer.unresolved_work_item_ids)
         unresolved_hypothesis_ids = set(
@@ -1036,6 +1075,8 @@ def _raise_preflight_contract_violations(
     decision: SolverDecision,
     *,
     fetchable_article_ids: Collection[str] | None,
+    graph_known_article_ids: Collection[str] | None,
+    article_fetch_tool_name: str | None,
     unreviewed_graph_candidate_count: int,
 ) -> None:
     """独立した主要違反を一括提示し、修復の逐次エラー化を防ぐ。"""
@@ -1110,15 +1151,23 @@ def _raise_preflight_contract_violations(
             f"{sorted(unknown_tool_hypothesis_ids)}"
         )
 
-    if fetchable_article_ids is not None:
+    for request in decision.tool_requests:
         requested_article_ids = {
             article_id
-            for request in decision.tool_requests
             for article_id in request.arguments.get("article_ids", ())
             if isinstance(article_id, str)
         }
-        unknown_article_ids = requested_article_ids - set(fetchable_article_ids)
-        if unknown_article_ids:
+        allowed_article_ids = _allowed_tool_article_ids(
+            state,
+            request.tool_name,
+            fetchable_article_ids=fetchable_article_ids,
+            graph_known_article_ids=graph_known_article_ids,
+            article_fetch_tool_name=article_fetch_tool_name,
+        )
+        if (
+            allowed_article_ids is not None
+            and (unknown_article_ids := requested_article_ids - allowed_article_ids)
+        ):
             violations.append(
                 "tool request references unknown Article IDs: "
                 f"{sorted(unknown_article_ids)}"
@@ -1204,7 +1253,40 @@ def _validated_copy(model: ModelT, /, **updates) -> ModelT:
     try:
         return type(model).model_validate({**model.model_dump(), **updates})
     except ValidationError as exc:
-        raise ContractViolation("updated state violates its schema") from exc
+        detail = exc.errors(include_url=False, include_input=False)[0]
+        location = ".".join(str(item) for item in detail.get("loc", ()))
+        message = str(detail.get("msg") or "validation failed")
+        raise ContractViolation(
+            "updated state violates its schema"
+            f" at {location or '<root>'}: {message}"
+        ) from exc
+
+
+def _allowed_tool_article_ids(
+    state: CaseState,
+    tool_name: str,
+    *,
+    fetchable_article_ids: Collection[str] | None,
+    graph_known_article_ids: Collection[str] | None,
+    article_fetch_tool_name: str | None,
+) -> set[str] | None:
+    """本文取得候補とGraph起点の既知Article集合を混同しない。"""
+
+    fetch_tool_name = article_fetch_tool_name or "fetch_articles"
+    if tool_name == fetch_tool_name:
+        return (
+            set(fetchable_article_ids)
+            if fetchable_article_ids is not None
+            else None
+        )
+    known_article_ids = set(fetchable_article_ids or ())
+    known_article_ids.update(graph_known_article_ids or ())
+    for evidence in state.evidence:
+        for key in ("articleId", "fromArticleId", "toArticleId"):
+            article_id = evidence.metadata.get(key)
+            if isinstance(article_id, str) and article_id:
+                known_article_ids.add(article_id)
+    return known_article_ids
 
 
 def _reject_duplicate_delta_ids(values, label: str) -> None:

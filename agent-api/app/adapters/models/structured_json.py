@@ -95,6 +95,7 @@ class StructuredJSONModelAdapter:
                             context.contract_feedback.previous_decision.update
                         )
                     decision = SolverDecision.model_validate(normalized)
+                    _validate_hypothesis_update_evidence(decision)
                     return SolverCallResult(
                         decision=decision,
                         input_tokens=(input_tokens if input_tokens_known else None),
@@ -271,6 +272,16 @@ def _solver_prompt(
             "引用へ追加せず、Article全文が提示されたという理由だけで全Paragraph・Itemを根拠にしません。"
             "finalize時のretain_evidence_idsは空でよく、citation_idsとは別の引継ぎ欄です。\n"
         )
+    contract_repair_instruction = _focused_contract_repair_instruction(context)
+    article_fetch_aliases = _article_fetch_alias_map(context)
+    article_fetch_alias_instruction = (
+        "article_fetchのarticle_ref_NにはArticle ID本体でなく、次の既知候補別名を指定します。"
+        "Adapterが対応するArticle IDへ機械変換します。"
+        f"<article_fetch_aliases>{json.dumps(article_fetch_aliases, ensure_ascii=False, separators=(',', ':'))}"
+        "</article_fetch_aliases>"
+        if article_fetch_aliases
+        else ""
+    )
     transport_instruction = (
         "以下は現在のSolverContextです。コンパクト輸送schemaに従い、"
         "復元後SolverDecisionのうちupdateを構造化object、tool_requestsを"
@@ -287,17 +298,34 @@ def _solver_prompt(
             "update全体はupdate_jsonへJSON object文字列として格納します。"
             "add_hypothesesとupdate_hypothesesのevidence_idsはupdate_json内では空配列にし、"
             "実際に選ぶ既知Evidence IDはhypothesis_evidence_bindingsへ返してください。"
+            "hypothesis_evidence_bindingsには今回のupdate_jsonのadd_hypothesesまたは"
+            "update_hypothesesに含めたhypothesis_idだけを返し、変更しない既存Hypothesisは返しません。"
+            "grounding_evidence_idsが空ならhypothesis_evidence_bindingsはnullにし、update_jsonで"
+            "追加・更新するHypothesisはjudgment=unresolved、evidence_ids=[]のままにします。"
+            "検索候補だけでsupported/contradictedにせず、必要なArticle本文を取得します。"
+            "dependency_decisionsはWorkItemごとの固定JSON文字列slotです。各slotへ"
+            "dependency_kind、work_item_id、status、reason、basis_evidence_ids、action_request_idを持つ"
+            "1個のobjectをJSON文字列化して返します。指定されたwork_item_idは変更せず、"
+            "basis_evidence_idsは空配列にします。実際に使う既知Evidence IDは"
+            "直接返さず、dependency_article_bindingsへ判断に使った取得済みArticle IDを"
+            "WorkItemごとに1件返します。Adapterが選ばれたArticleの取得済みEvidence IDを"
+            "basis_evidence_idsへ機械転記します。"
             "legal_search、legal_graph_neighbors、load_evidenceはtool_requestsへ"
-            "固定slotとして返してください。各tool_request_N_jsonにはrequest_id、"
-            "work_item_id、tool_name、arguments、purpose、hypothesis_idsを持つToolRequest objectを"
-            "1個のJSON文字列として格納し、使わないslotはnullにします。"
+            "固定slotとして返してください。各tool_request_N_jsonにはtool_nameとrequest_jsonを持つ"
+            "objectを返し、request_jsonにはrequest_id、work_item_id、arguments、purpose、"
+            "hypothesis_idsを持つToolRequestをJSON文字列化して格納します。外側のtool_nameが正本で、"
+            "使わないslotはnullにします。新規request_idは"
+            "160文字以内の短いASCII識別子にし、説明文はpurposeへ入れます。"
             "fetch_articlesだけはtool_requestsへ入れず、"
-            "article_fetchへ1件だけ返し、article_id_1から順に既知IDを指定してください。"
+            "article_fetchへ1件だけ返し、article_ref_1から順に上記の既知候補別名を指定してください。"
+            "article_fetchはfetch_articles ToolRequestそのものの輸送表現であり、追加情報ではありません。"
+            "article_fetchを返す場合も返さない場合も、tool_requestsの各slotへ"
+            "tool_name=fetch_articlesを決して再掲しません。"
             "不要な残りslotはnullにします。"
             "各ToolRequest内のargumentsはJSON objectのまま格納し、arguments_jsonと"
             "tool_requests_jsonは返しません。"
             "Adapterがupdate_json、Evidence対応、各ToolRequest文字列、article_fetchを復元し、SolverDecisionとして"
-            "上記契約で完全検証します。\n"
+            f"上記契約で完全検証します。{article_fetch_alias_instruction}\n"
             if structured_tool_transport
             else (
                 "以下は現在のSolverContextです。Provider輸送schemaに従い、"
@@ -313,7 +341,7 @@ def _solver_prompt(
     )
     prompt = (
         f"{system_prompt}\n\n"
-        f"{_SOLVER_CONTRACT}\n\n"
+        f"{_MINIMAL_SOLVER_CONTRACT}\n\n"
         "contract_feedbackがある場合、直前Decisionは状態へ適用されていません。"
         "適合している意味判断は保ち、violationと矛盾する制御値・参照だけを修正してください。\n"
         f"{contract_repair_instruction}"
@@ -363,13 +391,132 @@ def _solver_repair_prompt(
         )
     else:
         error_detail = str(error)
+    focused_instruction = ""
+    if "continue decision requires a tool request" in error_detail:
+        focused_instruction = (
+            "next=continueを維持するなら、追加調査に必要なlegal_search、"
+            "legal_graph_neighbors、load_evidenceまたはarticle_fetchを少なくとも1件返します。"
+            "調査が不要と判断するなら、未完了WorkItemを根拠に基づいて閉じ、"
+            "next=finalizeとanswerを返します。どちらかを意味判断して選びます。\n"
+        )
+    elif "all fetch_articles requests combined must contain at most" in error_detail:
+        focused_instruction = (
+            "本文取得は専用article_fetchだけに1件返し、article_ref_Nはエラーに示された"
+            "現在の残り件数以内にします。汎用tool_requestsへarticle_fetchまたは"
+            "fetch_articlesを入れません。どの候補を今回取得するかは自分で選びます。\n"
+        )
+    elif "supported or contradicted hypothesis requires evidence" in error_detail:
+        focused_instruction = (
+            "本文Evidenceを選んでいないHypothesisはjudgment=unresolved、"
+            "evidence_ids=[]のままにします。search_navigationだけでsupportedまたは"
+            "contradictedにせず、必要な既知Articleはarticle_fetchで取得します。\n"
+        )
     return (
         f"{base_prompt}\n\n"
         "直前の出力は輸送またはschema検証だけに失敗しました。"
         "意味上の判断を変えず、契約に適合するSolverDecisionへ修復してください。\n"
+        f"{focused_instruction}"
         f"<validation_error>{error_detail}</validation_error>\n"
         f"<previous_solver_decision>{previous}</previous_solver_decision>"
     )
+
+
+def _validate_hypothesis_update_evidence(decision: SolverDecision) -> None:
+    """状態適用後に必ず失敗するHypothesis更新を輸送修復へ戻す。"""
+
+    if any(
+        item.judgment in {"supported", "contradicted"} and not item.evidence_ids
+        for item in decision.update.update_hypotheses
+    ):
+        raise ModelProtocolError(
+            "supported or contradicted hypothesis requires evidence"
+        )
+
+
+def _focused_contract_repair_instruction(context: SolverContext) -> str:
+    feedback = context.contract_feedback
+    if feedback is None:
+        return ""
+    violation = feedback.violation
+    instructions = [
+        "\n直前Decisionは未適用です。適合する意味判断を保ち、次の違反だけを修正します。"
+    ]
+    rules = (
+        (
+            ("unknown evidence", "hypothesis has unknown evidence"),
+            "Evidence IDを生成せず、grounding_evidence_idsの完全一致だけを"
+            "hypothesis_evidence_bindingsで選びます。未取得本文ならHypothesisをunresolvedにします。",
+        ),
+        (
+            ("supported or contradicted hypothesis requires evidence",),
+            "grounding_evidence_idsが空ならHypothesisをunresolved、evidence_ids=[]へ戻し、"
+            "検索候補から必要なArticleをarticle_fetchで取得します。検索候補だけで完了しません。",
+        ),
+        (
+            ("navigation-only evidence",),
+            "search_navigationは根拠にせず、必要なArticle本文を取得するか未解決のままにします。",
+        ),
+        (
+            ("unknown Article ID",),
+            "fetchable_article_idsの完全一致だけを使い、未知ならlegal_searchで発見し直します。",
+        ),
+        (
+            ("open WorkItem", "unresolved answer scope"),
+            "追加調査できるならopenのままcontinueします。不能時だけlimitationsと既知の未解決IDを対応させます。",
+        ),
+        (
+            ("Cycle boundary", "remaining Cycle capacity"),
+            "現CycleへToolを追加せず、完了ならfinalize、未完了で次Cycle可能ならstart_next_cycle=trueにします。",
+        ),
+        (
+            ("resolved dependency requires",),
+            "同じArticleのParagraphを重ねず、委任元と末端Articleの本文Evidenceを使います。"
+            "末端未取得ならneeds_actionにします。",
+        ),
+        (
+            (
+                "dependency decision",
+                "dependency action",
+                "decisions do not match required work items",
+            ),
+            "required_dependency_work_item_idsの各IDへ1件返します。needs_actionのaction_request_idは、"
+            "同じDecisionで実際に返すToolRequestまたはarticle_fetchのrequest_idと完全一致させます。",
+        ),
+        (
+            ("retained evidence count exceeds",),
+            "retain_evidence_idsはmax_retained_evidence件以内で、後続Cycleにも本文が必要なEvidenceをLLMが選びます。",
+        ),
+        (
+            ("tool request count", "fetch_articles.article_ids exceeds"),
+            "上限内で今回必要な要求をLLMが選び、超過分をProgramへ選別させません。",
+        ),
+        (
+            ("Article body fetch", "fetch_articles"),
+            "本文取得は1 Requestに統合し、既知Articleをremaining_fetch_capacity以内で選びます。",
+        ),
+        (
+            ("focus", "ToolRequest", "tool request references"),
+            "WorkItem・Hypothesis・Requestは既知IDへ完全一致させます。必要なToolなら対応WorkItemを"
+            "state=open、resolution=nullのまま保ちます。WorkItemが本当に完了したなら、そのWorkItemを"
+            "next_focus_work_item_idsとToolRequestから外します。どちらかは意味判断に基づいてSolverが選びます。",
+        ),
+        (
+            ("Graph", "graph review", "Frontier"),
+            "表示されたGraph batch・ledgerの既知IDだけを使い、候補の必要性はSolverが判断します。",
+        ),
+        (
+            ("citations omit",),
+            "回答で使うHypothesis Evidenceをcitation_idsへ含め、使わないEvidenceはHypothesisから外します。"
+            "resolved DependencyDecisionのbasisに選んだ各Articleから少なくとも1つのEvidenceを引用します。"
+            "直前Decisionは未適用なので、finalizeを維持するならWorkItem・Hypothesisの完了更新も"
+            "update_jsonへ再掲します。",
+        ),
+    )
+    for markers, instruction in rules:
+        if any(marker in violation for marker in markers):
+            instructions.append(instruction)
+    instructions.append(f"violation: {violation}\n")
+    return "".join(instructions)
 
 
 def _solver_transport_schema(context: SolverContext) -> dict:
@@ -774,6 +921,34 @@ def _solver_anthropic_transport_schema(context: SolverContext) -> dict:
 
     schema = _solver_transport_schema(context)
     properties = schema["properties"]
+    properties["dependency_decisions"] = _anthropic_dependency_decisions_schema(
+        context
+    )
+    grounding_article_ids = tuple(
+        dict.fromkeys(
+            article_id
+            for evidence in context.material_evidence
+            if (article_id := evidence.metadata.get("articleId"))
+            and isinstance(article_id, str)
+        )
+    )
+    properties["dependency_article_bindings"] = (
+        {
+            "type": "array",
+            "items": _strict_object(
+                {
+                    "work_item_id": _enum_string(
+                        context.required_dependency_work_item_ids
+                    ),
+                    "article_ids": _bounded_enum_array(
+                        grounding_article_ids
+                    ),
+                }
+            ),
+        }
+        if context.required_dependency_work_item_ids
+        else {"type": "null"}
+    )
     properties["hypothesis_evidence_bindings"] = (
         {
             "type": "array",
@@ -787,7 +962,7 @@ def _solver_anthropic_transport_schema(context: SolverContext) -> dict:
             ),
         }
         if context.grounding_evidence_ids
-        else _empty_array_schema()
+        else {"type": "null"}
     )
     tool_requests_forbidden = properties["tool_requests_json"].get("enum") == [
         "[]"
@@ -804,13 +979,25 @@ def _solver_anthropic_transport_schema(context: SolverContext) -> dict:
         {
             f"tool_request_{index}_json": {
                 "anyOf": [
-                    {
-                        "type": "string",
-                        "description": (
-                            "one ToolRequest JSON object; fetch_articles is "
-                            "forbidden here and must use article_fetch"
-                        ),
-                    },
+                    _strict_object(
+                        {
+                            "tool_name": {
+                                "type": "string",
+                                "enum": [
+                                    "legal_search",
+                                    "legal_graph_neighbors",
+                                    "load_evidence",
+                                ],
+                            },
+                            "request_json": {
+                                "type": "string",
+                                "description": (
+                                    "one ToolRequest JSON object without tool_name; "
+                                    "the outer tool_name is authoritative"
+                                ),
+                            },
+                        }
+                    ),
                     {"type": "null"},
                 ]
             }
@@ -836,8 +1023,38 @@ def _solver_anthropic_transport_schema(context: SolverContext) -> dict:
         for item in schema["required"]
     ]
     schema["required"].append("hypothesis_evidence_bindings")
+    schema["required"].append("dependency_article_bindings")
     schema["required"].append("article_fetch")
     return schema
+
+
+def _anthropic_dependency_decisions_schema(
+    context: SolverContext,
+) -> dict[str, Any]:
+    """配列件数制約を保持しないProviderでもWorkItem全件を提示させる。"""
+
+    if not context.required_dependency_work_item_ids:
+        return _strict_object({})
+    return _strict_object(
+        {
+            f"dependency_decision_{index}_json": {
+                "type": "string",
+                "description": (
+                    "one DependencyDecision JSON object for exact work_item_id "
+                    f"{work_item_id}; keep basis_evidence_ids empty and select "
+                    "Article IDs in dependency_article_bindings; status=resolved "
+                    "requires at least two distinct Article IDs "
+                    "(delegating source and terminal target); if the target body "
+                    "is not shown, use needs_action; restored and fully validated "
+                    "after transport"
+                ),
+            }
+            for index, work_item_id in enumerate(
+                context.required_dependency_work_item_ids,
+                start=1,
+            )
+        }
+    )
 
 
 def _anthropic_article_fetch_schema(context: SolverContext) -> dict[str, Any]:
@@ -863,9 +1080,10 @@ def _anthropic_article_fetch_schema(context: SolverContext) -> dict[str, Any]:
         "purpose": {"type": "string"},
         "hypothesis_ids": _bounded_enum_array(_repair_hypothesis_ids(context)),
     }
+    aliases = tuple(_article_fetch_alias_map(context))
     for index in range(1, capacity + 1):
-        article_schema = _enum_string(context.fetchable_article_ids)
-        article_properties[f"article_id_{index}"] = (
+        article_schema = _enum_string(aliases)
+        article_properties[f"article_ref_{index}"] = (
             article_schema
             if index == 1
             else {"anyOf": [article_schema, {"type": "null"}]}
@@ -875,6 +1093,13 @@ def _anthropic_article_fetch_schema(context: SolverContext) -> dict[str, Any]:
             _strict_object(article_properties),
             {"type": "null"},
         ]
+    }
+
+
+def _article_fetch_alias_map(context: SolverContext) -> dict[str, str]:
+    return {
+        f"a{index}": article_id
+        for index, article_id in enumerate(context.fetchable_article_ids, start=1)
     }
 
 
@@ -1083,6 +1308,7 @@ def _preserve_previous_update_for_contract_repair(
             "unknown retained evidence IDs",
             "retained evidence count exceeds the profile limit",
             "completed dependency decision cannot reference an action request",
+            "dependency action must reference a ToolRequest in the same decision",
         )
     )
 
@@ -1101,7 +1327,10 @@ def _bounded_enum_array(
     *,
     max_items: int | None = None,
 ) -> dict[str, Any]:
-    items = _enum_string(values)
+    # Anthropicの構造化出力方言ではmaxItemsを受け付けないため、候補0件を
+    # string items + maxItems=0で表すと変換後に任意文字列の配列へ緩む。
+    # null要素だけを許す配列にして、空配列以外は復元後の型検証で拒否する。
+    items = _enum_string(values) if values else {"type": "null"}
     return {
         "type": "array",
         "items": items,
@@ -1141,9 +1370,14 @@ def _normalize_solver_payload(payload: dict) -> dict:
             expected_type=dict,
             label="update_json",
         )
+    has_evidence_binding_sidecar = "hypothesis_evidence_bindings" in normalized
     evidence_bindings = normalized.pop("hypothesis_evidence_bindings", None)
     if evidence_bindings is not None:
         _apply_hypothesis_evidence_bindings(normalized, evidence_bindings)
+    elif has_evidence_binding_sidecar:
+        # Anthropic transportではsidecarがEvidence選択の正本である。
+        # 候補0件時のnullは、二重JSON側の予測IDを採用しないことを表す。
+        _apply_hypothesis_evidence_bindings(normalized, [])
     if "tool_requests_json" in normalized:
         normalized["tool_requests"] = _decode_transport_json(
             normalized.pop("tool_requests_json"),
@@ -1156,6 +1390,10 @@ def _normalize_solver_payload(payload: dict) -> dict:
             expected_type=list,
             label="dependency_decisions_json",
         )
+    dependency_article_bindings = normalized.pop(
+        "dependency_article_bindings",
+        None,
+    )
     if isinstance(normalized.get("tool_requests"), dict):
         request_slots = normalized["tool_requests"]
         normalized_requests = []
@@ -1163,15 +1401,33 @@ def _normalize_solver_payload(payload: dict) -> dict:
             value = request_slots[key]
             if value is None:
                 continue
-            normalized_requests.append(
-                _decode_transport_json(
-                    value,
+            if isinstance(value, dict) and "request_json" in value:
+                request = _decode_transport_json(
+                    value["request_json"],
                     expected_type=dict,
-                    label=key,
+                    label=f"{key}.request_json",
                 )
-            )
+                request["tool_name"] = value.get("tool_name")
+                normalized_requests.append(request)
+            else:
+                # 旧transport payloadとの読み取り互換。新schemaでは生成されない。
+                normalized_requests.append(
+                    _decode_transport_json(
+                        value,
+                        expected_type=dict,
+                        label=key,
+                    )
+                )
         normalized["tool_requests"] = normalized_requests
+    has_article_fetch_sidecar = "article_fetch" in normalized
     article_fetch = normalized.pop("article_fetch", None)
+    if has_article_fetch_sidecar:
+        for request in normalized.get("tool_requests") or []:
+            if (
+                isinstance(request, dict)
+                and request.get("tool_name") == "article_fetch"
+            ):
+                request["tool_name"] = "fetch_articles"
     # `next` is the LLM's control decision. The unused answer branch is only
     # transport noise, so remove it without changing that control decision.
     if normalized.get("next") == "continue":
@@ -1181,10 +1437,18 @@ def _normalize_solver_payload(payload: dict) -> dict:
         normalized["tool_requests"] = []
         normalized["frontier_re_adoptions"] = []
     if normalized.get("next") == "continue" and isinstance(article_fetch, dict):
+        if any(
+            isinstance(request, dict)
+            and request.get("tool_name") == "fetch_articles"
+            for request in normalized.get("tool_requests", ())
+        ):
+            raise ModelProtocolError(
+                "article body fetch is duplicated across generic and dedicated slots"
+            )
         article_ids = [
             article_fetch[key]
             for key in sorted(article_fetch)
-            if key.startswith("article_id_")
+            if key.startswith(("article_id_", "article_ref_"))
             and isinstance(article_fetch[key], str)
             and article_fetch[key]
         ]
@@ -1198,17 +1462,31 @@ def _normalize_solver_payload(payload: dict) -> dict:
                 "hypothesis_ids": article_fetch.get("hypothesis_ids") or [],
             }
         )
+    raw_dependencies = normalized.get("dependency_decisions") or []
+    if isinstance(raw_dependencies, dict):
+        raw_dependencies = [
+            _decode_transport_json(
+                raw_dependencies[key],
+                expected_type=dict,
+                label=key,
+            )
+            for key in sorted(raw_dependencies)
+        ]
     dependency_decisions = []
-    for raw_dependency in normalized.get("dependency_decisions") or []:
+    for raw_dependency in raw_dependencies:
         if not isinstance(raw_dependency, dict):
             dependency_decisions.append(raw_dependency)
             continue
         dependency = dict(raw_dependency)
         status = dependency.get("status")
-        if status in {"not_required", "resolved"}:
+        if status in {"not_required", "resolved"} or (
+            status == "needs_action" and normalized.get("start_next_cycle") is True
+        ):
             dependency["action_request_id"] = None
         dependency_decisions.append(dependency)
     normalized["dependency_decisions"] = dependency_decisions
+    if dependency_article_bindings is not None:
+        normalized["_dependency_article_bindings"] = dependency_article_bindings
     requests = []
     for raw_request in normalized.get("tool_requests") or []:
         if not isinstance(raw_request, dict):
@@ -1308,11 +1586,158 @@ def _apply_hypothesis_evidence_bindings(
         )
 
 
+def _apply_dependency_article_bindings(
+    dependency_decisions: list[Any],
+    raw_bindings: Any,
+    context: SolverContext,
+) -> None:
+    """Expand LLM-selected material Article IDs into their known Evidence IDs."""
+
+    if not isinstance(raw_bindings, list):
+        raise ModelProtocolError("dependency_article_bindings must be an array")
+    bindings: dict[str, list[str]] = {}
+    for index, raw_binding in enumerate(raw_bindings):
+        if not isinstance(raw_binding, dict):
+            raise ModelProtocolError(
+                f"dependency_article_bindings[{index}] must be an object"
+            )
+        work_item_id = raw_binding.get("work_item_id")
+        article_ids = raw_binding.get("article_ids")
+        if not isinstance(work_item_id, str) or not work_item_id:
+            raise ModelProtocolError(
+                f"dependency_article_bindings[{index}].work_item_id is invalid"
+            )
+        if work_item_id in bindings:
+            raise ModelProtocolError(
+                "dependency_article_bindings work item IDs must be unique"
+            )
+        if not isinstance(article_ids, list) or any(
+            not isinstance(article_id, str) for article_id in article_ids
+        ):
+            raise ModelProtocolError(
+                f"dependency_article_bindings[{index}].article_ids is invalid"
+            )
+        if len(article_ids) != len(set(article_ids)):
+            raise ModelProtocolError(
+                "dependency_article_bindings Article IDs must be unique"
+            )
+        bindings[work_item_id] = article_ids
+
+    evidence_ids_by_article: dict[str, list[str]] = {}
+    for evidence in context.material_evidence:
+        article_id = evidence.metadata.get("articleId")
+        if isinstance(article_id, str) and article_id:
+            evidence_ids_by_article.setdefault(article_id, []).append(
+                evidence.evidence_id
+            )
+
+    decision_work_item_ids: set[str] = set()
+    for index, dependency in enumerate(dependency_decisions):
+        if not isinstance(dependency, dict):
+            raise ModelProtocolError(
+                f"dependency_decisions[{index}] must be an object"
+            )
+        work_item_id = dependency.get("work_item_id")
+        if not isinstance(work_item_id, str) or not work_item_id:
+            raise ModelProtocolError(
+                f"dependency_decisions[{index}].work_item_id is invalid"
+            )
+        decision_work_item_ids.add(work_item_id)
+        article_ids = bindings.get(work_item_id, [])
+        unknown_article_ids = set(article_ids) - set(evidence_ids_by_article)
+        if unknown_article_ids:
+            raise ModelProtocolError(
+                "dependency_article_bindings reference Articles absent from "
+                f"material evidence: {sorted(unknown_article_ids)}"
+            )
+        dependency["basis_evidence_ids"] = [
+            evidence_id
+            for article_id in article_ids
+            for evidence_id in evidence_ids_by_article[article_id]
+        ]
+
+    if set(bindings) != decision_work_item_ids:
+        raise ModelProtocolError(
+            "dependency_article_bindings must match dependency decision work "
+            f"items: expected={sorted(decision_work_item_ids)}, "
+            f"actual={sorted(bindings)}"
+        )
+
+
 def _normalize_absent_context_branches(
     normalized: dict[str, Any],
     context: SolverContext,
 ) -> None:
     """参照対象が存在しないGraph制御欄だけを機械的に空へ揃える。"""
+
+    dependency_article_bindings = normalized.pop(
+        "_dependency_article_bindings",
+        None,
+    )
+    if dependency_article_bindings is not None:
+        _apply_dependency_article_bindings(
+            normalized.get("dependency_decisions") or [],
+            dependency_article_bindings,
+            context,
+        )
+
+    article_aliases = _article_fetch_alias_map(context)
+    for request in normalized.get("tool_requests") or []:
+        if not isinstance(request, dict) or request.get("tool_name") != "fetch_articles":
+            continue
+        arguments = request.get("arguments")
+        if not isinstance(arguments, dict):
+            continue
+        article_ids = arguments.get("article_ids")
+        if isinstance(article_ids, list):
+            arguments["article_ids"] = [
+                article_aliases.get(article_id, article_id)
+                for article_id in article_ids
+            ]
+
+    if not context.cycle_close_required:
+        requested_article_ids: set[str] = set()
+        for request in normalized.get("tool_requests") or []:
+            if (
+                not isinstance(request, dict)
+                or request.get("tool_name") != "fetch_articles"
+            ):
+                continue
+            arguments = request.get("arguments")
+            article_ids = (
+                arguments.get("article_ids")
+                if isinstance(arguments, dict)
+                else None
+            )
+            if isinstance(article_ids, list):
+                requested_article_ids.update(
+                    article_id
+                    for article_id in article_ids
+                    if isinstance(article_id, str)
+                )
+        current_limit = min(4, context.remaining_fetch_capacity)
+        if len(requested_article_ids) > current_limit:
+            raise ModelProtocolError(
+                "all fetch_articles requests combined must contain at most "
+                f"{current_limit} unique Article IDs; the LLM must choose the "
+                "current verification set"
+            )
+
+    if (
+        context.cycle_close_required
+        and context.can_start_next_cycle
+        and normalized.get("next") == "continue"
+    ):
+        # `continue`というLLM判断を保ったまま、取得枠を使い切ったCycleの
+        # 唯一の合法な制御形（Toolなしで次Cycleへ移る）へ正規化する。
+        normalized["start_next_cycle"] = True
+        normalized["tool_requests"] = []
+        for dependency in normalized.get("dependency_decisions") or []:
+            if (
+                isinstance(dependency, dict)
+                and dependency.get("status") == "needs_action"
+            ):
+                dependency["action_request_id"] = None
 
     if not context.graph_review_batch.candidates:
         normalized["graph_candidate_review"] = None
@@ -1341,6 +1766,34 @@ def _decode_transport_json(value: Any, *, expected_type: type, label: str) -> An
     if not isinstance(decoded, expected_type):
         raise ModelProtocolError(f"{label} has an invalid root type")
     return decoded
+
+
+_MINIMAL_SOLVER_CONTRACT = """
+出力原則:
+- Provider schemaに従い、CaseState全体ではなく今回の差分だけを返す。
+- update_jsonに許されるキーはadd_work_items、update_work_items、add_hypotheses、update_hypotheses、impact_decisionsだけ。work_tree等の現在状態を返さない。
+- continueは同Cycleの次step、またはstart_next_cycle=trueによる次Cycle開始であり、answerは返さない。
+- finalizeは追加Toolを返さず、通常完了では全WorkItemを閉じる。上限時の限定回答だけ未解決IDとlimitationsを対応させる。
+
+update_jsonの状態契約:
+- add_work_items要素: work_item_id、parent_work_item_id、question、state、resolution、basis_hypothesis_ids、replaces_work_item_id。statusは使わない。
+- update_work_items要素: work_item_id、state、resolution、basis_hypothesis_ids。
+- add_hypotheses要素: hypothesis_id、work_item_id、statement、judgment、evidence_ids、gaps。statusは使わない。
+- update_hypotheses要素: hypothesis_id、judgment、evidence_ids、gaps。
+- WorkItemのstate=openは未完了なのでresolution=null、resolved/droppedは終了状態なので空でないresolutionを持つ。
+- next_focus_work_item_idsと各ToolRequest.work_item_idは、このupdate適用後もstate=openのWorkItemだけを参照する。Toolが必要ならWorkItemを閉じない。
+- Hypothesisのjudgment=unresolvedは未確認、supported/contradictedは本文根拠で確認済みなので空でないevidence_idsを持つ。
+- impact_decisions要素: work_item_id、action、reason、new_basis_hypothesis_ids、replacement_work_item_id、drop_subtree。既存Hypothesisをcontradictedへ変える場合だけ使い、actionはretain / replace / dropのいずれか。それ以外は空配列にする。
+- required_dependency_work_item_idsがあれば各WorkItemのDependencyDecisionを1件ずつ返す。not_required/resolvedはaction_request_id=null。needs_actionは通常は同じDecisionのToolを参照するが、Cycle境界でstart_next_cycle=trueならToolを返さずaction_request_id=nullにする。
+- 通常finalizeでは現在openの全WorkItemを同じupdate_jsonでresolved/droppedへ閉じる。未確認なら閉じずcontinueし、上限時だけ未解決IDとlimitationsを対応させる。
+- finalize時のanswer.citation_idsには、resolved WorkItemのbasis Hypothesisが選んだEvidenceを漏れなく含める。不要なEvidenceならHypothesis側から外す。
+
+参照契約:
+- IDはSolverContextまたは直前Decisionに表示された値だけを完全一致で使い、名前から生成しない。
+- retain_evidence_idsはmax_retained_evidence件以内で、次Cycleにも本文提示が必要なEvidenceだけを選ぶ。
+- statusの意味、根拠の十分性、追加調査、Graph候補の採否はsystem promptに従ってSolverが判断する。
+- 対象がない任意配列は空、任意objectはnull、更新がなければupdateは空objectにする。
+""".strip()
 
 
 _SOLVER_CONTRACT = """

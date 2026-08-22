@@ -86,7 +86,7 @@ Luna Worker / Reviewerで17/17承認され、24 RelationAssertionを
 `classification-run-public-tender-mini-v1-v23`としてpublishした。固定selectorの直接確認では、
 金商法27条の2から施行令7条、施行令7条から府令2条の5、金商法27条の3から府令10条へ到達できる。
 
-回答経路はLegal Profile v64で、Graph要求を1ホップ、Graph由来Articleを後続stepの起点として許可する。
+回答経路はLegal Profile v98で、Graph要求を1ホップ、Graph由来Articleを後続stepの起点として許可する。
 本文取得後の下位規範チェックリストは、法的根拠をHypothesis / Evidenceへ一本化し、監査statusと
 追加ToolRequest参照だけをDependencyDecisionへ保存する。Gemmaは本文取得・完了判断が安定せず、Haikuは
 必要本文取得まで進んだが、v53への簡素化後も検索候補を本文根拠へ誤用する修復不備が残った。v54では
@@ -111,10 +111,23 @@ v64では、同じ下位法令の別Articleを委任事項の具体化規定と�
 Cycle境界ではAnthropic / compact輸送schemaも新規Tool slotを0件にし、共通契約のTool禁止を保持する。
 Anthropic輸送ではCaseUpdateのJSON文字列と、Hypothesisが選ぶEvidence IDの小さな構造化sidecarを分ける。
 sidecarだけを提示済みIDへ制限してCaseUpdateへ機械転記し、CaseUpdate全体の構造化でgrammar上限を
-超えることを避ける。ToolRequestも固定JSON文字列slotを維持する。
+超えることを避ける。ToolRequestも固定slotを維持する。v98では汎用slotのTool名だけを構造化して
+`legal_search / legal_graph_neighbors / load_evidence`へ限定し、Request本体をJSON文字列で輸送する。
+本文取得は専用slotだけに分け、短い候補別名を既知Article IDへ機械変換する。これにより本文取得経路の重複と、
+長いArticle IDのenum反復によるAnthropic grammar肥大化を防ぐ。また、sidecarを今回更新する
+Hypothesisだけへ限定し、選択可能な本文Evidenceがないときは`null`を返す。sidecarをEvidence選択の正本とし、
+`update_json`内のEvidence IDを二重管理しない。また、本文取得済みArticleは再取得候補から外す一方、
+既知のGraph起点としては保持する。本文取得候補とGraph起点の許可集合を同一視しない。
+共通輸送Promptは差分更新の正確なフィールド名と状態整合を短く構造化し、契約修復時は該当違反だけを提示する。
 ただし、この実行はOpenSearchだけで金商法27条の2、施行令7条、府令2条の5を発見し、Graph要求は0件だった。
 固定selectorの直接Tool確認とは別に、OpenSearchだけでは下位Articleを発見できない質問で、Solverが
 Graph由来Articleを次の1ホップ起点にするE2E試験を残す。これを確認するまで全件へ戻らない。
+
+2026-08-21のHaiku・Reviewer off実測では、v94の例外問題は必要Article 3/3・回答観点3/3、公告問題は
+必要Article 2/2・回答観点4/4へ到達した。v96の総合問題ではCycle 1の判断と選択Evidenceを保持したまま
+Cycle 2の追加検索へ進み、Cycle間引継ぎを確認したが、Anthropic grammar上限で停止した。v98はその輸送問題を
+解消したものの、総合問題はCycle 1で3 Articleを取得した後の引用契約修復中に240秒へ達し、gold必須Articleは
+2/6だった。複数WorkItemの完了判断を含む第二期Step 1全体の完了条件はまだ満たしていない。
 
 ## 3. 目標とする検索の流れ
 

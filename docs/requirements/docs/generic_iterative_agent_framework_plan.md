@@ -28,7 +28,7 @@
 - `agent_framework`、`InMemoryCaseStore`、用途別Model Profile、read-only Tool並列実行、
   任意Reviewer、法令Tool Adapter、Feature Flag付き経路は存在する。
 - Reviewerの既定値は無効で、新経路のFeature Flagも既定では無効である。
-- 現行Legal Profile v64は本文取得後の自動Graph連動を持たず、`automatic_tools=()`である。
+- 現行Legal Profile v98は本文取得後の自動Graph連動を持たず、`automatic_tools=()`である。
   Solverは`legal_graph_neighbors`へ、既知起点Article、`semantic_assertion / explicit_reference / explains`の
   いずれか1 mode、意味関係なら5 predicateのうち1つ、方向を明示する。意味方向は
   `from_subject / to_subject`、原文関係は`outgoing / incoming`で、1要求は1ホップである。
@@ -73,11 +73,27 @@
   Tool slotを0件へ固定する。Cycleを閉じるか次Cycleへ進む意味判断はSolverが行う。
   Anthropic輸送ではCaseUpdateのJSON文字列と、Hypothesisが選ぶEvidence IDの小さな構造化sidecarを分ける。
   sidecarだけを提示済みIDへ制限して機械転記し、CaseUpdate全体の構造化でgrammar上限を超えることを避ける。
-  ToolRequestも固定JSON文字列slotを維持する。
+  ToolRequestも固定slotを維持する。v98では汎用slotの`tool_name`を構造化し、
+  `legal_search / legal_graph_neighbors / load_evidence`だけを許可する。残りのRequest本体はJSON文字列で輸送する。
+  本文取得は専用`article_fetch`だけを使い、LLMが選んだ短い候補別名をAdapterが既知Article IDへ機械変換する。
+  これにより本文取得経路の重複と、長いArticle IDのenum反復によるAnthropic grammar肥大化を避ける。
+  また、今回更新するHypothesisだけをsidecar対象とし、
+  選択可能な本文Evidenceがない場合は`null`を返す。sidecarをEvidence選択の正本として扱い、
+  `update_json`内へ誤って残ったEvidence IDは採用しない。
+  また、本文取得済みArticleを`fetch_articles`候補から除外しても、そのArticleは既知のGraph起点として保持する。
+  本文取得候補とGraph起点の許可集合を分離し、Graph由来かOpenSearch由来かを理由に後続1ホップ探索を禁止しない。
+  共通輸送Promptは差分更新の正確なフィールド名と状態整合だけを短く構造化し、契約修復時は該当違反の規則だけを提示する。
+  意味判断、根拠の十分性、追加調査、Graph候補の採否はLegal Promptの責務のままである。
   v56、Haiku、Reviewer offの`公開買付けによらない主な場合`では1 Cycleで完了し、goldの必要Article
   3/3（金商法27条の2、施行令7条、府令2条の5）と回答観点3/3へ到達した。この実行はOpenSearchで
   3 Articleを発見したためGraph要求は0件であり、Solverによる連続1ホップ探索のE2E確認とは区別する。
   全件へ広げる前に、OpenSearchだけでは下位Articleを発見できない質問でGraph連鎖を確認する。
+- 2026-08-21のHaiku・Reviewer offによるミニsnapshot実データ検証では、v94の例外問題は必要Article 3/3・
+  回答観点3/3、公告問題は必要Article 2/2・回答観点4/4へ到達した。v96の総合問題ではCycle 1の
+  WorkItem、Hypothesis、選択Evidenceを保持してCycle 2の追加検索まで進み、Cycle間引継ぎを実モデルで確認したが、
+  候補IDを繰り返したAnthropic grammarがProvider上限を超えた。v98はこの輸送問題を解消した一方、総合問題は
+  Cycle 1で3 Articleを取得した後の引用契約修復中に240秒へ達し、gold必須Articleへの到達は2/6だった。
+  したがって、狭い縦切りとCycle間引継ぎは通るが、複数WorkItemの完了判断を含むStep 1全体は未合格である。
 - Luna用のlabel-free候補packetと最大5件のshardを決定的に生成するIFは実装済みである。
   packetはsnapshot、schema、prompt、Worker / Reviewer model、両Article全文、全参照出現を含み、
   goldやexpected predicateを型上受け付けない。実indexのexportは有向Articleペア単位へ修正済みで、
@@ -261,7 +277,7 @@ Solverが同じHypothesisについて明示した1ホップGraph検索は同じs
 - 通常: 1〜2 research cyclesで完了する
 - 多段探索または再計画が必要な場合: 3〜4 research cycles
 - 上限: 4 research cycles
-- 1 Cycleの本文取得累計上限: Profileの`max_fetched_resources_per_cycle`。Legal初期値は4
+- 1 Cycleの本文取得累計上限: Profileの`max_fetched_resources_per_cycle`。Legal初期値は3。Article全文を同時評価する負荷をCycleへ分散するためであり、Tool 1回の物理上限4とは区別する
 - 1 Cycle内のaction-observation step上限: Profileの`max_steps_per_cycle`
 - Run全体のstep上限: Profileの`max_total_steps`
 - Solverが`finalize`を返した時点で即終了
@@ -1378,7 +1394,8 @@ ToolRequest、grounding Evidenceの参照整合だけを検証する。
 
 本文取得後は、その取得RequestへSolver自身が結び付けたopen WorkItemだけを`lower_norm`監査対象にする。
 Solverは各対象へ`not_required / needs_action / resolved`を1件返し、判断に使った本文を
-`basis_evidence_ids`へ示す。`needs_action`だけ同じDecisionのToolRequestを`action_request_id`で参照する。
+`basis_evidence_ids`へ示す。`needs_action`は通常stepでは同じDecisionのToolRequestを`action_request_id`で参照する。
+Cycle境界ではToolを返さず`action_request_id=null`、`start_next_cycle=true`とし、次Cycleの最初のSolver呼出しで探索を計画する。
 委任元・委任先Articleや法的根拠はToolRequest、Hypothesis、Evidence、citationが正本であり、
 DependencyDecisionへsource/target Evidenceを重複保存しない。Programは対象ID、件数、既知Evidence、
 同一DecisionのRequest参照だけを検証し、statusを選ばない。
@@ -1514,7 +1531,7 @@ reviewer:
 
 limits:
   max_research_cycles: 4
-  max_fetched_resources_per_cycle: 4
+  max_fetched_resources_per_cycle: 3
   max_steps_per_cycle: 4
   max_total_steps: 8
   max_tool_requests_per_step: 5
@@ -2018,7 +2035,7 @@ focusへ接続するNode・Link、直近ToolResult、新規・保持EvidenceをC
 - 全WorkTree案内、現Cycleのgoal・strategy、直前Step、frontier、Solver指定focus、直前の新規Evidence、保持Evidenceを組み立てる。
 - Cycleの`planned → running → completed`と、各Stepの`planned → observed → completed`を保存し、
   Cycleの`completed`時だけcycle数を増やす。
-- `max_research_cycles=4`、Cycle累計の`max_fetched_resources_per_cycle=4`、
+- `max_research_cycles=4`、Cycle累計の`max_fetched_resources_per_cycle=3`、
   `max_tool_requests_per_step`を別の制約として実装する。自動Toolをstep・Cycle traceへ計上するが、
   本文取得数とは混同しない。
 - Cycleの本文取得・step・時間境界前に新しいactionを止め、予約したSolver呼出しで
