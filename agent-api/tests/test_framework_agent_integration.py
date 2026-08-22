@@ -7,7 +7,6 @@ from typing import Any
 
 import pytest
 import requests
-
 from app import main
 from app.adapters.models import StructuredJSONModelAdapter
 from app.adapters.models.structured_json import (
@@ -30,6 +29,7 @@ from app.agent_framework.context import (
     build_solver_context,
 )
 from app.agent_framework.contracts import SolverDecision
+from app.agent_framework.diagnostics import AgentDiagnostics
 from app.agent_framework.loop import AgentLoop, _dependency_audit_work_item_ids
 from app.agent_framework.ports.model import ModelProtocolError
 from app.agent_framework.profiles import AgentLimits, ModelCallProfile
@@ -63,6 +63,7 @@ class FakeStructuredLLM:
         self.payloads: list[dict[str, Any]] = [
             {
                 "next": "continue",
+                "decision_reason": "要件を定めるArticleをまだ取得していないため検索する",
                 "update": {
                     "add_work_items": [
                         {
@@ -92,6 +93,7 @@ class FakeStructuredLLM:
             },
             {
                 "next": "continue",
+                "decision_reason": "検索候補だけでは根拠にならないためArticle本文を取得する",
                 "update": {
                     "update_hypotheses": [
                         {
@@ -115,6 +117,7 @@ class FakeStructuredLLM:
             },
             {
                 "next": "finalize",
+                "decision_reason": "要件本文と下位規範不要判断の根拠が揃ったため完了する",
                 "update": {
                     "update_work_items": [
                         {
@@ -153,6 +156,7 @@ class FakeStructuredLLM:
         return StructuredJSONResult(
             payload={
                 "next": decision["next"],
+                "decision_reason": decision["decision_reason"],
                 "update_json": json.dumps(
                     decision.get("update", {}),
                     ensure_ascii=False,
@@ -220,12 +224,19 @@ class FakeGraph:
 
 def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     monkeypatch,
+    tmp_path,
 ) -> None:
     monkeypatch.setattr(
         legal_profiles.settings,
         "agent_framework_reviewer_enabled",
         False,
     )
+    monkeypatch.setattr(
+        legal_profiles.settings,
+        "agent_framework_diagnostics_mode",
+        "status",
+    )
+    monkeypatch.setattr(legal_profiles.settings, "eval_results_dir", tmp_path)
     llm = FakeStructuredLLM()
     service = LegalFrameworkAgentService(
         FakeOpenSearch(),
@@ -245,6 +256,8 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert response.answer == "検証法第2条が要件を定めています。"
     assert response.citations[0].contentUnitId == "law-test-article-2"
     assert framework_trace["reviewerEnabled"] is False
+    assert framework_trace["diagnosticsMode"] == "status"
+    assert framework_trace["diagnosticsPath"].endswith(".jsonl")
     assert "answerStatus" not in framework_trace
     assert framework_trace["researchCycleCount"] == 1
     assert len(framework_trace["modelCalls"]) == 3
@@ -265,6 +278,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(llm.calls) == 3
     assert "decision_json" not in llm.calls[0]["schema"]["properties"]
     assert "next" in llm.calls[0]["schema"]["properties"]
+    assert "decision_reason" in llm.calls[0]["schema"]["required"]
     assert "dependency_decisions" in llm.calls[0]["schema"]["properties"]
     assert "dependency_decisions_json" not in llm.calls[0]["schema"]["properties"]
     initial_dependency_schema = llm.calls[0]["schema"]["properties"][
@@ -287,6 +301,94 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
         "enum": ["lower_norm"],
     }
     assert framework_trace["dependencyDecisions"][0]["status"] == "not_required"
+    assert len(framework_trace["appliedDecisionSequences"]) == 3
+    diagnostic_records = [
+        json.loads(record_line)
+        for output_path in (tmp_path / "agent-framework-diagnostics").glob(
+            "*.jsonl"
+        )
+        for record_line in output_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert diagnostic_records
+    assert diagnostic_records[0]["event"] == "solver_input"
+    assert "caseState" not in diagnostic_records[0]
+
+
+def test_framework_diagnostics_off_avoids_detailed_output(monkeypatch) -> None:
+    monkeypatch.setattr(
+        legal_profiles.settings,
+        "agent_framework_diagnostics_mode",
+        "off",
+    )
+    service = LegalFrameworkAgentService(
+        FakeOpenSearch(),
+        FakeGraph(),
+        FakeStructuredLLM(),
+    )
+
+    response = service.answer(
+        AnswerRequest(
+            question="検証法の要件は何ですか",
+            pattern="pattern_4_deepsearch",
+        )
+    )
+
+    framework_trace = response.trace["agentFramework"]
+    assert framework_trace["diagnosticsMode"] == "off"
+    assert "diagnosticsPath" not in framework_trace
+    assert "workItems" not in framework_trace
+    assert "hypotheses" not in framework_trace
+    assert "dependencyDecisions" not in framework_trace
+
+
+def test_framework_snapshot_diagnostics_preserve_full_solver_material(
+    tmp_path,
+) -> None:
+    state = CaseState(case_id="case-snapshot", question="質問")
+    context = build_solver_context(
+        state,
+        AgentLimits(),
+        remaining_wall_time_sec=100,
+        finalize_only=False,
+    )
+    profile = ModelCallProfile(model="model", system_prompt="prompt")
+    diagnostics = AgentDiagnostics(
+        mode="snapshot",
+        output_dir=tmp_path,
+        case_id=state.case_id,
+    )
+
+    diagnostics.record_solver_input(
+        state=state,
+        context=context,
+        profile=profile,
+        purpose="integration",
+        contract_attempt=0,
+    )
+
+    assert diagnostics.output_path is not None
+    record = json.loads(
+        diagnostics.output_path.read_text(encoding="utf-8").splitlines()[0]
+    )
+    assert record["stateStatus"]["runStatus"] == "running"
+    assert record["caseState"]["case_id"] == "case-snapshot"
+    assert record["solverContext"]["question"] == "質問"
+    assert record["modelProfile"]["system_prompt"] == "prompt"
+
+
+def test_solver_schema_and_prompt_require_a_concise_decision_reason() -> None:
+    context = build_solver_context(
+        CaseState(case_id="case-reason", question="質問"),
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+    )
+
+    schema = _solver_transport_schema(context)
+    prompt = _solver_prompt(context, "system")
+
+    assert "decision_reason" in schema["required"]
+    assert "内部思考の逐語記録" in prompt
 
 
 def test_framework_reviewer_setting_defaults_to_false() -> None:
@@ -420,7 +522,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 
 def test_all_solver_stages_include_shared_legal_research_rules() -> None:
     profile = legal_profiles.legal_agent_profile()
-    assert profile.version == "98"
+    assert profile.version == "99"
     prompts = (
         profile.solver_research.system_prompt,
         profile.solver_integration.system_prompt,

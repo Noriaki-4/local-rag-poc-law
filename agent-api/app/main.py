@@ -6,10 +6,23 @@ from fastapi import FastAPI, HTTPException
 from .agent import AgentService
 from .config import settings
 from .framework_agent import LegalFrameworkAgentService
+from .framework_audit import (
+    AuditContextCapacityError,
+    AuditModelProtocolError,
+    AuditSnapshotInvalidError,
+    AuditSnapshotNotFoundError,
+    FrameworkPostRunAuditService,
+    PostRunAuditDisabledError,
+)
 from .graph_client import GraphClient
 from .legal_ontology import GRAPH_SCHEMA_VERSION
 from .llm import LLMClient
-from .models import AnswerRequest, GraphPathRequest, SearchRequest
+from .models import (
+    AnswerRequest,
+    FrameworkAuditRequest,
+    GraphPathRequest,
+    SearchRequest,
+)
 from .opensearch_client import OpenSearchClient
 from .reranker import RerankerClient
 from .retrieval_budget import current_profile
@@ -25,6 +38,7 @@ framework_agent_service = LegalFrameworkAgentService(
     graph_client,
     llm_client,
 )
+framework_audit_service = FrameworkPostRunAuditService(llm_client)
 
 
 @asynccontextmanager
@@ -114,6 +128,8 @@ def health() -> dict[str, Any]:
             "algorithm": "shared_boundary_iterative_v1",
             "active": settings.agent_framework_active,
             "reviewerEnabled": settings.agent_framework_reviewer_enabled,
+            "diagnosticsMode": settings.agent_framework_diagnostics_mode,
+            "postRunAudit": settings.agent_framework_post_run_audit,
             "researchModel": settings.agent_framework_research_model,
             "integrationModel": settings.agent_framework_integration_model,
             # 旧クライアントとの互換性のため当面残す。
@@ -192,6 +208,52 @@ def framework_answer(request: AnswerRequest) -> dict[str, Any]:
         raise _internal_http_error(
             "framework_answer_failed",
             "新Agent Frameworkの回答処理に失敗しました。",
+            exc,
+        ) from exc
+
+
+@app.post("/answer/framework/audit")
+def framework_audit(request: FrameworkAuditRequest) -> dict[str, Any]:
+    """保存済みSnapshotを使い、指定した適用済み判断を読み取り専用で説明する。"""
+
+    try:
+        return framework_audit_service.audit(request).model_dump()
+    except PostRunAuditDisabledError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "framework_post_run_audit_disabled",
+                "message": "事後監査は無効です。",
+            },
+        ) from exc
+    except AuditSnapshotNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "framework_audit_snapshot_not_found",
+                "message": "指定された診断Snapshotが見つかりません。",
+            },
+        ) from exc
+    except (AuditSnapshotInvalidError, AuditContextCapacityError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "framework_audit_snapshot_invalid",
+                "message": "診断Snapshotを事後監査に使用できません。",
+            },
+        ) from exc
+    except AuditModelProtocolError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "framework_audit_model_protocol_error",
+                "message": "事後監査モデルの応答を検証できませんでした。",
+            },
+        ) from exc
+    except Exception as exc:
+        raise _internal_http_error(
+            "framework_audit_failed",
+            "事後監査処理に失敗しました。",
             exc,
         ) from exc
 

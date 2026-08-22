@@ -1135,6 +1135,7 @@ class CycleHandoff:
     failed_request_ids: list[str]
 
 class SolverCommandBase:
+    decision_reason: str
     update: CaseUpdate
     next_focus_work_item_ids: list[str]
     retain_evidence_ids: list[str]
@@ -1173,6 +1174,8 @@ discriminatorは、`cycle_plan`、ToolRequest、handoff、answer等のCommand固
 したがって、型だけで全相互制約を表現できるとはみなさない。共通欄の既知ID、現在状態、全件性、
 Commandとの許可組合せは`apply_case_command`の実行時検証とCommand別の契約テストで保証する。
 意味上どのCommandを選ぶべきかは検証しない。
+`decision_reason`はそのStepで当該Commandを選んだ直接の理由を、提示済みEvidence、gap、実行上限へ
+結び付けた短い一文とする。providerの内部思考や逐語的な検討過程を保存する欄ではない。
 
 主な整合条件は次のとおり。
 
@@ -1892,6 +1895,20 @@ EventJournalやDB監査ログは導入しない。運用ログとAPI traceを同
 
 内容が必要なデバッグは明示的な開発設定に限定する。ログ出力失敗によって回答処理を失敗させない。
 
+診断出力は`off / status / snapshot`の明示modeで切り替える。既定`off`ではmodel・Tool・停止理由等の
+小さい実行要約だけをAPI traceへ返し、診断ファイルを作らない。`status`はWorkItem、Hypothesis、
+Graph review等の状態一覧と本文を含まない件数・契約違反を出力する。`snapshot`は再現対象の実行に限り、
+統合直前の`CaseState`、実際に投影した`SolverContext`、Model Profile、修復前後の`SolverDecision`を
+`eval-results/`配下へ保存する。Providerへ渡したPrompt・schemaとProvider内の輸送修復も同じRunへ記録し、
+Framework契約修復と区別する。modeは観測出力だけを変更し、LLMへ渡すstatus契約や本文量を変えない。
+
+SolverDecisionは各Stepの`continue / finalize`選択について、内部思考ではない短い
+`decision_reason`を持つ。構造契約を通過してCaseStateへ適用されたDecisionだけを`decision_applied`として
+Snapshotへ保存し、修復前の不正な出力を実行判断と混同しない。事後説明は既定無効のオンデマンド機能とし、
+指定した`case_id`と適用済みDecision sequenceのSnapshotを別のLLM呼出しへ投影する。出力は記録済み事実と
+事後的推論を区別し、CaseStore・最終回答・検索結果へ書き戻さない。これはproviderの隠れた思考を取得する
+機能ではなく、保存された判断契約を監査可能に説明する機能である。
+
 ## 10. ディレクトリ構成
 
 ```text
@@ -2274,7 +2291,8 @@ publishする別単位とする。Graph schema、抽出規則、入力データ�
   Worker / Reviewer別の判定時間、差戻し率、未解消率、再開skip件数を記録する。最初に代表100件を
   5候補/session・最大3 active sessionのWorker / Reviewer判定で測り、全候補の所要時間を再見積りしてから
   全Runを開始する。速度のためにProgramがpredicateを補完したり、未評価候補を処理済みにしない。
-- cycle phase・goal・strategy、step番号・phase、frontier、探索Node/Link/depth、model用途、Tool時間を構造化ログとAPI traceへ出す。
+- cycle phase・goal・strategy、step番号・phase、frontier、探索Node/Link/depth、model用途、Tool時間を、
+  通常の要約traceと明示的な`status / snapshot`診断modeへ分けて出す。
 - 秘匿情報が通常ログへ出ないことをテストする。
 - Prompt入力と構造化出力を必要最小限へ縮小する。
 - 直列Tool実行が残っていないことを計測する。

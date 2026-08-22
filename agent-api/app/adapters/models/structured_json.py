@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from app.agent_framework.context import ContextCapacityExceeded, SolverContext
 from app.agent_framework.contracts import SolverDecision
+from app.agent_framework.diagnostics import AgentDiagnostics
 from app.agent_framework.ports.model import (
     ModelProtocolError,
     ReviewCallResult,
@@ -23,8 +24,13 @@ from app.llm import LLMClient
 
 
 class StructuredJSONModelAdapter:
-    def __init__(self, client: LLMClient) -> None:
+    def __init__(
+        self,
+        client: LLMClient,
+        diagnostics: AgentDiagnostics | None = None,
+    ) -> None:
         self._client = client
+        self._diagnostics = diagnostics
 
     def solve(
         self,
@@ -61,7 +67,21 @@ class StructuredJSONModelAdapter:
         for repair_index in range(2):
             remaining_timeout = profile.timeout_sec - (monotonic() - started_at)
             if remaining_timeout <= 1:
+                if self._diagnostics is not None:
+                    self._diagnostics.record_transport_timeout(
+                        context=context,
+                        repair_index=repair_index,
+                        reason="solver contract repair time exhausted",
+                    )
                 raise TimeoutError("solver contract repair time exhausted")
+            if self._diagnostics is not None:
+                self._diagnostics.record_transport_input(
+                    context=context,
+                    profile=profile,
+                    prompt=prompt,
+                    schema=transport_schema,
+                    repair_index=repair_index,
+                )
             try:
                 result = self._client.generate_structured_json(
                     prompt=prompt,
@@ -71,6 +91,12 @@ class StructuredJSONModelAdapter:
                     timeout_sec=max(1, round(remaining_timeout)),
                 )
             except requests.Timeout as exc:
+                if self._diagnostics is not None:
+                    self._diagnostics.record_transport_timeout(
+                        context=context,
+                        repair_index=repair_index,
+                        reason="model provider request timed out",
+                    )
                 raise TimeoutError("model provider request timed out") from exc
             attempt_count += 1 + result.retryCount
             if result.inputTokens is None:
@@ -96,6 +122,16 @@ class StructuredJSONModelAdapter:
                         )
                     decision = SolverDecision.model_validate(normalized)
                     _validate_hypothesis_update_evidence(decision)
+                    if self._diagnostics is not None:
+                        self._diagnostics.record_transport_output(
+                            context=context,
+                            repair_index=repair_index,
+                            payload=result.payload,
+                            validation_error=None,
+                            input_tokens=result.inputTokens,
+                            output_tokens=result.outputTokens,
+                            provider_retry_count=result.retryCount,
+                        )
                     return SolverCallResult(
                         decision=decision,
                         input_tokens=(input_tokens if input_tokens_known else None),
@@ -104,6 +140,17 @@ class StructuredJSONModelAdapter:
                     )
                 except (ModelProtocolError, ValidationError) as exc:
                     last_error = exc
+
+            if self._diagnostics is not None:
+                self._diagnostics.record_transport_output(
+                    context=context,
+                    repair_index=repair_index,
+                    payload=result.payload,
+                    validation_error=str(last_error),
+                    input_tokens=result.inputTokens,
+                    output_tokens=result.outputTokens,
+                    provider_retry_count=result.retryCount,
+                )
 
             if repair_index == 0:
                 prompt = _solver_repair_prompt(
@@ -444,13 +491,17 @@ def _focused_contract_repair_instruction(context: SolverContext) -> str:
     rules = (
         (
             ("unknown evidence", "hypothesis has unknown evidence"),
-            "Evidence IDを生成せず、grounding_evidence_idsの完全一致だけを"
-            "hypothesis_evidence_bindingsで選びます。未取得本文ならHypothesisをunresolvedにします。",
+            (
+                "Evidence IDを生成せず、grounding_evidence_idsの完全一致だけを"
+                "hypothesis_evidence_bindingsで選びます。未取得本文ならHypothesisをunresolvedにします。"
+            ),
         ),
         (
             ("supported or contradicted hypothesis requires evidence",),
-            "grounding_evidence_idsが空ならHypothesisをunresolved、evidence_ids=[]へ戻し、"
-            "検索候補から必要なArticleをarticle_fetchで取得します。検索候補だけで完了しません。",
+            (
+                "grounding_evidence_idsが空ならHypothesisをunresolved、evidence_ids=[]へ戻し、"
+                "検索候補から必要なArticleをarticle_fetchで取得します。検索候補だけで完了しません。"
+            ),
         ),
         (
             ("navigation-only evidence",),
@@ -470,8 +521,10 @@ def _focused_contract_repair_instruction(context: SolverContext) -> str:
         ),
         (
             ("resolved dependency requires",),
-            "同じArticleのParagraphを重ねず、委任元と末端Articleの本文Evidenceを使います。"
-            "末端未取得ならneeds_actionにします。",
+            (
+                "同じArticleのParagraphを重ねず、委任元と末端Articleの本文Evidenceを使います。"
+                "末端未取得ならneeds_actionにします。"
+            ),
         ),
         (
             (
@@ -479,8 +532,10 @@ def _focused_contract_repair_instruction(context: SolverContext) -> str:
                 "dependency action",
                 "decisions do not match required work items",
             ),
-            "required_dependency_work_item_idsの各IDへ1件返します。needs_actionのaction_request_idは、"
-            "同じDecisionで実際に返すToolRequestまたはarticle_fetchのrequest_idと完全一致させます。",
+            (
+                "required_dependency_work_item_idsの各IDへ1件返します。needs_actionのaction_request_idは、"
+                "同じDecisionで実際に返すToolRequestまたはarticle_fetchのrequest_idと完全一致させます。"
+            ),
         ),
         (
             ("retained evidence count exceeds",),
@@ -496,9 +551,11 @@ def _focused_contract_repair_instruction(context: SolverContext) -> str:
         ),
         (
             ("focus", "ToolRequest", "tool request references"),
-            "WorkItem・Hypothesis・Requestは既知IDへ完全一致させます。必要なToolなら対応WorkItemを"
-            "state=open、resolution=nullのまま保ちます。WorkItemが本当に完了したなら、そのWorkItemを"
-            "next_focus_work_item_idsとToolRequestから外します。どちらかは意味判断に基づいてSolverが選びます。",
+            (
+                "WorkItem・Hypothesis・Requestは既知IDへ完全一致させます。必要なToolなら対応WorkItemを"
+                "state=open、resolution=nullのまま保ちます。WorkItemが本当に完了したなら、そのWorkItemを"
+                "next_focus_work_item_idsとToolRequestから外します。どちらかは意味判断に基づいてSolverが選びます。"
+            ),
         ),
         (
             ("Graph", "graph review", "Frontier"),
@@ -506,10 +563,12 @@ def _focused_contract_repair_instruction(context: SolverContext) -> str:
         ),
         (
             ("citations omit",),
-            "回答で使うHypothesis Evidenceをcitation_idsへ含め、使わないEvidenceはHypothesisから外します。"
-            "resolved DependencyDecisionのbasisに選んだ各Articleから少なくとも1つのEvidenceを引用します。"
-            "直前Decisionは未適用なので、finalizeを維持するならWorkItem・Hypothesisの完了更新も"
-            "update_jsonへ再掲します。",
+            (
+                "回答で使うHypothesis Evidenceをcitation_idsへ含め、使わないEvidenceはHypothesisから外します。"
+                "resolved DependencyDecisionのbasisに選んだ各Articleから少なくとも1つのEvidenceを引用します。"
+                "直前Decisionは未適用なので、finalizeを維持するならWorkItem・Hypothesisの完了更新も"
+                "update_jsonへ再掲します。"
+            ),
         ),
     )
     for markers, instruction in rules:
@@ -782,6 +841,14 @@ def _solver_transport_schema(context: SolverContext) -> dict:
                     else ["continue", "finalize"]
                 ),
             },
+            "decision_reason": {
+                "type": "string",
+                "description": (
+                    "One concise sentence explaining why this step chooses "
+                    "continue or finalize from the shown evidence, gaps, and limits; "
+                    "do not provide hidden chain-of-thought"
+                ),
+            },
             "start_next_cycle": (
                 {"type": "boolean", "enum": [False]}
                 if graph_review_mode or force_continue_repair
@@ -854,6 +921,7 @@ def _solver_transport_schema(context: SolverContext) -> dict:
         },
         "required": [
             "next",
+            "decision_reason",
             "start_next_cycle",
             "update_json",
             "next_focus_work_item_ids",
@@ -1771,6 +1839,7 @@ def _decode_transport_json(value: Any, *, expected_type: type, label: str) -> An
 _MINIMAL_SOLVER_CONTRACT = """
 出力原則:
 - Provider schemaに従い、CaseState全体ではなく今回の差分だけを返す。
+- decision_reasonには、提示された根拠・gap・上限から今回continueまたはfinalizeを選ぶ理由を一文で書く。内部思考の逐語記録や長い検討過程は書かない。
 - update_jsonに許されるキーはadd_work_items、update_work_items、add_hypotheses、update_hypotheses、impact_decisionsだけ。work_tree等の現在状態を返さない。
 - continueは同Cycleの次step、またはstart_next_cycle=trueによる次Cycle開始であり、answerは返さない。
 - finalizeは追加Toolを返さず、通常完了では全WorkItemを閉じる。上限時の限定回答だけ未解決IDとlimitationsを対応させる。
@@ -1800,6 +1869,7 @@ _SOLVER_CONTRACT = """
 復元後のSolverDecision契約:
 {
   "next": "continue" | "finalize",
+  "decision_reason": str,
   "start_next_cycle": bool,
   "update": {
     "add_work_items": [{"work_item_id": str, "parent_work_item_id": str|null, "question": str, "state": "open"|"resolved"|"dropped", "resolution": str|null, "basis_hypothesis_ids": [str], "replaces_work_item_id": str|null}],

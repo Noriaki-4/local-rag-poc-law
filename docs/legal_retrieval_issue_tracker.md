@@ -63,7 +63,7 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-001` | P0 | 検証待ち | 質問から必要な検索仮説を漏れなく作る | 範囲・要件・例外・手続を分けるPromptはあるが、総合問題で必要観点を追跡できていない | 公開買付け3問のtraceで、質問が要求する全観点が独立したWorkItem・Hypothesisになったか確認する |
 | `LR-002` | P0 | 検証待ち | 法令検索表現を作り、同一Cycle内でOpenSearchを適切に再検索する | 「必要な手続」を「公告・届出・通知・提出・期間・様式」等へ言い換えるPromptと複数stepは実装済み | 初回検索、本文観察後の検索語変更、同一scopeの重複防止をtraceで確認する |
 | `LR-003` | P0 | 検証待ち | Graph由来Articleを起点に連続1ホップ探索する | 固定selectorでは法律→施行令→府令へ到達でき、Graph由来Articleの再起点化も実装済み | OpenSearchだけでは末端Articleを発見できない条件で、実モデルが2回の1ホップを選ぶE2E試験を通す |
-| `LR-004` | P0 | 対応中 | 複合問題で必要本文を揃えてから完了する | 狭い2問は合格したが、総合問題は240秒で停止し、必要Articleは2/6だった | `tob-overview`で必要Article 6/6、回答観点、未解決ID、引用の整合を確認する |
+| `LR-004` | P0 | 対応中 | 複合問題の統合Decisionを成立させ、次の探索または完了へ進む | 狭い2問は合格したが、総合問題はCycle 1で3 Article取得後の契約修復中に240秒で停止し、必要Articleは2/6だった | Cycle 1直後の統合入力を固定し、初回出力で次Cycleへ進めるかを検索実行から分離して確認する |
 | `LR-005` | P0 | 未着手 | `gpt-4o-mini`で新検索経路を実モデル評価する | Provider接続、Structured Outputs、model切替は実装済み。法令E2Eは未実施 | Reviewer無効で公開買付け3問を実行し、Hypothesis、Tool、Evidence、Cycle、時間を記録する |
 | `LR-006` | P1 | 要設計 | 意味分類coverage不足時にも逆引き検索爆発と取りこぼしを両立させる | publish済み意味関係ならselectorで絞れるが、未分類範囲でraw `REFERENCES/to_subject`を使うと高fan-inになる | 限定fallbackの発動条件、scope上限、coverage不足の表示、限定回答条件を決める |
 | `LR-007` | P1 | 未着手 | CycleとStepを再開可能な状態として保存する | WorkItem、Hypothesis、Evidence、Graph review履歴はあるが、目標の`CycleRecord / StepRecord / ExplorationState`は未実装 | Tool観察後の中断から同じStepを再開し、別Cycleとして数えないfixtureを通す |
@@ -72,7 +72,94 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-010` | P2 | 停止中 | 全件Relation分類を安全に再開する | 全件Runは1,615 checkpointで参照scopeと改正法構造の問題が見つかり停止中 | shadow差分監査、影響候補特定、再開条件合格後に同じsnapshot・checkpointから再開する |
 | `LR-011` | P2 | 要設計 | 自治体の条例・規則・要綱を使う小規模データセットを決める | 自治体向け利用像はあるが、データセットは未決定 | 上位法令改正→条例→規則→要綱の逆引きを検証できる最小集合を利用者と決める |
 
-## 4. P0課題の完了条件
+## 4. 最優先分析: 複合問題の統合
+
+### 4.1 本書でいう統合
+
+現行の統合は、取得済み本文を要約して最終回答を書く処理だけではない。Tool実行後の1回の
+`SolverDecision`で、次をまとめて行っている。
+
+```text
+ToolResultとArticle全文
+        ↓
+EvidenceをHypothesisへ対応付ける
+        ↓
+HypothesisとWorkItemの状態を更新する
+        ↓
+下位規範、未取得候補、未解決観点を監査する
+        ↓
+同一Cycleで追加調査 / 次Cycleへ移る / 最終回答、のいずれかを選ぶ
+        ↓
+選択に対応するToolRequest、引継ぎ情報または引用付き回答を返す
+```
+
+したがって「統合失敗」は、最終回答の文章生成失敗だけでなく、Evidence対応付け、状態更新、
+Cycle引継ぎ、完了判断または構造化出力契約の失敗を含む。
+
+### 4.2 現時点で確認できている事実
+
+- 狭い例外問題と公告問題は合格している。
+- 総合問題はCycle 1で3 Articleを取得した後、引用に関する契約修復中に全体上限240秒へ達した。
+- 停止時点のgold必須Article到達は2/6だった。
+- Reviewerは既定無効であり、この失敗経路には関与しない。
+- 全Cycle、通常呼出し、輸送修復、Framework契約修復は、1回の実行に設定された同じwall timeを消費する。
+
+この事実から、2/6だけを見てOpenSearchまたはGraphの取得不能と結論付けない。少なくとも直近実行では、
+Cycle 1の取得結果を統合して次の探索へ進む前に停止したため、残り4 Articleを探す機会自体が失われている。
+一方、保存済み資料だけでは、最初の出力が違反した契約名、修復回数、各呼出し時間の完全な内訳までは
+再現できない。ここを推測で修正せず、固定fixtureと計測で確定する。
+
+### 4.3 分析対象
+
+| 観点 | 確認すること | 問題なら疑う場所 |
+|---|---|---|
+| 統合入力 | 取得した3 Article全文、対応WorkItem・Hypothesis、直前ToolResultが欠落・重複なく見えているか | `CaseStore`、`Projector`、`SolverContext` |
+| 差分範囲 | 直前結果と関係しない状態まで毎回再判断・再出力させていないか | `Projector`、`CaseUpdate`契約 |
+| Evidence対応 | statementと直接根拠を対応付け、未知IDやnavigationを根拠にしていないか | 統合Prompt、Evidence binding、ID輸送 |
+| 状態整合 | 未解決Hypothesisを残したままWorkItemを閉じる、または根拠なしでsupportedにしていないか | `SolverDecision`、状態遷移検証 |
+| Cycle引継ぎ | 1 Cycleの本文3件枠を使い切った不完全状態で、finalizeせず`start_next_cycle=true`を返せるか | 統合Prompt、Cycle境界契約 |
+| 契約修復 | 違反箇所だけを直せているか。統合Decision全体を再生成して意味判断を壊していないか | Provider輸送schema、修復Prompt、Adapter |
+| 時間 | 通常統合、Provider内修復、Framework契約修復のどこで時間を使ったか | trace、wall-time配分 |
+| 完了判断 | 全明示観点と直接根拠が揃う前に完全回答にしていないか | 統合Prompt、finalize検証 |
+
+Programは既知ID、型、件数、参照整合、予算を検証する。Evidenceの関連性、Hypothesisの真偽、
+未解決観点、次の検索、完了可否は引き続きSolverが判断し、統合問題の修正を理由にProgramへ移さない。
+また、統合専用の新Agentは追加せず、Solverの統合利用形として扱う。
+
+### 4.4 分析手順
+
+```text
+1. Cycle 1で3 Articleを取得した直後のCaseStateをfixture化
+        ↓
+2. Projectorが作る統合用SolverContextを保存して内訳を監査
+        ↓
+3. 外部LLMなしで、次の4形を契約・状態適用テスト
+   a. 同一Cycleで追加Toolを要求
+   b. 取得枠を使い切り、未解決のまま次Cycleへ移る
+   c. 全観点が解決し、通常回答をfinalize
+   d. 実行上限で、未確認事項を示した限定回答をfinalize
+        ↓
+4. 違反コード、Prompt文字数、入力・出力token、各修復時間をtraceへ記録
+        ↓
+5. 総合問題だけをReviewer無効・設定済みモデルで1回実行
+        ↓
+6. 統合を通過してから、残った不足を検索仮説・OpenSearch・Graphへ分類
+```
+
+最初から公開買付け3問を連続実行しない。狭い2問はCycle引継ぎを十分に通らないため、まず
+`tob-overview`のCycle 1直後を再現対象にする。全体timeoutや本文取得上限を先に増やすと、契約失敗を
+隠したまま入力だけを増やす可能性があるため、計測前には変更しない。
+
+### 4.5 統合分析の完了条件
+
+- 同じCycle 1状態から、同じ統合用`SolverContext`を再現できる。
+- 統合入力の各要素について、件数と文字量を説明できる。
+- 3件取得済み・未解決あり・Cycle取得枠0のfixtureが、修復なしで次Cycleへ遷移する。
+- 通常完了と上限時の限定完了を区別し、open WorkItemを契約通過だけのために閉じない。
+- 初回出力違反とProvider輸送違反を別々に記録し、修復前後の時間を説明できる。
+- 実モデル総合問題が、240秒を増やさずCycle 2へ到達する。
+
+## 5. P0課題の完了条件
 
 ### LR-001 検索仮説
 
@@ -111,7 +198,7 @@ Neo4jから指定条件の1ホップ候補を取得する
 - 失敗時は、モデル判断、Prompt、共通契約、Provider輸送、Tool、データのどこで失敗したかをtraceで分離する。
 - Provider疎通やmockテストだけを法令検索の合格としない。
 
-## 5. 確認済みの前提
+## 6. 確認済みの前提
 
 次は新規課題として再度設計し直さず、回帰対象として維持する。
 
@@ -125,16 +212,20 @@ Neo4jから指定条件の1ホップ候補を取得する
 | 判断境界 | Hypothesis、検索語、Graph selector、候補採否、根拠十分性、完了はSolverが判断し、Programは既知ID、型、件数、予算、重複scopeだけを検証する |
 | Agent構成 | 回答経路はSolverと任意Reviewerに留め、Reviewerは既定無効とする |
 
-## 6. 推奨する実行順
+## 7. 推奨する実行順
 
 ```text
-LR-005  GPT-4o miniで公開買付け3問を実行
+LR-004  Cycle 1直後の統合fixtureと計測を整備
     ↓
-LR-001  WorkItem・Hypothesisの不足をtraceで確認
+LR-004  総合問題だけを実行し、Cycle 2遷移を確認
+    ↓
+LR-001  統合後も残ったWorkItem・Hypothesis不足を確認
     ↓
 LR-002  法令検索表現と同一Cycle内の再検索を確認
     ↓
 LR-003  OpenSearchだけでは解けない連続1ホップE2Eを確認
+    ↓
+LR-005  設定済みモデルで公開買付け3問を同一指標で比較
     ↓
 LR-004  総合問題を必要Article 6/6まで通す
     ↓
@@ -147,7 +238,7 @@ LR-010  必要性と費用を再評価して全件分類を再開
 
 全件Relation分類は、P0の検索経路が小規模データで合格するまで再開しない。
 
-## 7. 確認証跡
+## 8. 確認証跡
 
 | 日付 | 対象 | 結果 | 証跡 |
 |---|---|---|---|

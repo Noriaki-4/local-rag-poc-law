@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import logging
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from time import monotonic
 
 from pydantic import ValidationError
@@ -16,6 +16,7 @@ from .context import (
     SolverContractFeedback,
     build_solver_context,
 )
+from .diagnostics import AgentDiagnostics
 from .observability import (
     AgentRunResult,
     ModelCallTrace,
@@ -52,12 +53,14 @@ class AgentLoop:
         model: ModelPort,
         tools: ToolRegistry,
         profile: AgentProfile,
+        diagnostics: AgentDiagnostics | None = None,
         clock: Callable[[], float] = monotonic,
     ) -> None:
         self._store = store
         self._model = model
         self._tools = tools
         self._profile = profile
+        self._diagnostics = diagnostics
         self._clock = clock
 
     def run(self, case_id: str) -> AgentRunResult:
@@ -161,12 +164,17 @@ class AgentLoop:
             state = self._store.load(case_id)
             state = self._finish(state, "failed", stop_reason="model_timeout")
             failure_code = "model_timeout"
-        except Exception as exc:  # noqa: BLE001 - provider境界で内部例外を公開しない
+        except Exception as exc:
             logger.exception("unexpected AgentLoop failure", exc_info=exc)
             state = self._store.load(case_id)
             state = self._finish(state, "failed", stop_reason="provider_error")
             failure_code = "provider_error"
 
+        if self._diagnostics is not None:
+            self._diagnostics.record_run_complete(
+                state=state,
+                failure_code=failure_code,
+            )
         return AgentRunResult(
             state=state,
             trace=RunTrace(
@@ -295,6 +303,14 @@ class AgentLoop:
                     base_call_profile,
                     model_budget,
                 )
+                if self._diagnostics is not None:
+                    self._diagnostics.record_solver_input(
+                        state=state,
+                        context=context,
+                        profile=call_profile,
+                        purpose=purpose,
+                        contract_attempt=contract_attempt,
+                    )
                 call_started = self._clock()
                 try:
                     solver_call = self._model.solve(context, call_profile)
@@ -334,6 +350,13 @@ class AgentLoop:
                         finalize_only=finalize_only,
                     )
                 )
+                if self._diagnostics is not None:
+                    self._diagnostics.record_solver_output(
+                        state=state,
+                        purpose=purpose,
+                        contract_attempt=contract_attempt,
+                        decision=solver_call.decision,
+                    )
                 try:
                     candidate = apply_solver_decision(
                         state,
@@ -447,9 +470,26 @@ class AgentLoop:
                         can_start_next_cycle=context.can_start_next_cycle,
                         finalize_only=finalize_only,
                     )
+                    if self._diagnostics is not None:
+                        self._diagnostics.record_decision_applied(
+                            state_before=state,
+                            state_after=candidate,
+                            context=context,
+                            purpose=purpose,
+                            contract_attempt=contract_attempt,
+                            decision=solver_call.decision,
+                        )
                     break
                 except ContractViolation as exc:
                     logger.warning("Solver contract violation: %s", exc)
+                    if self._diagnostics is not None:
+                        self._diagnostics.record_contract_violation(
+                            state=state,
+                            purpose=purpose,
+                            contract_attempt=contract_attempt,
+                            decision=solver_call.decision,
+                            violation=str(exc),
+                        )
                     if contract_attempt == MAX_SOLVER_CONTRACT_ATTEMPTS - 1:
                         raise
                     contract_feedback = SolverContractFeedback(

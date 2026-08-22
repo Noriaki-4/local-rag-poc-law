@@ -10,8 +10,8 @@ from .state import (
     DeferredFrontierResolution,
     DependencyDecision,
     FinalAnswer,
-    FrontierReAdoption,
     FrameworkModel,
+    FrontierReAdoption,
     GraphCandidateReview,
     Hypothesis,
     HypothesisJudgment,
@@ -67,6 +67,9 @@ class CaseUpdate(FrameworkModel):
 
 class SolverDecision(FrameworkModel):
     next: Literal["continue", "finalize"]
+    # Providerの隠れた思考ではなく、このStepでnextを選んだ監査可能な短い理由。
+    # defaultは旧fixture・保存データとの互換用で、Provider schemaでは必須にする。
+    decision_reason: str = Field(default="", max_length=1200)
     start_next_cycle: bool = False
     update: CaseUpdate = Field(default_factory=CaseUpdate)
     next_focus_work_item_ids: tuple[str, ...] = ()

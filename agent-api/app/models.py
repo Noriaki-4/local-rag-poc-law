@@ -2,7 +2,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-
 Pattern = Literal[
     "pattern_1_baseline_rag",
     "pattern_2_rule_based_agentic_rag",
@@ -75,3 +74,31 @@ class AnswerResponse(BaseModel):
     citations: list[Citation]
     graphPaths: list[dict[str, Any]]
     trace: dict[str, Any]
+
+
+class FrameworkAuditRequest(BaseModel):
+    caseId: str = Field(
+        min_length=1,
+        max_length=160,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$",
+    )
+    inquiry: str = Field(
+        default="この判断を選んだ理由を、記録された根拠に基づいて説明してください。",
+        min_length=1,
+        max_length=1000,
+    )
+    decisionSequence: int | None = Field(default=None, ge=1)
+
+
+class FrameworkAuditResponse(BaseModel):
+    caseId: str
+    decisionSequence: int
+    recordedDecisionReason: str
+    explanation: str
+    recordedFacts: list[str]
+    inferences: list[str]
+    sourceDecisionSequences: list[int]
+    limitations: list[str]
+    model: str
+    inputTokens: int | None = None
+    outputTokens: int | None = None

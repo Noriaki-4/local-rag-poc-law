@@ -1094,6 +1094,8 @@ OLLAMA_BASE_URL=http://host.docker.internal:11434
 AGENT_FRAMEWORK_RESEARCH_MODEL=gemma4:e4b
 AGENT_FRAMEWORK_INTEGRATION_MODEL=gemma4:e4b
 AGENT_FRAMEWORK_REVIEWER_ENABLED=false
+AGENT_FRAMEWORK_DIAGNOSTICS_MODE=off
+AGENT_FRAMEWORK_POST_RUN_AUDIT=off
 ```
 
 ```bash
@@ -1103,15 +1105,61 @@ curl -s http://localhost:8000/answer/framework \
   | jq '{answer, citations, agentFramework: .trace.agentFramework}'
 ```
 
-`trace.agentFramework`の`reviewerEnabled`、`researchCycleCount`、`modelCalls`、`toolCalls`、
-`graphCandidateReviews`、`runStatus`を確認する。`runStatus=completed`は実行完了だけを表し、
+既定の`AGENT_FRAMEWORK_DIAGNOSTICS_MODE=off`では、`trace.agentFramework`へ
+`reviewerEnabled`、`researchCycleCount`、`modelCalls`、`toolCalls`、`runStatus`等の小さい実行要約だけを返す。
+`runStatus=completed`は実行完了だけを表し、
 回答の法的十分性を意味しない。
 `toolCalls`には本文を含めず、Solverが指定した検索・本文取得・1ホップGraph取得の`arguments`と
 `purpose`を残す。本文取得だけではGraphを自動実行しない。
+
+統合の状態分析が必要な実行だけ、次の診断modeへ変更する。
+機能の目的、保存情報、応答フィールドの説明は
+[Agent事後監査](docs/agent_post_run_audit.md)を参照する。本節は実行手順を正とする。
+
+| `AGENT_FRAMEWORK_DIAGNOSTICS_MODE` | API trace | ローカル診断ファイル |
+|---|---|---|
+| `off` | 実行・model・Toolの要約 | 出力しない |
+| `status` | 上記にWorkItem、Hypothesis、Graph review等の状態一覧を追加 | 本文を含まない状態・件数・契約違反をJSONLで出力 |
+| `snapshot` | `status`と同じ | 統合直前の`CaseState`、実際の`SolverContext`、Model Profile、Providerへ渡したPrompt・schema、Decision、契約違反を含む |
+
+診断ファイルは`EVAL_RESULTS_DIR/agent-framework-diagnostics/<case_id>.jsonl`へ保存する。
+`eval-results/`はGit管理外である。診断出力に失敗しても回答処理は失敗させない。modeは出力・保存だけを
+切り替え、SolverのPromptや`SolverContext`を増減しないため、`status`や`snapshot`を有効にしても
+LLMへの入力tokenは増えない。通常は`off`を維持し、再現対象の1実行だけ`status`または`snapshot`にする。
+
+各Solver呼出しは、内部思考の逐語記録ではなく、そのStepで`continue`または`finalize`を選ぶ直接の理由を
+`SolverDecision.decision_reason`へ一文で返す。構造契約を通過してCaseStateへ適用されたDecisionだけを
+診断JSONLの`decision_applied`へ保存し、契約修復前の不正なDecisionと区別する。API traceの
+`caseId`と、診断有効時の`appliedDecisionSequences`で対象を特定できる。
+
+処理終了後に理由を確認するときだけ、回答実行前に次を設定する。
+
+```bash
+AGENT_FRAMEWORK_DIAGNOSTICS_MODE=snapshot
+AGENT_FRAMEWORK_POST_RUN_AUDIT=on_demand
+AGENT_FRAMEWORK_POST_RUN_AUDIT_MAX_TOKENS=2048
+```
+
+回答後、`trace.agentFramework.caseId`を使って最後の適用済みDecisionを説明させる。
+
+```bash
+curl -s http://localhost:8000/answer/framework/audit \
+  -H 'content-type: application/json' \
+  -d '{"caseId":"legal-...","inquiry":"なぜ完了と判断したのですか"}' \
+  | jq
+```
+
+途中の判断を確認する場合だけ、`appliedDecisionSequences`にある値を`decisionSequence`へ指定する。
+監査APIは保存済みの対象SolverContext、適用済みDecision、前後状態を別のLLM呼出しへ渡す読み取り専用処理で、
+CaseStore、最終回答、検索結果を更新しない。返るのは内部思考ではなく、記録済み事実と事後的推論を分離した説明である。
+`status`では本文と完全なDecision材料を保存しないため監査APIは利用できない。既定`off`では追加API呼出しも
+診断ファイルも発生しない。
+
 Legal ProfileのGraph要求は1回1ホップである。SolverがHypothesisに対応するpredicate・方向・起点を
 明示して`legal_graph_neighbors`を要求する。Graph候補Articleの本文取得後、その先が必要なら、Solverは
 そのArticleを新しい起点にして次の1ホップを要求できる。Programは累積depthや発見元を理由に除外しない。
-`fetch_articles`1回のArticle IDは最大4個、1 Cycleの本文取得成功数も重複なしで最大4件とする。
+`fetch_articles`1回のArticle IDは物理上限4個、1 Cycleの本文取得成功数は
+`AGENT_FRAMEWORK_MAX_FETCHED_RESOURCES_PER_CYCLE`（現行既定3件）で制限する。
 Legal Profileの1 Solver Decisionは検索系Toolを最大4要求、`fetch_articles`を最大1要求とし、
 合計上限は5要求である。本文取得量の4 Article上限とは別の制約である。
 Graph Reviewから1 stepで選ぶ候補は最大3件とし、残りの関連候補はdeferして後続stepまたは次Cycleへ残す。

@@ -347,6 +347,22 @@ class Settings:
     agent_framework_reviewer_enabled = os.getenv(
         "AGENT_FRAMEWORK_REVIEWER_ENABLED", "false"
     ).lower() in {"1", "true", "yes", "on"}
+    _agent_framework_diagnostics_mode = os.getenv(
+        "AGENT_FRAMEWORK_DIAGNOSTICS_MODE", "off"
+    ).strip().lower()
+    agent_framework_diagnostics_mode = (
+        _agent_framework_diagnostics_mode
+        if _agent_framework_diagnostics_mode in {"off", "status", "snapshot"}
+        else "off"
+    )
+    _agent_framework_post_run_audit = os.getenv(
+        "AGENT_FRAMEWORK_POST_RUN_AUDIT", "off"
+    ).strip().lower()
+    agent_framework_post_run_audit = (
+        _agent_framework_post_run_audit
+        if _agent_framework_post_run_audit in {"off", "on_demand"}
+        else "off"
+    )
     agent_framework_research_model = (
         llm_model
         or os.getenv("AGENT_FRAMEWORK_RESEARCH_MODEL")
@@ -377,6 +393,13 @@ class Settings:
                 os.getenv("AGENT_FRAMEWORK_INTEGRATION_MAX_TOKENS")
                 or os.getenv("AGENT_FRAMEWORK_FINALIZE_MAX_TOKENS", "8192")
             ),
+            anthropic_max_tokens_ceiling,
+        ),
+    )
+    agent_framework_post_run_audit_max_tokens = max(
+        512,
+        min(
+            int(os.getenv("AGENT_FRAMEWORK_POST_RUN_AUDIT_MAX_TOKENS", "2048")),
             anthropic_max_tokens_ceiling,
         ),
     )

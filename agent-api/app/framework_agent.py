@@ -6,8 +6,10 @@ from uuid import uuid4
 
 from app.adapters.models import StructuredJSONModelAdapter
 from app.adapters.persistence.simple_in_memory import InMemoryCaseStore
+from app.agent_framework.diagnostics import AgentDiagnostics
 from app.agent_framework.loop import AgentLoop
 from app.agent_framework.state import CaseState, Evidence
+from app.config import settings
 from app.domains.legal import legal_agent_profile, legal_tool_registry
 from app.graph_client import GraphClient
 from app.llm import LLMClient
@@ -38,16 +40,25 @@ class LegalFrameworkAgentService:
             case_id=f"legal-{uuid4().hex}",
             question=request.question,
         )
+        diagnostics = AgentDiagnostics(
+            mode=settings.agent_framework_diagnostics_mode,
+            output_dir=settings.eval_results_dir,
+            case_id=initial.case_id,
+        )
         store.create(initial)
         loop = AgentLoop(
             store=store,
-            model=StructuredJSONModelAdapter(self._llm_client),
+            model=StructuredJSONModelAdapter(
+                self._llm_client,
+                diagnostics=diagnostics,
+            ),
             tools=legal_tool_registry(
                 self._os_client,
                 self._graph_client,
                 user_clearance_level=request.userClearanceLevel,
             ),
             profile=profile,
+            diagnostics=diagnostics,
         )
         result = loop.run(initial.case_id)
         final_answer = result.state.final_answer
@@ -67,30 +78,32 @@ class LegalFrameworkAgentService:
             for evidence_id in citation_ids
             if evidence_id in evidence_by_id
         ]
-        return AnswerResponse(
-            pattern="agent_framework_v1",
-            route=["agent_framework", "legal_domain"],
-            answer=answer_text,
-            citations=citations,
-            graphPaths=[],
-            trace={
-                "agentFramework": {
-                    "algorithm": "differential_graph_review_v2",
-                    "profile": profile.name,
-                    "profileVersion": profile.version,
-                    "provider": profile.provider,
-                    "reviewerEnabled": profile.reviewer.enabled,
-                    "runStatus": result.state.run_status,
-                    "researchCycleCount": result.state.research_cycle_count,
-                    "stopReason": result.state.stop_reason,
-                    "failureCode": result.trace.failure_code,
-                    "modelCalls": [
-                        item.model_dump(mode="json")
-                        for item in result.trace.model_calls
-                    ],
-                    "toolCalls": [
-                        item.model_dump(mode="json") for item in result.trace.tool_calls
-                    ],
+        framework_trace = {
+            "algorithm": "differential_graph_review_v2",
+            "caseId": result.state.case_id,
+            "profile": profile.name,
+            "profileVersion": profile.version,
+            "provider": profile.provider,
+            "reviewerEnabled": profile.reviewer.enabled,
+            "diagnosticsMode": diagnostics.mode,
+            "runStatus": result.state.run_status,
+            "researchCycleCount": result.state.research_cycle_count,
+            "stopReason": result.state.stop_reason,
+            "failureCode": result.trace.failure_code,
+            "modelCalls": [
+                item.model_dump(mode="json") for item in result.trace.model_calls
+            ],
+            "toolCalls": [
+                item.model_dump(mode="json") for item in result.trace.tool_calls
+            ],
+        }
+        if diagnostics.output_path is not None:
+            framework_trace["diagnosticsPath"] = str(diagnostics.output_path)
+            framework_trace.update(
+                {
+                    "appliedDecisionSequences": list(
+                        diagnostics.applied_decision_sequences
+                    ),
                     "workItems": [
                         {
                             "workItemId": item.work_item_id,
@@ -144,7 +157,15 @@ class LegalFrameworkAgentService:
                         else []
                     ),
                 }
-            },
+            )
+
+        return AnswerResponse(
+            pattern="agent_framework_v1",
+            route=["agent_framework", "legal_domain"],
+            answer=answer_text,
+            citations=citations,
+            graphPaths=[],
+            trace={"agentFramework": framework_trace},
         )
 
 
