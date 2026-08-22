@@ -195,7 +195,7 @@ traceと評価ログで、少なくとも次の5段階を区別する。
 
 関連文書:
 
-- [RUNBOOK](../../../RUNBOOK.md)
+- [RUNBOOK](../RUNBOOK.md)
 - [LLM選定・コスト設定](llm_and_cost_config.md)
 
 ## 11. 評価
@@ -230,7 +230,7 @@ traceと評価ログで、少なくとも次の5段階を区別する。
 関連文書:
 
 - [評価設計](evaluation_design.md)
-- [既知問題の管理例](../samples/eval/lawqa_known_issues.json)
+- [既知問題の管理例](samples/eval/lawqa_known_issues.json)
 
 ## 12. 段階的な導入ゲート
 

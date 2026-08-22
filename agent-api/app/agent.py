@@ -805,7 +805,7 @@ class AgentService:
         shadowでは現行コンテキストを変更せずtraceだけを残す。新方式の内部障害は
         現行回答へ影響してはならないため、例外はここで握りつぶす。active時の意味上の
         根拠不足・予算不足は通常回答へ隠さず、answerStatusとして回答制御へ渡す
-        (docs/requirements/docs/layered_legal_evidence_retrieval_plan.md §11.3, §19)。
+        (docs/layered_legal_evidence_retrieval_plan.md §11.3, §19)。
         """
         active = settings.agent_layered_legal_retrieval
         if not active and not settings.agent_layered_legal_retrieval_shadow:

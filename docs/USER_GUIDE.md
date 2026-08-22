@@ -215,7 +215,7 @@ lawqa_jp の選択式140問（金商法80・薬機法39・借地借家法21）�
 > システムには**問題文と選択肢しか渡しません**（`コンテキスト`＝正解条文の本文は送信しない。
 > [run_eval.py](../eval-runner/run_eval.py) の `normalize_lawqa_sample`）。
 > gold条文の生成と各指標の詳細は
-> [evaluation_design.md](requirements/docs/evaluation_design.md) 2.1 を参照。
+> [evaluation_design.md](evaluation_design.md) 2.1 を参照。
 
 #### この数値の読み方（重要）
 

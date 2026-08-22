@@ -646,7 +646,7 @@ agent-api/tests/test_evidence_selector.py
 - `.env.example`
 - `docker-compose.yml`
 - `RUNBOOK.md`
-- `docs/requirements/docs/evaluation_design.md`
+- `docs/evaluation_design.md`
 
 ## 24. 実装・検証状況
 

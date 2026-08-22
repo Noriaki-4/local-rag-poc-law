@@ -21,7 +21,7 @@ from app.opensearch_client import (  # noqa: E402
 
 DEFAULT_FIXTURE_PATH = (
     Path(__file__).resolve().parents[1]
-    / "docs/requirements/samples/eval/guidance_navigation_fixture.jsonl"
+    / "docs/samples/eval/guidance_navigation_fixture.jsonl"
 )
 
 

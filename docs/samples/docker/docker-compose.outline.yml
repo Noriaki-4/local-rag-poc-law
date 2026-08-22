@@ -63,7 +63,7 @@ services:
       retries: 30
 
   agent-api:
-    build: ../../agent-api
+    build: ../../../agent-api
     ports:
       - '8000:8000'
     environment:
@@ -79,7 +79,7 @@ services:
         condition: service_healthy
 
   agent-ui:
-    build: ../../agent-ui
+    build: ../../../agent-ui
     ports:
       - '8501:8501'
     environment:
@@ -88,13 +88,13 @@ services:
       - agent-api
 
   eval-runner:
-    build: ../../eval-runner
+    build: ../../../eval-runner
     environment:
       AGENT_API_URL: http://agent-api:8000
     depends_on:
       - agent-api
     volumes:
-      - ../../eval-results:/workspace/eval-results
+      - ../../../eval-results:/workspace/eval-results
 
 volumes:
   minio_data:

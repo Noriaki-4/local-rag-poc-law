@@ -123,7 +123,7 @@ OpenSearchとNeo4jでどう扱い、Solverがどの単位で検索するかを�
 ```
 
 参照した保存ファイルは
-[金融商品取引法施行令のXML snapshot](../../../datasets/lawqa_jp/egov_law_corpus/documents/340CO0000000321/575982afba368dd8750149e6852934f69206a3ae93b1516e49e891d124bd1123.xml)
+[金融商品取引法施行令のXML snapshot](../datasets/lawqa_jp/egov_law_corpus/documents/340CO0000000321/575982afba368dd8750149e6852934f69206a3ae93b1516e49e891d124bd1123.xml)
 である。上のXMLは説明用の抜粋であり、原文全体を再掲したものではない。
 
 各要素の役割は次のとおり。

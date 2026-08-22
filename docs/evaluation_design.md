@@ -81,7 +81,7 @@ lawqa_jp native JSON（`data/selection.json`）の1問は次を持つ:
 #### システムへ渡す入力（gold を含めない）
 
 `eval-runner` が `/answer` へ送るのは `question` と `choices` だけ
-（[run_eval.py](../../../eval-runner/run_eval.py) の `run_lawqa`）。
+（[run_eval.py](../eval-runner/run_eval.py) の `run_lawqa`）。
 `output`・`コンテキスト`・`references` は送らない。システムは seed 済みのローカル
 コーパスから条文を自力検索する。
 
@@ -146,7 +146,7 @@ Shadow modeで計算した `shadowRerankerArticleCompleteHit` /
 - `graphExpansionHit` は Graph が新規取得した `graphExpandedContentUnitIds`（およびその親条・
   親法令ID）が gold に当たった場合だけ1。
 
-> 実装は [run_eval.py](../../../eval-runner/run_eval.py) の `run_lawqa` 内。期待側は
+> 実装は [run_eval.py](../eval-runner/run_eval.py) の `run_lawqa` 内。期待側は
 > `expected`（contentUnitId集合）/ `expected_document_ids` / `expected_articles`、引用側は
 > `retrieved` / `retrieved_document_ids` / `retrieved_articles`、完全到達・再現率は
 > `_article_coverage()` に対応。

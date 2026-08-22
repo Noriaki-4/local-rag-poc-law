@@ -25,7 +25,7 @@ from app.opensearch_client import OpenSearchClient  # noqa: E402
 
 DEFAULT_FIXTURE_PATH = (
     Path(__file__).resolve().parents[1]
-    / "docs/requirements/samples/eval/legal_relation_classifier_fixture.jsonl"
+    / "docs/samples/eval/legal_relation_classifier_fixture.jsonl"
 )
 CLASSIFICATION_FIELDS = {
     "classificationVerdict",

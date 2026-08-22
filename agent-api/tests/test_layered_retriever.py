@@ -114,7 +114,7 @@ def _local_law_registry(monkeypatch: pytest.MonkeyPatch):
     from app.config import settings
 
     monkeypatch.setattr(
-        settings, "samples_dir", Path(__file__).resolve().parents[2] / "docs" / "requirements" / "samples"
+        settings, "samples_dir", Path(__file__).resolve().parents[2] / "docs" / "samples"
     )
     law_family.clear_cache()
     yield

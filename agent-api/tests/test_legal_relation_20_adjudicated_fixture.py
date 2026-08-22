@@ -6,7 +6,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts/evaluate_legal_relation_20_adjudicated.py"
 FIXTURE_PATH = (
     REPO_ROOT
-    / "docs/requirements/samples/eval/legal_relation_20_adjudicated_fixture.jsonl"
+    / "docs/samples/eval/legal_relation_20_adjudicated_fixture.jsonl"
 )
 
 

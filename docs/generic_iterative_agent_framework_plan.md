@@ -12,7 +12,7 @@
 ## 実装状況（2026-08-22）
 
 この節は変更履歴ではなく、12章の完了条件に対する差分だけを示す。個別のProfile version、
-不具合修正、実測結果はGit履歴、[RUNBOOK](../../../RUNBOOK.md)、
+不具合修正、実測結果はGit履歴、[RUNBOOK](../RUNBOOK.md)、
 [評価設計](evaluation_design.md)を参照し、本書へ時系列に追記しない。
 
 | Phase | 状況 | 未完了の中心 |
@@ -131,7 +131,7 @@
   修正はOpenSearch本文・content hash・snapshotを変えず、Graph抽出専用の構造境界を保持する。
   Worker契約違反も同じWorker sessionへ1回だけ返して完全recordを再出力させ、Programでは補正しない。
   Neo4j、OpenSearch、承認済み成果物へはまだ反映していない。
-  詳しい比較結果と運用手順は[RUNBOOK](../../../RUNBOOK.md)を正とする。
+  詳しい比較結果と運用手順は[RUNBOOK](../RUNBOOK.md)を正とする。
 - 旧`legal-relation-classifier-v8`は、schema version 7の旧`IMPLEMENTS`候補を
   `implements / reference_only / uncertain`へ分類する移行用機能である。
   本書の5 predicate、`ClassificationRun`、`SUBJECT / OBJECT / CLASSIFIED_IN`を備えた

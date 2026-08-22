@@ -50,7 +50,7 @@ def main() -> int:
         "--mapping",
         type=Path,
         default=repo_root
-        / "docs/requirements/samples/metadata/"
+        / "docs/samples/metadata/"
         "opensearch_index_mapping.japanese.sample.json",
     )
     args = parser.parse_args()

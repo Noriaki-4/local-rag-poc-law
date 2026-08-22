@@ -1,5 +1,8 @@
 # Step1 ローカル Agentic RAG / DeepSearch POC 実装計画・データセット概要
 
+> 本ディレクトリにはユーザー要望の原本だけを置く。
+> 設計文書、課題管理、サンプル、評価fixtureの索引は[docs/README.md](../README.md)を参照する。
+
 ## 目的
 
 本パッケージは、ローカル Docker 環境で以下を検証するための実装計画とデータセット設計である。
@@ -94,7 +97,7 @@ OpenSearch投入サンプルは非ゼロのダミーベクトルを含むが、�
 - `docs/graph_edge_construction.md`: Graphエッジ構築方式
 - `docs/llm_and_cost_config.md`: LLM選定・固定変数・コスト前提
 - `docs/legal_rag_project_checklist.md`: 類似法令RAG案件で再利用する設計・評価チェックリスト
-- `samples/`: JSONL / YAML / docker-compose サンプル
+- `docs/samples/`: JSONL / YAML / docker-compose サンプル
 
 ## Step2 の実現イメージ
 

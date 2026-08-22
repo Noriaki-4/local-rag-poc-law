@@ -218,7 +218,7 @@ services:
       AGENT_FRAMEWORK_FINALIZATION_RESERVE_SEC: ${AGENT_FRAMEWORK_FINALIZATION_RESERVE_SEC:-35}
       AGENT_FRAMEWORK_MAX_WALL_TIME_SEC: ${AGENT_FRAMEWORK_MAX_WALL_TIME_SEC:-240}
       AGENT_FRAMEWORK_REVIEWER_MAX_REVISIONS: ${AGENT_FRAMEWORK_REVIEWER_MAX_REVISIONS:-1}
-      # 法令レイヤー別探索 vNext (docs/requirements/docs/layered_legal_evidence_retrieval_plan.md)
+      # 法令レイヤー別探索 vNext (docs/layered_legal_evidence_retrieval_plan.md)
       AGENT_TIME_PROFILE_NAME: ${AGENT_TIME_PROFILE_NAME:-}
       AGENT_LAYERED_LEGAL_RETRIEVAL: ${AGENT_LAYERED_LEGAL_RETRIEVAL:-false}
       AGENT_LAYERED_LEGAL_RETRIEVAL_SHADOW: ${AGENT_LAYERED_LEGAL_RETRIEVAL_SHADOW:-false}
@@ -261,7 +261,7 @@ services:
       reranker-api:
         condition: service_healthy
     volumes:
-      - ./docs/requirements/samples:/workspace/samples:ro
+      - ./docs/samples:/workspace/samples:ro
       - ./datasets:/workspace/datasets:ro
       - ./eval-results:/workspace/eval-results
 
@@ -291,7 +291,7 @@ services:
     depends_on:
       - agent-api
     volumes:
-      - ./docs/requirements/samples:/workspace/samples:ro
+      - ./docs/samples:/workspace/samples:ro
       - ./datasets:/workspace/datasets:ro
       - ./eval-results:/workspace/eval-results
     profiles:

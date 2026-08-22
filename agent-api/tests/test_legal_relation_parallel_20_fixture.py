@@ -6,7 +6,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_PATH = (
     REPO_ROOT
-    / "docs/requirements/samples/eval/legal_relation_parallel_20_adjudicated_fixture.jsonl"
+    / "docs/samples/eval/legal_relation_parallel_20_adjudicated_fixture.jsonl"
 )
 
 

@@ -227,7 +227,7 @@ curl -s -X POST http://localhost:8000/admin/seed | jq .
 - Neo4j edges: 構造`HAS_CONTENT_UNIT`、原文上の明示参照`REFERENCES`、
   ガイドが明示した対応`EXPLAINS`
 - `MENTIONS / APPLIED_BY`、意味関係と同名の物理Relation、同期`RelationAssertion`は生成しない
-- e-Gov法令は本則・附則を分けて投入する。本則は `law-<法令番号>-article-<条番号>`、附則は `law-<法令番号>-suppl-<index>-article-<条番号>`（条番号の衝突で本則が消えるのを防ぐ）。各文書に `provisionType` / `sectionKey` を付与。詳細は [id_naming_rules.md](docs/requirements/docs/id_naming_rules.md) 3.1
+- e-Gov法令は本則・附則を分けて投入する。本則は `law-<法令番号>-article-<条番号>`、附則は `law-<法令番号>-suppl-<index>-article-<条番号>`（条番号の衝突で本則が消えるのを防ぐ）。各文書に `provisionType` / `sectionKey` を付与。詳細は [id_naming_rules.md](docs/id_naming_rules.md) 3.1
 - MinIO bucket: `knowledge-root`
 - サンプル評価データ: `knowledge-root/eval-data/samples/...`
 - 原本保管用マニュアル: `knowledge-root/source-documents/dept=general-affairs/docType=manual/manual-ordinance-001/source.md`
@@ -279,7 +279,7 @@ LEGAL_RELATION_CLASSIFICATION_RUN_ID=classification-run-public-tender-mini-v1-v2
 ### 非同期Relation分類
 
 全件実行前後の順序と停止条件は
-[非同期Relation分類 全件実行チェックリスト](docs/requirements/docs/relation_classification_rollout_checklist.md)に従う。
+[非同期Relation分類 全件実行チェックリスト](docs/relation_classification_rollout_checklist.md)に従う。
 
 `/admin/seed`は決定的に抽出できる構造と原文Relationまでを作り、LLMを呼ばない。
 意味分類はseed後の独立した再開可能jobが、原文`REFERENCES`を候補化し、5種類の
@@ -547,7 +547,7 @@ ReviewerはWorkerの回答を見たうえで誤りと根拠を指摘し、Worker
 既存14件の回帰は最終14/14、新規20件は2ペア（11件と9件）で並列実行し、初回の3件を
 1回の差戻しで修正して最終20/20、未解消0件となった。新規20件はさらに人手相当の全件監査を行い、
 確定fixture
-`docs/requirements/samples/eval/legal_relation_parallel_20_adjudicated_fixture.jsonl`と全件一致した。
+`docs/samples/eval/legal_relation_parallel_20_adjudicated_fixture.jsonl`と全件一致した。
 
 全件用の最終運用では、1 Worker sessionと1 Reviewer sessionへそれぞれ最大5候補を渡し、候補ごとに
 独立したJSONL recordとcheckpointを作る。WorkerとReviewerは別contextである。差戻しは元のWorkerへ
@@ -626,16 +626,16 @@ workflow `unresolved`は差戻し1回後もReviewerが承認しなかった実�
 
 成果物は次の3ファイルを正本とする。
 
-- `docs/requirements/samples/eval/legal_relation_guidance_100_manifest.json`
-- `docs/requirements/samples/eval/legal_relation_94_adjudicated_fixture.jsonl`
-- `docs/requirements/samples/eval/legal_relation_94_adjudication_audit.jsonl`
+- `docs/samples/eval/legal_relation_guidance_100_manifest.json`
+- `docs/samples/eval/legal_relation_94_adjudicated_fixture.jsonl`
+- `docs/samples/eval/legal_relation_94_adjudication_audit.jsonl`
 
 Articleペア化後に人が再監査した意味goldは
-`docs/requirements/samples/eval/legal_relation_73_pair_overrides.jsonl`で明示的に上書きする。
+`docs/samples/eval/legal_relation_73_pair_overrides.jsonl`で明示的に上書きする。
 builderは複数edgeだけでなく単一edgeの明示overrideも旧edge goldより優先する。現在は複数edge 15件と
 単一edge 3件の計18件である。このファイルはProgramが意味を生成する規則ではなく、CodexがArticle全文を
 確認した監査結果である。複数の妥当なgroundingは
-`docs/requirements/samples/eval/legal_relation_73_grounding_allowances.jsonl`へ候補・predicate単位で明示する。
+`docs/samples/eval/legal_relation_73_grounding_allowances.jsonl`へ候補・predicate単位で明示する。
 scorerは既知occurrence/span IDとcanonical goldを含むことを検証したうえで集合との完全一致だけを調べ、
 隣接spanや親子spanから許容値を自動生成しない。これらの評価成果物はWorker / Reviewerへ渡さない。
 
@@ -670,21 +670,21 @@ gold再構築と再採点は次で行う。`--output`は既存成果物を上書
 ```bash
 agent-api/.venv/bin/python scripts/build_relation_pair_gold.py \
   --packet eval-results/relation-guidance-100-pair-v2/semantic-blind-packet.jsonl \
-  --legacy-audit docs/requirements/samples/eval/legal_relation_94_adjudication_audit.jsonl \
-  --pair-overrides docs/requirements/samples/eval/legal_relation_73_pair_overrides.jsonl \
+  --legacy-audit docs/samples/eval/legal_relation_94_adjudication_audit.jsonl \
+  --pair-overrides docs/samples/eval/legal_relation_73_pair_overrides.jsonl \
   --output /tmp/semantic-pair-gold.jsonl
 
 agent-api/.venv/bin/python scripts/score_relation_pair_output.py \
   --packet eval-results/relation-guidance-100-pair-v2/semantic-blind-packet.jsonl \
   --gold /tmp/semantic-pair-gold.jsonl \
   --actual eval-results/relation-guidance-100-pair-v2/semantic-approved/*.jsonl \
-  --grounding-allowances docs/requirements/samples/eval/legal_relation_73_grounding_allowances.jsonl
+  --grounding-allowances docs/samples/eval/legal_relation_73_grounding_allowances.jsonl
 ```
 
 `--actual`は複数ファイルを受け付け、別ディレクトリを加える場合はオプション自体を繰り返せる。
 
 ガイド6件は既存の
-`docs/requirements/samples/eval/guidance_navigation_fixture.jsonl`を参照する。100件fixtureの件数、
+`docs/samples/eval/guidance_navigation_fixture.jsonl`を参照する。100件fixtureの件数、
 status、predicate網羅、監査契約は次で回帰する。
 
 ```bash
@@ -700,7 +700,7 @@ Graphの参照解決を修正した後は、次で94件の構造正解と照合�
 ```bash
 agent-api/.venv/bin/python \
   scripts/evaluate_legal_relation_20_adjudicated.py \
-  --fixture docs/requirements/samples/eval/legal_relation_94_adjudicated_fixture.jsonl
+  --fixture docs/samples/eval/legal_relation_94_adjudicated_fixture.jsonl
 ```
 
 したがって、現時点の採用判断は次のとおりである。
@@ -850,7 +850,7 @@ curl -s http://localhost:8000/health | jq '.timeBudget, .layeredLegalRetrieval'
 ```
 
 `timeBudget.warnings` に次が出た場合は、Phase 0 の実測後に値を明示設定する
-(自動では書き換えない。`docs/requirements/docs/layered_legal_evidence_retrieval_plan.md` §11.2)。
+(自動では書き換えない。`docs/layered_legal_evidence_retrieval_plan.md` §11.2)。
 
 - `AGENT_ANSWER_RESERVE_SEC < LLM_TIMEOUT_SEC`: 回答LLMがtimeout上限まで使うとwall timeを超え得る
 - componentの設定timeout×最大呼び出し回数の合計が full-answer-safe 探索予算を超えている
@@ -904,7 +904,7 @@ contentUnitIdだけを選べるenumにする。統合段階は、同じ長いID 
 Graph・本文取得の確認済み結果はツール終了直後に案件へ記録し、統合LLMが成功した
 場合だけ新しいCheckpointを作る。統合タイムアウト時も最新Checkpoint以降の案件差分と
 未取得Article候補Taskは残る。詳細は
-[llm_research_case_store_implementation_plan.md](docs/requirements/docs/llm_research_case_store_implementation_plan.md)
+[llm_research_case_store_implementation_plan.md](docs/llm_research_case_store_implementation_plan.md)
 を参照する。
 一般検索で発見したArticleも`search_result`候補Taskとして案件へ保存する。候補が
 Prompt上限を超える場合は文書別に分散して表示ページを進め、先頭候補だけを各サイクルで
@@ -1044,7 +1044,7 @@ LLM_RESEARCH_EVIDENCE_CHARS=30000
 ```
 
 設計と次の実装手順は
-[llm_directed_legal_retrieval.md](docs/requirements/docs/llm_directed_legal_retrieval.md)
+[llm_directed_legal_retrieval.md](docs/llm_directed_legal_retrieval.md)
 を参照する。
 
 ### Graph棚卸し (Phase 0)
@@ -1056,7 +1056,7 @@ PYTHONPATH=agent-api agent-api/.venv/bin/python scripts/graph_inventory.py
 ```
 
 `ordinance_unspecified` が残る法令は、省令か内閣府令かを人手で確認して
-`docs/requirements/samples/eval/law_registry.json` の `authorityType` へ明示する。
+`docs/samples/eval/law_registry.json` の `authorityType` へ明示する。
 推測で確定してはならないが、未判別を理由にレイヤー指定検索から除外もしない。
 
 ## 5. UI 操作
@@ -1223,7 +1223,7 @@ ls -la eval-results
 tail -n 5 eval-results/*.jsonl
 ```
 
-評価は `docs/requirements/samples/eval/*.sample.jsonl` を使う。lawqa_jp 本体データは同梱していない。
+評価は `docs/samples/eval/*.sample.jsonl` を使う。lawqa_jp 本体データは同梱していない。
 
 ### lawqa_jp 全問評価
 
@@ -1344,7 +1344,7 @@ curl -s -X POST http://localhost:8000/admin/seed | jq .
 `externalGuidanceDocuments` が0より大きければ投入された。既定は `false` のため、法令だけの評価結果とガイドライン込みの評価結果は分けて記録する。
 
 `LAWQA_EGOV_LAW_IDS` を指定すると、lawqa_jp から自動抽出せず、指定したe-Gov法令IDだけを投入できる。
-未指定の場合は `docs/requirements/samples/eval/law_registry.json` を使用する。法令ID、評価用の法令ファミリー、部分投入範囲はこのファイルで一元管理する。
+未指定の場合は `docs/samples/eval/law_registry.json` を使用する。法令ID、評価用の法令ファミリー、部分投入範囲はこのファイルで一元管理する。
 
 ```bash
 LAWQA_EGOV_LAW_IDS=323AC0000000025,340CO0000000321 \
@@ -1416,7 +1416,7 @@ Graph展開は上位ノードごとに少数ずつ取得した後、質問との
 いれば条・項・号を直接取得し、同検索語内のローカル再ランク代表を最大2件保持する。
 
 再ランカー入力30件から回答コンテキスト16件を選ぶ論点被覆型方式は
-[legal_issue_coverage_retrieval.md](docs/requirements/docs/legal_issue_coverage_retrieval.md)
+[legal_issue_coverage_retrieval.md](docs/legal_issue_coverage_retrieval.md)
 に従う。既定では現行16件を回答へ使いながら新16件も計算するShadow modeである。
 
 ```text
@@ -1487,7 +1487,7 @@ docker compose --profile eval run --rm eval-runner
 - lawqa_jp はゴールデンセット（正解＋必要な条文を持つ）だが、それらは採点専用で、
   システムには問題文と選択肢しか渡さない。gold条文の生成（コンテキスト見出しから
   条・項・号の contentUnitId を復元）と各指標の照合ロジックの詳細は
-  [evaluation_design.md](docs/requirements/docs/evaluation_design.md) 2.1 を参照。
+  [evaluation_design.md](docs/evaluation_design.md) 2.1 を参照。
 - 現行の既定検索は BM25 + bge-m3 vector の Hybrid 検索。
 - `SEED_LAWQA_EGOV=true` を使わない場合、RAGコーパスはサンプル1文書のみなので、全問スコアは検索基盤の完成度ではなく、現在投入済み文書に強く依存する。
 - e-Gov以外のPDF等を参照する問題は、現行の自動投入対象外。`citationHit` は e-Gov 法令ID単位の部分一致も見る。
@@ -1578,6 +1578,6 @@ Phase 0 で以下を固定する。
 - `.env`: `LLM_PROVIDER`, `LLM_MODEL`, `ANSWER_MODEL`, `REVIEWER_MODEL`,
   `LLM_RESEARCH_STAGE_MODEL`, `LLM_RESEARCH_INTEGRATION_MODEL`, provider別APIキーを変更
 - `agent-api/app/agent.py`: planner / answer / judge の使い分けを拡張
-- `docs/requirements/samples/eval/`: 実評価分割の JSONL に差し替え
+- `docs/samples/eval/`: 実評価分割の JSONL に差し替え
 
 法的判断はシステム出力だけで断定せず、必要に応じて専門家確認を行う。

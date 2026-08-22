@@ -450,11 +450,11 @@ def test_committed_pair_gold_and_grounding_allowances_are_rebuildable() -> None:
     )
     legacy_path = (
         REPO_ROOT
-        / "docs/requirements/samples/eval/legal_relation_94_adjudication_audit.jsonl"
+        / "docs/samples/eval/legal_relation_94_adjudication_audit.jsonl"
     )
     override_path = (
         REPO_ROOT
-        / "docs/requirements/samples/eval/legal_relation_73_pair_overrides.jsonl"
+        / "docs/samples/eval/legal_relation_73_pair_overrides.jsonl"
     )
     gold_path = (
         REPO_ROOT
@@ -462,11 +462,11 @@ def test_committed_pair_gold_and_grounding_allowances_are_rebuildable() -> None:
     )
     allowance_path = (
         REPO_ROOT
-        / "docs/requirements/samples/eval/legal_relation_73_grounding_allowances.jsonl"
+        / "docs/samples/eval/legal_relation_73_grounding_allowances.jsonl"
     )
     recall_allowance_path = (
         REPO_ROOT
-        / "docs/requirements/samples/eval/"
+        / "docs/samples/eval/"
         "legal_relation_73_predicate_recall_allowances.jsonl"
     )
     packets = [

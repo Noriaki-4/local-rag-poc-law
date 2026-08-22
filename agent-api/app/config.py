@@ -517,7 +517,7 @@ class Settings:
     )
 
     # ------------------------------------------------------------------------------
-    # 法令レイヤー別探索 vNext (docs/requirements/docs/layered_legal_evidence_retrieval_plan.md)
+    # 法令レイヤー別探索 vNext (docs/layered_legal_evidence_retrieval_plan.md)
     # 既定はshadowのみ。active切替はPhase 6の評価後に行う(§19)。
     # 上限値は §11.1 の初期値案であり、Phase 0の実測後に確定する。
     # ------------------------------------------------------------------------------

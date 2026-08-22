@@ -145,7 +145,7 @@ normalized:   A / B / C / D
 原本:
 
 ```text
-docs/requirements/samples/source-documents/dept=general-affairs/docType=manual/manual-ordinance-001/source.md
+docs/samples/source-documents/dept=general-affairs/docType=manual/manual-ordinance-001/source.md
 ```
 
 扱い:

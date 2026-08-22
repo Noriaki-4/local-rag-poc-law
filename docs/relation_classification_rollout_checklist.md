@@ -2,7 +2,7 @@
 
 > 本書は、全件意味分類を開始する前後の実行順と停止条件を示す運用チェックリストである。
 > 設計判断は[`generic_iterative_agent_framework_plan.md`](generic_iterative_agent_framework_plan.md)、
-> コマンドは[`RUNBOOK.md`](../../../RUNBOOK.md)を正とする。
+> コマンドは[`RUNBOOK.md`](../RUNBOOK.md)を正とする。
 
 ## 全件実行を開始してよい条件
 

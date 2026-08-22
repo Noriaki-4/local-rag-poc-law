@@ -12,7 +12,7 @@ import requests
 
 API_URL = os.getenv("AGENT_API_URL", "http://localhost:8000").rstrip("/")
 _CONTAINER_SAMPLES_DIR = Path("/workspace/samples")
-_LOCAL_SAMPLES_DIR = Path(__file__).resolve().parent.parent / "docs" / "requirements" / "samples"
+_LOCAL_SAMPLES_DIR = Path(__file__).resolve().parent.parent / "docs" / "samples"
 SAMPLES_DIR = Path(
     os.getenv(
         "SAMPLES_DIR",
@@ -210,7 +210,7 @@ def assert_request_timeout_is_safe(health: dict[str, Any]) -> None:
 
     REQUEST_TIMEOUT_SECはeval-runner側の設定であり、agent-api単独では比較できないため、
     /healthが公開するwall timeと突き合わせる
-    (docs/requirements/docs/layered_legal_evidence_retrieval_plan.md §11.2)。
+    (docs/layered_legal_evidence_retrieval_plan.md §11.2)。
     """
     budget = (health or {}).get("timeBudget") or {}
     wall_time = budget.get("agentMaxWallTimeSec")

@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-EVAL_DIR = REPO_ROOT / "docs/requirements/samples/eval"
+EVAL_DIR = REPO_ROOT / "docs/samples/eval"
 LEGAL_FIXTURE = EVAL_DIR / "legal_relation_94_adjudicated_fixture.jsonl"
 AUDIT_FIXTURE = EVAL_DIR / "legal_relation_94_adjudication_audit.jsonl"
 GUIDANCE_FIXTURE = EVAL_DIR / "guidance_navigation_fixture.jsonl"

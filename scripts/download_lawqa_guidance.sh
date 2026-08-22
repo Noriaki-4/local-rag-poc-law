@@ -5,7 +5,7 @@ set -euo pipefail
 root_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 target_dir="${LAWQA_GUIDANCE_DIR:-$root_dir/datasets/lawqa_jp/external-guidance}"
 documents_dir="$target_dir/documents"
-template="$root_dir/docs/requirements/samples/external_guidance.manifest.sample.json"
+template="$root_dir/docs/samples/external_guidance.manifest.sample.json"
 manifest="$target_dir/manifest.json"
 
 mkdir -p "$documents_dir"

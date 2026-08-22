@@ -18,7 +18,7 @@ from urllib.request import Request, urlopen
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_REGISTRY = (
-    REPO_ROOT / "docs/requirements/samples/eval/law_registry.json"
+    REPO_ROOT / "docs/samples/eval/law_registry.json"
 )
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "datasets/lawqa_jp/egov_law_corpus"
 DEFAULT_API_BASE_URL = "https://laws.e-gov.go.jp/api/1"

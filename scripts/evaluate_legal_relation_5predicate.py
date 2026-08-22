@@ -18,7 +18,7 @@ from app.opensearch_client import OpenSearchClient
 
 DEFAULT_FIXTURE_PATH = (
     Path(__file__).resolve().parents[1]
-    / "docs/requirements/samples/eval/legal_relation_5predicate_regression_fixture.jsonl"
+    / "docs/samples/eval/legal_relation_5predicate_regression_fixture.jsonl"
 )
 
 

@@ -9,12 +9,12 @@
   "lanes": [
     {
       "caseType": "legal_relation",
-      "fixture": "docs/requirements/samples/eval/legal_relation_94_adjudicated_fixture.jsonl",
+      "fixture": "docs/samples/eval/legal_relation_94_adjudicated_fixture.jsonl",
       "caseCount": 94
     },
     {
       "caseType": "guidance_navigation",
-      "fixture": "docs/requirements/samples/eval/guidance_navigation_fixture.jsonl",
+      "fixture": "docs/samples/eval/guidance_navigation_fixture.jsonl",
       "caseCount": 6
     }
   ],

@@ -11,11 +11,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SKILL_ROOT = REPO_ROOT / ".agents/skills/legal-relation-adjudicator"
 PAIR_GOLD = (
     REPO_ROOT
-    / "docs/requirements/samples/eval/legal_relation_73_pair_overrides.jsonl"
+    / "docs/samples/eval/legal_relation_73_pair_overrides.jsonl"
 )
 EDGE_GOLD = (
     REPO_ROOT
-    / "docs/requirements/samples/eval/legal_relation_94_adjudicated_fixture.jsonl"
+    / "docs/samples/eval/legal_relation_94_adjudicated_fixture.jsonl"
 )
 
 

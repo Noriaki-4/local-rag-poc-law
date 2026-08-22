@@ -1,6 +1,6 @@
 # 設計文書ガイド
 
-> 更新日: 2026-08-20
+> 更新日: 2026-08-22
 
 このディレクトリには、データ投入、検索、Graph、Agent、評価、将来移行に関する設計文書がある。
 すべてが同じ世代の現行仕様ではないため、本書では各文書の役割と位置づけを整理する。
@@ -9,13 +9,14 @@
 
 文書間で説明が食い違う場合は、次の順で確認する。
 
-1. Agentの目標構造・実装順・完了条件は
+1. ユーザー要望の原本は[requirements/README.md](requirements/README.md)
+2. Agentの目標構造・実装順・完了条件は
    [generic_iterative_agent_framework_plan.md](generic_iterative_agent_framework_plan.md)
-2. 現行Graph schema version 9のseed仕様は
+3. 現行Graph schema version 9のseed仕様は
    [graph_edge_construction.md](graph_edge_construction.md)
-3. データ原本・e-Gov XML snapshot・投入対象は[dataset_design.md](dataset_design.md)
-4. 実行コマンド、現在のindex名、実測結果は[RUNBOOK.md](../../../RUNBOOK.md)
-5. 実装済みかどうかの最終確認はコード、テスト、評価成果物
+4. データ原本・e-Gov XML snapshot・投入対象は[dataset_design.md](dataset_design.md)
+5. 実行コマンド、現在のindex名、実測結果は[RUNBOOK.md](../RUNBOOK.md)
+6. 実装済みかどうかの最終確認はコード、テスト、評価成果物
 
 古い文書に残る`MENTIONS / APPLIED_BY`、物理Relationとしての`IMPLEMENTS / EXCEPTION_TO`、
 旧Graph schemaの記述を、schema version 9へ追加する指示として解釈しない。
@@ -65,6 +66,7 @@
 
 | 文書 | 内容 | 現在の位置づけ |
 |---|---|---|
+| [legal_retrieval_issue_tracker.md](legal_retrieval_issue_tracker.md) | 検索仮説、法令検索表現、OpenSearch反復検索、連続1ホップGraph、完了判断、実モデル評価、全件分類再開条件の課題・優先度・完了条件 | 法令検索の現在地と次の作業を管理する課題台帳。設計判断は各正本文書を優先する |
 | [layered_legal_evidence_retrieval_plan.md](layered_legal_evidence_retrieval_plan.md) | 法律・政令・府省令のレイヤー、法的役割、旧Graphオントロジー、ガイドレーン、反復探索、予算 | 旧法令検索経路の詳細設計と実装記録。schema version 3〜6や旧Relationの記述は現行Graph仕様に使わない |
 | [legal_issue_coverage_retrieval.md](legal_issue_coverage_retrieval.md) | 質問の論点分解、30候補から16件への選抜、論点被覆、再ランキング、Graph候補の論点継承 | 旧経路の回答コンテキスト選択改善。feature flag付き実装 |
 | [legal_rag_project_checklist.md](legal_rag_project_checklist.md) | データ、索引、日本語検索、Graph、ガイド、LLM状態、時間、評価の確認項目 | 横断的なレビュー・品質確認用チェックリスト |
@@ -78,10 +80,10 @@
 
 代表100件の正解データと監査記録:
 
-- [legal_relation_guidance_100_manifest.json](../samples/eval/legal_relation_guidance_100_manifest.json)
-- [legal_relation_94_adjudicated_fixture.jsonl](../samples/eval/legal_relation_94_adjudicated_fixture.jsonl)
-- [legal_relation_94_adjudication_audit.jsonl](../samples/eval/legal_relation_94_adjudication_audit.jsonl)
-- [guidance_navigation_fixture.jsonl](../samples/eval/guidance_navigation_fixture.jsonl)
+- [legal_relation_guidance_100_manifest.json](samples/eval/legal_relation_guidance_100_manifest.json)
+- [legal_relation_94_adjudicated_fixture.jsonl](samples/eval/legal_relation_94_adjudicated_fixture.jsonl)
+- [legal_relation_94_adjudication_audit.jsonl](samples/eval/legal_relation_94_adjudication_audit.jsonl)
+- [guidance_navigation_fixture.jsonl](samples/eval/guidance_navigation_fixture.jsonl)
 
 ## 5. 全体計画・将来移行
 
@@ -95,6 +97,9 @@
 
 ```text
 プロジェクト全体
+├─ ユーザー要望
+│  └─ requirements/README                     要望の原本
+│
 ├─ Step1全体構成
 │  └─ step1_implementation_plan
 │
@@ -107,6 +112,7 @@
 │  └─ graph_edge_construction
 │
 ├─ 法令検索Domain
+│  ├─ legal_retrieval_issue_tracker            現在の課題・優先度・完了条件
 │  ├─ layered_legal_evidence_retrieval_plan    旧経路の詳細設計・実装記録
 │  ├─ legal_issue_coverage_retrieval           旧経路のfeature flag実装
 │  └─ legal_rag_project_checklist
@@ -132,16 +138,18 @@
 
 ## 7. 推奨読順
 
-1. 第二期の変更概要: [second_phase_development_memo.md](second_phase_development_memo.md)
-2. Agent全体像: [generic_iterative_agent_framework_plan_visual.md](generic_iterative_agent_framework_plan_visual.md)
-3. Agent実装仕様: [generic_iterative_agent_framework_plan.md](generic_iterative_agent_framework_plan.md)
-4. 投入対象: [dataset_design.md](dataset_design.md)
-5. Graph構築: [graph_edge_construction.md](graph_edge_construction.md)
-6. 現在の実装・再投入・評価結果: [RUNBOOK.md](../../../RUNBOOK.md)
-7. OpenSearchの基本設計: [retrieval_config.md](retrieval_config.md)
-8. 旧法令検索経路を調べる場合だけ:
+1. ユーザー要望: [requirements/README.md](requirements/README.md)
+2. 第二期の変更概要: [second_phase_development_memo.md](second_phase_development_memo.md)
+3. 現在の課題と次の作業: [legal_retrieval_issue_tracker.md](legal_retrieval_issue_tracker.md)
+4. Agent全体像: [generic_iterative_agent_framework_plan_visual.md](generic_iterative_agent_framework_plan_visual.md)
+5. Agent実装仕様: [generic_iterative_agent_framework_plan.md](generic_iterative_agent_framework_plan.md)
+6. 投入対象: [dataset_design.md](dataset_design.md)
+7. Graph構築: [graph_edge_construction.md](graph_edge_construction.md)
+8. 現在の実装・再投入・評価結果: [RUNBOOK.md](../RUNBOOK.md)
+9. OpenSearchの基本設計: [retrieval_config.md](retrieval_config.md)
+10. 旧法令検索経路を調べる場合だけ:
    [layered_legal_evidence_retrieval_plan.md](layered_legal_evidence_retrieval_plan.md)
-9. QA・検索評価: [evaluation_design.md](evaluation_design.md)
+11. QA・検索評価: [evaluation_design.md](evaluation_design.md)
 
 ## 8. 文書を更新するときの注意
 

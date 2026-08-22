@@ -23,7 +23,7 @@
 ### 2.1 現行索引と2つの検索API
 
 索引定義は
-`docs/requirements/samples/metadata/opensearch_index_mapping.sample.json`にある。
+`docs/samples/metadata/opensearch_index_mapping.sample.json`にある。
 `title`、`heading`、`sectionPath`、`text`はいずれも`text`型だが、Analyzerを明示していない。
 そのためOpenSearchの既定Analyzerが使われる。
 

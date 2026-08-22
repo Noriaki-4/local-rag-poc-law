@@ -61,7 +61,7 @@ class Citation(BaseModel):
     sourcePage: int | None = None
     text: str | None = None
     # 法令本文かガイド(行政解釈)かを回答・UIで区別するためのレーン表示
-    # (docs/requirements/docs/layered_legal_evidence_retrieval_plan.md §10)。
+    # (docs/layered_legal_evidence_retrieval_plan.md §10)。
     evidenceLane: str | None = None
     evidenceRole: str | None = None
 

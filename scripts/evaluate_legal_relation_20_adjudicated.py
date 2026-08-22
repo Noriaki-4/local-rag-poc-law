@@ -23,7 +23,7 @@ from app.opensearch_client import OpenSearchClient
 
 DEFAULT_FIXTURE_PATH = (
     Path(__file__).resolve().parents[1]
-    / "docs/requirements/samples/eval/legal_relation_20_adjudicated_fixture.jsonl"
+    / "docs/samples/eval/legal_relation_20_adjudicated_fixture.jsonl"
 )
 RESOLUTION_STATUSES = frozenset({"resolved", "unresolved", "not_reference"})
 PREDICATES = tuple(item.value for item in ProposedPredicate)
