@@ -19,6 +19,7 @@ from app.agent_framework.ports.model import (
     SolverCallResult,
 )
 from app.agent_framework.profiles import ModelCallProfile, ReviewerProfile
+from app.agent_framework.prompt_assets import render_prompt_section
 from app.agent_framework.state import ReviewResult
 from app.llm import LLMClient
 
@@ -38,7 +39,9 @@ class StructuredJSONModelAdapter:
         profile: ModelCallProfile,
     ) -> SolverCallResult:
         provider = getattr(self._client, "provider", None)
-        compact_transport = provider == "ollama"
+        # OpenAI Structured OutputsでもToolRequestをobjectとして拘束する。
+        # JSON文字列へ落とすと内側の必須fieldをprovider schemaで検証できない。
+        compact_transport = provider in {"ollama", "openai"}
         structured_tool_transport = provider == "anthropic"
         base_prompt = _solver_prompt(
             context,
@@ -219,106 +222,6 @@ def _solver_prompt(
         ensure_ascii=False,
         separators=(",", ":"),
     )
-    contract_repair_instruction = ""
-    if context.contract_feedback is not None:
-        contract_repair_instruction = (
-            "\nこれは状態へ未適用のDecisionに対する契約修復呼出しです。"
-            "同じviolationを繰り返さないでください。"
-            "前回Decisionのうち契約に適合する意味判断・更新は維持しますが、"
-            "violationが不整合を示したnext、start_next_cycle、answer、参照IDは"
-            "そのまま維持せず、現在のSolverContextと整合する形へ直してください。"
-            "violationがfinalize時のopen WorkItemを示す場合は、"
-            "契約を通す目的だけでopen WorkItemをresolvedまたはdroppedへ変更してはいけません。"
-            "前回Decisionのanswer、limitations、Hypothesis.gaps、未評価Graph候補を再照合し、"
-            "未確認事項が回答へ影響しcan_start_next_cycle=trueなら、WorkItemをopenのまま"
-            "next=continueとして必要なToolRequest、またはCycle境界なら"
-            "start_next_cycle=trueとunreviewed_graph_resolutionを返してください。"
-            "直接根拠による完了判断が前回Decision内ですでに一貫しており、"
-            "gapsやlimitationsとも矛盾しないWorkItemだけを閉じられます。"
-            "finalize_only=trueまたは次Cycleを開始できない場合はopenを偽って閉じず、"
-            "answerのunresolved_work_item_idsとunresolved_hypothesis_idsへ明示してください。\n"
-            "open WorkItem違反から次Cycleへ移る修復では、直前の検証済みCaseUpdateを"
-            "Adapterが保持するためupdate_jsonは空objectを返してください。"
-            "同じ更新を長いJSON文字列として再出力しません。\n"
-            "violationがunknown evidence IDを示す場合は、そのIDを削除するか、"
-            "solver_context.grounding_evidence_idsに完全一致するIDだけへ置き換えてください。"
-            "検索候補本文中の番号やsourceContentUnitIdをEvidence IDとして使ってはいけません。\n"
-            "violationがnavigation-only evidenceを示す場合、そのEvidenceは候補発見にだけ使い、"
-            "Hypothesisをsupportedまたはcontradictedにする根拠やWorkItemの解決根拠にしません。"
-            "対応Article IDがfetchable_article_idsにあればfetch_articlesを要求し、本文取得まで"
-            "Hypothesisをunresolved、WorkItemをopenのままにしてください。継続可能な状態で"
-            "未解決WorkItemを残したfinalizeへ変更してはいけません。複数Articleを取得する場合も"
-            "fetch_articlesは同じDecision内で正確に1 Requestへ統合し、article_idsは重複なしで"
-            "min(4, solver_context.remaining_fetch_capacity)件以内に意味選択します。枠外の候補を"
-            "rejectや解決済みにせず、後続Decisionで評価できる状態に残してください。\n"
-            "violationがunknown Article IDを示す場合は、そのIDを削除し、"
-            "solver_context.fetchable_article_idsに完全一致するIDだけへ置き換えてください。"
-            "前回Decisionの既知IDは維持し、未知IDの条番号を修正した別IDや新しいIDを追加しません。"
-            "本文中の条番号、法令番号、documentIdをArticle IDへ変換しません。"
-            "修復後のfetch_articlesの全IDをfetchable_article_idsと文字列の完全一致で再確認してください。"
-            "未知IDを除くとarticle_idsが空になる、または必要な参照先IDが同一覧にない場合は、"
-            "fetch_articlesを残さず、表示済みの法令名・条番号・確認事項をqueryにしたlegal_searchを返してください。"
-            "下位規範のDependencyDecisionでneeds_actionを選ぶ場合は、必要な検索・Graph・"
-            "本文取得のToolRequestを同じDecisionへ含め、そのrequest_idを"
-            "action_request_idへ指定してください。\n"
-            "violationがfocusまたはToolRequestのWorkItem・Hypothesis参照を示す場合は、"
-            "前回Decisionのupdateで実際に追加・更新したIDとSolverContextの既知IDを"
-            "文字列の完全一致で使ってください。質問文から別表記のIDを作り直さず、"
-            "参照先に合わせてnext_focus_work_item_ids、work_item_id、hypothesis_idsだけを"
-            "修復してください。どの作業・仮説へ結び付けるかはあなたが判断します。\n"
-            "violationがfetch_articles.article_ids exceeds the profile limitを示す場合は、"
-            "未確認の命題に直接必要なArticleを4個以下に意味選択してください。"
-            "プログラムは候補を選別しません。上限回避のためにfetch_articlesを"
-            "複数Requestへ分割せず、残りは後続Decisionの候補として残します。\n"
-            "violationがArticle body fetches in one SolverDecision must be consolidatedまたは"
-            "Article body fetch exceeds the remaining Cycle capacityを示す場合も、全fetch_articlesを"
-            "正確に1 Requestへ統合し、article_idsを重複なしの"
-            "min(4, solver_context.remaining_fetch_capacity)件以内へ意味選択してください。"
-            "Programへ切捨てや優先順位付けを要求しません。\n"
-            "violationがremaining Cycle capacityまたはCycle boundaryを示す場合は、"
-            "現CycleへToolを追加しません。取得済み結果を評価し、can_start_next_cycle=trueなら"
-            "次に検証する命題・方針を明示してstart_next_cycle=true、falseならfinalizeします。\n"
-            "violationがdependency decisionを示す場合は、指定されたdependency_kindについて、"
-            "判断開始時にopenだった各WorkItemへちょうど1件ずつ返してください。"
-            "必要な種別とWorkItem IDはsolver_context.required_dependency_kindと"
-            "required_dependency_work_item_idsに列挙されています。"
-            "basis_evidence_idsにはsolver_context.grounding_evidence_idsから判断に使った本文を指定し、"
-            "needs_actionなら同じDecision内のToolRequest IDをaction_request_idへ指定してください。"
-            "not_requiredとresolvedではaction_request_id=nullにします。どのstatusが"
-            "妥当かはあなたが意味を判断してください。\n"
-            "violationがresolved dependency requires full-text evidence from at least two distinct Articlesを"
-            "示す場合、同じArticleのParagraphを増やして通そうとしません。委任元Articleと、委任事項を"
-            "実際に具体化する末端Articleの本文Evidenceをbasis_evidence_idsへ含めます。末端Articleが"
-            "未取得ならresolvedを維持せずneeds_actionとし、Graph・検索・本文取得のToolRequestを返してください。\n"
-            "violationがgraph reviewを示す場合は、required_graph_review_request_idsと"
-            "graph_review_batchの全link_idを各対応欄へ完全一致でコピーしてください。"
-            "batchの全frontier_item_idへselect/defer/rejectを1件ずつ返し、selectは"
-            "remaining_fetch_capacityとmax_selected_frontier_per_stepの小さい方以内にします。"
-            "候補の関連性はあなたが判断し、プログラムに選別を要求しません。\n"
-            "violationがdeferred Frontierを示す場合は、graph_review_ledgerにある"
-            "activeなrelevant_deferredのIDと参照をそのまま使い、Cycle境界で全件へ"
-            "fetch_next_cycle / carry_forward / no_longer_needed / "
-            "unresolved_at_limitのいずれかを"
-            "返してください。fetch_next_cycleのArticleはProgramが本文取得へ"
-            "機械転記するため、同じfetch_articlesをtool_requestsへ重ねて返しません。"
-            "必要性の判断は変えず、ID・actionと次動作の構造だけを"
-            "修復してください。\n"
-            "violationがunreviewed Graph candidate poolを示す場合は、"
-            "候補を未評価のまま黙って消さず、次Cycleで評価するならreview_next_cycle、"
-            "質問への回答に不要と判断してfinalizeするならno_longer_needed、"
-            "次Cycle不能のため未確認で終える場合だけunresolved_at_limitを返してください。\n"
-            "violationがanswer limitationsまたはunresolved answer scopeを示す場合は、"
-            "limitationsを削除して見かけ上完了させてはいけません。"
-            "調査継続可能ならopen WorkItemを保ってcontinueし、継続不能なら"
-            "limitationsと、それに対応するopen WorkItem・unresolved Hypothesisの既知IDを"
-            "answerへ返してください。\n"
-            "violationがfinal answer citations omit Evidence declared as resolved WorkItem basisを"
-            "示す場合は、解決根拠として選んだ各Hypothesis.evidence_idsを回答の各主張と再照合します。"
-            "全Evidenceが直接根拠ならanswer.citation_idsへ全て含め、直接根拠でないEvidenceが混在するなら"
-            "Hypothesis.evidence_idsを実際に使う根拠だけへ更新してください。無関係なEvidenceを機械的に"
-            "引用へ追加せず、Article全文が提示されたという理由だけで全Paragraph・Itemを根拠にしません。"
-            "finalize時のretain_evidence_idsは空でよく、citation_idsとは別の引継ぎ欄です。\n"
-        )
     contract_repair_instruction = _focused_contract_repair_instruction(context)
     article_fetch_aliases = _article_fetch_alias_map(context)
     article_fetch_alias_instruction = (
@@ -386,11 +289,14 @@ def _solver_prompt(
             )
         )
     )
+    contract_feedback_rule = render_prompt_section(
+        "solver_contract_repair.md",
+        "contract_feedback_rule",
+    )
     prompt = (
         f"{system_prompt}\n\n"
         f"{_MINIMAL_SOLVER_CONTRACT}\n\n"
-        "contract_feedbackがある場合、直前Decisionは状態へ適用されていません。"
-        "適合している意味判断は保ち、violationと矛盾する制御値・参照だけを修正してください。\n"
+        f"{contract_feedback_rule}\n"
         f"{contract_repair_instruction}"
         f"{transport_instruction}"
         f"<solver_context>{payload}</solver_context>"
@@ -421,6 +327,55 @@ def _review_prompt(context: ReviewContext, system_prompt: str) -> str:
     )
 
 
+_TRANSPORT_REPAIR_RULES = (
+    (
+        "continue decision requires a tool request",
+        "continue_requires_action",
+    ),
+    (
+        "all fetch_articles requests combined must contain at most",
+        "article_fetch_limit",
+    ),
+    (
+        "supported or contradicted hypothesis requires evidence",
+        "hypothesis_requires_evidence",
+    ),
+)
+
+_CONTRACT_REPAIR_RULES = (
+    (("unknown evidence", "hypothesis has unknown evidence"), "unknown_evidence"),
+    (
+        ("supported or contradicted hypothesis requires evidence",),
+        "hypothesis_requires_evidence",
+    ),
+    (("navigation-only evidence",), "navigation_only_evidence"),
+    (("unknown Article ID",), "unknown_article_id"),
+    (("open WorkItem", "unresolved answer scope"), "open_work_item"),
+    (("Cycle boundary", "remaining Cycle capacity"), "cycle_boundary"),
+    (("resolved dependency requires",), "resolved_dependency"),
+    (
+        (
+            "dependency decision",
+            "dependency action",
+            "decisions do not match required work items",
+        ),
+        "dependency_decision",
+    ),
+    (("retained evidence count exceeds",), "retained_evidence_limit"),
+    (
+        ("tool request count", "fetch_articles.article_ids exceeds"),
+        "tool_request_limit",
+    ),
+    (("Article body fetch", "fetch_articles"), "article_fetch_contract"),
+    (
+        ("focus", "ToolRequest", "tool request references"),
+        "known_references",
+    ),
+    (("Graph", "graph review", "Frontier"), "graph_review"),
+    (("citations omit",), "citation_coverage"),
+)
+
+
 def _solver_repair_prompt(
     base_prompt: str,
     payload: dict | None,
@@ -438,33 +393,23 @@ def _solver_repair_prompt(
         )
     else:
         error_detail = str(error)
-    focused_instruction = ""
-    if "continue decision requires a tool request" in error_detail:
-        focused_instruction = (
-            "next=continueを維持するなら、追加調査に必要なlegal_search、"
-            "legal_graph_neighbors、load_evidenceまたはarticle_fetchを少なくとも1件返します。"
-            "調査が不要と判断するなら、未完了WorkItemを根拠に基づいて閉じ、"
-            "next=finalizeとanswerを返します。どちらかを意味判断して選びます。\n"
-        )
-    elif "all fetch_articles requests combined must contain at most" in error_detail:
-        focused_instruction = (
-            "本文取得は専用article_fetchだけに1件返し、article_ref_Nはエラーに示された"
-            "現在の残り件数以内にします。汎用tool_requestsへarticle_fetchまたは"
-            "fetch_articlesを入れません。どの候補を今回取得するかは自分で選びます。\n"
-        )
-    elif "supported or contradicted hypothesis requires evidence" in error_detail:
-        focused_instruction = (
-            "本文Evidenceを選んでいないHypothesisはjudgment=unresolved、"
-            "evidence_ids=[]のままにします。search_navigationだけでsupportedまたは"
-            "contradictedにせず、必要な既知Articleはarticle_fetchで取得します。\n"
-        )
-    return (
-        f"{base_prompt}\n\n"
-        "直前の出力は輸送またはschema検証だけに失敗しました。"
-        "意味上の判断を変えず、契約に適合するSolverDecisionへ修復してください。\n"
-        f"{focused_instruction}"
-        f"<validation_error>{error_detail}</validation_error>\n"
-        f"<previous_solver_decision>{previous}</previous_solver_decision>"
+    focused_instruction = next(
+        (
+            render_prompt_section("solver_transport_repair.md", section_name)
+            for marker, section_name in _TRANSPORT_REPAIR_RULES
+            if marker in error_detail
+        ),
+        "",
+    )
+    return render_prompt_section(
+        "solver_transport_repair.md",
+        "base",
+        {
+            "base_prompt": base_prompt,
+            "focused_instruction": focused_instruction,
+            "validation_error": error_detail,
+            "previous_solver_decision": previous,
+        },
     )
 
 
@@ -485,97 +430,23 @@ def _focused_contract_repair_instruction(context: SolverContext) -> str:
     if feedback is None:
         return ""
     violation = feedback.violation
-    instructions = [
-        "\n直前Decisionは未適用です。適合する意味判断を保ち、次の違反だけを修正します。"
-    ]
-    rules = (
-        (
-            ("unknown evidence", "hypothesis has unknown evidence"),
-            (
-                "Evidence IDを生成せず、grounding_evidence_idsの完全一致だけを"
-                "hypothesis_evidence_bindingsで選びます。未取得本文ならHypothesisをunresolvedにします。"
-            ),
-        ),
-        (
-            ("supported or contradicted hypothesis requires evidence",),
-            (
-                "grounding_evidence_idsが空ならHypothesisをunresolved、evidence_ids=[]へ戻し、"
-                "検索候補から必要なArticleをarticle_fetchで取得します。検索候補だけで完了しません。"
-            ),
-        ),
-        (
-            ("navigation-only evidence",),
-            "search_navigationは根拠にせず、必要なArticle本文を取得するか未解決のままにします。",
-        ),
-        (
-            ("unknown Article ID",),
-            "fetchable_article_idsの完全一致だけを使い、未知ならlegal_searchで発見し直します。",
-        ),
-        (
-            ("open WorkItem", "unresolved answer scope"),
-            "追加調査できるならopenのままcontinueします。不能時だけlimitationsと既知の未解決IDを対応させます。",
-        ),
-        (
-            ("Cycle boundary", "remaining Cycle capacity"),
-            "現CycleへToolを追加せず、完了ならfinalize、未完了で次Cycle可能ならstart_next_cycle=trueにします。",
-        ),
-        (
-            ("resolved dependency requires",),
-            (
-                "同じArticleのParagraphを重ねず、委任元と末端Articleの本文Evidenceを使います。"
-                "末端未取得ならneeds_actionにします。"
-            ),
-        ),
-        (
-            (
-                "dependency decision",
-                "dependency action",
-                "decisions do not match required work items",
-            ),
-            (
-                "required_dependency_work_item_idsの各IDへ1件返します。needs_actionのaction_request_idは、"
-                "同じDecisionで実際に返すToolRequestまたはarticle_fetchのrequest_idと完全一致させます。"
-            ),
-        ),
-        (
-            ("retained evidence count exceeds",),
-            "retain_evidence_idsはmax_retained_evidence件以内で、後続Cycleにも本文が必要なEvidenceをLLMが選びます。",
-        ),
-        (
-            ("tool request count", "fetch_articles.article_ids exceeds"),
-            "上限内で今回必要な要求をLLMが選び、超過分をProgramへ選別させません。",
-        ),
-        (
-            ("Article body fetch", "fetch_articles"),
-            "本文取得は1 Requestに統合し、既知Articleをremaining_fetch_capacity以内で選びます。",
-        ),
-        (
-            ("focus", "ToolRequest", "tool request references"),
-            (
-                "WorkItem・Hypothesis・Requestは既知IDへ完全一致させます。必要なToolなら対応WorkItemを"
-                "state=open、resolution=nullのまま保ちます。WorkItemが本当に完了したなら、そのWorkItemを"
-                "next_focus_work_item_idsとToolRequestから外します。どちらかは意味判断に基づいてSolverが選びます。"
-            ),
-        ),
-        (
-            ("Graph", "graph review", "Frontier"),
-            "表示されたGraph batch・ledgerの既知IDだけを使い、候補の必要性はSolverが判断します。",
-        ),
-        (
-            ("citations omit",),
-            (
-                "回答で使うHypothesis Evidenceをcitation_idsへ含め、使わないEvidenceはHypothesisから外します。"
-                "resolved DependencyDecisionのbasisに選んだ各Articleから少なくとも1つのEvidenceを引用します。"
-                "直前Decisionは未適用なので、finalizeを維持するならWorkItem・Hypothesisの完了更新も"
-                "update_jsonへ再掲します。"
-            ),
-        ),
-    )
-    for markers, instruction in rules:
+    instructions: list[str] = []
+    for markers, section_name in _CONTRACT_REPAIR_RULES:
         if any(marker in violation for marker in markers):
-            instructions.append(instruction)
-    instructions.append(f"violation: {violation}\n")
-    return "".join(instructions)
+            instructions.append(
+                render_prompt_section(
+                    "solver_contract_repair.md",
+                    section_name,
+                )
+            )
+    return "\n" + render_prompt_section(
+        "solver_contract_repair.md",
+        "base",
+        {
+            "focused_instructions": "\n".join(instructions),
+            "violation": violation,
+        },
+    ) + "\n"
 
 
 def _solver_transport_schema(context: SolverContext) -> dict:

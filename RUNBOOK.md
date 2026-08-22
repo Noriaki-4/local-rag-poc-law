@@ -1127,6 +1127,24 @@ curl -s http://localhost:8000/answer/framework \
 切り替え、SolverのPromptや`SolverContext`を増減しないため、`status`や`snapshot`を有効にしても
 LLMへの入力tokenは増えない。通常は`off`を維持し、再現対象の1実行だけ`status`または`snapshot`にする。
 
+特定の`solver_input`を外部LLMなしで再現するfixtureへ固定する場合は、診断JSONLの`sequence`を指定する。
+`sequence`は診断ファイル内の対象recordを`jq`等で確認してから選ぶ。次は公開買付け総合問題の、初回
+OpenSearch結果を受けた統合入力を固定した実行例である。
+
+```bash
+python3 scripts/promote_agent_diagnostic_fixture.py \
+  --input eval-results/agent-framework-diagnostics/legal-....jsonl \
+  --sequence 6 \
+  --fixture-id tob-overview-cycle1-after-search-v1 \
+  --question-id tob-overview \
+  --output agent-api/tests/fixtures/framework/tob_overview_cycle1_after_search_v1.json
+```
+
+生成fixtureは`CaseState`と実際の`SolverContext`を保持し、case IDだけfixture用の固定値へ置換する。
+回帰テストでは同じ`CaseState`から`SolverContext`を再投影し、完全一致を確認する。元の診断JSONLや
+Prompt全体はfixtureへ複製しない。現在の`after-search` fixtureは本文取得前の失敗分析用であり、
+LR-004が求める「Cycle 1で3 Article取得直後」のfixtureとは区別する。
+
 各Solver呼出しは、内部思考の逐語記録ではなく、そのStepで`continue`または`finalize`を選ぶ直接の理由を
 `SolverDecision.decision_reason`へ一文で返す。構造契約を通過してCaseStateへ適用されたDecisionだけを
 診断JSONLの`decision_applied`へ保存し、契約修復前の不正なDecisionと区別する。API traceの
@@ -1202,6 +1220,13 @@ SolverDecisionの`next`、focus、保持ID、answer、`dependency_decisions`はp
 SolverDecisionが未知ID、上限超過、未終了WorkItem等の構造契約に違反した場合、状態へ適用せず、
 違反理由と直前Decisionを同じ用途のLLMへ返す。初回を含む最大3回でLLMが意味判断を保って自己修復し、
 3回目も不正なら`protocol_error`で終了する。プログラムによるID補正や超過分の切捨ては行わない。
+修復時にLLMへ渡す文面はPythonへ埋め込まず、次のMarkdownを正とする。
+
+- `agent-api/app/agent_framework/prompts/solver_transport_repair.md`
+- `agent-api/app/agent_framework/prompts/solver_contract_repair.md`
+
+各`prompt-section`とPython側の適用registryはテストで完全一致を確認する。Prompt編集時はsection markerと
+`${...}`形式のtemplate変数を変更せず、`agent-api/tests/test_prompt_assets.py`を実行する。
 Legal Profileの全体上限は既定240秒である。通常探索・契約修復用の時間を使い切った場合も、予約済みの
 最終化時間へ制御を戻し、未確認事項を限定回答として明示する。時間切れを法的完了へ読み替えない。
 

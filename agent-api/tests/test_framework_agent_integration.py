@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -24,6 +25,7 @@ from app.agent_framework.context import (
     GraphCandidateCatalog,
     GraphCandidateLink,
     GraphReviewBatch,
+    SolverContext,
     SolverContractFeedback,
     _graph_review_projection,
     build_solver_context,
@@ -53,6 +55,7 @@ from app.domains.legal import profiles as legal_profiles
 from app.framework_agent import LegalFrameworkAgentService
 from app.llm import StructuredJSONResult
 from app.models import AnswerRequest, AnswerResponse
+from pydantic import ValidationError
 
 
 class FakeStructuredLLM:
@@ -945,6 +948,8 @@ def test_compact_transport_structures_update_and_only_encodes_tool_arguments() -
     )
     assert finalized["start_next_cycle"] is False
     assert finalized["tool_requests"] == []
+
+
     assert finalized["frontier_re_adoptions"] == []
 
     normalized_dependencies = _normalize_solver_payload(
@@ -975,6 +980,176 @@ def test_compact_transport_structures_update_and_only_encodes_tool_arguments() -
     assert normalized_dependencies[0]["basis_evidence_ids"] == ["upper", "lower"]
     assert normalized_dependencies[1]["action_request_id"] is None
     assert normalized_dependencies[1]["basis_evidence_ids"] == ["body"]
+
+
+def test_diagnostic_fixture_reproduces_openai_tool_request_transport_gap() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_overview_openai_missing_tool_fields.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+
+    normalized = _normalize_solver_payload(fixture["payload"])
+
+    with pytest.raises(ValidationError) as captured:
+        SolverDecision.model_validate(normalized)
+
+    locations = {
+        ".".join(str(part) for part in error["loc"])
+        for error in captured.value.errors()
+    }
+    assert set(fixture["expectedMissingFields"]) <= locations
+
+
+def test_diagnostic_integration_fixture_rebuilds_the_same_solver_context() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_overview_cycle1_after_search_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    state = CaseState.model_validate(fixture["caseState"])
+    saved = SolverContext.model_validate(fixture["solverContext"])
+    expectations = fixture["expectations"]
+    limits = AgentLimits(
+        max_research_cycles=(
+            saved.research_cycle_count + saved.remaining_research_cycles
+        ),
+        max_tool_requests_per_step=saved.max_tool_requests_per_step,
+        max_fetched_resources_per_cycle=saved.max_fetched_resources_per_cycle,
+        max_selected_frontier_per_step=saved.max_selected_frontier_per_step,
+        max_retained_evidence=saved.max_retained_evidence,
+        max_material_evidence_chars=saved.max_material_evidence_chars,
+        max_solver_input_chars=saved.max_solver_input_chars,
+        min_next_cycle_budget_sec=saved.min_next_cycle_budget_sec,
+        max_wall_time_sec=240,
+    )
+
+    rebuilt = build_solver_context(
+        state,
+        limits,
+        remaining_wall_time_sec=saved.remaining_wall_time_sec,
+        finalize_only=saved.finalize_only,
+    )
+
+    assert rebuilt == saved
+    assert saved.research_cycle_count == expectations["researchCycleCount"]
+    assert saved.remaining_fetch_capacity == expectations["remainingFetchCapacity"]
+    assert len(saved.work_tree) == expectations["workItemCount"]
+    assert len(saved.hypotheses) == expectations["hypothesisCount"]
+    assert len(saved.material_evidence) == expectations["materialEvidenceCount"]
+    assert len(saved.recent_tool_results) == expectations["recentToolResultCount"]
+    assert len(saved.fetchable_article_ids) == expectations["fetchableArticleCount"]
+    assert (
+        len(saved.fetched_resource_ids_this_cycle)
+        == expectations["fetchedResourceCount"]
+    )
+    role_counts: dict[str, int] = {}
+    for evidence in saved.material_evidence:
+        role = str(evidence.metadata.get("evidenceRole", "unknown"))
+        role_counts[role] = role_counts.get(role, 0) + 1
+    assert role_counts == expectations["evidenceRoleCounts"]
+
+
+def test_openai_solver_uses_structured_tool_request_transport() -> None:
+    class OpenAIStructuredLLM:
+        provider = "openai"
+
+        def __init__(self) -> None:
+            self.schema: dict[str, Any] | None = None
+
+        def generate_structured_json(self, **kwargs: Any) -> StructuredJSONResult:
+            self.schema = kwargs["schema"]
+            return StructuredJSONResult(
+                payload={
+                    "next": "continue",
+                    "decision_reason": "根拠Articleを検索する",
+                    "start_next_cycle": False,
+                    "update": {
+                        "add_work_items": [
+                            {
+                                "work_item_id": "w1",
+                                "parent_work_item_id": None,
+                                "question": "公開買付けの要件を確認する",
+                                "state": "open",
+                                "resolution": None,
+                                "basis_hypothesis_ids": ["h1"],
+                                "replaces_work_item_id": None,
+                            }
+                        ],
+                        "update_work_items": [],
+                        "add_hypotheses": [
+                            {
+                                "hypothesis_id": "h1",
+                                "work_item_id": "w1",
+                                "statement": "要件を定めるArticleがある",
+                                "judgment": "unresolved",
+                                "evidence_ids": [],
+                                "gaps": ["本文未取得"],
+                            }
+                        ],
+                        "update_hypotheses": [],
+                        "impact_decisions": [],
+                    },
+                    "next_focus_work_item_ids": ["w1"],
+                    "retain_evidence_ids": [],
+                    "tool_requests": [
+                        {
+                            "request_id": "r1",
+                            "work_item_id": "w1",
+                            "tool_name": "legal_search",
+                            "arguments_json": (
+                                '{"query":"公開買付け 手続 条文",'
+                                '"doc_types":["law"]}'
+                            ),
+                            "purpose": "根拠Articleの候補を検索する",
+                            "hypothesis_ids": ["h1"],
+                        }
+                    ],
+                    "dependency_decisions": [],
+                    "graph_candidate_review": None,
+                    "frontier_re_adoptions": [],
+                    "deferred_frontier_resolutions": [],
+                    "unreviewed_graph_resolution": None,
+                    "answer": None,
+                },
+                provider="openai",
+                model=kwargs["model"],
+                latencyMs=1,
+                inputTokens=10,
+                outputTokens=10,
+            )
+
+    context = build_solver_context(
+        CaseState(case_id="case-1", question="質問"),
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+    )
+    llm = OpenAIStructuredLLM()
+
+    result = StructuredJSONModelAdapter(llm).solve(
+        context,
+        ModelCallProfile(model="gpt-4o-mini", system_prompt="判断する"),
+    )
+
+    assert result.decision.tool_requests[0].request_id == "r1"
+    assert llm.schema is not None
+    properties = llm.schema["properties"]
+    assert "tool_requests" in properties
+    assert "tool_requests_json" not in properties
+    request_schema = properties["tool_requests"]["items"]
+    assert set(request_schema["required"]) == {
+        "request_id",
+        "work_item_id",
+        "tool_name",
+        "arguments_json",
+        "purpose",
+        "hypothesis_ids",
+    }
 
 
 def test_anthropic_transport_uses_one_fixed_slot_article_fetch() -> None:

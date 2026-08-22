@@ -63,7 +63,7 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-001` | P0 | 検証待ち | 質問から必要な検索仮説を漏れなく作る | 範囲・要件・例外・手続を分けるPromptはあるが、総合問題で必要観点を追跡できていない | 公開買付け3問のtraceで、質問が要求する全観点が独立したWorkItem・Hypothesisになったか確認する |
 | `LR-002` | P0 | 検証待ち | 法令検索表現を作り、同一Cycle内でOpenSearchを適切に再検索する | 「必要な手続」を「公告・届出・通知・提出・期間・様式」等へ言い換えるPromptと複数stepは実装済み | 初回検索、本文観察後の検索語変更、同一scopeの重複防止をtraceで確認する |
 | `LR-003` | P0 | 検証待ち | Graph由来Articleを起点に連続1ホップ探索する | 固定selectorでは法律→施行令→府令へ到達でき、Graph由来Articleの再起点化も実装済み | OpenSearchだけでは末端Articleを発見できない条件で、実モデルが2回の1ホップを選ぶE2E試験を通す |
-| `LR-004` | P0 | 対応中 | 複合問題の統合Decisionを成立させ、次の探索または完了へ進む | 狭い2問は合格したが、総合問題はCycle 1で3 Article取得後の契約修復中に240秒で停止し、必要Articleは2/6だった | Cycle 1直後の統合入力を固定し、初回出力で次Cycleへ進めるかを検索実行から分離して確認する |
+| `LR-004` | P0 | 対応中 | 複合問題の統合Decisionを成立させ、次の探索または完了へ進む | 診断modeで初回検索後の統合入力をfixture化した。gpt-4o-miniは本文取得へ進まず検索を反復したため、3 Article取得直後の目標fixtureは未作成 | `after-search` fixtureで本文取得を選べない原因を分離し、その後に3 Article取得直後のfixtureを固定する |
 | `LR-005` | P0 | 未着手 | `gpt-4o-mini`で新検索経路を実モデル評価する | Provider接続、Structured Outputs、model切替は実装済み。法令E2Eは未実施 | Reviewer無効で公開買付け3問を実行し、Hypothesis、Tool、Evidence、Cycle、時間を記録する |
 | `LR-006` | P1 | 要設計 | 意味分類coverage不足時にも逆引き検索爆発と取りこぼしを両立させる | publish済み意味関係ならselectorで絞れるが、未分類範囲でraw `REFERENCES/to_subject`を使うと高fan-inになる | 限定fallbackの発動条件、scope上限、coverage不足の表示、限定回答条件を決める |
 | `LR-007` | P1 | 未着手 | CycleとStepを再開可能な状態として保存する | WorkItem、Hypothesis、Evidence、Graph review履歴はあるが、目標の`CycleRecord / StepRecord / ExplorationState`は未実装 | Tool観察後の中断から同じStepを再開し、別Cycleとして数えないfixtureを通す |
@@ -103,6 +103,12 @@ Cycle引継ぎ、完了判断または構造化出力契約の失敗を含む。
 - 停止時点のgold必須Article到達は2/6だった。
 - Reviewerは既定無効であり、この失敗経路には関与しない。
 - 全Cycle、通常呼出し、輸送修復、Framework契約修復は、1回の実行に設定された同じwall timeを消費する。
+- 2026-08-22の`snapshot`実行では、OpenAI用輸送schemaがToolRequest内部の必須項目を拘束していない
+  不具合を検出し、構造化ToolRequestへ変更した。この輸送不具合は固定fixtureで再現する。
+- 同修正後の再実行では、最初の4件の`legal_search`から9 Article IDを発見したが、Solverは
+  `fetch_articles`を選ばず検索を反復した。最初の統合入力を
+  `tob_overview_cycle1_after_search_v1.json`へ固定した。この時点では13件すべてが
+  `search_navigation`で、Article全文取得数は0、Cycle残り取得枠は3である。
 
 この事実から、2/6だけを見てOpenSearchまたはGraphの取得不能と結論付けない。少なくとも直近実行では、
 Cycle 1の取得結果を統合して次の探索へ進む前に停止したため、残り4 Articleを探す機会自体が失われている。

@@ -1641,10 +1641,19 @@ Profileにはsystem promptの参照先とversionを持たせ、法令固有のpr
 
 - 汎用ループの制御規則: `agent_framework`の共通prompt fragment
 - 法令の調査方法・注意事項: `domains/legal/prompts/`
+- Solverの輸送修復・Framework契約修復のLLM向け文面:
+  `agent_framework/prompts/solver_transport_repair.md`と
+  `agent_framework/prompts/solver_contract_repair.md`
 - モデル、token、timeout、prompt参照: Profile
 - API key: 環境変数またはsecret管理
 
 Profileを切り替えても、CaseStateの意味とTool契約は変わらない。
+
+修復Prompt本文をPythonの文字列へ埋め込まない。Markdown内の名前付きsectionを
+`prompt_assets.py`がUTF-8で読み込み、初回読込み後にcacheする。Pythonには違反markerと適用する
+section名の対応だけを残し、実際の契約検証は引き続きValidatorを正本とする。契約テストは、registryが
+参照するsectionの欠落、参照されないsection、template変数の不足を失敗させる。これによりPrompt本文だけを
+人間またはAIへ渡してレビューできる状態と、実装との対応漏れ防止を両立する。
 
 Skillsは初期ループの必須要素にしない。必要になった場合だけ、明示的に選択されたSkillの指示を
 Solver promptへ追加する。SkillによってTool権限や意味判断の責務を拡大しない。
