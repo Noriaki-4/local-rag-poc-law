@@ -1127,6 +1127,13 @@ curl -s http://localhost:8000/answer/framework \
 切り替え、SolverのPromptや`SolverContext`を増減しないため、`status`や`snapshot`を有効にしても
 LLMへの入力tokenは増えない。通常は`off`を維持し、再現対象の1実行だけ`status`または`snapshot`にする。
 
+双方向の契約は次のrecordで追跡する。`transport_input`はプログラムからLLMへ送ったPrompt・schemaの
+`promptHash`、`schemaHash`、Profile名・versionと、外部Prompt assetのファイル名・使用section・hashを持つ。
+`snapshot`ではPromptとschema本文も保存する。`transport_output`はLLMから返った生payloadと
+`payloadHash`、輸送検証エラーを持ち、`solver_output`以降は正規化済み`SolverDecision`と
+`solverDecisionHash`を持つ。同じhashにより、生応答、正規化後、契約違反、CaseState適用の境界を区別する。
+Prompt assetの本文を変更した場合はProfile versionも更新し、実行時の来歴と設定上の契約versionを一致させる。
+
 特定の`solver_input`を外部LLMなしで再現するfixtureへ固定する場合は、診断JSONLの`sequence`を指定する。
 `sequence`は診断ファイル内の対象recordを`jq`等で確認してから選ぶ。次は公開買付け総合問題の、初回
 OpenSearch結果を受けた統合入力を固定した実行例である。

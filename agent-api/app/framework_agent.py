@@ -44,6 +44,8 @@ class LegalFrameworkAgentService:
             mode=settings.agent_framework_diagnostics_mode,
             output_dir=settings.eval_results_dir,
             case_id=initial.case_id,
+            profile_name=profile.name,
+            profile_version=profile.version,
         )
         store.create(initial)
         loop = AgentLoop(

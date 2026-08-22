@@ -19,7 +19,11 @@ from app.agent_framework.ports.model import (
     SolverCallResult,
 )
 from app.agent_framework.profiles import ModelCallProfile, ReviewerProfile
-from app.agent_framework.prompt_assets import render_prompt_section
+from app.agent_framework.prompt_assets import (
+    PromptAssetTrace,
+    prompt_asset_trace,
+    render_prompt_section,
+)
 from app.agent_framework.state import ReviewResult
 from app.llm import LLMClient
 
@@ -59,6 +63,7 @@ class StructuredJSONModelAdapter:
             )
         )
         prompt = base_prompt
+        prompt_assets = _solver_prompt_assets(context)
         input_tokens = 0
         output_tokens = 0
         input_tokens_known = True
@@ -84,6 +89,7 @@ class StructuredJSONModelAdapter:
                     prompt=prompt,
                     schema=transport_schema,
                     repair_index=repair_index,
+                    prompt_assets=prompt_assets,
                 )
             try:
                 result = self._client.generate_structured_json(
@@ -156,10 +162,20 @@ class StructuredJSONModelAdapter:
                 )
 
             if repair_index == 0:
+                transport_repair_sections = _transport_repair_section_names(
+                    last_error
+                )
                 prompt = _solver_repair_prompt(
                     base_prompt,
                     result.payload,
                     last_error,
+                )
+                prompt_assets = (
+                    *_solver_prompt_assets(context),
+                    prompt_asset_trace(
+                        "solver_transport_repair.md",
+                        ("base", *transport_repair_sections),
+                    ),
                 )
                 _ensure_solver_prompt_capacity(prompt, context.max_solver_input_chars)
 
@@ -384,22 +400,10 @@ def _solver_repair_prompt(
     previous = ""
     if isinstance(payload, dict):
         previous = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-    if isinstance(error, ValidationError):
-        error_detail = json.dumps(
-            error.errors(include_url=False, include_input=False),
-            ensure_ascii=False,
-            separators=(",", ":"),
-            default=str,
-        )
-    else:
-        error_detail = str(error)
-    focused_instruction = next(
-        (
-            render_prompt_section("solver_transport_repair.md", section_name)
-            for marker, section_name in _TRANSPORT_REPAIR_RULES
-            if marker in error_detail
-        ),
-        "",
+    error_detail = _transport_error_detail(error)
+    focused_instruction = "".join(
+        render_prompt_section("solver_transport_repair.md", section_name)
+        for section_name in _transport_repair_section_names(error_detail)
     )
     return render_prompt_section(
         "solver_transport_repair.md",
@@ -447,6 +451,50 @@ def _focused_contract_repair_instruction(context: SolverContext) -> str:
             "violation": violation,
         },
     ) + "\n"
+
+
+def _transport_error_detail(
+    error: ModelProtocolError | ValidationError,
+) -> str:
+    if isinstance(error, ValidationError):
+        return json.dumps(
+            error.errors(include_url=False, include_input=False),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=str,
+        )
+    return str(error)
+
+
+def _transport_repair_section_names(
+    error: ModelProtocolError | ValidationError | str,
+) -> tuple[str, ...]:
+    error_detail = (
+        error if isinstance(error, str) else _transport_error_detail(error)
+    )
+    return tuple(
+        section_name
+        for marker, section_name in _TRANSPORT_REPAIR_RULES
+        if marker in error_detail
+    )[:1]
+
+
+def _solver_prompt_assets(context: SolverContext) -> tuple[PromptAssetTrace, ...]:
+    section_names = ["contract_feedback_rule"]
+    feedback = context.contract_feedback
+    if feedback is not None:
+        section_names.append("base")
+        section_names.extend(
+            section_name
+            for markers, section_name in _CONTRACT_REPAIR_RULES
+            if any(marker in feedback.violation for marker in markers)
+        )
+    return (
+        prompt_asset_trace(
+            "solver_contract_repair.md",
+            tuple(section_names),
+        ),
+    )
 
 
 def _solver_transport_schema(context: SolverContext) -> dict:

@@ -1655,6 +1655,13 @@ section名の対応だけを残し、実際の契約検証は引き続きValidat
 参照するsectionの欠落、参照されないsection、template変数の不足を失敗させる。これによりPrompt本文だけを
 人間またはAIへ渡してレビューできる状態と、実装との対応漏れ防止を両立する。
 
+診断時は、プログラムからLLMへの`transport_input`へ実送信Prompt・schemaのhash、Profile名・version、
+Prompt builder、使用した外部Prompt asset・section・各hashを記録する。LLMからプログラムへの
+`transport_output`へ生payloadとhash、輸送検証結果を、`solver_output / contract_violation /
+decision_applied`へ正規化済みDecisionと同一hashを記録する。`snapshot`では実データ本文も保持し、
+`status`では本文を持たずhashと状態だけを保持する。これにより、双方向の契約内容、正規化、拒否、適用を
+別の境界として追跡し、Promptファイル変更後も実行時に使われたsectionを特定できるようにする。
+
 Skillsは初期ループの必須要素にしない。必要になった場合だけ、明示的に選択されたSkillの指示を
 Solver promptへ追加する。SkillによってTool権限や意味判断の責務を拡大しない。
 

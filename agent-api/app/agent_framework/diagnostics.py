@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Sequence
+from hashlib import sha256
 from pathlib import Path
 from threading import RLock
 from typing import Any, Literal
@@ -12,6 +14,7 @@ from typing import Any, Literal
 from .context import SolverContext
 from .contracts import SolverDecision
 from .profiles import ModelCallProfile
+from .prompt_assets import PromptAssetTrace
 from .state import CaseState
 
 DiagnosticsMode = Literal["off", "status", "snapshot"]
@@ -28,6 +31,8 @@ class AgentDiagnostics:
         mode: str,
         output_dir: Path,
         case_id: str,
+        profile_name: str | None = None,
+        profile_version: str | None = None,
     ) -> None:
         self.mode: DiagnosticsMode = (
             mode if mode in {"off", "status", "snapshot"} else "off"
@@ -36,6 +41,8 @@ class AgentDiagnostics:
         self._sequence = 0
         self._applied_decision_sequences: list[int] = []
         self._lock = RLock()
+        self._profile_name = profile_name
+        self._profile_version = profile_version
 
     @property
     def output_path(self) -> Path | None:
@@ -66,6 +73,8 @@ class AgentDiagnostics:
             "model": profile.model,
             "maxOutputTokens": profile.max_output_tokens,
             "timeoutSec": profile.timeout_sec,
+            "profileName": self._profile_name,
+            "profileVersion": self._profile_version,
         }
         if self.mode == "snapshot":
             record.update(
@@ -93,6 +102,7 @@ class AgentDiagnostics:
             "purpose": purpose,
             "contractAttempt": contract_attempt + 1,
             "decisionStatus": _decision_status(decision),
+            "solverDecisionHash": _json_sha256(decision.model_dump(mode="json")),
         }
         if self.mode == "snapshot":
             record["solverDecision"] = decision.model_dump(mode="json")
@@ -116,6 +126,7 @@ class AgentDiagnostics:
             "contractAttempt": contract_attempt + 1,
             "violation": violation,
             "decisionStatus": _decision_status(decision),
+            "solverDecisionHash": _json_sha256(decision.model_dump(mode="json")),
         }
         if self.mode == "snapshot":
             record["solverDecision"] = decision.model_dump(mode="json")
@@ -142,6 +153,7 @@ class AgentDiagnostics:
             "contractAttempt": contract_attempt + 1,
             "decisionReason": decision.decision_reason,
             "decisionStatus": _decision_status(decision),
+            "solverDecisionHash": _json_sha256(decision.model_dump(mode="json")),
             "stateBeforeStatus": _state_status(state_before),
             "stateAfterStatus": _state_status(state_after),
         }
@@ -185,6 +197,7 @@ class AgentDiagnostics:
         prompt: str,
         schema: dict[str, Any],
         repair_index: int,
+        prompt_assets: Sequence[PromptAssetTrace] = (),
     ) -> None:
         if self.mode == "off":
             return
@@ -196,6 +209,13 @@ class AgentDiagnostics:
             "model": profile.model,
             "promptChars": len(prompt),
             "schemaChars": len(schema_json),
+            "promptHash": _text_sha256(prompt),
+            "schemaHash": _json_sha256(schema),
+            "systemPromptHash": _text_sha256(profile.system_prompt),
+            "profileName": self._profile_name,
+            "profileVersion": self._profile_version,
+            "promptBuilder": "app.adapters.models.structured_json:_solver_prompt",
+            "promptAssets": list(prompt_assets),
         }
         if self.mode == "snapshot":
             record.update({"prompt": prompt, "transportSchema": schema})
@@ -223,6 +243,7 @@ class AgentDiagnostics:
             "outputTokens": output_tokens,
             "providerRetryCount": provider_retry_count,
             "hasPayload": payload is not None,
+            "payloadHash": _json_sha256(payload) if payload is not None else None,
         }
         if self.mode == "snapshot":
             record["payload"] = payload
@@ -359,3 +380,17 @@ def _decision_status(decision: SolverDecision) -> dict[str, Any]:
         "hasGraphCandidateReview": decision.graph_candidate_review is not None,
         "hasAnswer": decision.answer is not None,
     }
+
+
+def _text_sha256(value: str) -> str:
+    return sha256(value.encode("utf-8")).hexdigest()
+
+
+def _json_sha256(value: Any) -> str:
+    canonical = json.dumps(
+        value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return _text_sha256(canonical)

@@ -315,6 +315,31 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
+    assert diagnostic_records[0]["profileName"] == "legal-default"
+    assert diagnostic_records[0]["profileVersion"] == "99"
+    transport_input = next(
+        item for item in diagnostic_records if item["event"] == "transport_input"
+    )
+    assert len(transport_input["promptHash"]) == 64
+    assert len(transport_input["schemaHash"]) == 64
+    assert len(transport_input["systemPromptHash"]) == 64
+    assert transport_input["profileName"] == "legal-default"
+    assert transport_input["profileVersion"] == "99"
+    assert transport_input["promptBuilder"].endswith(":_solver_prompt")
+    assert transport_input["promptAssets"][0]["asset"] == (
+        "agent_framework/prompts/solver_contract_repair.md"
+    )
+    assert [
+        item["name"] for item in transport_input["promptAssets"][0]["sections"]
+    ] == ["contract_feedback_rule"]
+    transport_output = next(
+        item for item in diagnostic_records if item["event"] == "transport_output"
+    )
+    assert len(transport_output["payloadHash"]) == 64
+    solver_output = next(
+        item for item in diagnostic_records if item["event"] == "solver_output"
+    )
+    assert len(solver_output["solverDecisionHash"]) == 64
 
 
 def test_framework_diagnostics_off_avoids_detailed_output(monkeypatch) -> None:
@@ -2287,7 +2312,7 @@ def test_answer_feature_flag_selects_new_framework(monkeypatch) -> None:
     assert response["pattern"] == "agent_framework_v1"
 
 
-def test_model_adapter_repairs_transport_json_once() -> None:
+def test_model_adapter_repairs_transport_json_once(tmp_path) -> None:
     class RepairClient:
         def __init__(self) -> None:
             self.calls = 0
@@ -2319,8 +2344,15 @@ def test_model_adapter_repairs_transport_json_once() -> None:
         remaining_wall_time_sec=60,
         finalize_only=False,
     )
+    diagnostics = AgentDiagnostics(
+        mode="snapshot",
+        output_dir=tmp_path,
+        case_id=context.case_id,
+        profile_name="test-profile",
+        profile_version="1",
+    )
 
-    result = StructuredJSONModelAdapter(client).solve(
+    result = StructuredJSONModelAdapter(client, diagnostics=diagnostics).solve(
         context,
         ModelCallProfile(
             model="fake-model",
@@ -2332,6 +2364,24 @@ def test_model_adapter_repairs_transport_json_once() -> None:
     assert result.decision.answer.text == "修復済み"
     assert result.attempt_count == 2
     assert client.calls == 2
+    assert diagnostics.output_path is not None
+    records = [
+        json.loads(line)
+        for line in diagnostics.output_path.read_text(encoding="utf-8").splitlines()
+    ]
+    transport_inputs = [
+        item for item in records if item["event"] == "transport_input"
+    ]
+    assert len(transport_inputs) == 2
+    assert [
+        item["name"]
+        for item in transport_inputs[0]["promptAssets"][0]["sections"]
+    ] == ["contract_feedback_rule"]
+    assert [
+        item["name"]
+        for item in transport_inputs[1]["promptAssets"][1]["sections"]
+    ] == ["base"]
+    assert transport_inputs[0]["promptHash"] != transport_inputs[1]["promptHash"]
 
 
 def test_model_adapter_repairs_semantic_judgment_without_evidence_once() -> None:

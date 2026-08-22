@@ -20,12 +20,29 @@ Agent処理の終了後に、「なぜその判断をしたか」を保存済み
 
 - そのStepで`continue`または`finalize`を選んだ短い理由
 - Solverが実際に参照した`SolverContext`
+- プログラムからLLMへ送ったPrompt・schemaと、それぞれのhash
+- Promptを構成した外部ファイル、使用section、Profile version
+- LLMからプログラムへ返った生payload、輸送検証結果、payload hash
 - 構造検証を通過した`SolverDecision`
 - 適用前後の状態
 - 実行終了状態と最終回答
 
 修復前の契約違反Decisionは`decision_applied`として扱わない。事後監査へ渡すときは
 `SolverContext`を正本とし、同じEvidenceを前後のCaseStateから重複して渡さない。
+
+双方向の境界は次の順で記録する。
+
+```text
+Program -> LLM: transport_input   (Prompt / schema / asset来歴)
+LLM -> Program: transport_output  (生payload / 輸送検証)
+正規化後:        solver_output     (SolverDecision)
+構造検証失敗:    contract_violation
+構造検証成功:    decision_applied  (適用前後のCaseState)
+```
+
+`promptHash / schemaHash / payloadHash / solverDecisionHash`は本文を保存しない`status`でも記録する。
+完全な内容を比較する場合は`snapshot`を使う。同じhashは同じ記録内容を示すが、法的妥当性や契約合格を
+意味しない。合否は`validationError`、`contract_violation`、`decision_applied`で判断する。
 
 ## 有効化
 
