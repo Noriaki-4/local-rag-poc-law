@@ -1397,6 +1397,202 @@ def test_solver_context_keeps_used_tool_ids_across_cycle_boundaries() -> None:
     assert context.used_tool_request_ids == ("cycle-1-search",)
 
 
+def _cross_cycle_search_state() -> CaseState:
+    search_request = ToolRequest(
+        request_id="cycle-1-search",
+        work_item_id="w1",
+        tool_name="legal_search",
+        arguments={"query": "確認語", "doc_types": ["law"]},
+        purpose="Cycle 1で候補を探す",
+        hypothesis_ids=("h1",),
+    )
+    navigation = Evidence(
+        evidence_id="cycle-1-nav",
+        source_ref="opensearch://cycle-1-nav",
+        title="確認法",
+        content="第2条　確認対象となる手続を定める。",
+        created_cycle=1,
+        metadata={
+            "articleId": "law-test-article-2",
+            "documentId": "law-test",
+            "heading": "第2条",
+            "citationEligible": False,
+        },
+    )
+    return CaseState(
+        case_id="case-cycle-search-carry",
+        question="質問",
+        research_cycle_count=2,
+        work_items=(WorkItem(work_item_id="w1", question="確認する"),),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h1",
+                work_item_id="w1",
+                statement="確認命題",
+            ),
+        ),
+        tool_requests=(search_request,),
+        evidence=(navigation,),
+        tool_results=(
+            ToolResult(
+                request_id=search_request.request_id,
+                status="succeeded",
+                evidence_ids=(navigation.evidence_id,),
+                cycle_no=1,
+            ),
+        ),
+        search_candidate_reviews=(
+            SearchCandidateReview(
+                search_request_ids=(search_request.request_id,),
+                selections=(),
+                deferred_article_ids=("law-test-article-2",),
+                reason="別の候補を先に確認する",
+                reviewed_cycle=1,
+            ),
+        ),
+    )
+
+
+def test_solver_context_carries_unfetched_search_candidates_across_cycles() -> None:
+    state = _cross_cycle_search_state()
+    navigation = state.evidence[0]
+
+    context = build_solver_context(
+        state,
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+    )
+
+    assert context.recent_tool_requests == ()
+    assert context.recent_tool_results == ()
+    assert context.required_search_review_request_ids == ()
+    assert context.fetchable_article_ids == ("law-test-article-2",)
+    assert tuple(item.article_id for item in context.search_candidates) == (
+        "law-test-article-2",
+    )
+    assert context.navigation_evidence_ids == (navigation.evidence_id,)
+    assert tuple(item.evidence_id for item in context.material_evidence) == (
+        navigation.evidence_id,
+    )
+
+
+def test_solver_context_stops_carrying_search_candidate_after_fetch() -> None:
+    state = _cross_cycle_search_state()
+    navigation_evidence_id = state.evidence[0].evidence_id
+    fetch_request = ToolRequest(
+        request_id="cycle-2-fetch",
+        work_item_id="w1",
+        tool_name="fetch_articles",
+        arguments={"article_ids": ["law-test-article-2"]},
+        purpose="保留候補の本文を取得する",
+        hypothesis_ids=("h1",),
+    )
+    body = Evidence(
+        evidence_id="cycle-2-body",
+        source_ref="opensearch://cycle-2-body",
+        content="第2条の本文",
+        created_cycle=2,
+        metadata={
+            "articleId": "law-test-article-2",
+            "citationEligible": True,
+        },
+    )
+    state = state.model_copy(
+        update={
+            "case_id": "case-cycle-search-fetched",
+            "tool_requests": (*state.tool_requests, fetch_request),
+            "evidence": (*state.evidence, body),
+            "tool_results": (
+                *state.tool_results,
+                ToolResult(
+                    request_id=fetch_request.request_id,
+                    status="succeeded",
+                    evidence_ids=(body.evidence_id,),
+                    cycle_no=2,
+                ),
+            ),
+        }
+    )
+
+    context = build_solver_context(
+        state,
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+    )
+
+    assert context.search_candidates == ()
+    assert "law-test-article-2" not in context.fetchable_article_ids
+    assert navigation_evidence_id not in context.navigation_evidence_ids
+
+
+def test_fresh_search_review_does_not_mix_prior_deferred_candidates() -> None:
+    state = _cross_cycle_search_state()
+    fresh_request = ToolRequest(
+        request_id="cycle-2-search",
+        work_item_id="w1",
+        tool_name="legal_search",
+        purpose="別の表現で候補を探す",
+        hypothesis_ids=("h1",),
+    )
+    fresh_navigation = Evidence(
+        evidence_id="fresh-nav",
+        source_ref="opensearch://fresh-nav",
+        content="今回の候補",
+        created_cycle=2,
+        metadata={"articleId": "article-fresh", "citationEligible": False},
+    )
+    later_fetch_request = ToolRequest(
+        request_id="cycle-2-later-fetch",
+        work_item_id="w1",
+        tool_name="fetch_articles",
+        arguments={"article_ids": ["article-unrelated"]},
+        purpose="検索後に別の本文を取得する",
+        hypothesis_ids=("h1",),
+    )
+    state = state.model_copy(
+        update={
+            "case_id": "case-cycle-fresh-search",
+            "tool_requests": (
+                *state.tool_requests,
+                fresh_request,
+                later_fetch_request,
+            ),
+            "evidence": (*state.evidence, fresh_navigation),
+            "tool_results": (
+                *state.tool_results,
+                ToolResult(
+                    request_id=fresh_request.request_id,
+                    status="succeeded",
+                    evidence_ids=(fresh_navigation.evidence_id,),
+                    cycle_no=2,
+                ),
+                ToolResult(
+                    request_id=later_fetch_request.request_id,
+                    status="failed",
+                    error_code="not_found",
+                    cycle_no=2,
+                ),
+            ),
+        }
+    )
+
+    context = build_solver_context(
+        state,
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+    )
+
+    assert context.required_search_review_request_ids == (
+        fresh_request.request_id,
+    )
+    assert tuple(item.article_id for item in context.search_candidates) == (
+        "article-fresh",
+    )
+
+
 def test_program_assigns_persistent_tool_ids_and_preserves_local_action_link() -> None:
     context = build_solver_context(
         CaseState(

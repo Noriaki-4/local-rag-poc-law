@@ -1847,6 +1847,10 @@ Legal Domain Packの共通Promptには次を追加する。
   条件・効果を自分の言葉で要約し、第2段階はその短い一覧だけから本文取得順位を判断する。一時要約はCaseStateの
   契約へ追加せず、診断snapshotと同じ呼出し内の第2段階だけに使う。Programは選択Articleの発見元参照を本文取得要求の
   輸送用に転記するだけで、意味上の採用先は全文取得後のIntegrationが判断する。
+- Search Reviewで`defer`した候補と、選択後の本文取得が未完了の候補は、検索要求・検索抜粋の既存参照から
+  Projectorが次のStep / Cycleへ再投影する。本文取得成功後は再投影しない。新しい未評価検索結果がある場合は、
+  過去の保留候補をそのSearch Reviewへ混ぜず、新規候補だけを評価する。これは候補の意味判断ではなく、
+  CaseStateに保存済みの判断とTool結果を引き継ぐ決定的処理である。
 - 同一WorkItem・Hypothesis・Tool引数で成功済みのlegal_searchを完全一致で再要求した場合は構造契約違反とする。
   Programは検索表現の意味的同一性を推測せず、候補が不十分ならSolverが理由と異なる検索表現を返す。
 - 質問に関係すると判断した1ホップ候補は、Graph Reviewごとに最大3件、かつCycleの

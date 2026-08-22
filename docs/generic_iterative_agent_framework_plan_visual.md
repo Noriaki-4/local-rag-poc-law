@@ -201,16 +201,20 @@ flowchart LR
     C1 --> H[支持・反証・未解決Hypothesis]
     C1 --> W[open / resolved / dropped WorkItem]
     C1 --> F[Frontier・全Node/Link]
+    C1 --> S[本文未取得のOpenSearch候補・検索抜粋]
     C1 --> X[失敗理由・未確認gap]
     E --> C2[Cycle 2開始]
     H --> C2
     W --> C2
     F --> C2
+    S --> C2
     X --> C2
     C2 --> P2[Solverが新しいgoal・strategyを決定]
 ```
 
 引き継がないものは、過去のLLM生応答、同じ本文の重複コピー、次Cycleに固定された検索queryである。
+OpenSearch候補は本文取得に成功するまで、候補IDだけでなく発見元と検索抜粋もCase履歴から再構成する。
+新規候補のReviewと過去の保留候補は混ぜず、Review後の通常処理で保留候補を再び選べるようにする。
 
 ## 8. 非同期Relation分類
 

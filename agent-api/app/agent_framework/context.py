@@ -272,6 +272,21 @@ def build_solver_context(
         item for item in state.tool_requests if item.request_id in recent_request_ids
     )
     recent_requests_by_id = {item.request_id: item for item in recent_requests}
+    all_requests_by_id = {item.request_id: item for item in state.tool_requests}
+    successfully_fetched_article_ids = set(
+        _fetched_article_ids_for_cycle(state, None)
+    )
+    carried_search_candidates = _carried_search_candidate_projection(
+        state=state,
+        requests_by_id=all_requests_by_id,
+        evidence_by_id=evidence_by_id,
+        successfully_fetched_article_ids=successfully_fetched_article_ids,
+    )
+    carried_search_evidence_ids = tuple(
+        evidence_id
+        for candidate in carried_search_candidates
+        for evidence_id in candidate.navigation_evidence_ids
+    )
     new_evidence_ids = _round_robin_result_evidence_ids(recent_results)
     declared_basis_evidence_ids = tuple(
         evidence_id
@@ -290,6 +305,7 @@ def build_solver_context(
         dict.fromkeys(
             [
                 *new_evidence_ids,
+                *carried_search_evidence_ids,
                 *state.retained_evidence_ids,
                 *declared_basis_evidence_ids,
                 *reviewer_basis_evidence_ids,
@@ -404,9 +420,6 @@ def build_solver_context(
             ]
         )
     )
-    successfully_fetched_article_ids = set(
-        _fetched_article_ids_for_cycle(state, None)
-    )
     fetchable_article_ids = tuple(
         dict.fromkeys(
             [
@@ -416,6 +429,7 @@ def build_solver_context(
                     if item.metadata.get("citationEligible") is False
                     for article_id in _evidence_article_ids(item)
                 ),
+                *(item.article_id for item in carried_search_candidates),
                 *graph_fetchable_article_ids,
             ]
         )
@@ -425,35 +439,43 @@ def build_solver_context(
         for item in fetchable_article_ids
         if item not in successfully_fetched_article_ids
     )
-    search_candidates = _search_candidate_projection(
-        recent_results=recent_results,
+    reviewed_search_request_ids = {
+        request_id
+        for review in state.search_candidate_reviews
+        for request_id in review.search_request_ids
+    }
+    unreviewed_search_results = tuple(
+        result
+        for result in recent_results
+        if result.request_id not in reviewed_search_request_ids
+        and (request := recent_requests_by_id.get(result.request_id)) is not None
+        and request.tool_name == "legal_search"
+    )
+    fresh_search_candidates = _search_candidate_projection(
+        recent_results=unreviewed_search_results,
         recent_requests_by_id=recent_requests_by_id,
         evidence_by_id=evidence_by_id,
         fetchable_article_ids=fetchable_article_ids,
     )
-    search_request_ids = tuple(
+    fresh_search_request_ids = tuple(
         dict.fromkeys(
             request_id
-            for candidate in search_candidates
+            for candidate in fresh_search_candidates
             for request_id in candidate.search_request_ids
         )
     )
-    latest_request = (
-        recent_requests_by_id.get(recent_results[-1].request_id)
-        if recent_results
-        else None
-    )
-    reviewed_search_request_sets = {
-        frozenset(review.search_request_ids)
-        for review in state.search_candidate_reviews
-    }
     required_search_review_request_ids = (
-        search_request_ids
+        fresh_search_request_ids
         if not finalize_only
-        and latest_request is not None
-        and latest_request.tool_name == "legal_search"
-        and frozenset(search_request_ids) not in reviewed_search_request_sets
+        and fresh_search_request_ids
         else ()
+    )
+    # 新規候補のReview中は、その候補だけを提示する。Review済み候補は
+    # 本文取得が完了するまでCycleをまたいでIntegrationへ引き継ぐ。
+    search_candidates = (
+        fresh_search_candidates
+        if required_search_review_request_ids
+        else carried_search_candidates
     )
     manifest = tuple(
         EvidenceManifestItem(
@@ -616,6 +638,53 @@ def _search_candidate_projection(
             navigation_evidence_ids=tuple(item["navigation_evidence_ids"]),
         )
         for article_id, item in candidates.items()
+    )
+
+
+def _carried_search_candidate_projection(
+    *,
+    state: CaseState,
+    requests_by_id: dict[str, ToolRequest],
+    evidence_by_id: dict[str, Evidence],
+    successfully_fetched_article_ids: set[str],
+) -> tuple[SearchCandidateArticle, ...]:
+    """Review済みで本文未取得の検索候補をCase履歴から再投影する。"""
+
+    reviewed_request_ids = tuple(
+        dict.fromkeys(
+            request_id
+            for review in state.search_candidate_reviews
+            for request_id in review.search_request_ids
+        )
+    )
+    if not reviewed_request_ids:
+        return ()
+
+    carried_article_ids = tuple(
+        dict.fromkeys(
+            article_id
+            for review in state.search_candidate_reviews
+            for article_id in (
+                *review.selected_article_ids,
+                *review.deferred_article_ids,
+            )
+            if article_id not in successfully_fetched_article_ids
+        )
+    )
+    if not carried_article_ids:
+        return ()
+
+    reviewed_request_id_set = set(reviewed_request_ids)
+    reviewed_results = tuple(
+        result
+        for result in state.tool_results
+        if result.request_id in reviewed_request_id_set
+    )
+    return _search_candidate_projection(
+        recent_results=reviewed_results,
+        recent_requests_by_id=requests_by_id,
+        evidence_by_id=evidence_by_id,
+        fetchable_article_ids=carried_article_ids,
     )
 
 

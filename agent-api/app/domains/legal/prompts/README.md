@@ -58,6 +58,10 @@ solver_completion.md ──┤       │
 | `solver_search_reselection.md` | 検索抜粋を再掲せず、前段の短い自己要約一覧から本文取得候補を選ぶ。 |
 | `solver_graph_review.md` | Graph差分候補の`select / defer / reject`と本文取得順。 |
 
+Search Reviewで保留した候補と、本文取得が未完了の選択候補は、次のStep / Cycleでも
+`search_candidates`へ再投影されます。新規未評価候補があるときは新規候補だけをSearch Reviewへ渡し、
+過去の候補は通常の統合処理で再利用します。
+
 ### モードの選択
 
 選択処理は`app/agent_framework/loop.py`、Promptの組み合わせは
