@@ -290,6 +290,8 @@ class LLMClient:
     def health(self) -> dict[str, Any]:
         if self.provider == "anthropic":
             return self._anthropic_health()
+        if self.provider == "openai":
+            return self._openai_health()
         if self.provider != "ollama":
             return {
                 "provider": self.provider,
@@ -524,6 +526,75 @@ class LLMClient:
             ),
         }
 
+    def _openai_health(self) -> dict[str, Any]:
+        base = {
+            "provider": "openai",
+            "baseUrl": settings.openai_base_url,
+            "answerModel": settings.answer_model,
+            "reviewerModel": settings.reviewer_model,
+            "plannerModel": settings.planner_model,
+            "evaluatorModel": settings.evaluator_model,
+            "researchStageModel": settings.llm_research_stage_model,
+            "researchIntegrationModel": settings.llm_research_integration_model,
+            "researchModel": settings.llm_research_model,
+            "relationClassifierProvider": settings.relation_classifier_provider,
+            "relationClassifierModel": settings.relation_classifier_model,
+            "relationClassifierReviewerModel": (
+                settings.relation_classifier_reviewer_model
+            ),
+        }
+        if not settings.openai_api_key:
+            return {
+                **base,
+                "ok": False,
+                "reasonCode": "openai_api_key_missing",
+            }
+        configured_models = [
+            settings.answer_model,
+            settings.reviewer_model,
+            settings.planner_model,
+            settings.evaluator_model,
+            settings.llm_research_stage_model,
+            settings.llm_research_integration_model,
+        ]
+        if settings.relation_classifier_provider == "openai":
+            configured_models.extend(
+                [
+                    settings.relation_classifier_model,
+                    settings.relation_classifier_reviewer_model,
+                ]
+            )
+        models = tuple(dict.fromkeys(configured_models))
+        checks = []
+        try:
+            for model in models:
+                response = requests.get(
+                    f"{settings.openai_base_url.rstrip('/')}/models/{model}",
+                    headers=_openai_headers(),
+                    timeout=5,
+                )
+                checks.append({"model": model, "available": response.ok})
+        except requests.RequestException:
+            return {
+                **base,
+                "ok": False,
+                "reasonCode": "openai_model_check_failed",
+                "modelChecks": checks,
+            }
+        unavailable = [
+            check["model"] for check in checks if not check["available"]
+        ]
+        return {
+            **base,
+            "ok": not unavailable,
+            "modelChecks": checks,
+            **(
+                {"reasonCode": "openai_model_unavailable"}
+                if unavailable
+                else {}
+            ),
+        }
+
     def generate_answer(
         self,
         request: AnswerRequest,
@@ -735,6 +806,10 @@ class LLMClient:
             return self._generate_ollama(request, prompt, timeout_sec, citations)
         if self.provider == "anthropic":
             return self._generate_anthropic(
+                request, prompt, timeout_sec, citations, max_tokens
+            )
+        if self.provider == "openai":
+            return self._generate_openai(
                 request, prompt, timeout_sec, citations, max_tokens
             )
         return None
@@ -1322,6 +1397,70 @@ class LLMClient:
             answerIssueDecisions=issue_decisions,
         )
 
+    def _generate_openai(
+        self,
+        request: AnswerRequest,
+        prompt: str,
+        timeout_sec: int | None,
+        citations: list[Citation],
+        max_tokens: int | None = None,
+    ) -> LLMResult:
+        started = perf_counter()
+        prompt_citations = _shown_citations_for_prompt(citations)
+        data = _post_openai_chat_completion(
+            prompt=prompt,
+            schema=_answer_json_schema(request, prompt_citations),
+            model=settings.answer_model,
+            max_tokens=min(
+                max_tokens or settings.openai_max_tokens_ceiling,
+                settings.openai_max_tokens_ceiling,
+            ),
+            timeout_sec=timeout_sec or settings.llm_timeout_sec,
+        )
+        raw_text = _openai_text(data)
+        (
+            answer,
+            predicted_answer,
+            choice_judgements,
+            assessments,
+            polarity,
+            validation_error,
+        ) = _parse_answer_payload(
+            raw_text,
+            request.choices,
+            _citation_ids(prompt_citations),
+            request.topK,
+        )
+        (
+            answer_status,
+            answer_citation_ids,
+            missing,
+            issue_decisions,
+        ) = _final_decision_fields(raw_text)
+        usage = data.get("usage", {})
+        return LLMResult(
+            text=answer,
+            provider="openai",
+            model=settings.answer_model,
+            latencyMs=int((perf_counter() - started) * 1000),
+            inputTokens=usage.get("prompt_tokens"),
+            outputTokens=usage.get("completion_tokens"),
+            estimatedCost=0,
+            answer=answer,
+            predictedAnswer=predicted_answer,
+            choiceJudgements=choice_judgements,
+            validationError=validation_error,
+            stopReason=_openai_finish_reason(data),
+            contentBlockTypes=["text"] if raw_text else [],
+            outputChars=len(raw_text),
+            questionPolarity=polarity,
+            choiceAssessments=assessments,
+            answerStatus=answer_status,
+            answerCitationIds=answer_citation_ids,
+            missing=missing,
+            answerIssueDecisions=issue_decisions,
+        )
+
     def _json_transport(
         self,
         prompt: str,
@@ -1342,6 +1481,14 @@ class LLMClient:
                 max_tokens,
                 timeout_sec,
                 effort=effort,
+            )
+        if self.provider == "openai":
+            return self._openai_json(
+                prompt,
+                schema,
+                model,
+                max_tokens,
+                timeout_sec,
             )
         raise ValueError(f"Unsupported LLM_PROVIDER: {self.provider}")
 
@@ -1424,6 +1571,31 @@ class LLMClient:
             data.get("stop_reason"),
         )
 
+    def _openai_json(
+        self,
+        prompt: str,
+        schema: dict[str, Any],
+        model: str,
+        max_tokens: int,
+        timeout_sec: int,
+    ) -> tuple[str, int, int | None, int | None, str | None]:
+        started = perf_counter()
+        data = _post_openai_chat_completion(
+            prompt=prompt,
+            schema=schema,
+            model=model,
+            max_tokens=min(max_tokens, settings.openai_max_tokens_ceiling),
+            timeout_sec=timeout_sec,
+        )
+        usage = data.get("usage", {})
+        return (
+            _openai_text(data),
+            int((perf_counter() - started) * 1000),
+            usage.get("prompt_tokens"),
+            usage.get("completion_tokens"),
+            _openai_finish_reason(data),
+        )
+
 
 def _post_anthropic_with_overload_retry(
     *,
@@ -1460,6 +1632,103 @@ def _post_anthropic_with_overload_retry(
     if response is not None:
         return response
     raise requests.Timeout("Anthropic request budget exhausted before retry")
+
+
+def _openai_headers() -> dict[str, str]:
+    if not settings.openai_api_key:
+        raise ValueError("OPENAI_API_KEY is required when LLM_PROVIDER=openai")
+    return {
+        "authorization": f"Bearer {settings.openai_api_key}",
+        "content-type": "application/json",
+    }
+
+
+def _post_openai_chat_completion(
+    *,
+    prompt: str,
+    schema: dict[str, Any],
+    model: str,
+    max_tokens: int,
+    timeout_sec: int,
+) -> dict[str, Any]:
+    """OpenAI Chat CompletionsのStructured Outputsを共通JSON契約へ接続する。"""
+
+    response = requests.post(
+        f"{settings.openai_base_url.rstrip('/')}/chat/completions",
+        headers=_openai_headers(),
+        json={
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_completion_tokens": max_tokens,
+            "temperature": 0,
+            "store": False,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "legal_agent_response",
+                    "strict": True,
+                    "schema": _to_openai_schema(schema),
+                },
+            },
+        },
+        timeout=timeout_sec,
+    )
+    if not response.ok:
+        raise ValueError(f"{response.status_code}: {_openai_error(response)}")
+    data = response.json()
+    if not isinstance(data, dict):
+        raise TypeError("OpenAI response root is not an object")
+    return data
+
+
+def _to_openai_schema(schema: Any) -> Any:
+    """内部JSON SchemaをOpenAIのstrict Structured Outputs向けに正規化する。
+
+    strict modeではobjectの全propertyをrequiredにし、未知propertyを禁止する必要がある。
+    Pydanticが付けるdefaultはStructured Outputsで不要なため除去する。内部契約による
+    Pydantic検証は応答後にも実施するので、provider変換に意味判断は持たせない。
+    """
+
+    if isinstance(schema, list):
+        return [_to_openai_schema(item) for item in schema]
+    if not isinstance(schema, dict):
+        return schema
+
+    source = {key: value for key, value in schema.items() if key != "default"}
+    type_value = source.get("type")
+    if isinstance(type_value, list):
+        shared = {key: value for key, value in source.items() if key != "type"}
+        branches = []
+        for type_name in type_value:
+            if type_name == "null":
+                branches.append({"type": "null"})
+                continue
+            branch = {**shared, "type": type_name}
+            if "enum" in branch:
+                allowed = [
+                    value
+                    for value in branch["enum"]
+                    if _enum_value_matches_type(value, type_name)
+                ]
+                if allowed:
+                    branch["enum"] = allowed
+                else:
+                    branch.pop("enum")
+            if type_name != "object":
+                for object_key in ("properties", "required", "additionalProperties"):
+                    branch.pop(object_key, None)
+            branches.append(_to_openai_schema(branch))
+        return {"anyOf": branches}
+
+    converted = {
+        key: _to_openai_schema(value) for key, value in source.items()
+    }
+    if converted.get("type") == "object":
+        properties = converted.get("properties")
+        if isinstance(properties, dict):
+            converted["required"] = list(properties)
+        converted["additionalProperties"] = False
+    return converted
 
 
 def _scoped_research_article_ids(
@@ -2722,6 +2991,51 @@ def _anthropic_error(response: requests.Response) -> str:
     try:
         return str(response.json().get("error", {}).get("message", ""))
     except Exception:
+        return response.text[:200]
+
+
+def _openai_text(data: dict[str, Any]) -> str:
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise ValueError("OpenAI response has no choices")
+    choice = choices[0]
+    message = choice.get("message", {}) if isinstance(choice, dict) else {}
+    refusal = message.get("refusal") if isinstance(message, dict) else None
+    content = message.get("content") if isinstance(message, dict) else None
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts = [
+            str(part.get("text", ""))
+            for part in content
+            if isinstance(part, dict) and part.get("type") == "text"
+        ]
+        text = "".join(parts).strip()
+        if text:
+            return text
+    if refusal:
+        raise ValueError("OpenAI model refused the request")
+    return ""
+
+
+def _openai_finish_reason(data: dict[str, Any]) -> str | None:
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return None
+    choice = choices[0]
+    if not isinstance(choice, dict):
+        return None
+    reason = choice.get("finish_reason")
+    if reason == "length":
+        return "max_tokens"
+    return str(reason) if reason is not None else None
+
+
+def _openai_error(response: requests.Response) -> str:
+    try:
+        message = response.json().get("error", {}).get("message", "")
+        return str(message)[:500]
+    except (AttributeError, TypeError, ValueError):
         return response.text[:200]
 
 

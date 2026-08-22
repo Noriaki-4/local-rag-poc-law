@@ -1,6 +1,6 @@
 # シンプルな汎用反復型エージェント基盤 実装計画
 
-> 更新日: 2026-08-21
+> 更新日: 2026-08-22
 >
 > 本書を新しい実装ロードマップの正本とする。
 > 人間向けの概念図と処理イメージは、対になる
@@ -9,7 +9,7 @@
 > 過去の実装計画やProfile変更履歴は本書へ残さない。現在のコードから目標仕様へ移すために
 > 必要な差分、実装順、完了条件だけを記載する。
 
-## 実装状況（2026-08-21）
+## 実装状況（2026-08-22）
 
 この節は変更履歴ではなく、12章の完了条件に対する差分だけを示す。個別のProfile version、
 不具合修正、実測結果はGit履歴、[RUNBOOK](../../../RUNBOOK.md)、
@@ -27,6 +27,9 @@
 
 - `agent_framework`、`InMemoryCaseStore`、用途別Model Profile、read-only Tool並列実行、
   任意Reviewer、法令Tool Adapter、Feature Flag付き経路は存在する。
+- 共通Model PortはOllama、Anthropic、OpenAI APIを選択できる。`LLM_PROVIDER=openai`の既定modelは
+  `gpt-4o-mini`で、`LLM_MODEL`により同一Runの探索・統合・回答・Reviewerを一括変更できる。
+  `LLM_MODEL`未指定時は従来どおり役割別model設定を使う。同一Run内でproviderを統一する制約は維持する。
 - Reviewerの既定値は無効で、新経路のFeature Flagも既定では無効である。
 - 現行Legal Profile v98は本文取得後の自動Graph連動を持たず、`automatic_tools=()`である。
   Solverは`legal_graph_neighbors`へ、既知起点Article、`semantic_assertion / explicit_reference / explains`の

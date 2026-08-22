@@ -136,6 +136,13 @@ class Settings:
     anthropic_base_url = os.getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
     anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
     anthropic_version = os.getenv("ANTHROPIC_VERSION", "2023-06-01")
+    openai_base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+    # gpt-4o-miniの最大出力は16,384 token。APIへ上限超過値を送らないため、
+    # OpenAI transport内でこの値を天井として使う。
+    openai_max_tokens_ceiling = max(
+        1, min(int(os.getenv("OPENAI_MAX_TOKENS_CEILING", "16384")), 16384)
+    )
     # 応答にthinkingブロックが含まれ、その分もmax_tokensを消費する。思考だけで枠を使い切ると
     # 本文(text)が返らずJSONパースに失敗するため、本文が載る余裕を見て大きめに取る。
     anthropic_max_tokens = int(os.getenv("ANTHROPIC_MAX_TOKENS", "16384"))
@@ -143,10 +150,17 @@ class Settings:
     anthropic_max_tokens_ceiling = int(
         os.getenv("ANTHROPIC_MAX_TOKENS_CEILING", "32768")
     )
-    answer_model = os.getenv("ANSWER_MODEL") or (
-        "claude-sonnet-5" if llm_provider == "anthropic" else "gemma4:e4b"
+    _default_answer_model = (
+        "claude-sonnet-5"
+        if llm_provider == "anthropic"
+        else "gpt-4o-mini"
+        if llm_provider == "openai"
+        else "gemma4:e4b"
     )
-    reviewer_model = os.getenv("REVIEWER_MODEL") or answer_model
+    # LLM_MODELは全役割を一括で切り替える簡易設定。未指定時だけ役割別設定を使う。
+    llm_model = os.getenv("LLM_MODEL", "").strip()
+    answer_model = llm_model or os.getenv("ANSWER_MODEL") or _default_answer_model
+    reviewer_model = llm_model or os.getenv("REVIEWER_MODEL") or answer_model
     reviewer_max_tokens = max(
         1024,
         min(
@@ -154,10 +168,10 @@ class Settings:
             anthropic_max_tokens_ceiling,
         ),
     )
-    planner_model = os.getenv("PLANNER_MODEL") or answer_model
+    planner_model = llm_model or os.getenv("PLANNER_MODEL") or answer_model
     planner_max_tokens = int(os.getenv("PLANNER_MAX_TOKENS", "1024"))
     planner_timeout_sec = int(os.getenv("PLANNER_TIMEOUT_SEC", "30"))
-    evaluator_model = os.getenv("EVALUATOR_MODEL") or planner_model
+    evaluator_model = llm_model or os.getenv("EVALUATOR_MODEL") or planner_model
     evaluator_max_tokens = int(os.getenv("EVALUATOR_MAX_TOKENS", "1024"))
     evaluator_timeout_sec = int(os.getenv("EVALUATOR_TIMEOUT_SEC", "20"))
     judge_model = os.getenv("JUDGE_MODEL", "none")
@@ -178,13 +192,13 @@ class Settings:
     agent_llm_directed_retrieval_shadow = os.getenv(
         "AGENT_LLM_DIRECTED_RETRIEVAL_SHADOW", "false"
     ).lower() in {"1", "true", "yes", "on"}
-    # LLM_RESEARCH_MODELは従来設定との互換用。役割別設定があればそちらを優先する。
-    llm_research_model = os.getenv("LLM_RESEARCH_MODEL") or answer_model
+    # LLM_RESEARCH_MODELは従来設定との互換用。LLM_MODEL未指定時は役割別設定を優先する。
+    llm_research_model = llm_model or os.getenv("LLM_RESEARCH_MODEL") or answer_model
     llm_research_stage_model = (
-        os.getenv("LLM_RESEARCH_STAGE_MODEL") or llm_research_model
+        llm_model or os.getenv("LLM_RESEARCH_STAGE_MODEL") or llm_research_model
     )
     llm_research_integration_model = (
-        os.getenv("LLM_RESEARCH_INTEGRATION_MODEL") or llm_research_model
+        llm_model or os.getenv("LLM_RESEARCH_INTEGRATION_MODEL") or llm_research_model
     )
     # RelationAssertionの分類はseedとは分離したオフライン処理で行う。検索・回答用の
     # providerがAnthropicでも、分類だけローカルOllamaへ分離できるよう専用providerを持つ。
@@ -334,17 +348,20 @@ class Settings:
         "AGENT_FRAMEWORK_REVIEWER_ENABLED", "false"
     ).lower() in {"1", "true", "yes", "on"}
     agent_framework_research_model = (
-        os.getenv("AGENT_FRAMEWORK_RESEARCH_MODEL") or llm_research_stage_model
+        llm_model
+        or os.getenv("AGENT_FRAMEWORK_RESEARCH_MODEL")
+        or llm_research_stage_model
     )
     agent_framework_integration_model = (
-        os.getenv("AGENT_FRAMEWORK_INTEGRATION_MODEL")
+        llm_model
+        or os.getenv("AGENT_FRAMEWORK_INTEGRATION_MODEL")
         or os.getenv("AGENT_FRAMEWORK_FINALIZE_MODEL")
         or llm_research_integration_model
     )
     # 旧設定名は既存環境との互換性のためだけに残す。
     agent_framework_finalize_model = agent_framework_integration_model
     agent_framework_reviewer_model = (
-        os.getenv("AGENT_FRAMEWORK_REVIEWER_MODEL") or reviewer_model
+        llm_model or os.getenv("AGENT_FRAMEWORK_REVIEWER_MODEL") or reviewer_model
     )
     agent_framework_research_max_tokens = max(
         1024,

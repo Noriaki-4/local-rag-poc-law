@@ -17,7 +17,9 @@
 実装はサンプルデータで起動確認できる。lawqa_jp 本体は同梱せず、全問評価時は公開データをURLまたはローカルファイルから読む。
 
 初期 LLM は有料 API ではなく、ホストで動く Ollama の `gemma4:e4b` を使う。Docker 内の Agent API からは `http://host.docker.internal:11434` に接続する。
-Claude を使う場合は `LLM_PROVIDER=anthropic` に切り替える（選択式 lawqa_jp の判定精度は Ollama の小型モデルより大きく高い。動作確認例は2節参照）。
+Claude は `LLM_PROVIDER=anthropic`、OpenAI APIの`gpt-4o-mini`は
+`LLM_PROVIDER=openai`へ切り替える。`LLM_MODEL`を指定すると、探索・統合・回答・Reviewerを
+1つのモデルへ一括で切り替えられる。未指定時だけ役割別のmodel設定を使う。
 
 embedding は既定で Ollama の `bge-m3` を使う。Agent の検索は `AGENT_USE_BM25=true`, `AGENT_USE_VECTOR=true` の Hybrid 検索を既定にする。
 
@@ -101,6 +103,37 @@ curl -s https://api.anthropic.com/v1/messages \
 ```
 
 `404 model not found` の場合は、そのキーではモデルIDが使えない。契約プランで利用可能な別のモデルIDに変える。
+
+OpenAI APIの`gpt-4o-mini`へ全役割を一括で切り替える`.env`例:
+
+```bash
+LLM_PROVIDER=openai
+LLM_MODEL=gpt-4o-mini
+OPENAI_API_KEY=sk-...
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_MAX_TOKENS_CEILING=16384
+```
+
+API keyを画面へ表示せず、上記設定を既存`.env`へ反映する場合は次を実行する。
+同じコマンドを再実行すると既存値を置き換え、重複行は残さない。`.env`のpermissionは`600`になる。
+
+```bash
+./scripts/configure_openai.sh
+```
+
+`LLM_MODEL`は`ANSWER_MODEL`、`REVIEWER_MODEL`、探索・統合modelなどの役割別設定より優先する。
+役割ごとに異なるモデルを使う場合は`LLM_MODEL`を空にして、従来の役割別設定を指定する。
+`gpt-4o-mini`はChat CompletionsのStructured Outputsへ接続し、既存の共通JSON契約を使う。
+モデルのAPI仕様は[OpenAI公式のgpt-4o-mini説明](https://developers.openai.com/api/docs/models/gpt-4o-mini)を参照する。
+ChatGPTの月額サブスクリプションはOpenAI API利用料に充当されないため、API Platform側の
+APIキーと支払い設定が別途必要である。
+
+キーとmodelの疎通はAgent APIのhealthで確認する。キーをshellへ直接表示しない。
+
+```bash
+docker compose up --build -d agent-api
+curl -s http://localhost:8000/health | jq '.llm'
+```
 
 `.env` を書き換えた後は、`docker compose up -d agent-api` だけでなく `docker compose up --build -d agent-api` を使うこと。`agent-api` の Python コードはイメージに `COPY` されているため、コード変更後に `--build` を省略すると古いイメージのまま起動し、変更が反映されない。
 
@@ -1533,7 +1566,8 @@ Phase 0 で以下を固定する。
 
 - embedding model / dimension。既定は Ollama `bge-m3` / 1024次元
 - lawqa_jp 評価対象件数と除外条件
-- planner / answer / judge LLM。初期確認は Ollama `gemma4:e4b`、Claude利用時は `LLM_PROVIDER=anthropic`
+- planner / answer / judge LLM。初期確認は Ollama `gemma4:e4b`。Claudeは
+  `LLM_PROVIDER=anthropic`、OpenAI APIは`LLM_PROVIDER=openai`を使う
 - Hybrid 検索重み
 - Pattern 3 の tool call / retry 上限
 
@@ -1541,7 +1575,7 @@ Phase 0 で以下を固定する。
 
 - `agent-api/app/embeddings.py`: embedding provider を変更する場合に差し替え
 - `agent-api/app/seed.py`: サンプル文書生成から e-Gov 前処理済み文書投入へ変更
-- `.env`: `LLM_PROVIDER`, `ANSWER_MODEL`, `REVIEWER_MODEL`,
+- `.env`: `LLM_PROVIDER`, `LLM_MODEL`, `ANSWER_MODEL`, `REVIEWER_MODEL`,
   `LLM_RESEARCH_STAGE_MODEL`, `LLM_RESEARCH_INTEGRATION_MODEL`, provider別APIキーを変更
 - `agent-api/app/agent.py`: planner / answer / judge の使い分けを拡張
 - `docs/requirements/samples/eval/`: 実評価分割の JSONL に差し替え
