@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from time import monotonic
 from typing import Any
+from uuid import uuid4
 
 import requests
 from pydantic import ValidationError
@@ -131,6 +132,7 @@ class StructuredJSONModelAdapter:
             else:
                 try:
                     normalized = _normalize_solver_payload(result.payload)
+                    _assign_tool_request_ids(normalized, context)
                     _normalize_absent_context_branches(normalized, context)
                     if _preserve_previous_update_for_contract_repair(context):
                         normalized["update"] = (
@@ -639,6 +641,10 @@ def _review_prompt(context: ReviewerView, system_prompt: str) -> str:
 
 _TRANSPORT_REPAIR_RULES = (
     (
+        "finalize decision requires an answer",
+        "finalize_requires_answer",
+    ),
+    (
         "continue decision requires a tool request",
         "continue_requires_action",
     ),
@@ -662,6 +668,10 @@ _CONTRACT_REPAIR_RULES = (
     (("navigation-only evidence",), "navigation_only_evidence"),
     (("unknown Article ID",), "unknown_article_id"),
     (("open WorkItem", "unresolved answer scope"), "open_work_item"),
+    (
+        ("resolved work item retains unresolved basis hypotheses",),
+        "work_item_hypothesis_alignment",
+    ),
     (("Cycle boundary", "remaining Cycle capacity"), "cycle_boundary"),
     (("resolved dependency requires",), "resolved_dependency"),
     (
@@ -1918,6 +1928,59 @@ def _normalize_solver_payload(payload: dict) -> dict:
     return normalized
 
 
+def _assign_tool_request_ids(
+    normalized: dict[str, Any],
+    context: SolverContext,
+) -> None:
+    """LLMの局所参照を保ち、永続化用ToolRequest IDを機械採番する。"""
+
+    requests = normalized.get("tool_requests") or []
+    if not requests:
+        return
+    local_ids = [
+        request.get("request_id") if isinstance(request, dict) else None
+        for request in requests
+    ]
+    if any(not isinstance(request_id, str) or not request_id for request_id in local_ids):
+        return
+    if len(local_ids) != len(set(local_ids)):
+        raise ModelProtocolError(
+            "tool request local IDs must be unique within the decision"
+        )
+
+    used_ids = set(context.used_tool_request_ids)
+    assigned_ids: set[str] = set()
+    id_map: dict[str, str] = {}
+    for request, local_id in zip(requests, local_ids, strict=True):
+        assert isinstance(request, dict)
+        assert isinstance(local_id, str)
+        while True:
+            assigned_id = f"solver-tool-{uuid4().hex}"
+            if assigned_id not in used_ids and assigned_id not in assigned_ids:
+                break
+        request["request_id"] = assigned_id
+        assigned_ids.add(assigned_id)
+        id_map[local_id] = assigned_id
+
+    requests_by_work_item: dict[str, list[str]] = {}
+    for request in requests:
+        work_item_id = request.get("work_item_id")
+        request_id = request.get("request_id")
+        if isinstance(work_item_id, str) and isinstance(request_id, str):
+            requests_by_work_item.setdefault(work_item_id, []).append(request_id)
+
+    for dependency in normalized.get("dependency_decisions") or []:
+        if not isinstance(dependency, dict) or dependency.get("status") != "needs_action":
+            continue
+        action_request_id = dependency.get("action_request_id")
+        if isinstance(action_request_id, str) and action_request_id in id_map:
+            dependency["action_request_id"] = id_map[action_request_id]
+            continue
+        matching_ids = requests_by_work_item.get(dependency.get("work_item_id"), [])
+        if action_request_id is None and len(matching_ids) == 1:
+            dependency["action_request_id"] = matching_ids[0]
+
+
 def _normalize_search_review_payload(
     payload: dict[str, Any],
     context: SolverContext,
@@ -2248,8 +2311,8 @@ update_jsonの状態契約:
 - finalize時のanswer.citation_idsには、resolved WorkItemのbasis Hypothesisが選んだEvidenceを漏れなく含める。不要なEvidenceならHypothesis側から外す。
 
 参照契約:
-- IDはSolverContextまたは直前Decisionに表示された値だけを完全一致で使い、名前から生成しない。
-- 今回作るToolRequestのrequest_idは相互に一意な新しいIDとし、recent_tool_requestsの過去IDを再利用しない。
+- 既存のWorkItem、Hypothesis、Evidence、Articleを参照するIDは、SolverContextに表示された値だけを完全一致で使う。Article IDやEvidence IDを名前から生成しない。
+- add_work_itemsとadd_hypothesesでは新しいIDを作る。ToolRequestのrequest_idは同じDecision内だけで重複しない短い局所IDとし、Programが永続化用IDへ置き換える。
 - retain_evidence_idsはmax_retained_evidence件以内で、次Cycleにも本文提示が必要なEvidenceだけを選ぶ。
 - reviewer_findingsがあれば、review_finding_resolutionsで全finding_idを1回ずつ処理する。指摘を受け入れて回答修正または追加調査へ反映する場合はaddressed、提示済み本文と照合して指摘を採用しない場合だけdisputedとし、reasonと実際に使ったbasis_evidence_idsを返す。reviewer_findingsがなければ空配列にする。
 - statusの意味、根拠の十分性、追加調査、Graph候補の採否はsystem promptに従ってSolverが判断する。

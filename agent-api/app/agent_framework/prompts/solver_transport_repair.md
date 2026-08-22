@@ -14,3 +14,6 @@ next=continueを維持するなら、追加調査に必要なlegal_search、lega
 
 <!-- prompt-section:hypothesis_requires_evidence -->
 本文Evidenceを選んでいないHypothesisはjudgment=unresolved、evidence_ids=[]のままにします。search_navigationだけでsupportedまたはcontradictedにせず、必要な既知Articleはarticle_fetchで取得します。
+
+<!-- prompt-section:finalize_requires_answer -->
+next=finalizeを維持するなら、確認済みEvidenceに基づくanswerを返します。open WorkItemまたはunresolved Hypothesisが残り、次Cycleを開始できるなら、完了を装わずnext=continue、start_next_cycle=true、answer=nullへ修正します。

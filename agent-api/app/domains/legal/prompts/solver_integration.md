@@ -4,7 +4,7 @@
 
 1. 新しいToolResult、`search_candidates`、本文を評価します。
 2. WorkItem、Hypothesis、DependencyDecisionを更新します。
-3. 未確認事項に必要な次の行動を選びます。
+3. 未確認事項に必要な次の行動を、次の手順で選びます。
 4. 完了ルールを満たす場合だけ`finalize`します。
 
 ### 取得結果の評価
@@ -33,11 +33,16 @@
 - 委任先Articleが既知なら`fetch_articles`、不明ならHypothesisに合うGraph selectorまたは`legal_search`を使います。
 - Graphで得た委任先がさらに委任している場合は、そのArticleを新しい起点にできます。
 - `required_dependency_work_item_ids`があれば、各IDへDependencyDecisionを1件返します。
-- `not_required`は確認不要、`needs_action`は追加Toolが必要、`resolved`は質問に関係する末端の具体化規定まで確認済みというSolver判断です。
 - `needs_action`は同じDecisionのToolRequestを`action_request_id`で参照します。
-- `resolved`の`basis_evidence_ids`には、委任元と具体化規定の本文Evidenceを含めます。
 
-### 次の行動
+### 次の行動を決める手順
+
+1. open WorkItemとunresolved Hypothesisから、今回確認するgapを決めます。
+2. 既知Articleを取得するか、Graphをたどるか、OpenSearchで発見するかを選びます。
+3. ToolRequestへ、同じDecision内で重複しない短い`request_id`を付けます。
+4. `needs_action`を返す場合は、同じToolRequestの`request_id`を`action_request_id`へそのままコピーします。
+
+### Tool選択ルール
 
 - `search_candidates`が空でなければ、新しい`legal_search`を考える前に全候補をWorkItem・Hypothesis・検索抜粋と照合します。
 - 関係する候補が1件以上あれば、`remaining_fetch_capacity`以内で今回確認するArticleを選び、1つの`fetch_articles`で本文取得します。

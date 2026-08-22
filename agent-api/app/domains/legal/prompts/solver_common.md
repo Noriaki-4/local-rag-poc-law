@@ -19,6 +19,7 @@
 - 適用要件、数値基準、例外、義務、手続など、別の本文で検証する観点を束ねません。
 - 未確認のHypothesisは`unresolved`にします。
 - `supported / contradicted`には、命題を直接支持または否定するgrounding Evidenceだけを使います。
+- 同じ制度や近い手続に関する本文でも、Hypothesisが問う主体、条件、範囲、例外または行為を示さなければ直接根拠ではありません。
 - 検索候補、Graph候補、近接する別Articleを回答根拠として代用しません。
 
 ### IDと本文

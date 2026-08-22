@@ -24,6 +24,9 @@ fetchable_article_idsの完全一致だけを使い、未知ならlegal_search�
 <!-- prompt-section:open_work_item -->
 追加調査できるならopenのままcontinueします。不能時だけlimitationsと既知の未解決IDを対応させます。
 
+<!-- prompt-section:work_item_hypothesis_alignment -->
+WorkItemだけをresolvedにしません。提示本文がbasis Hypothesisを直接確認できるなら、同じDecisionで各Hypothesisを根拠付きsupportedまたはcontradictedへ更新します。確認できないbasis Hypothesisが一つでもあれば、WorkItemをopen、resolution=nullのままcontinueします。
+
 <!-- prompt-section:cycle_boundary -->
 現CycleへToolを追加せず、完了ならfinalize、未完了で次Cycle可能ならstart_next_cycle=trueにします。
 
@@ -31,7 +34,7 @@ fetchable_article_idsの完全一致だけを使い、未知ならlegal_search�
 同じArticleのParagraphを重ねず、委任元と末端Articleの本文Evidenceを使います。末端未取得ならneeds_actionにします。
 
 <!-- prompt-section:dependency_decision -->
-required_dependency_work_item_idsの各IDへ1件返します。needs_actionのaction_request_idは、同じDecisionで実際に返すToolRequestまたはarticle_fetchのrequest_idと完全一致させます。
+required_dependency_work_item_idsの各IDへ1件返し、各basis_evidence_idsへ判断に使ったgrounding Evidenceを1件以上指定します。needs_actionには未解決の委任を確認した本文Evidenceを使います。現Cycleを続ける場合は、対応するtool_requests[].request_idをaction_request_idへ同じ文字列のままコピーします。次Cycleへ引き継ぐ場合はnullにします。
 
 <!-- prompt-section:retained_evidence_limit -->
 retain_evidence_idsはmax_retained_evidence件以内で、後続Cycleにも本文が必要なEvidenceをLLMが選びます。
@@ -40,7 +43,7 @@ retain_evidence_idsはmax_retained_evidence件以内で、後続Cycleにも本�
 上限内で今回必要な要求をLLMが選び、超過分をProgramへ選別させません。
 
 <!-- prompt-section:unique_tool_request_ids -->
-今回返す各ToolRequestには相互に異なる新しいrequest_idを付け、recent_tool_requestsにある過去のrequest_idを再利用しません。意味判断とToolの種類・引数は変えず、IDだけを修正します。
+今回返す各ToolRequestのrequest_idを同じDecision内で相互に異なる短い局所IDにします。意味判断とToolの種類・引数は変えません。request_idを変更したToolRequestを指すDependencyDecisionがあれば、action_request_idにも同じ局所IDをコピーします。
 
 <!-- prompt-section:repeated_successful_search -->
 同じWorkItem・Hypothesis・query・filterで成功済みのlegal_searchを再要求しません。search_candidatesと対応する検索抜粋を評価し、関係する候補があればfetch_articlesで本文を取得します。既存候補では検証できないと判断した場合だけ、不足する確認事項をdecision_reasonに示して検索表現を変更します。

@@ -176,6 +176,7 @@ class SolverContext(FrameworkModel):
     hypotheses: tuple[Hypothesis, ...]
     focus_work_items: tuple[WorkItem, ...]
     affected_work_items: tuple[WorkItem, ...]
+    used_tool_request_ids: tuple[str, ...] = Field(default=(), exclude=True)
     recent_tool_requests: tuple[ToolRequest, ...]
     recent_tool_results: tuple[SolverToolResult, ...]
     evidence_manifest: tuple[EvidenceManifestItem, ...]
@@ -518,6 +519,7 @@ def build_solver_context(
         affected_work_items=tuple(
             item for item in state.work_items if item.work_item_id in affected_ids
         ),
+        used_tool_request_ids=tuple(item.request_id for item in state.tool_requests),
         recent_tool_requests=recent_requests,
         recent_tool_results=solver_recent_results,
         evidence_manifest=manifest,

@@ -1304,6 +1304,9 @@ class ToolResult:
 ```
 
 ToolRequestは実行前にCaseStateへ保存し、ToolResultの`request_id`は既知のToolRequestと完全一致させる。
+LLM出力中の`request_id`は同じDecision内の局所参照とし、Adapterが永続化前にCase内で一意なIDへ
+機械変換する。`DependencyDecision.action_request_id`は同じ対応表で変換し、Toolの意味、引数、
+WorkItem・Hypothesisとの対応は変更しない。
 候補発見・Graph展開・本文取得を行うToolRequestは`exploration_intent_id`を必須とし、同じWorkItem・Hypothesisに
 属する既知Intentと完全一致させる。CaseStore内の既知Evidenceを再読込するだけの`load_evidence`等はnullを許可する。
 これによりToolResultから検証対象WorkItem、Hypothesis、検索scopeを必ず逆引きできる。

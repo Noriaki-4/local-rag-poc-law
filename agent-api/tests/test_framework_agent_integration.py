@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from app import main
 from app.adapters.models import StructuredJSONModelAdapter
 from app.adapters.models.structured_json import (
+    _assign_tool_request_ids,
     _normalize_absent_context_branches,
     _normalize_solver_payload,
     _search_review_context_payload,
@@ -165,6 +166,13 @@ class FakeStructuredLLM:
         self.calls.append(kwargs)
         decision = self.payloads.pop(0)
         if "next" not in kwargs["schema"]["properties"]:
+            search_request_schema = kwargs["schema"]["properties"].get(
+                "search_request_ids"
+            )
+            if search_request_schema is not None:
+                decision["search_request_ids"] = search_request_schema["items"][
+                    "enum"
+                ]
             return StructuredJSONResult(
                 payload=decision,
                 provider="fake",
@@ -342,7 +350,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "116"
+    assert diagnostic_records[0]["profileVersion"] == "124"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -350,7 +358,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "116"
+    assert transport_input["profileVersion"] == "124"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"][0]["asset"] == (
         "agent_framework/prompts/solver_contract_repair.md"
@@ -702,7 +710,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "116"
+    assert profile.version == "124"
     mode_prompts = {
         "research": profile.solver_research.system_prompt,
         "integration": profile.solver_integration.system_prompt,
@@ -724,12 +732,18 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     assert "## Tool選択ルール" in research_prompt
     assert "## Researchモード" in research_prompt
     assert "## 完了ルール" in research_prompt
+    assert "各観点を別WorkItem" in research_prompt
+    assert "「特定の条件がある」「法令に定められている」「例外がある」" in research_prompt
+    assert "同じ制度や近い手続に関する本文でも" in research_prompt
     assert "## Integrationモード" not in research_prompt
     assert "## Cycle Closeモード" not in research_prompt
 
     integration_prompt = mode_prompts["integration"]
     assert "## Tool選択ルール" in integration_prompt
     assert "## Integrationモード" in integration_prompt
+    assert "### 次の行動を決める手順" in integration_prompt
+    assert "### Tool選択ルール" in integration_prompt
+    assert "`request_id`を`action_request_id`へそのままコピー" in integration_prompt
     assert "## 完了ルール" in integration_prompt
     assert "## Cycle Closeモード" not in integration_prompt
     assert "## Reviewer Revisionモード" not in integration_prompt
@@ -821,6 +835,24 @@ def test_graph_review_prompt_has_one_document_hierarchy() -> None:
     assert "## Relationの読み方" in prompt
     assert "## 選択ルール" in prompt
     assert "## 出力" in prompt
+
+
+def test_cycle_close_prompt_separates_steps_from_decision_rules() -> None:
+    profile = legal_profiles.legal_agent_profile()
+    prompt = profile.solver_cycle_close.system_prompt
+
+    assert "### 手順" in prompt
+    assert "### 判断ルール" in prompt
+    assert "### 出力ルール" in prompt
+    assert "### 引継ぎルール" in prompt
+    assert "open WorkItemまたはunresolved Hypothesisが残り" in prompt
+    assert "`next=continue`、`start_next_cycle=true`" in prompt
+    assert "`next=finalize`では`answer`を必ず返します" in prompt
+    assert "| `needs_action` |" in prompt
+    assert "末端の具体化規定を未確認" in prompt
+    assert "「政令で定める」「府令で定める」" in prompt
+    assert "`basis_evidence_ids`には、その判断に使ったgrounding Evidence" in prompt
+    assert "`action_request_id`は`null`" in prompt
 
 
 def test_search_review_prompt_defines_evidence_join_and_limited_role() -> None:
@@ -1299,7 +1331,7 @@ def test_diagnostic_integration_fixture_rebuilds_the_same_solver_context() -> No
         finalize_only=saved.finalize_only,
     )
 
-    assert rebuilt == saved
+    assert rebuilt.model_dump(mode="json") == saved.model_dump(mode="json")
     assert saved.research_cycle_count == expectations["researchCycleCount"]
     assert saved.remaining_fetch_capacity == expectations["remainingFetchCapacity"]
     assert len(saved.work_tree) == expectations["workItemCount"]
@@ -1328,6 +1360,116 @@ def test_diagnostic_integration_fixture_rebuilds_the_same_solver_context() -> No
         role = str(evidence.metadata.get("evidenceRole", "unknown"))
         role_counts[role] = role_counts.get(role, 0) + 1
     assert role_counts == expectations["evidenceRoleCounts"]
+
+
+def test_solver_context_keeps_used_tool_ids_across_cycle_boundaries() -> None:
+    prior_request = ToolRequest(
+        request_id="cycle-1-search",
+        work_item_id="w1",
+        tool_name="legal_search",
+        arguments={"query": "確認語", "doc_types": ["law"]},
+        purpose="Cycle 1で検索する",
+        hypothesis_ids=("h1",),
+    )
+    state = CaseState(
+        case_id="case-cycle-2",
+        question="質問",
+        research_cycle_count=2,
+        work_items=(WorkItem(work_item_id="w1", question="確認する"),),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h1",
+                work_item_id="w1",
+                statement="確認命題",
+            ),
+        ),
+        tool_requests=(prior_request,),
+    )
+
+    context = build_solver_context(
+        state,
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+    )
+
+    assert context.recent_tool_requests == ()
+    assert context.used_tool_request_ids == ("cycle-1-search",)
+
+
+def test_program_assigns_persistent_tool_ids_and_preserves_local_action_link() -> None:
+    context = build_solver_context(
+        CaseState(
+            case_id="case-tool-id",
+            question="質問",
+            tool_requests=(
+                ToolRequest(
+                    request_id="request-1",
+                    work_item_id="w1",
+                    tool_name="legal_search",
+                    arguments={"query": "以前の検索", "doc_types": ["law"]},
+                    purpose="以前の検索",
+                    hypothesis_ids=("h1",),
+                ),
+            ),
+        ),
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+    )
+    normalized = {
+        "tool_requests": [
+            {
+                "request_id": "request-1",
+                "work_item_id": "w1",
+                "tool_name": "legal_search",
+                "arguments": {"query": "次の検索", "doc_types": ["law"]},
+                "purpose": "次の検索",
+                "hypothesis_ids": ["h1"],
+            }
+        ],
+        "dependency_decisions": [
+            {
+                "dependency_kind": "lower_norm",
+                "work_item_id": "w1",
+                "status": "needs_action",
+                "reason": "下位規範を確認する",
+                "basis_evidence_ids": ["e1"],
+                "action_request_id": "request-1",
+            }
+        ],
+    }
+
+    _assign_tool_request_ids(normalized, context)
+
+    assigned_id = normalized["tool_requests"][0]["request_id"]
+    assert assigned_id.startswith("solver-tool-")
+    assert assigned_id != "request-1"
+    assert normalized["dependency_decisions"][0]["action_request_id"] == assigned_id
+
+
+def test_cycle_close_fixture_preserves_the_unresolved_boundary_state() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_overview_cycle1_close_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    state = CaseState.model_validate(fixture["caseState"])
+    context = SolverContext.model_validate(fixture["solverContext"])
+
+    assert fixture["source"]["purpose"] == "cycle_close"
+    assert context.cycle_close_required is True
+    assert context.can_start_next_cycle is True
+    assert context.remaining_fetch_capacity == 0
+    assert len(context.fetched_resource_ids_this_cycle) == 3
+    assert all(item.state == "open" for item in context.work_tree)
+    assert all(item.judgment == "unresolved" for item in context.hypotheses)
+    assert set(context.required_dependency_work_item_ids) == {
+        item.work_item_id for item in context.work_tree
+    }
+    assert state.final_answer is None
 
 
 def test_search_review_view_groups_each_excerpt_with_its_candidate() -> None:
@@ -1487,7 +1629,7 @@ def test_openai_solver_uses_structured_tool_request_transport() -> None:
         ModelCallProfile(model="gpt-4o-mini", system_prompt="判断する"),
     )
 
-    assert result.decision.tool_requests[0].request_id == "r1"
+    assert result.decision.tool_requests[0].request_id.startswith("solver-tool-")
     assert llm.schema is not None
     properties = llm.schema["properties"]
     assert "tool_requests" in properties
@@ -1835,6 +1977,18 @@ def test_transport_repair_explains_continue_requires_an_actual_action() -> None:
     assert "next=continueを維持するなら" in prompt
     assert "article_fetchを少なくとも1件" in prompt
     assert "next=finalizeとanswer" in prompt
+
+
+def test_transport_repair_explains_finalize_requires_an_answer() -> None:
+    prompt = _solver_repair_prompt(
+        "base",
+        {"next": "finalize", "answer": None},
+        ModelProtocolError("finalize decision requires an answer"),
+    )
+
+    assert "next=finalizeを維持するなら" in prompt
+    assert "確認済みEvidenceに基づくanswer" in prompt
+    assert "start_next_cycle=true" in prompt
 
 
 def test_anthropic_prompt_limits_bindings_to_current_hypothesis_updates() -> None:
@@ -2468,7 +2622,7 @@ def test_contract_repair_prompt_handles_unknown_article_ids() -> None:
 
     prompt = _solver_prompt(context, "system")
 
-    assert "IDはSolverContextまたは直前Decisionに表示された値だけ" in prompt
+    assert "既存のWorkItem、Hypothesis、Evidence、Articleを参照するID" in prompt
     assert "fetchable_article_idsの完全一致だけを使い" in prompt
     assert "violation: tool request references unknown Article IDs" in prompt
     assert "navigation-only evidence" not in prompt
@@ -2493,10 +2647,34 @@ def test_contract_repair_prompt_handles_duplicate_tool_request_ids() -> None:
 
     prompt = _solver_prompt(context, "system")
 
-    assert "相互に異なる新しいrequest_id" in prompt
-    assert "recent_tool_requestsにある過去のrequest_idを再利用しません" in prompt
-    assert "意味判断とToolの種類・引数は変えず、IDだけを修正" in prompt
+    assert "同じDecision内で相互に異なる短い局所ID" in prompt
+    assert "action_request_idにも同じ局所IDをコピー" in prompt
     assert "violation: duplicate tool request ID" in prompt
+
+
+def test_contract_repair_prompt_aligns_resolved_work_item_and_hypotheses() -> None:
+    context = build_solver_context(
+        CaseState(case_id="case-1", question="質問"),
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+        contract_feedback=SolverContractFeedback(
+            violation=(
+                "resolved work item retains unresolved basis hypotheses: "
+                "w1=['h1']"
+            ),
+            previous_decision=SolverDecision(
+                next="finalize",
+                answer={"text": "回答"},
+            ),
+        ),
+    )
+
+    prompt = _solver_prompt(context, "system")
+
+    assert "WorkItemだけをresolvedにしません" in prompt
+    assert "同じDecisionで各Hypothesisを根拠付き" in prompt
+    assert "WorkItemをopen、resolution=nullのままcontinue" in prompt
 
 
 def test_contract_repair_prompt_handles_repeated_successful_search() -> None:
@@ -2545,6 +2723,10 @@ def test_minimal_solver_contract_defines_state_field_invariants() -> None:
     assert "actionはretain / replace / drop" in prompt
     assert "それ以外は空配列" in prompt
     assert "retain_evidence_idsはmax_retained_evidence件以内" in prompt
+    assert "既存のWorkItem、Hypothesis、Evidence、Articleを参照するID" in prompt
+    assert "ToolRequestのrequest_idは同じDecision内だけで重複しない短い局所ID" in prompt
+    assert "Programが永続化用IDへ置き換える" in prompt
+    assert "IDはSolverContextまたは直前Decisionに表示された値だけ" not in prompt
 
 
 def test_contract_repair_prompt_distinguishes_retained_evidence_limit() -> None:
@@ -2751,7 +2933,7 @@ def test_model_adapter_repairs_transport_json_once(tmp_path) -> None:
     assert [
         item["name"]
         for item in transport_inputs[1]["promptAssets"][1]["sections"]
-    ] == ["base"]
+    ] == ["base", "finalize_requires_answer"]
     assert transport_inputs[0]["promptHash"] != transport_inputs[1]["promptHash"]
 
 

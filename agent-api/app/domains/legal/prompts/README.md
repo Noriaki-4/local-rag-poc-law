@@ -86,6 +86,9 @@ solver_completion.md ──┤       │
 修復指示のassetは`app/agent_framework/prompts/`にあります。法令判断の手順はこのディレクトリ、
 Provider輸送と契約修復はFramework側へ分け、同じ規則を両方へ重複記載しません。
 JSON SchemaとPydantic型が出力形状の正本であり、Promptは値の意味と使い方を説明します。
+LLMが返すToolRequestの`request_id`は同じDecision内の参照用です。AdapterがCase内で一意な
+永続化用IDへ置き換え、同じDecisionの`action_request_id`も機械的に追随させます。
+Toolの種類、引数、対象WorkItem・Hypothesisは変更しません。
 
 ## Reviewer
 
