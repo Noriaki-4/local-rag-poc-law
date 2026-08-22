@@ -16,6 +16,7 @@ from .state import (
     Hypothesis,
     HypothesisJudgment,
     ReviewFindingResolution,
+    SearchCandidateReview,
     ToolRequest,
     UnreviewedGraphResolution,
     WorkItem,
@@ -78,6 +79,7 @@ class SolverDecision(FrameworkModel):
     review_finding_resolutions: tuple[ReviewFindingResolution, ...] = ()
     dependency_decisions: tuple[DependencyDecision, ...] = ()
     graph_candidate_review: GraphCandidateReview | None = None
+    search_candidate_review: SearchCandidateReview | None = None
     frontier_re_adoptions: tuple[FrontierReAdoption, ...] = ()
     deferred_frontier_resolutions: tuple[DeferredFrontierResolution, ...] = ()
     unreviewed_graph_resolution: UnreviewedGraphResolution | None = None
@@ -92,6 +94,7 @@ class SolverDecision(FrameworkModel):
             if (
                 not self.tool_requests
                 and self.graph_candidate_review is None
+                and self.search_candidate_review is None
                 and not self.frontier_re_adoptions
                 and not self.deferred_frontier_resolutions
                 and self.unreviewed_graph_resolution is None

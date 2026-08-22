@@ -43,6 +43,12 @@ class StructuredJSONModelAdapter:
         profile: ModelCallProfile,
     ) -> SolverCallResult:
         provider = getattr(self._client, "provider", None)
+        if (
+            context.required_search_review_request_ids
+            and not context.graph_review_batch.candidates
+            and not context.finalize_only
+        ):
+            return self._solve_search_review(context, profile)
         # OpenAI Structured OutputsでもToolRequestをobjectとして拘束する。
         # JSON文字列へ落とすと内側の必須fieldをprovider schemaで検証できない。
         compact_transport = provider in {"ollama", "openai"}
@@ -90,6 +96,7 @@ class StructuredJSONModelAdapter:
                     schema=transport_schema,
                     repair_index=repair_index,
                     prompt_assets=prompt_assets,
+                    transport_stage="solver",
                 )
             try:
                 result = self._client.generate_structured_json(
@@ -140,6 +147,7 @@ class StructuredJSONModelAdapter:
                             input_tokens=result.inputTokens,
                             output_tokens=result.outputTokens,
                             provider_retry_count=result.retryCount,
+                            transport_stage="solver",
                         )
                     return SolverCallResult(
                         decision=decision,
@@ -159,6 +167,7 @@ class StructuredJSONModelAdapter:
                     input_tokens=result.inputTokens,
                     output_tokens=result.outputTokens,
                     provider_retry_count=result.retryCount,
+                    transport_stage="solver",
                 )
 
             if repair_index == 0:
@@ -193,6 +202,164 @@ class StructuredJSONModelAdapter:
         if isinstance(last_error, ModelProtocolError):
             raise last_error
         raise ModelProtocolError("solver decision is unavailable")
+
+    def _solve_search_review(
+        self,
+        context: SolverContext,
+        profile: ModelCallProfile,
+    ) -> SolverCallResult:
+        """候補理解と比較選択を別コンテキストで順に実行する。"""
+
+        assessment_prompt = _search_review_prompt(
+            context,
+            profile.system_prompt,
+        )
+        assessment_schema = _search_review_transport_schema(context)
+        if self._diagnostics is not None:
+            self._diagnostics.record_transport_input(
+                context=context,
+                profile=profile,
+                prompt=assessment_prompt,
+                schema=assessment_schema,
+                repair_index=0,
+                transport_stage="search_assessment",
+            )
+        started_at = monotonic()
+        try:
+            assessment_result = self._client.generate_structured_json(
+                prompt=assessment_prompt,
+                schema=assessment_schema,
+                model=profile.model,
+                max_tokens=profile.max_output_tokens,
+                timeout_sec=max(1, round(profile.timeout_sec)),
+            )
+        except requests.Timeout as exc:
+            if self._diagnostics is not None:
+                self._diagnostics.record_transport_timeout(
+                    context=context,
+                    repair_index=0,
+                    reason="search assessment timed out",
+                    transport_stage="search_assessment",
+                )
+            raise TimeoutError("search assessment timed out") from exc
+        assessment_error = assessment_result.validationError
+        if assessment_result.payload is None and assessment_error is None:
+            assessment_error = "empty"
+        if self._diagnostics is not None:
+            self._diagnostics.record_transport_output(
+                context=context,
+                repair_index=0,
+                payload=assessment_result.payload,
+                validation_error=assessment_error,
+                input_tokens=assessment_result.inputTokens,
+                output_tokens=assessment_result.outputTokens,
+                provider_retry_count=assessment_result.retryCount,
+                transport_stage="search_assessment",
+            )
+        if assessment_error is not None or assessment_result.payload is None:
+            raise ModelProtocolError(
+                f"search assessment transport invalid: {assessment_error}"
+            )
+        _validate_search_assessment_payload(
+            assessment_result.payload,
+            context,
+        )
+
+        followup_prompt = profile.followup_system_prompt
+        if followup_prompt is None:
+            raise ModelProtocolError("search reselection prompt is unavailable")
+        selection_prompt = _search_reselection_prompt(
+            context,
+            assessment_result.payload,
+            followup_prompt,
+        )
+        selection_schema = _search_reselection_transport_schema(context)
+        if self._diagnostics is not None:
+            self._diagnostics.record_transport_input(
+                context=context,
+                profile=profile,
+                prompt=selection_prompt,
+                schema=selection_schema,
+                repair_index=0,
+                transport_stage="search_reselection",
+            )
+        remaining_timeout = profile.timeout_sec - (monotonic() - started_at)
+        if remaining_timeout <= 1:
+            raise TimeoutError("search reselection time exhausted")
+        try:
+            selection_result = self._client.generate_structured_json(
+                prompt=selection_prompt,
+                schema=selection_schema,
+                model=profile.model,
+                max_tokens=profile.max_output_tokens,
+                timeout_sec=max(1, round(remaining_timeout)),
+            )
+        except requests.Timeout as exc:
+            if self._diagnostics is not None:
+                self._diagnostics.record_transport_timeout(
+                    context=context,
+                    repair_index=0,
+                    reason="search reselection timed out",
+                    transport_stage="search_reselection",
+                )
+            raise TimeoutError("search reselection timed out") from exc
+        selection_error = selection_result.validationError
+        if selection_result.payload is None and selection_error is None:
+            selection_error = "empty"
+        if self._diagnostics is not None:
+            self._diagnostics.record_transport_output(
+                context=context,
+                repair_index=0,
+                payload=selection_result.payload,
+                validation_error=selection_error,
+                input_tokens=selection_result.inputTokens,
+                output_tokens=selection_result.outputTokens,
+                provider_retry_count=selection_result.retryCount,
+                transport_stage="search_reselection",
+            )
+        if selection_error is not None or selection_result.payload is None:
+            raise ModelProtocolError(
+                f"search reselection transport invalid: {selection_error}"
+            )
+
+        combined_payload = {
+            **assessment_result.payload,
+            **selection_result.payload,
+        }
+        try:
+            decision = SolverDecision.model_validate(
+                _normalize_search_review_payload(combined_payload, context)
+            )
+        except ValidationError as exc:
+            detail = exc.errors(include_url=False, include_input=False)[0]
+            location = ".".join(str(item) for item in detail.get("loc", ()))
+            raise ModelProtocolError(
+                "search review violates schema: "
+                f"{location or '<root>'}: {detail.get('msg')}"
+            ) from exc
+
+        input_tokens = (
+            assessment_result.inputTokens + selection_result.inputTokens
+            if assessment_result.inputTokens is not None
+            and selection_result.inputTokens is not None
+            else None
+        )
+        output_tokens = (
+            assessment_result.outputTokens + selection_result.outputTokens
+            if assessment_result.outputTokens is not None
+            and selection_result.outputTokens is not None
+            else None
+        )
+        return SolverCallResult(
+            decision=decision,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            attempt_count=(
+                2
+                + assessment_result.retryCount
+                + selection_result.retryCount
+            ),
+        )
 
     def review(
         self,
@@ -341,7 +508,7 @@ def _solver_prompt(
                 "next、next_focus_work_item_ids、retain_evidence_ids、answerは直接返し、"
                 "update全体をupdate_json、tool_requests全体をtool_requests_jsonへ"
                 "JSON文字列化し、dependency_decisionsはschemaどおりの配列として直接"
-                "返し、graph_candidate_review、frontier_re_adoptions、"
+                "返し、graph_candidate_review、search_candidate_review、frontier_re_adoptions、"
                 "deferred_frontier_resolutions、unreviewed_graph_resolutionもschemaどおり直接返してください。"
                 "Adapterが2つのJSON文字列を復元し、"
                 "SolverDecisionとして上記契約で完全検証します。\n"
@@ -359,6 +526,90 @@ def _solver_prompt(
         f"{contract_repair_instruction}"
         f"{transport_instruction}"
         f"<solver_context>{payload}</solver_context>"
+    )
+    _ensure_solver_prompt_capacity(prompt, context.max_solver_input_chars)
+    return prompt
+
+
+def _search_review_prompt(
+    context: SolverContext,
+    system_prompt: str,
+) -> str:
+    """Search Reviewへ固有手順と現在Contextだけを渡す。"""
+
+    payload = json.dumps(
+        _search_review_context_payload(context),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    prompt = f"{system_prompt}\n\n<solver_context>{payload}</solver_context>"
+    _ensure_solver_prompt_capacity(prompt, context.max_solver_input_chars)
+    return prompt
+
+
+def _search_review_context_payload(
+    context: SolverContext,
+) -> dict[str, Any]:
+    """検索抜粋を候補ごとに機械結合したSearch Review専用View。"""
+
+    evidence_by_id = {
+        item.evidence_id: item for item in context.material_evidence
+    }
+    return {
+        "question": context.question,
+        "work_tree": [item.model_dump(mode="json") for item in context.work_tree],
+        "hypotheses": [
+            item.model_dump(mode="json") for item in context.hypotheses
+        ],
+        "remaining_fetch_capacity": context.remaining_fetch_capacity,
+        "required_search_review_request_ids": list(
+            context.required_search_review_request_ids
+        ),
+        "candidate_count": len(context.search_candidates),
+        "search_candidates": [
+            {
+                "article_id": candidate.article_id,
+                "document_id": candidate.document_id,
+                "title": candidate.title,
+                "headings": list(candidate.headings),
+                "discovery_work_item_ids": list(
+                    candidate.discovery_work_item_ids
+                ),
+                "discovery_hypothesis_ids": list(
+                    candidate.discovery_hypothesis_ids
+                ),
+                "search_request_ids": list(candidate.search_request_ids),
+                "search_excerpts": [
+                    {
+                        "evidence_id": evidence_id,
+                        "content": evidence_by_id[evidence_id].content,
+                    }
+                    for evidence_id in candidate.navigation_evidence_ids
+                    if evidence_id in evidence_by_id
+                ],
+            }
+            for candidate in context.search_candidates
+        ],
+    }
+
+
+def _search_reselection_prompt(
+    context: SolverContext,
+    assessment_payload: dict[str, Any],
+    system_prompt: str,
+) -> str:
+    payload = {
+        "question": context.question,
+        "hypotheses": [
+            item.model_dump(mode="json") for item in context.hypotheses
+        ],
+        "remaining_fetch_capacity": context.remaining_fetch_capacity,
+        "assessments": assessment_payload.get("assessments") or [],
+    }
+    prompt = (
+        f"{system_prompt}\n\n<search_review_summary>"
+        f"{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}"
+        "</search_review_summary>"
     )
     _ensure_solver_prompt_capacity(prompt, context.max_solver_input_chars)
     return prompt
@@ -427,6 +678,10 @@ _CONTRACT_REPAIR_RULES = (
         "tool_request_limit",
     ),
     (("duplicate tool request ID",), "unique_tool_request_ids"),
+    (
+        ("successful legal_search scope was already completed",),
+        "repeated_successful_search",
+    ),
     (("Article body fetch", "fetch_articles"), "article_fetch_contract"),
     (
         ("focus", "ToolRequest", "tool request references"),
@@ -567,7 +822,7 @@ def _solver_transport_schema(context: SolverContext) -> dict:
                 "type": "string",
                 "enum": ["not_required", "needs_action", "resolved"],
             },
-            "reason": {"type": "string"},
+            "reason": {"type": "string", "minLength": 1},
             "basis_evidence_ids": {
                 **_bounded_enum_array(context.grounding_evidence_ids),
                 "description": (
@@ -600,7 +855,7 @@ def _solver_transport_schema(context: SolverContext) -> dict:
                 "type": "string",
                 "enum": ["addressed", "disputed"],
             },
-            "reason": {"type": "string"},
+            "reason": {"type": "string", "minLength": 1},
             "basis_evidence_ids": _bounded_enum_array(
                 context.grounding_evidence_ids
             ),
@@ -618,6 +873,7 @@ def _solver_transport_schema(context: SolverContext) -> dict:
     )
     batch_candidates = context.graph_review_batch.candidates
     graph_review_mode = bool(batch_candidates and not context.finalize_only)
+    selection_mode = graph_review_mode
     batch_frontier_ids = tuple(item.frontier_item_id for item in batch_candidates)
     selectable_ledger = tuple(
         item
@@ -773,7 +1029,7 @@ def _solver_transport_schema(context: SolverContext) -> dict:
     force_next_cycle_repair = _preserve_previous_update_for_cycle_repair(context)
     force_continue_repair = _force_continue_after_open_finalize_repair(context)
     tool_requests_forbidden = (
-        graph_review_mode
+        selection_mode
         or context.finalize_only
         or context.cycle_close_required
         or force_next_cycle_repair
@@ -782,7 +1038,7 @@ def _solver_transport_schema(context: SolverContext) -> dict:
         context
     )
     repair_update_json: str | None = None
-    if preserve_previous_update:
+    if preserve_previous_update or selection_mode:
         repair_update_json = "{}"
     repair_open_work_item_ids: tuple[str, ...] = ()
     if context.contract_feedback is not None:
@@ -825,7 +1081,7 @@ def _solver_transport_schema(context: SolverContext) -> dict:
                 "type": "string",
                 "enum": (
                     ["continue"]
-                    if graph_review_mode
+                    if selection_mode
                     or force_next_cycle_repair
                     or force_continue_repair
                     else ["continue", "finalize"]
@@ -841,7 +1097,7 @@ def _solver_transport_schema(context: SolverContext) -> dict:
             },
             "start_next_cycle": (
                 {"type": "boolean", "enum": [False]}
-                if graph_review_mode or force_continue_repair
+                if selection_mode or force_continue_repair
                 else (
                     {"type": "boolean", "enum": [True]}
                     if force_next_cycle_repair
@@ -858,13 +1114,21 @@ def _solver_transport_schema(context: SolverContext) -> dict:
                 ),
             },
             "next_focus_work_item_ids": (
-                _bounded_enum_array(repair_open_work_item_ids)
-                if context.contract_feedback is not None
-                else string_array
+                _empty_array_schema()
+                if selection_mode
+                else (
+                    _bounded_enum_array(repair_open_work_item_ids)
+                    if context.contract_feedback is not None
+                    else string_array
+                )
             ),
-            "retain_evidence_ids": _bounded_enum_array(
-                tuple(item.evidence_id for item in context.evidence_manifest),
-                max_items=context.max_retained_evidence,
+            "retain_evidence_ids": (
+                _empty_array_schema()
+                if selection_mode
+                else _bounded_enum_array(
+                    tuple(item.evidence_id for item in context.evidence_manifest),
+                    max_items=context.max_retained_evidence,
+                )
             ),
             "review_finding_resolutions": review_finding_resolutions,
             "tool_requests_json": {
@@ -878,9 +1142,10 @@ def _solver_transport_schema(context: SolverContext) -> dict:
                 if graph_review_mode
                 else {"type": "null"}
             ),
+            "search_candidate_review": {"type": "null"},
             "frontier_re_adoptions": (
                 _empty_array_schema()
-                if graph_review_mode
+                if selection_mode
                 else {
                     "type": "array",
                     "items": frontier_re_adoption,
@@ -889,7 +1154,7 @@ def _solver_transport_schema(context: SolverContext) -> dict:
             ),
             "deferred_frontier_resolutions": (
                 _empty_array_schema()
-                if graph_review_mode
+                if selection_mode
                 else {
                     "type": "array",
                     "items": deferred_frontier_resolution,
@@ -898,13 +1163,13 @@ def _solver_transport_schema(context: SolverContext) -> dict:
             ),
             "unreviewed_graph_resolution": (
                 {"type": "null"}
-                if graph_review_mode
+                if selection_mode
                 or context.graph_review_batch.remaining_unreviewed_count == 0
                 else unreviewed_graph_resolution
             ),
             "answer": (
                 {"type": "null"}
-                if graph_review_mode
+                if selection_mode
                 or force_next_cycle_repair
                 or force_continue_repair
                 else {"anyOf": [answer, {"type": "null"}]}
@@ -921,12 +1186,76 @@ def _solver_transport_schema(context: SolverContext) -> dict:
             "tool_requests_json",
             "dependency_decisions",
             "graph_candidate_review",
+            "search_candidate_review",
             "frontier_re_adoptions",
             "deferred_frontier_resolutions",
             "unreviewed_graph_resolution",
             "answer",
         ],
     }
+
+
+def _search_review_transport_schema(context: SolverContext) -> dict[str, Any]:
+    """Search Reviewが意味選択だけへ集中する専用輸送schema。"""
+
+    candidate_ids = tuple(item.article_id for item in context.search_candidates)
+    return _strict_object(
+        {
+            "search_request_ids": {
+                "type": "array",
+                "items": _enum_string(
+                    context.required_search_review_request_ids
+                ),
+                "minItems": len(context.required_search_review_request_ids),
+                "maxItems": len(context.required_search_review_request_ids),
+            },
+            "assessments": {
+                "type": "array",
+                "items": _strict_object(
+                    {
+                        "article_id": _enum_string(candidate_ids),
+                        "legal_function": {
+                            "type": "string",
+                            "enum": [
+                                "applicability",
+                                "exception",
+                                "procedure",
+                                "scope",
+                            ],
+                        },
+                        "summary": {"type": "string", "minLength": 1},
+                    }
+                ),
+                "minItems": len(candidate_ids),
+                "maxItems": len(candidate_ids),
+            },
+            "reason": {"type": "string", "minLength": 1},
+        }
+    )
+
+
+def _search_reselection_transport_schema(
+    context: SolverContext,
+) -> dict[str, Any]:
+    candidate_ids = tuple(item.article_id for item in context.search_candidates)
+    return _strict_object(
+        {
+            "selections": {
+                "type": "array",
+                "items": _strict_object(
+                    {
+                        "article_id": _enum_string(candidate_ids),
+                        "reason": {"type": "string", "minLength": 1},
+                    }
+                ),
+                "maxItems": min(
+                    len(candidate_ids),
+                    context.remaining_fetch_capacity,
+                ),
+            },
+            "reason": {"type": "string", "minLength": 1},
+        }
+    )
 
 
 def _solver_compact_transport_schema(context: SolverContext) -> dict:
@@ -944,9 +1273,13 @@ def _solver_compact_transport_schema(context: SolverContext) -> dict:
     ]
     properties.pop("update_json")
     properties.pop("tool_requests_json")
+    selection_mode = bool(
+        context.graph_review_batch.candidates
+    ) and not context.finalize_only
     properties["update"] = (
         _empty_case_update_transport_schema()
-        if _preserve_previous_update_for_contract_repair(context)
+        if selection_mode
+        or _preserve_previous_update_for_contract_repair(context)
         else _case_update_transport_schema()
     )
     if not context.work_tree and context.contract_feedback is None:
@@ -954,11 +1287,17 @@ def _solver_compact_transport_schema(context: SolverContext) -> dict:
         properties["update"]["properties"]["add_hypotheses"]["minItems"] = 1
     projected_open_work_item_ids = _repair_open_work_item_ids(context)
     evidence_ids = tuple(item.evidence_id for item in context.evidence_manifest)
-    properties["retain_evidence_ids"] = _bounded_enum_array(
-        evidence_ids,
-        max_items=context.max_retained_evidence,
+    properties["retain_evidence_ids"] = (
+        _empty_array_schema()
+        if selection_mode
+        else _bounded_enum_array(
+            evidence_ids,
+            max_items=context.max_retained_evidence,
+        )
     )
-    if projected_open_work_item_ids:
+    if selection_mode:
+        properties["next_focus_work_item_ids"] = _empty_array_schema()
+    elif projected_open_work_item_ids:
         properties["next_focus_work_item_ids"] = _bounded_enum_array(
             projected_open_work_item_ids
         )
@@ -1579,6 +1918,62 @@ def _normalize_solver_payload(payload: dict) -> dict:
     return normalized
 
 
+def _normalize_search_review_payload(
+    payload: dict[str, Any],
+    context: SolverContext,
+) -> dict[str, Any]:
+    """専用輸送を意味判断せず通常のSolverDecisionへ包む。"""
+
+    selected_ids = {
+        item.get("article_id")
+        for item in payload.get("selections") or []
+        if isinstance(item, dict) and isinstance(item.get("article_id"), str)
+    }
+    review = {
+        "search_request_ids": payload.get("search_request_ids") or [],
+        "selections": payload.get("selections") or [],
+        "reason": payload.get("reason") or "検索候補を選択した",
+        "deferred_article_ids": [
+            item.article_id
+            for item in context.search_candidates
+            if item.article_id not in selected_ids
+        ],
+    }
+    return {
+        "next": "continue",
+        "decision_reason": payload.get("reason") or "検索候補を評価した",
+        "start_next_cycle": False,
+        "update": {},
+        "next_focus_work_item_ids": [],
+        "retain_evidence_ids": [],
+        "review_finding_resolutions": [],
+        "dependency_decisions": [],
+        "graph_candidate_review": None,
+        "search_candidate_review": review,
+        "frontier_re_adoptions": [],
+        "deferred_frontier_resolutions": [],
+        "unreviewed_graph_resolution": None,
+        "tool_requests": [],
+        "answer": None,
+    }
+
+
+def _validate_search_assessment_payload(
+    payload: dict[str, Any],
+    context: SolverContext,
+) -> None:
+    assessment_ids = [
+        item.get("article_id")
+        for item in payload.get("assessments") or []
+        if isinstance(item, dict)
+    ]
+    expected_ids = {item.article_id for item in context.search_candidates}
+    if len(assessment_ids) != len(set(assessment_ids)):
+        raise ModelProtocolError("search assessments must be unique")
+    if set(assessment_ids) != expected_ids:
+        raise ModelProtocolError("search assessments must cover every candidate")
+
+
 def _apply_hypothesis_evidence_bindings(
     normalized: dict[str, Any],
     raw_bindings: Any,
@@ -1801,6 +2196,7 @@ def _normalize_absent_context_branches(
 
     if not context.graph_review_batch.candidates:
         normalized["graph_candidate_review"] = None
+    normalized["search_candidate_review"] = None
     if not context.graph_review_ledger:
         normalized["frontier_re_adoptions"] = []
     active_deferred = tuple(

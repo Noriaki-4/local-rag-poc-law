@@ -42,6 +42,9 @@ retain_evidence_idsはmax_retained_evidence件以内で、後続Cycleにも本�
 <!-- prompt-section:unique_tool_request_ids -->
 今回返す各ToolRequestには相互に異なる新しいrequest_idを付け、recent_tool_requestsにある過去のrequest_idを再利用しません。意味判断とToolの種類・引数は変えず、IDだけを修正します。
 
+<!-- prompt-section:repeated_successful_search -->
+同じWorkItem・Hypothesis・query・filterで成功済みのlegal_searchを再要求しません。search_candidatesと対応する検索抜粋を評価し、関係する候補があればfetch_articlesで本文を取得します。既存候補では検証できないと判断した場合だけ、不足する確認事項をdecision_reasonに示して検索表現を変更します。
+
 <!-- prompt-section:article_fetch_contract -->
 本文取得は1 Requestに統合し、既知Articleをremaining_fetch_capacity以内で選びます。
 

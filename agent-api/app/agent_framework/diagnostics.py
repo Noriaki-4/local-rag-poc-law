@@ -343,6 +343,7 @@ class AgentDiagnostics:
         schema: dict[str, Any],
         repair_index: int,
         prompt_assets: Sequence[PromptAssetTrace] = (),
+        transport_stage: str = "solver",
     ) -> None:
         if self.mode == "off":
             return
@@ -351,6 +352,7 @@ class AgentDiagnostics:
             "event": "transport_input",
             "caseId": context.case_id,
             "transportAttempt": repair_index + 1,
+            "transportStage": transport_stage,
             "model": profile.model,
             "promptChars": len(prompt),
             "schemaChars": len(schema_json),
@@ -359,7 +361,15 @@ class AgentDiagnostics:
             "systemPromptHash": _text_sha256(profile.system_prompt),
             "profileName": self._profile_name,
             "profileVersion": self._profile_version,
-            "promptBuilder": "app.adapters.models.structured_json:_solver_prompt",
+            "promptBuilder": (
+                "app.adapters.models.structured_json:_search_reselection_prompt"
+                if transport_stage == "search_reselection"
+                else (
+                    "app.adapters.models.structured_json:_search_review_prompt"
+                    if transport_stage == "search_assessment"
+                    else "app.adapters.models.structured_json:_solver_prompt"
+                )
+            ),
             "promptAssets": list(prompt_assets),
         }
         if self.mode == "snapshot":
@@ -376,6 +386,7 @@ class AgentDiagnostics:
         input_tokens: int | None,
         output_tokens: int | None,
         provider_retry_count: int,
+        transport_stage: str = "solver",
     ) -> None:
         if self.mode == "off":
             return
@@ -383,6 +394,7 @@ class AgentDiagnostics:
             "event": "transport_output",
             "caseId": context.case_id,
             "transportAttempt": repair_index + 1,
+            "transportStage": transport_stage,
             "validationError": validation_error,
             "inputTokens": input_tokens,
             "outputTokens": output_tokens,
@@ -400,6 +412,7 @@ class AgentDiagnostics:
         context: SolverContext,
         repair_index: int,
         reason: str,
+        transport_stage: str = "solver",
     ) -> None:
         if self.mode == "off":
             return
@@ -408,6 +421,7 @@ class AgentDiagnostics:
                 "event": "transport_timeout",
                 "caseId": context.case_id,
                 "transportAttempt": repair_index + 1,
+                "transportStage": transport_stage,
                 "reason": reason,
             }
         )
@@ -480,6 +494,7 @@ def _state_status(state: CaseState) -> dict[str, Any]:
         "toolRequestCount": len(state.tool_requests),
         "toolResultCount": len(state.tool_results),
         "graphReviewCount": len(state.graph_candidate_reviews),
+        "searchReviewCount": len(state.search_candidate_reviews),
         "reviewVerdict": state.review.verdict if state.review is not None else None,
         "reviewFindingCount": (
             len(state.review.findings) if state.review is not None else 0
@@ -504,6 +519,10 @@ def _context_status(context: SolverContext) -> dict[str, Any]:
             len(item.content) for item in context.material_evidence
         ),
         "recentToolResultCount": len(context.recent_tool_results),
+        "searchCandidateCount": len(context.search_candidates),
+        "requiredSearchReviewRequestCount": len(
+            context.required_search_review_request_ids
+        ),
         "graphReviewBatchCount": len(context.graph_review_batch.candidates),
         "graphReviewLedgerCount": len(context.graph_review_ledger),
         "requiredDependencyWorkItemCount": len(
@@ -531,6 +550,7 @@ def _decision_status(decision: SolverDecision) -> dict[str, Any]:
         ),
         "toolRequestCount": len(decision.tool_requests),
         "hasGraphCandidateReview": decision.graph_candidate_review is not None,
+        "hasSearchCandidateReview": decision.search_candidate_review is not None,
         "hasAnswer": decision.answer is not None,
     }
 

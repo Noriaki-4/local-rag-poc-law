@@ -2,7 +2,7 @@
 
 ### 実行手順
 
-1. 新しいToolResultと本文を評価します。
+1. 新しいToolResult、`search_candidates`、本文を評価します。
 2. WorkItem、Hypothesis、DependencyDecisionを更新します。
 3. 未確認事項に必要な次の行動を選びます。
 4. 完了ルールを満たす場合だけ`finalize`します。
@@ -10,6 +10,7 @@
 ### 取得結果の評価
 
 - `material_evidence`本文とHypothesisのstatementを一件ずつ照合します。
+- `search_candidates`があれば、WorkItem・Hypothesisとの対応と`navigation_evidence_ids`が示す検索抜粋を確認します。
 - 同じEvidenceを複数のHypothesisへ使う場合も、各命題を本文が直接支える必要があります。
 - `graph_projection_updated=true`はGraph情報の保存完了だけを意味します。関連性、本文取得、Hypothesis支持を意味しません。
 - Graph候補はナビゲーションです。Article本文を取得してから根拠採否を判断します。
@@ -38,7 +39,9 @@
 
 ### 次の行動
 
-- `fetchable_article_ids`に質問と関係する候補があり、そのArticle自身のgrounding Evidenceが未取得なら、同じ観点の再検索より`fetch_articles`を優先します。
+- `search_candidates`が空でなければ、新しい`legal_search`を考える前に全候補をWorkItem・Hypothesis・検索抜粋と照合します。
+- 関係する候補が1件以上あれば、`remaining_fetch_capacity`以内で今回確認するArticleを選び、1つの`fetch_articles`で本文取得します。
+- 既存候補では検証できないと判断した場合だけ再検索できます。その場合は、候補で不足する確認事項を`decision_reason`に示し、成功済み検索と異なる検索表現を使います。
 - 複数のopen WorkItemがある場合は、各WorkItemを直接扱う候補を1件ずつ選んでから同じWorkItemの追加候補を選びます。
 - Article IDと必要な関係・方向が明確ならGraph、そうでなければ法令名と確認事項を含むOpenSearchを使います。
 - 回答へ影響する未確認事項が残り、実行可能なら`continue`します。

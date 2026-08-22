@@ -183,6 +183,40 @@ class GraphCandidateReview(FrameworkModel):
         )
 
 
+class SearchCandidateSelection(FrameworkModel):
+    article_id: str = Field(min_length=1, max_length=500)
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class SearchCandidateReview(FrameworkModel):
+    """OpenSearch候補に対するSolver自身の意味判断。"""
+
+    search_request_ids: tuple[str, ...]
+    selections: tuple[SearchCandidateSelection, ...]
+    deferred_article_ids: tuple[str, ...]
+    reason: str = Field(min_length=1, max_length=2000)
+    reviewed_cycle: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def require_unique_ids(self) -> SearchCandidateReview:
+        if len(self.search_request_ids) != len(set(self.search_request_ids)):
+            raise ValueError("search review request IDs must be unique")
+        selected_ids = tuple(item.article_id for item in self.selections)
+        if len(selected_ids) != len(set(selected_ids)):
+            raise ValueError("search candidate selections must be unique")
+        if len(self.deferred_article_ids) != len(
+            set(self.deferred_article_ids)
+        ):
+            raise ValueError("deferred search candidate IDs must be unique")
+        if set(selected_ids) & set(self.deferred_article_ids):
+            raise ValueError("selected and deferred search candidates must differ")
+        return self
+
+    @property
+    def selected_article_ids(self) -> tuple[str, ...]:
+        return tuple(item.article_id for item in self.selections)
+
+
 class ToolRequest(FrameworkModel):
     request_id: str = Field(min_length=1, max_length=160)
     work_item_id: str = Field(min_length=1, max_length=160)
@@ -297,6 +331,7 @@ class CaseState(FrameworkModel):
     evidence: tuple[Evidence, ...] = ()
     dependency_decisions: tuple[DependencyDecision, ...] = ()
     graph_candidate_reviews: tuple[GraphCandidateReview, ...] = ()
+    search_candidate_reviews: tuple[SearchCandidateReview, ...] = ()
     frontier_re_adoptions: tuple[FrontierReAdoption, ...] = ()
     deferred_frontier_resolutions: tuple[DeferredFrontierResolution, ...] = ()
     unreviewed_graph_resolutions: tuple[UnreviewedGraphResolution, ...] = ()

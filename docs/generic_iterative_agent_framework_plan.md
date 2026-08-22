@@ -208,7 +208,7 @@
 | OpenSearch / Neo4j Adapter | Adapter | 固定されたTool契約を各backendへ変換する。自由queryをLLMへ開放しない |
 | CaseStore | Data Store | 案件状態、探索履歴、Evidence、Cycle・Step checkpointを保持する |
 
-Solverのresearch、integration、Graph Reviewは別Agentではなく、同じSolverの呼び出し用途である。
+Solverのresearch、integration、Search Review、Graph Reviewは別Agentではなく、同じSolverの呼び出し用途である。
 Projector、Explorer、Integrator、Answerer、Schedulerを独立した登場人物として追加しない。
 
 ### 3.2 判断境界
@@ -1838,6 +1838,14 @@ Legal Domain Packの共通Promptには次を追加する。
 - fetchable_article_idsは本文取得済みを意味せず、検索等で発見済みの本文取得可能な候補を表す。
   Solverが質問に関係すると判断した候補のgrounding Evidenceが未取得なら、同じHypothesisの成功済み検索を
   反復せずfetch_articlesで本文を取得する。
+- OpenSearch候補は`search_candidates`としてArticle単位にまとめ、発見元の検索要求、WorkItem、Hypothesis、
+  navigation Evidence IDを来歴として保持する。発見元は意味上の採用先を限定しない。Projectorは既存参照を
+  機械的に対応付けるだけで候補を選別しない。Search Reviewの第1段階は候補ごとにまとめた検索抜粋から全候補の
+  条件・効果を自分の言葉で要約し、第2段階はその短い一覧だけから本文取得順位を判断する。一時要約はCaseStateの
+  契約へ追加せず、診断snapshotと同じ呼出し内の第2段階だけに使う。Programは選択Articleの発見元参照を本文取得要求の
+  輸送用に転記するだけで、意味上の採用先は全文取得後のIntegrationが判断する。
+- 同一WorkItem・Hypothesis・Tool引数で成功済みのlegal_searchを完全一致で再要求した場合は構造契約違反とする。
+  Programは検索表現の意味的同一性を推測せず、候補が不十分ならSolverが理由と異なる検索表現を返す。
 - 質問に関係すると判断した1ホップ候補は、Graph Reviewごとに最大3件、かつCycleの
   残り本文取得枠内でselectする。関連するが枠に収まらない候補はdeferし、
   graph_review_ledgerと次Cycleの引継ぎ候補へ残す。Graph候補だけを根拠にせず、端点Article本文を確認する。
@@ -1892,6 +1900,8 @@ Graph Review差分処理やCycle境界処理を混入させず、IntegrationとG
 | `solver_cycle_close.md` | 現Cycleの状態更新、active Frontier全件の処理、`finalize / start_next_cycle`だけを扱う。次Cycleの詳細なTool計画は作らない。 |
 | `solver_finalization.md` | `finalize_only=true`で追加Toolを要求せず、確認済み範囲と未確認範囲を分けた回答を作る。 |
 | `solver_reviewer_revision.md` | 全Findingを本文と照合し、`addressed / disputed`を全件返す。回答修正か追加調査かはSolverが判断する。 |
+| `solver_search_review.md` | 候補別にまとめた検索抜粋を全件読み、条件・効果と主な法的機能を自分の言葉で短く評価する。この段階では候補を選ばず、一時評価をCaseStateへ保存しない。 |
+| `solver_search_reselection.md` | 前段の短い一時評価だけを比較し、中心命題を直接検証する候補を確保してから、異なる未確認事項へ広げて本文取得候補を選ぶ。元の検索抜粋、状態更新、再検索は扱わない。 |
 | `solver_graph_review.md` | `graph_review_batch`と`graph_review_ledger`を読む。`review_trigger`を解釈し、過去の詳細が再提示されないことを候補の不存在と解釈しない。 |
 | `solver_graph_review.md` | 各batchの全候補をWorkItem・Hypothesis別に評価し、最大3件を`select`、関連する残りを`defer`、無関係と判断したものだけを`reject`する。 |
 | `solver_graph_review.md` | `remaining_fetch_capacity=0`なら新たにselectせず、関連候補をdeferしてCycle終了判断へ戻す。Graph Reviewから直接次Cycleの法的方針を決めない。 |
@@ -1900,6 +1910,7 @@ Graph Review差分処理やCycle境界処理を混入させず、IntegrationとG
 | Provider schema | Review判断対象は現在のbatch、本文取得へ選べるIDはbatchの候補とledgerの`relevant_deferred`、再試行時の`selected + failed/timeout`に制限する。選択上限は`min(3, remaining_fetch_capacity)`とする。`rejected`は新Link差分でbatchへ再提示された場合を除き同じHypothesisで再選択させず、別Hypothesisへの`frontier_re_adoptions`はledgerの既知Nodeと既知のopen WorkItem・Hypothesisだけを許可する。候補の関連性や優先度はschemaまたはProgramで補正しない。 |
 | Provider schema | Deferred解消はledgerの既知IDだけを許可する。Programは全件性と次動作との矛盾だけを拒否し、関連性・必要性を補正しない。 |
 | Provider schema | Graph Reviewモードで必ず空になるre-adoption、deferred解消、answerは空配列またはnullの簡易schemaとし、未使用の動的enumをコンパイルさせない。 |
+| Provider schema | Search Reviewの第1段階は既知候補全件の一時評価、第2段階は既知候補からの選択だけを返す。Programは評価対象の全件性、既知ID、選択件数を検証し、選択外候補を機械的に`defer`する。最終SearchCandidateReview契約へ一時評価を追加せず、選択IDと発見元参照を1件の`fetch_articles`へ機械転記する。候補の意味上の採用先はProgramもSearch Reviewも確定しない。 |
 | Provider schema | ExplorationIntentのWorkItem・Hypothesis・起点Articleは既知ID enum、Graph mode、predicateまたは原文relation、direction、構造filterはLegal Tool allowlistへ限定する。predicateは5種、directionは`from_subject / to_subject`だけを許可し、空・all・複数predicateの一括指定を許可しない。`APPLIED_BY / MENTIONS`をenumへ含めない。 |
 
 Prompt契約テストでは、共通Prompt、処理モード別Prompt、Provider schemaが上表と同じCommand、status、
@@ -2035,6 +2046,8 @@ agent-api/app/
 │           ├── solver_cycle_close.md
 │           ├── solver_finalization.md
 │           ├── solver_reviewer_revision.md
+│           ├── solver_search_review.md
+│           ├── solver_search_reselection.md
 │           ├── solver_graph_review.md
 │           ├── relation_classifier.md
 │           ├── relation_grounder.md

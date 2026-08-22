@@ -1088,7 +1088,7 @@ Reviewerは`AGENT_FRAMEWORK_REVIEWER_ENABLED=true`を明示した場合だけ有
 旧`AGENT_FRAMEWORK_FINALIZE_MODEL`も互換設定として読めるが、新規設定ではintegration名を使う。
 全Solver呼出しへ短い`solver_common.md`を合成する。Toolを使える処理だけへ`solver_tools.md`、
 完了判断を行う処理へ`solver_completion.md`を追加する。実行手順は`research / integration /
-cycle_close / finalization / reviewer_revision / graph_selection`別のPromptから一つだけ選ぶ。
+cycle_close / finalization / reviewer_revision / search_selection / graph_selection`別のPromptから一つだけ選ぶ。
 選択条件はContextの構造値だけで、法的意味やToolの必要性はSolverが判断する。
 
 最初の検索動作確認用設定:
@@ -1195,7 +1195,7 @@ Legal Profileの1 Solver Decisionは検索系Toolを最大4要求、`fetch_artic
 Graph Reviewから1 stepで選ぶ候補は最大3件とし、残りの関連候補はdeferして後続stepまたは次Cycleへ残す。
 プログラムは超過分を選別せず契約違反として返す。
 `modelCalls[].purpose`は`research / integration / cycle_close / finalization /
-reviewer_revision / graph_selection`のいずれかになる。`cycle_close_required=true`では`cycle_close`、
+reviewer_revision / search_selection / graph_selection`のいずれかになる。`cycle_close_required=true`では`cycle_close`、
 `finalize_only=true`では`finalization`、Reviewer差戻し時は`reviewer_revision`を使う。新しい1ホップ候補が
 投影された直後は、同一Solverを本文を再掲しない短い専用Promptの`graph_selection`モードで呼ぶ。これは任意の
 Reviewer Agentとは別の処理モードである。Solverは`graph_review_batch`の全候補をselect/defer/rejectし、
@@ -1208,6 +1208,17 @@ SolverContextは、根拠・引用に使える正確なIDを`grounding_evidence_
 Article IDを`fetchable_article_ids`として別々に渡す。LLMは前者をHypothesis・citationへ、後者を
 `fetch_articles`へ使う。`fetchable_article_ids`は本文取得済みという意味ではなく、検索等で発見済みの
 本文取得可能な候補を表す。質問に関係する候補の本文が未取得なら、同じ検索の反復より本文取得を優先する。
+`search_candidates`は各候補を発見した検索要求、発見元WorkItem・Hypothesis、検索抜粋Evidenceの既知参照を
+Article単位にまとめる。発見元は来歴であり意味上の採用先を限定しない。Programは参照を対応付けるだけで、
+候補の関連性と本文取得対象はSolverが判断する。Search Reviewは採用先を確定せず、選択Articleの発見元参照を
+Programが本文取得要求の輸送用に転記する。全文取得後のIntegrationが意味上の採用先を判断する。
+新しい検索候補が投影された直後は、同じSolverを`search_selection`用途で2段階に呼ぶ。第1段階は候補ごとに
+検索抜粋をまとめた専用Viewから、全候補の条件・効果を自分の言葉で短く評価する。この一時評価はCaseStateへ
+保存せず、診断snapshotと第2段階の入力だけに使う。第2段階は検索抜粋を再掲せず、短い評価一覧から本文取得候補を
+選ぶ。Programは評価対象の全件性、既知ID、選択件数だけを検証し、選択外候補を機械的に保留して、選択IDを
+1件の本文取得要求へ転記する。
+同一WorkItem・Hypothesis・query・filterで成功済みの`legal_search`を完全一致で再要求した場合だけ、
+構造契約違反として差し戻す。Programは検索語の意味的な類似や候補の関連性を判定しない。
 プログラムはIDの完全一致だけを検証する。
 Article本文等のEvidence本文は`AGENT_FRAMEWORK_MAX_MATERIAL_EVIDENCE_CHARS`（既定50,000文字）を
 上限とする。全Graph Article・Link・判断履歴はCaseStoreに保持し、Solverへは新規・再採用・新Link差分の

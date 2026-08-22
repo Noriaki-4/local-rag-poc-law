@@ -130,6 +130,19 @@ class SolverToolResult(FrameworkModel):
     cycle_no: int = Field(ge=1)
 
 
+class SearchCandidateArticle(FrameworkModel):
+    """OpenSearch候補と、その発見要求を意味選別なしで対応付ける。"""
+
+    article_id: str
+    document_id: str | None
+    title: str | None
+    headings: tuple[str, ...]
+    discovery_work_item_ids: tuple[str, ...]
+    discovery_hypothesis_ids: tuple[str, ...]
+    search_request_ids: tuple[str, ...]
+    navigation_evidence_ids: tuple[str, ...]
+
+
 class SolverContractFeedback(FrameworkModel):
     violation: str
     previous_decision: SolverDecision
@@ -158,6 +171,7 @@ class SolverContext(FrameworkModel):
     grounding_evidence_ids: tuple[str, ...]
     navigation_evidence_ids: tuple[str, ...]
     fetchable_article_ids: tuple[str, ...]
+    search_candidates: tuple[SearchCandidateArticle, ...] = ()
     work_tree: tuple[WorkTreeItem, ...]
     hypotheses: tuple[Hypothesis, ...]
     focus_work_items: tuple[WorkItem, ...]
@@ -168,6 +182,7 @@ class SolverContext(FrameworkModel):
     graph_review_batch: GraphReviewBatch
     graph_review_ledger: tuple[GraphReviewLedgerItem, ...]
     required_graph_review_request_ids: tuple[str, ...] = ()
+    required_search_review_request_ids: tuple[str, ...] = ()
     material_evidence: tuple[Evidence, ...]
     omitted_evidence_ids: tuple[str, ...]
     required_dependency_kind: str | None = None
@@ -409,6 +424,36 @@ def build_solver_context(
         for item in fetchable_article_ids
         if item not in successfully_fetched_article_ids
     )
+    search_candidates = _search_candidate_projection(
+        recent_results=recent_results,
+        recent_requests_by_id=recent_requests_by_id,
+        evidence_by_id=evidence_by_id,
+        fetchable_article_ids=fetchable_article_ids,
+    )
+    search_request_ids = tuple(
+        dict.fromkeys(
+            request_id
+            for candidate in search_candidates
+            for request_id in candidate.search_request_ids
+        )
+    )
+    latest_request = (
+        recent_requests_by_id.get(recent_results[-1].request_id)
+        if recent_results
+        else None
+    )
+    reviewed_search_request_sets = {
+        frozenset(review.search_request_ids)
+        for review in state.search_candidate_reviews
+    }
+    required_search_review_request_ids = (
+        search_request_ids
+        if not finalize_only
+        and latest_request is not None
+        and latest_request.tool_name == "legal_search"
+        and frozenset(search_request_ids) not in reviewed_search_request_sets
+        else ()
+    )
     manifest = tuple(
         EvidenceManifestItem(
             evidence_id=item.evidence_id,
@@ -464,6 +509,7 @@ def build_solver_context(
         grounding_evidence_ids=grounding_ids,
         navigation_evidence_ids=navigation_ids,
         fetchable_article_ids=fetchable_article_ids,
+        search_candidates=search_candidates,
         work_tree=work_tree,
         hypotheses=state.hypotheses,
         focus_work_items=tuple(
@@ -478,6 +524,7 @@ def build_solver_context(
         graph_review_batch=graph_review_batch,
         graph_review_ledger=graph_review_ledger,
         required_graph_review_request_ids=required_graph_review_request_ids,
+        required_search_review_request_ids=required_search_review_request_ids,
         material_evidence=material,
         omitted_evidence_ids=tuple(
             item.evidence_id
@@ -495,6 +542,79 @@ def build_solver_context(
 
 class ContextCapacityExceeded(ValueError):
     """候補を欠落させずにSolver入力へ収められない。"""
+
+
+def _search_candidate_projection(
+    *,
+    recent_results: tuple[ToolResult, ...],
+    recent_requests_by_id: dict[str, ToolRequest],
+    evidence_by_id: dict[str, Evidence],
+    fetchable_article_ids: tuple[str, ...],
+) -> tuple[SearchCandidateArticle, ...]:
+    """検索要求と候補Articleの既存参照だけをArticle単位にまとめる。"""
+
+    fetchable_ids = set(fetchable_article_ids)
+    candidates: dict[str, dict[str, Any]] = {}
+    for result in recent_results:
+        request = recent_requests_by_id.get(result.request_id)
+        if request is None or request.tool_name != "legal_search":
+            continue
+        for evidence_id in result.evidence_ids:
+            evidence = evidence_by_id.get(evidence_id)
+            if evidence is None:
+                continue
+            for article_id in _evidence_article_ids(evidence):
+                if article_id not in fetchable_ids:
+                    continue
+                candidate = candidates.setdefault(
+                    article_id,
+                    {
+                        "document_id": _nonempty_string(
+                            evidence.metadata.get("documentId")
+                        ),
+                        "title": evidence.title,
+                        "headings": [],
+                        "discovery_work_item_ids": [],
+                        "discovery_hypothesis_ids": [],
+                        "search_request_ids": [],
+                        "navigation_evidence_ids": [],
+                    },
+                )
+                heading = _nonempty_string(evidence.metadata.get("heading"))
+                if heading is not None:
+                    _extend_unique(candidate["headings"], (heading,))
+                _extend_unique(
+                    candidate["discovery_work_item_ids"],
+                    (request.work_item_id,),
+                )
+                _extend_unique(
+                    candidate["discovery_hypothesis_ids"],
+                    request.hypothesis_ids,
+                )
+                _extend_unique(
+                    candidate["search_request_ids"],
+                    (request.request_id,),
+                )
+                _extend_unique(
+                    candidate["navigation_evidence_ids"],
+                    (evidence_id,),
+                )
+
+    return tuple(
+        SearchCandidateArticle(
+            article_id=article_id,
+            document_id=item["document_id"],
+            title=item["title"],
+            headings=tuple(item["headings"]),
+            discovery_work_item_ids=tuple(item["discovery_work_item_ids"]),
+            discovery_hypothesis_ids=tuple(
+                item["discovery_hypothesis_ids"]
+            ),
+            search_request_ids=tuple(item["search_request_ids"]),
+            navigation_evidence_ids=tuple(item["navigation_evidence_ids"]),
+        )
+        for article_id, item in candidates.items()
+    )
 
 
 _GRAPH_RELATION_FIELDS = (

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Collection, Mapping
 from typing import TypeVar
 
@@ -9,7 +10,14 @@ from pydantic import ValidationError
 
 from .contracts import CaseUpdate, SolverDecision, WorkItemImpactDecision
 from .profiles import AgentLimits
-from .state import CaseState, FrameworkModel, Hypothesis, WorkItem, utc_now
+from .state import (
+    CaseState,
+    FrameworkModel,
+    Hypothesis,
+    ToolRequest,
+    WorkItem,
+    utc_now,
+)
 
 ModelT = TypeVar("ModelT", bound=FrameworkModel)
 
@@ -33,6 +41,8 @@ def apply_solver_decision(
     required_review_finding_ids: Collection[str] = (),
     tool_list_argument_limits: Mapping[tuple[str, str], int] | None = None,
     required_graph_review_request_ids: Collection[str] = (),
+    required_search_review_request_ids: Collection[str] = (),
+    search_candidate_article_ids: Collection[str] = (),
     graph_candidate_article_ids: Collection[str] = (),
     graph_known_article_ids: Collection[str] | None = None,
     graph_review_fetch_tool_name: str | None = None,
@@ -265,6 +275,16 @@ def apply_solver_decision(
         )
 
     request_ids = {item.request_id for item in state.tool_requests}
+    completed_search_scopes = {
+        _tool_request_scope(request)
+        for request in state.tool_requests
+        if request.tool_name == "legal_search"
+        and any(
+            result.request_id == request.request_id
+            and result.status == "succeeded"
+            for result in state.tool_results
+        )
+    }
     new_request_ids: set[str] = set()
     new_requests_by_id = {
         item.request_id: item for item in decision.tool_requests
@@ -275,6 +295,13 @@ def apply_solver_decision(
         new_request_ids.add(request.request_id)
         if request.tool_name not in known_tool_names:
             raise ContractViolation(f"unknown tool: {request.tool_name}")
+        if (
+            request.tool_name == "legal_search"
+            and _tool_request_scope(request) in completed_search_scopes
+        ):
+            raise ContractViolation(
+                "successful legal_search scope was already completed"
+            )
         for (tool_name, argument_name), max_items in (
             tool_list_argument_limits or {}
         ).items():
@@ -598,6 +625,69 @@ def apply_solver_decision(
             "graph_candidate_review is allowed only for newly projected Graph results"
         )
 
+    required_search_ids = tuple(
+        dict.fromkeys(required_search_review_request_ids)
+    )
+    search_review = decision.search_candidate_review
+    if required_search_ids:
+        if decision.update != CaseUpdate():
+            raise ContractViolation(
+                "Search Review mode cannot update WorkItems or Hypotheses"
+            )
+        if decision.dependency_decisions:
+            raise ContractViolation(
+                "Search Review mode cannot update dependency decisions"
+            )
+        if graph_review is not None:
+            raise ContractViolation(
+                "Search Review mode cannot review Graph candidates"
+            )
+        if search_review is None:
+            raise ContractViolation(
+                "new OpenSearch candidates require a search_candidate_review"
+            )
+        if set(search_review.search_request_ids) != set(required_search_ids):
+            raise ContractViolation(
+                "search review request IDs do not match the latest OpenSearch results"
+            )
+        expected_candidates = set(search_candidate_article_ids)
+        selected_ids = tuple(search_review.selected_article_ids)
+        decided_ids = {
+            *selected_ids,
+            *search_review.deferred_article_ids,
+        }
+        if decided_ids != expected_candidates:
+            raise ContractViolation(
+                "search review must decide every candidate Article"
+            )
+        if len(selected_ids) + len(search_review.deferred_article_ids) != len(
+            expected_candidates
+        ):
+            raise ContractViolation(
+                "search review candidates must be selected or deferred exactly once"
+            )
+        max_selected = (
+            effective_fetch_capacity
+            if effective_fetch_capacity is not None
+            else limits.max_selected_frontier_per_step
+        )
+        if len(selected_ids) > max_selected:
+            raise ContractViolation(
+                "search review selected Article count exceeds the remaining limit "
+                f"of {max_selected} items"
+            )
+        if decision.tool_requests:
+            raise ContractViolation(
+                "Search candidate review returns selections only; AgentLoop executes "
+                "the selected IDs deterministically"
+            )
+        if decision.next != "continue":
+            raise ContractViolation("Search Review mode must continue")
+    elif search_review is not None:
+        raise ContractViolation(
+            "search_candidate_review is allowed only for newly projected search results"
+        )
+
     graph_known_articles = set(graph_known_article_ids or ())
     open_work_ids = {
         item.work_item_id for item in work_items.values() if item.state == "open"
@@ -889,6 +979,16 @@ def apply_solver_decision(
             )
             if graph_review is not None
             else state.graph_candidate_reviews
+        ),
+        search_candidate_reviews=(
+            (
+                *state.search_candidate_reviews,
+                search_review.model_copy(
+                    update={"reviewed_cycle": max(1, state.research_cycle_count)}
+                ),
+            )
+            if search_review is not None
+            else state.search_candidate_reviews
         ),
         frontier_re_adoptions=(
             *state.frontier_re_adoptions,
@@ -1314,6 +1414,24 @@ def _allowed_tool_article_ids(
             if isinstance(article_id, str) and article_id:
                 known_article_ids.add(article_id)
     return known_article_ids
+
+
+def _tool_request_scope(
+    request: ToolRequest,
+) -> tuple[str, str, tuple[str, ...], str]:
+    """意味を解釈せず、同一Tool scopeの完全一致だけを比較する。"""
+
+    return (
+        request.tool_name,
+        request.work_item_id,
+        tuple(sorted(request.hypothesis_ids)),
+        json.dumps(
+            request.arguments,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+    )
 
 
 def _reject_duplicate_delta_ids(values, label: str) -> None:

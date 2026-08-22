@@ -14,6 +14,7 @@ class ModelCallProfile(FrameworkModel):
     max_output_tokens: int = Field(default=4096, ge=256)
     timeout_sec: float = Field(default=30.0, gt=0)
     system_prompt: str = Field(min_length=1)
+    followup_system_prompt: str | None = None
 
 
 class ReviewerProfile(ModelCallProfile):
@@ -164,6 +165,7 @@ class AgentProfile(FrameworkModel):
     solver_cycle_close: ModelCallProfile | None = None
     solver_finalization: ModelCallProfile | None = None
     solver_reviewer_revision: ModelCallProfile | None = None
+    solver_search_review: ModelCallProfile | None = None
     solver_graph_review: ModelCallProfile | None = None
     reviewer: ReviewerProfile
     required_dependency_kind: str | None = Field(default=None, max_length=160)

@@ -36,23 +36,26 @@ solver_completion.md ──┤       │
 | `cycle_close` | common + cycle_close + completion | 現Cycleを評価して閉じ、未取得候補を処理し、完了または次Cycleへの引継ぎを決める。新しいToolは要求しない。 |
 | `finalization` | common + finalization + completion | 実行上限時に追加Toolなしで、確認済み範囲と未確認範囲を分けた回答を作る。 |
 | `reviewer_revision` | common + tools + reviewer_revision + completion | Reviewer Findingを全件処理し、回答修正または追加調査を決める。 |
+| `search_selection` | search_review → search_reselection | OpenSearch候補を全件要約し、その短い一覧から今回本文取得する候補を決める。 |
 | `graph_selection` | graph_reviewのみ | 新しい1ホップGraph候補を差分評価し、本文取得する候補と保留・除外を決める。 |
 
-`graph_selection`は同じSolverの処理モードです。任意実行のReviewer Agentではありません。
-Graph Reviewは入力と出力が他モードより限定されるため、共通fragmentを合成しない独立Promptにしています。
+`search_selection`と`graph_selection`は同じSolverの処理モードです。任意実行のReviewer Agentではありません。
+両モードは入力と出力が他モードより限定されるため、共通fragmentを合成しない独立Promptにしています。
 
 ### 各ファイルの役割
 
 | ファイル | 内容 |
 |---|---|
 | `solver_common.md` | 判断主体、WorkItem・Hypothesis・Evidence、ID、Cycleに関する全モード共通の不変条件。 |
-| `solver_tools.md` | OpenSearch、本文取得、1ホップGraph探索、RelationAssertionの意味と方向。Toolを使えるモードだけに合成する。 |
+| `solver_tools.md` | OpenSearch候補の`search_candidates`投影、本文取得、1ホップGraph探索、RelationAssertionの意味と方向。Toolを使えるモードだけに合成する。 |
 | `solver_completion.md` | grounding Evidence、citation、下位規範、通常完了と上限時限定回答の共通条件。 |
 | `solver_research.md` | 初回の作業分解、仮説、法令検索表現、最初の探索。 |
 | `solver_integration.md` | 観察結果の評価、状態更新、下位規範監査、次の行動。 |
 | `solver_cycle_close.md` | Cycle終了と次Cycleへの構造化引継ぎ。 |
 | `solver_finalization.md` | `finalize_only=true`時の限定最終化。 |
 | `solver_reviewer_revision.md` | Reviewer Findingの受領、反映、反論、再調査。 |
+| `solver_search_review.md` | OpenSearch候補を候補別の検索抜粋から全件要約する。この一時結果では候補を選ばない。 |
+| `solver_search_reselection.md` | 検索抜粋を再掲せず、前段の短い自己要約一覧から本文取得候補を選ぶ。 |
 | `solver_graph_review.md` | Graph差分候補の`select / defer / reject`と本文取得順。 |
 
 ### モードの選択
@@ -61,10 +64,11 @@ Graph Reviewは入力と出力が他モードより限定されるため、共�
 `app/domains/legal/profiles.py`を正本とします。選択には次の構造情報だけを使います。
 
 1. 未評価Graph候補があるか
-2. Reviewer Findingがあるか
-3. `finalize_only=true`か
-4. `cycle_close_required=true`か
-5. すでにToolResultを得た後か
+2. 未評価OpenSearch候補があるか
+3. Reviewer Findingがあるか
+4. `finalize_only=true`か
+5. `cycle_close_required=true`か
+6. すでにToolResultを得た後か
 
 法的意味を見てモードを選択したり、Programが検索方法を補完したりしません。
 実際に選ばれた用途は診断情報の`modelCalls[].purpose`で確認できます。

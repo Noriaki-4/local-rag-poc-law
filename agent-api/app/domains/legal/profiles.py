@@ -23,7 +23,7 @@ def legal_agent_profile() -> AgentProfile:
     timeout_sec = settings.agent_framework_model_timeout_sec
     return AgentProfile(
         name="legal-default",
-        version="103",
+        version="115",
         provider=settings.llm_provider,
         solver_research=_model_profile(
             model=settings.agent_framework_research_model,
@@ -76,6 +76,15 @@ def legal_agent_profile() -> AgentProfile:
                 tool_prompt,
                 _read_prompt("solver_reviewer_revision.md"),
                 completion_prompt,
+            ),
+        ),
+        solver_search_review=ModelCallProfile(
+            model=integration_model,
+            max_output_tokens=min(integration_max_tokens, 4096),
+            timeout_sec=timeout_sec,
+            system_prompt=_read_prompt("solver_search_review.md"),
+            followup_system_prompt=_read_prompt(
+                "solver_search_reselection.md"
             ),
         ),
         solver_graph_review=ModelCallProfile(

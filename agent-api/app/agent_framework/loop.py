@@ -13,6 +13,8 @@ from pydantic import ValidationError
 
 from .context import (
     ContextCapacityExceeded,
+    GraphReviewBatch,
+    SearchCandidateArticle,
     SolverContext,
     SolverContractFeedback,
     build_solver_context,
@@ -35,6 +37,7 @@ from .state import (
     ReviewFinding,
     ReviewResult,
     RunStatus,
+    SearchCandidateReview,
     ToolRequest,
     ToolResult,
     utc_now,
@@ -290,6 +293,13 @@ class AgentLoop:
                     and not finalize_only
                     and not reviewer_findings
                 )
+                search_review_call = bool(
+                    context.required_search_review_request_ids
+                    and self._profile.solver_search_review is not None
+                    and not graph_review_call
+                    and not finalize_only
+                    and not reviewer_findings
+                )
                 if graph_review_call and not finalize_only:
                     context = context.model_copy(
                         update={
@@ -300,11 +310,46 @@ class AgentLoop:
                             "omitted_evidence_ids": (),
                             "required_dependency_kind": None,
                             "required_dependency_work_item_ids": (),
+                            "search_candidates": (),
+                            "required_search_review_request_ids": (),
+                        }
+                    )
+                elif search_review_call:
+                    navigation_ids = frozenset(
+                        evidence_id
+                        for item in context.search_candidates
+                        for evidence_id in item.navigation_evidence_ids
+                    )
+                    context = context.model_copy(
+                        update={
+                            "grounding_evidence_ids": (),
+                            "navigation_evidence_ids": tuple(
+                                evidence_id
+                                for evidence_id in context.navigation_evidence_ids
+                                if evidence_id in navigation_ids
+                            ),
+                            "evidence_manifest": tuple(
+                                item
+                                for item in context.evidence_manifest
+                                if item.evidence_id in navigation_ids
+                            ),
+                            "material_evidence": tuple(
+                                item
+                                for item in context.material_evidence
+                                if item.evidence_id in navigation_ids
+                            ),
+                            "omitted_evidence_ids": (),
+                            "required_dependency_kind": None,
+                            "required_dependency_work_item_ids": (),
+                            "graph_review_batch": GraphReviewBatch(),
+                            "graph_review_ledger": (),
+                            "required_graph_review_request_ids": (),
                         }
                     )
                 base_call_profile, purpose = self._solver_profile_for_context(
                     context=context,
                     graph_review_call=graph_review_call,
+                    search_review_call=search_review_call,
                     integration_call=integration_call,
                     has_reviewer_findings=bool(reviewer_findings),
                 )
@@ -390,6 +435,12 @@ class AgentLoop:
                         },
                         required_graph_review_request_ids=(
                             context.required_graph_review_request_ids
+                        ),
+                        required_search_review_request_ids=(
+                            context.required_search_review_request_ids
+                        ),
+                        search_candidate_article_ids=tuple(
+                            item.article_id for item in context.search_candidates
                         ),
                         graph_candidate_article_ids=tuple(
                             item.article_id
@@ -536,6 +587,22 @@ class AgentLoop:
                     candidate,
                     tool_requests=(*candidate.tool_requests, *decision_requests),
                 )
+            elif (
+                search_review_call
+                and solver_call.decision.search_candidate_review is not None
+                and solver_call.decision.search_candidate_review.selected_article_ids
+            ):
+                decision_requests = (
+                    self._search_review_fetch_request(
+                        candidate,
+                        solver_call.decision.search_candidate_review,
+                        context.search_candidates,
+                    ),
+                )
+                candidate = self._replace_state(
+                    candidate,
+                    tool_requests=(*candidate.tool_requests, *decision_requests),
+                )
 
             deferred_fetch_resolutions = tuple(
                 item
@@ -558,7 +625,11 @@ class AgentLoop:
                 )
 
             if not decision_requests:
-                if solver_call.decision.start_next_cycle and not graph_review_call:
+                if (
+                    solver_call.decision.start_next_cycle
+                    and not graph_review_call
+                    and not search_review_call
+                ):
                     candidate = self._replace_state(
                         candidate,
                         research_cycle_count=max(
@@ -608,7 +679,8 @@ class AgentLoop:
                     state.research_cycle_count == 0
                     or solver_call.decision.start_next_cycle
                 )
-                and not graph_review_call,
+                and not graph_review_call
+                and not search_review_call,
             )
             reviewer_findings = ()
 
@@ -619,11 +691,14 @@ class AgentLoop:
         *,
         context: SolverContext,
         graph_review_call: bool,
+        search_review_call: bool,
         integration_call: bool,
         has_reviewer_findings: bool,
     ) -> tuple[ModelCallProfile, str]:
         if graph_review_call and self._profile.solver_graph_review is not None:
             return self._profile.solver_graph_review, "graph_selection"
+        if search_review_call and self._profile.solver_search_review is not None:
+            return self._profile.solver_search_review, "search_selection"
         if (
             has_reviewer_findings
             and self._profile.solver_reviewer_revision is not None
@@ -676,6 +751,52 @@ class AgentLoop:
             tool_name=self._profile.graph_review_fetch_tool_name or "fetch_articles",
             arguments={"article_ids": list(selected_ids)},
             purpose="Solverが選んだGraph候補Article本文を取得する",
+            hypothesis_ids=hypothesis_ids,
+        )
+
+    def _search_review_fetch_request(
+        self,
+        state: CaseState,
+        review: SearchCandidateReview,
+        candidates: tuple[SearchCandidateArticle, ...],
+    ) -> ToolRequest:
+        if not review.selections:
+            raise ContractViolation("Search review fetch requires a selected Article")
+        candidates_by_id = {item.article_id: item for item in candidates}
+        selected_candidates = tuple(
+            candidates_by_id[item.article_id] for item in review.selections
+        )
+        primary = selected_candidates[0]
+        if not primary.discovery_work_item_ids:
+            raise ContractViolation(
+                "Search review fetch requires discovery provenance"
+            )
+        selected_ids = tuple(item.article_id for item in review.selections)
+        hypothesis_ids = tuple(
+            dict.fromkeys(
+                hypothesis_id
+                for item in selected_candidates
+                for hypothesis_id in item.discovery_hypothesis_ids
+            )
+        )
+        payload = json.dumps(
+            {
+                "search_request_ids": review.search_request_ids,
+                "selected_article_ids": selected_ids,
+                "review_sequence": len(state.search_candidate_reviews),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
+        return ToolRequest(
+            request_id=f"search-review-fetch-{digest}",
+            work_item_id=primary.discovery_work_item_ids[0],
+            tool_name=self._profile.graph_review_fetch_tool_name
+            or "fetch_articles",
+            arguments={"article_ids": list(selected_ids)},
+            purpose="Solverが選んだ検索候補Article本文を取得する",
             hypothesis_ids=hypothesis_ids,
         )
 

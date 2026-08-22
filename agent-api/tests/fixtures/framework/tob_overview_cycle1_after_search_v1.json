@@ -16,6 +16,7 @@
     "materialEvidenceCount": 13,
     "recentToolResultCount": 4,
     "fetchableArticleCount": 9,
+    "searchCandidateCount": 9,
     "fetchedResourceCount": 0,
     "evidenceRoleCounts": {
       "search_navigation": 13
@@ -557,6 +558,117 @@
       "law-323AC0000000025-article-27_4",
       "law-402M50000040038-article-9"
     ],
+    "search_candidates": [
+      {
+        "article_id": "law-340CO0000000321-article-7",
+        "document_id": "law-340CO0000000321",
+        "title": "金融商品取引法施行令",
+        "headings": [
+          "第七条 （公開買付けの適用除外となる買付け等） 第1項第13号",
+          "第七条 （公開買付けの適用除外となる買付け等） 第1項"
+        ],
+        "discovery_work_item_ids": ["work_item_1", "work_item_2", "work_item_3", "work_item_4"],
+        "discovery_hypothesis_ids": ["hypothesis_1", "hypothesis_2", "hypothesis_3", "hypothesis_4"],
+        "search_request_ids": ["legal_search_1", "legal_search_2", "legal_search_3", "legal_search_4"],
+        "navigation_evidence_ids": [
+          "search-nav-law-340CO0000000321-article-7-paragraph-1-item-13:c2430e2025ef9b55",
+          "search-nav-law-340CO0000000321-article-7-paragraph-1",
+          "search-nav-law-340CO0000000321-article-7-paragraph-1:80e5b6f1b54a62d9"
+        ]
+      },
+      {
+        "article_id": "law-323AC0000000025-article-27_3",
+        "document_id": "law-323AC0000000025",
+        "title": "金融商品取引法",
+        "headings": ["第二十七条の三 （公開買付開始公告及び公開買付届出書の提出） 第1項"],
+        "discovery_work_item_ids": ["work_item_1", "work_item_2", "work_item_4"],
+        "discovery_hypothesis_ids": ["hypothesis_1", "hypothesis_2", "hypothesis_4"],
+        "search_request_ids": ["legal_search_1", "legal_search_2", "legal_search_4"],
+        "navigation_evidence_ids": ["search-nav-law-323AC0000000025-article-27_3-paragraph-1"]
+      },
+      {
+        "article_id": "law-402M50000040038-article-10",
+        "document_id": "law-402M50000040038",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "headings": ["第十条 （公開買付開始公告の掲載事項）"],
+        "discovery_work_item_ids": ["work_item_1", "work_item_2", "work_item_4"],
+        "discovery_hypothesis_ids": ["hypothesis_1", "hypothesis_2", "hypothesis_4"],
+        "search_request_ids": ["legal_search_1", "legal_search_2", "legal_search_4"],
+        "navigation_evidence_ids": ["search-nav-law-402M50000040038-article-10"]
+      },
+      {
+        "article_id": "law-323AC0000000025-article-27_2",
+        "document_id": "law-323AC0000000025",
+        "title": "金融商品取引法",
+        "headings": [
+          "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第3項",
+          "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第1項"
+        ],
+        "discovery_work_item_ids": ["work_item_1", "work_item_2", "work_item_3", "work_item_4"],
+        "discovery_hypothesis_ids": ["hypothesis_1", "hypothesis_2", "hypothesis_3", "hypothesis_4"],
+        "search_request_ids": ["legal_search_1", "legal_search_2", "legal_search_3", "legal_search_4"],
+        "navigation_evidence_ids": [
+          "search-nav-law-323AC0000000025-article-27_2-paragraph-3",
+          "search-nav-law-323AC0000000025-article-27_2-paragraph-1"
+        ]
+      },
+      {
+        "article_id": "law-340CO0000000321-article-8",
+        "document_id": "law-340CO0000000321",
+        "title": "金融商品取引法施行令",
+        "headings": ["第八条 （買付け等の期間等） 第3項"],
+        "discovery_work_item_ids": ["work_item_1", "work_item_4"],
+        "discovery_hypothesis_ids": ["hypothesis_1", "hypothesis_4"],
+        "search_request_ids": ["legal_search_1", "legal_search_4"],
+        "navigation_evidence_ids": ["search-nav-law-340CO0000000321-article-8-paragraph-3"]
+      },
+      {
+        "article_id": "law-323AC0000000025-article-27_4",
+        "document_id": "law-323AC0000000025",
+        "title": "金融商品取引法",
+        "headings": ["第二十七条の四 （有価証券をもつて対価とする買付け等） 第1項"],
+        "discovery_work_item_ids": ["work_item_1", "work_item_4"],
+        "discovery_hypothesis_ids": ["hypothesis_1", "hypothesis_4"],
+        "search_request_ids": ["legal_search_1", "legal_search_4"],
+        "navigation_evidence_ids": ["search-nav-law-323AC0000000025-article-27_4-paragraph-1"]
+      },
+      {
+        "article_id": "law-340CO0000000321-article-6",
+        "document_id": "law-340CO0000000321",
+        "title": "金融商品取引法施行令",
+        "headings": [
+          "第六条 （公開買付けによらなければならない有価証券等） 第3項",
+          "第六条 （公開買付けによらなければならない有価証券等） 第1項"
+        ],
+        "discovery_work_item_ids": ["work_item_1", "work_item_3", "work_item_4"],
+        "discovery_hypothesis_ids": ["hypothesis_1", "hypothesis_3", "hypothesis_4"],
+        "search_request_ids": ["legal_search_1", "legal_search_3", "legal_search_4"],
+        "navigation_evidence_ids": [
+          "search-nav-law-340CO0000000321-article-6-paragraph-3",
+          "search-nav-law-340CO0000000321-article-6-paragraph-1"
+        ]
+      },
+      {
+        "article_id": "law-402M50000040038-article-9",
+        "document_id": "law-402M50000040038",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "headings": ["第九条 （公告の方法） 第1項"],
+        "discovery_work_item_ids": ["work_item_1", "work_item_4"],
+        "discovery_hypothesis_ids": ["hypothesis_1", "hypothesis_4"],
+        "search_request_ids": ["legal_search_1", "legal_search_4"],
+        "navigation_evidence_ids": ["search-nav-law-402M50000040038-article-9-paragraph-1"]
+      },
+      {
+        "article_id": "law-402M50000040038-article-2_5",
+        "document_id": "law-402M50000040038",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "headings": ["第二条の五 （株券等の所有者が少数である場合） 第2項"],
+        "discovery_work_item_ids": ["work_item_2"],
+        "discovery_hypothesis_ids": ["hypothesis_2"],
+        "search_request_ids": ["legal_search_2"],
+        "navigation_evidence_ids": ["search-nav-law-402M50000040038-article-2_5-paragraph-2"]
+      }
+    ],
     "work_tree": [
       {
         "work_item_id": "work_item_1",
@@ -903,6 +1015,12 @@
     },
     "graph_review_ledger": [],
     "required_graph_review_request_ids": [],
+    "required_search_review_request_ids": [
+      "legal_search_1",
+      "legal_search_2",
+      "legal_search_3",
+      "legal_search_4"
+    ],
     "material_evidence": [
       {
         "evidence_id": "search-nav-law-340CO0000000321-article-7-paragraph-1-item-13:c2430e2025ef9b55",

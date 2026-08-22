@@ -133,6 +133,10 @@ class LegalFrameworkAgentService:
                         item.model_dump(mode="json")
                         for item in result.state.graph_candidate_reviews
                     ],
+                    "searchCandidateReviews": [
+                        item.model_dump(mode="json")
+                        for item in result.state.search_candidate_reviews
+                    ],
                     "frontierReAdoptions": [
                         item.model_dump(mode="json")
                         for item in result.state.frontier_re_adoptions
