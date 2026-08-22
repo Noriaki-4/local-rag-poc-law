@@ -1571,6 +1571,8 @@ provider: anthropic
 
 solver:
   common_system_prompt: domains/legal/prompts/solver_common.md
+  tool_prompt: domains/legal/prompts/solver_tools.md
+  completion_prompt: domains/legal/prompts/solver_completion.md
   research:
     model: claude-haiku-4-5-20251001
     max_output_tokens: 4096
@@ -1579,6 +1581,15 @@ solver:
     model: claude-haiku-4-5-20251001
     max_output_tokens: 4096
     system_prompt: domains/legal/prompts/solver_integration.md
+  cycle_close:
+    model: claude-haiku-4-5-20251001
+    system_prompt: domains/legal/prompts/solver_cycle_close.md
+  finalization:
+    model: claude-haiku-4-5-20251001
+    system_prompt: domains/legal/prompts/solver_finalization.md
+  reviewer_revision:
+    model: claude-haiku-4-5-20251001
+    system_prompt: domains/legal/prompts/solver_reviewer_revision.md
 
 reviewer:
   enabled: false
@@ -1656,10 +1667,11 @@ Luna Worker / Reviewerの出力はaudit履歴に残すが、Lunaの精度測定�
 ただし、Luna出力を候補hash・snapshot・Pydantic契約で検証して
 `ClassificationRun`へ取り込むimportが完成するまでは、評価JSONLをpublish済みGraphとして扱わない。
 
-`solver_common.md`はresearchとintegrationの両方へ合成する。質問観点、法令階層・委任先追跡、
-Evidence利用、Cycle・Stepの意味、完了条件のようにサイクル間で変わらない規則を段階別Promptへ重複記載しない。
-`solver_research.md`は初回の作業分解と発見、`solver_integration.md`は観測結果の反映と次の
-行動または完了の選択だけを追加する。
+`solver_common.md`は全Solver呼出しへ合成するが、判断主体、Evidence、ID、Cycleの不変条件だけを持つ。
+Toolを使えるモードだけへ`solver_tools.md`、完了判断を行うモードへ`solver_completion.md`を合成する。
+実行手順は`research / integration / cycle_close / finalization / reviewer_revision / graph_review`の
+用途別Promptへ分ける。Programは`reviewer_findings`の有無、`finalize_only`、`cycle_close_required`、
+未評価Graph候補の有無という構造的事実だけで用途を選び、法的意味や次のToolを決めない。
 
 モデルID、token上限、timeout、Reviewer有効・無効はProfileだけで変更する。
 AgentLoopや法令ツールへmodel IDをハードコードしない。
@@ -1860,24 +1872,27 @@ statusの値と基本定義は5.2の契約から共通Promptへ生成する。�
 各処理モードで値をどう使うかという手順・業務上の制約である。コードと状態型の変更と同じcommitで更新し、
 Promptだけを先行させて現行SolverContextに存在しない値をLLMへ指示しない。
 
+Promptでは、実行順序と判断ルールを混在させない。`solver_common.md`は全モード共通の責務、
+不変条件、ID・Evidence契約だけを持ち、実行順序は定義しない。用途別Promptは最初に短い
+「実行手順」を示し、その後の「判断ルール」で各手順に適用する条件を定義する。Researchへ
+Graph Review差分処理やCycle境界処理を混入させず、IntegrationとGraph Reviewのルールはそれぞれの
+用途別Promptを正本とする。
+
 | Prompt / schema | 必須の内容 |
 |---|---|
-| `solver_common.md` | Graph ReviewはSolverの処理モードであり、任意のReviewer Agentとは別であることを定義する。 |
-| `solver_common.md` | Cycleは最大4、1 Cycleの本文取得累計は4、Graph Review選択は最大3と定義する。`max_tool_requests_per_step`と本文取得累計を区別する。 |
-| `solver_common.md` | `cycle_budget_reached`、`cycle_close_required`、`cycle_step_timeout`、`remaining_fetch_capacity`の意味と決定主体を定義する。 |
-| `solver_common.md` | `unreviewed / selected / relevant_deferred / rejected`と`select / defer / reject`を定義し、content statusと混同しないよう指示する。 |
-| `solver_common.md` | `fetch_articles`のcontent `succeeded`は当該Articleの全登録済みchunk取得完了を意味し、index完全性・関連性・根拠採用を意味しないと定義する。本文取得に`partial`を導入しない。 |
-| `solver_common.md` | 評価済みNodeを別Hypothesisへ使う場合は`frontier_re_adoptions`で明示し、Programが自動転用しないことを定義する。 |
-| `solver_common.md` | 各検索を既知WorkItem・Hypothesis・ExplorationIntentへ結び付け、OpenSearchとGraphの明示selector、候補と根拠の違い、selectorをProgramへ補完させないことを定義する。 |
-| `solver_common.md` / `solver_graph_review.md` | RelationAssertionは`SUBJECT / OBJECT`で接続された未確認候補で、`proposedPredicate`は確定関係ではないと定義する。5 predicateの向き、`ClassificationRun` coverage、検索時の案件判断をNeo4jへ更新・昇格しないことも定義する。`USES_DEFINITION`はラベルだけで扱わず、`relationExplanation`、両端supporting quote、方向から対象概念と探索目的を確認する手順を含める。 |
+| `solver_common.md` | Solverの共通責務、意味判断の境界、Evidence・ID・Cycleの不変条件だけを定義する。実行手順、Tool一覧、処理モード固有statusは置かない。 |
+| `solver_tools.md` | Tool選択、既知ID、1ホップGraph selector、RelationAssertionの5 predicateと方向、`USES_DEFINITION`の確認方法を定義する。Research、Integration、Reviewer Revisionだけへ合成する。 |
+| `solver_completion.md` | 直接Evidence、citation、下位規範、通常完了と上限時限定回答の共通完了条件を定義する。 |
 | `reviewer.md` | ReviewerViewの各状態、検査順序、`accept / revise`、Finding種別、既知IDの使い方を定義する。Reviewerは検索方法やToolRequestを決めない。 |
-| `solver_integration.md` | Reviewer差戻し時は全Findingを本文と照合し、`addressed / disputed`を全件返す。回答修正か追加調査かはSolverが判断する。 |
-| `solver_research.md` / `solver_integration.md` | 未確認事項から検証目的と最小scopeを作る。Graphの関係種別を選べなければ全種別を要求せず、OpenSearchで根拠または起点を発見する。 |
+| `solver_research.md` | 質問をWorkItemと検証可能なHypothesisへ分解し、最初の探索方法と法令検索表現を選ぶ。 |
+| `solver_integration.md` | 新しいToolResultを評価して状態を逐次更新し、未確認事項に対する次の行動を選ぶ。Graphの関係種別を説明できなければ全種別を要求せず、OpenSearchで根拠または起点を発見する。 |
+| `solver_cycle_close.md` | 現Cycleの状態更新、active Frontier全件の処理、`finalize / start_next_cycle`だけを扱う。次Cycleの詳細なTool計画は作らない。 |
+| `solver_finalization.md` | `finalize_only=true`で追加Toolを要求せず、確認済み範囲と未確認範囲を分けた回答を作る。 |
+| `solver_reviewer_revision.md` | 全Findingを本文と照合し、`addressed / disputed`を全件返す。回答修正か追加調査かはSolverが判断する。 |
 | `solver_graph_review.md` | `graph_review_batch`と`graph_review_ledger`を読む。`review_trigger`を解釈し、過去の詳細が再提示されないことを候補の不存在と解釈しない。 |
 | `solver_graph_review.md` | 各batchの全候補をWorkItem・Hypothesis別に評価し、最大3件を`select`、関連する残りを`defer`、無関係と判断したものだけを`reject`する。 |
 | `solver_graph_review.md` | `remaining_fetch_capacity=0`なら新たにselectせず、関連候補をdeferしてCycle終了判断へ戻す。Graph Reviewから直接次Cycleの法的方針を決めない。 |
-| `solver_integration.md` | Cycle上限に達したら、直前までのToolResultを評価し、Hypothesis・WorkItem・Evidence・Graph ledgerを整理した後に、finalizeまたは次Cycleへの構造化引継ぎを返す。次Cycleのgoal・strategyは返さない。 |
-| `solver_integration.md` | Cycle境界でactiveな`relevant_deferred`全件を`carry_forward / no_longer_needed / unresolved_at_limit`のいずれかへ明示し、黙って破棄しない。`start_next_cycle`では次Cycle計画やToolRequestを返さない。 |
+| `solver_cycle_close.md` | Cycle上限では直前結果を更新し、activeな`relevant_deferred`全件を`fetch_next_cycle / carry_forward / no_longer_needed / unresolved_at_limit`のいずれかへ明示する。 |
 | リポジトリ固有`legal-relation-adjudicator` skill | Workerは1候補の5 predicateを同じ回答で比較し、各predicate固有の二必要条件とfinding、成立predicateの方向・参照箇所・両端spanを返す。ReviewerはWorker回答を見て全5 predicateを検査し、具体的な誤りだけを差し戻す。Programは意味を補完せず、条件整合・既知ID・件数だけを検証する。 |
 | Provider schema | Review判断対象は現在のbatch、本文取得へ選べるIDはbatchの候補とledgerの`relevant_deferred`、再試行時の`selected + failed/timeout`に制限する。選択上限は`min(3, remaining_fetch_capacity)`とする。`rejected`は新Link差分でbatchへ再提示された場合を除き同じHypothesisで再選択させず、別Hypothesisへの`frontier_re_adoptions`はledgerの既知Nodeと既知のopen WorkItem・Hypothesisだけを許可する。候補の関連性や優先度はschemaまたはProgramで補正しない。 |
 | Provider schema | Deferred解消はledgerの既知IDだけを許可する。Programは全件性と次動作との矛盾だけを拒否し、関連性・必要性を補正しない。 |
@@ -2010,8 +2025,13 @@ agent-api/app/
 │       │   └── default.yaml
 │       └── prompts/
 │           ├── solver_common.md
+│           ├── solver_tools.md
+│           ├── solver_completion.md
 │           ├── solver_research.md
 │           ├── solver_integration.md
+│           ├── solver_cycle_close.md
+│           ├── solver_finalization.md
+│           ├── solver_reviewer_revision.md
 │           ├── solver_graph_review.md
 │           ├── relation_classifier.md
 │           ├── relation_grounder.md
@@ -2274,8 +2294,8 @@ publishする別単位とする。Graph schema、抽出規則、入力データ�
 - Graphの全Article・Link・Review履歴をCaseStoreに保持し、SolverContextへは
   `graph_review_batch`と`graph_review_ledger`を差分投影する。
 - Graph Reviewは1回最大3件のArticle本文を選び、Cycleの残り本文取得枠を超えないようにする。
-- 7.4の通り`solver_common.md`、`solver_graph_review.md`、`solver_integration.md`、Provider schemaを
-  型・Profile version・契約テストと同時に更新する。
+- 7.4の通り、最小の`solver_common.md`、共有fragment、処理モード別Prompt、Provider schemaを
+  型・Profile version・契約テストと同時に更新する。構造値から選ばれないモードの手順を混入させない。
 - `/answer`に新経路のFeature Flagを追加する。
 - Solverのresearch/integrationで別modelを設定できるようにする。
 - 法令固有型や法令関係判断がFrameworkへ漏れていないことを確認する。

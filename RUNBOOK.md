@@ -1086,9 +1086,10 @@ Reviewerは`AGENT_FRAMEWORK_REVIEWER_ENABLED=true`を明示した場合だけ有
 初回の作業分解とTool選択には`AGENT_FRAMEWORK_RESEARCH_MODEL`、ToolResult取得後の意味評価・
 状態統合・追加調査または終了の判断には`AGENT_FRAMEWORK_INTEGRATION_MODEL`を使う。
 旧`AGENT_FRAMEWORK_FINALIZE_MODEL`も互換設定として読めるが、新規設定ではintegration名を使う。
-両用途のsystem promptには`solver_common.md`を合成し、質問観点の再確認、法令階層・委任先の
-追跡、Evidence利用、完了条件を全サイクルで共通にする。`solver_research.md`は初回の作業分解、
-`solver_integration.md`はToolResult取得後の更新という段階固有の指示だけを追加する。
+全Solver呼出しへ短い`solver_common.md`を合成する。Toolを使える処理だけへ`solver_tools.md`、
+完了判断を行う処理へ`solver_completion.md`を追加する。実行手順は`research / integration /
+cycle_close / finalization / reviewer_revision / graph_selection`別のPromptから一つだけ選ぶ。
+選択条件はContextの構造値だけで、法的意味やToolの必要性はSolverが判断する。
 
 最初の検索動作確認用設定:
 
@@ -1193,7 +1194,9 @@ Legal Profileの1 Solver Decisionは検索系Toolを最大4要求、`fetch_artic
 合計上限は5要求である。本文取得量の4 Article上限とは別の制約である。
 Graph Reviewから1 stepで選ぶ候補は最大3件とし、残りの関連候補はdeferして後続stepまたは次Cycleへ残す。
 プログラムは超過分を選別せず契約違反として返す。
-`modelCalls[].purpose`は初回が`research`、通常のTool実行後は`integration`になる。新しい1ホップ候補が
+`modelCalls[].purpose`は`research / integration / cycle_close / finalization /
+reviewer_revision / graph_selection`のいずれかになる。`cycle_close_required=true`では`cycle_close`、
+`finalize_only=true`では`finalization`、Reviewer差戻し時は`reviewer_revision`を使う。新しい1ホップ候補が
 投影された直後は、同一Solverを本文を再掲しない短い専用Promptの`graph_selection`モードで呼ぶ。これは任意の
 Reviewer Agentとは別の処理モードである。Solverは`graph_review_batch`の全候補をselect/defer/rejectし、
 最大3件かつCycle残り枠内の選択Articleを同じ順序の1件の`fetch_articles`で`continue`する。

@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from .context import (
     ContextCapacityExceeded,
+    SolverContext,
     SolverContractFeedback,
     build_solver_context,
 )
@@ -301,23 +302,11 @@ class AgentLoop:
                             "required_dependency_work_item_ids": (),
                         }
                     )
-                base_call_profile = (
-                    self._profile.solver_graph_review
-                    if graph_review_call
-                    else (
-                        self._profile.solver_integration
-                        if integration_call or finalize_only
-                        else self._profile.solver_research
-                    )
-                )
-                purpose = (
-                    "graph_selection"
-                    if graph_review_call
-                    else (
-                        "integration"
-                        if integration_call or finalize_only
-                        else "research"
-                    )
+                base_call_profile, purpose = self._solver_profile_for_context(
+                    context=context,
+                    graph_review_call=graph_review_call,
+                    integration_call=integration_call,
+                    has_reviewer_findings=bool(reviewer_findings),
                 )
                 call_profile = self._bounded_model_profile(
                     base_call_profile,
@@ -624,6 +613,32 @@ class AgentLoop:
             reviewer_findings = ()
 
         return state
+
+    def _solver_profile_for_context(
+        self,
+        *,
+        context: SolverContext,
+        graph_review_call: bool,
+        integration_call: bool,
+        has_reviewer_findings: bool,
+    ) -> tuple[ModelCallProfile, str]:
+        if graph_review_call and self._profile.solver_graph_review is not None:
+            return self._profile.solver_graph_review, "graph_selection"
+        if (
+            has_reviewer_findings
+            and self._profile.solver_reviewer_revision is not None
+        ):
+            return self._profile.solver_reviewer_revision, "reviewer_revision"
+        if context.finalize_only and self._profile.solver_finalization is not None:
+            return self._profile.solver_finalization, "finalization"
+        if (
+            context.cycle_close_required
+            and self._profile.solver_cycle_close is not None
+        ):
+            return self._profile.solver_cycle_close, "cycle_close"
+        if integration_call or context.finalize_only:
+            return self._profile.solver_integration, "integration"
+        return self._profile.solver_research, "research"
 
     def _graph_review_fetch_request(
         self,

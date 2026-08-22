@@ -16,35 +16,75 @@ _PROMPT_DIR = Path(__file__).with_name("prompts")
 
 def legal_agent_profile() -> AgentProfile:
     common_solver_prompt = _read_prompt("solver_common.md")
+    tool_prompt = _read_prompt("solver_tools.md")
+    completion_prompt = _read_prompt("solver_completion.md")
+    integration_model = settings.agent_framework_integration_model
+    integration_max_tokens = settings.agent_framework_integration_max_tokens
+    timeout_sec = settings.agent_framework_model_timeout_sec
     return AgentProfile(
         name="legal-default",
-        version="100",
+        version="102",
         provider=settings.llm_provider,
-        solver_research=ModelCallProfile(
+        solver_research=_model_profile(
             model=settings.agent_framework_research_model,
-            max_output_tokens=settings.agent_framework_research_max_tokens,
-            timeout_sec=settings.agent_framework_model_timeout_sec,
-            system_prompt=_join_prompts(
+            max_tokens=settings.agent_framework_research_max_tokens,
+            timeout_sec=timeout_sec,
+            prompts=(
                 common_solver_prompt,
+                tool_prompt,
                 _read_prompt("solver_research.md"),
+                completion_prompt,
             ),
         ),
-        solver_integration=ModelCallProfile(
-            model=settings.agent_framework_integration_model,
-            max_output_tokens=settings.agent_framework_integration_max_tokens,
-            timeout_sec=settings.agent_framework_model_timeout_sec,
-            system_prompt=_join_prompts(
+        solver_integration=_model_profile(
+            model=integration_model,
+            max_tokens=integration_max_tokens,
+            timeout_sec=timeout_sec,
+            prompts=(
                 common_solver_prompt,
+                tool_prompt,
                 _read_prompt("solver_integration.md"),
+                completion_prompt,
+            ),
+        ),
+        solver_cycle_close=_model_profile(
+            model=integration_model,
+            max_tokens=integration_max_tokens,
+            timeout_sec=timeout_sec,
+            prompts=(
+                common_solver_prompt,
+                _read_prompt("solver_cycle_close.md"),
+                completion_prompt,
+            ),
+        ),
+        solver_finalization=_model_profile(
+            model=integration_model,
+            max_tokens=integration_max_tokens,
+            timeout_sec=timeout_sec,
+            prompts=(
+                common_solver_prompt,
+                _read_prompt("solver_finalization.md"),
+                completion_prompt,
+            ),
+        ),
+        solver_reviewer_revision=_model_profile(
+            model=integration_model,
+            max_tokens=integration_max_tokens,
+            timeout_sec=timeout_sec,
+            prompts=(
+                common_solver_prompt,
+                tool_prompt,
+                _read_prompt("solver_reviewer_revision.md"),
+                completion_prompt,
             ),
         ),
         solver_graph_review=ModelCallProfile(
-            model=settings.agent_framework_integration_model,
+            model=integration_model,
             max_output_tokens=min(
-                settings.agent_framework_integration_max_tokens,
+                integration_max_tokens,
                 4096,
             ),
-            timeout_sec=settings.agent_framework_model_timeout_sec,
+            timeout_sec=timeout_sec,
             system_prompt=_read_prompt("solver_graph_review.md"),
         ),
         reviewer=ReviewerProfile(
@@ -111,3 +151,18 @@ def _read_prompt(name: str) -> str:
 
 def _join_prompts(*prompts: str) -> str:
     return "\n\n".join(prompt.strip() for prompt in prompts if prompt.strip())
+
+
+def _model_profile(
+    *,
+    model: str,
+    max_tokens: int,
+    timeout_sec: float,
+    prompts: tuple[str, ...],
+) -> ModelCallProfile:
+    return ModelCallProfile(
+        model=model,
+        max_output_tokens=max_tokens,
+        timeout_sec=timeout_sec,
+        system_prompt=_join_prompts(*prompts),
+    )

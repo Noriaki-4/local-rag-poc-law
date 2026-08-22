@@ -21,6 +21,7 @@ from app.adapters.models.structured_json import (
     _solver_repair_prompt,
     _solver_transport_schema,
 )
+from app.adapters.persistence.simple_in_memory import InMemoryCaseStore
 from app.agent_framework.context import (
     ContextCapacityExceeded,
     GraphCandidateArticle,
@@ -36,6 +37,7 @@ from app.agent_framework.contracts import SolverDecision
 from app.agent_framework.diagnostics import AgentDiagnostics
 from app.agent_framework.loop import AgentLoop, _dependency_audit_work_item_ids
 from app.agent_framework.ports.model import ModelProtocolError, ReviewerView
+from app.agent_framework.ports.tool import ToolRegistry
 from app.agent_framework.profiles import (
     AgentLimits,
     ModelCallProfile,
@@ -323,7 +325,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "100"
+    assert diagnostic_records[0]["profileVersion"] == "102"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -331,7 +333,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "100"
+    assert transport_input["profileVersion"] == "102"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"][0]["asset"] == (
         "agent_framework/prompts/solver_contract_repair.md"
@@ -533,17 +535,21 @@ def test_reviewer_and_solver_prompts_define_the_revision_handoff() -> None:
     profile = legal_profiles.legal_agent_profile()
 
     reviewer_prompt = profile.reviewer.system_prompt
-    assert "# ReviewerViewの意味" in reviewer_prompt
-    assert "# 検査順序" in reviewer_prompt
-    assert "# Finding契約" in reviewer_prompt
+    assert "# 法令回答Reviewer" in reviewer_prompt
+    assert "## ReviewerViewの意味" in reviewer_prompt
+    assert "## 検査順序" in reviewer_prompt
+    assert "## Finding契約" in reviewer_prompt
+    assert [line for line in reviewer_prompt.splitlines() if line.startswith("# ")] == [
+        "# 法令回答Reviewer"
+    ]
     assert "dependency_decisions.status" in reviewer_prompt
     assert "検索、Tool選択、CaseStateの変更は行いません" in reviewer_prompt
 
-    solver_prompt = profile.solver_integration.system_prompt
-    assert "`reviewer_findings`がある場合" in solver_prompt
-    assert "全Findingを取得本文と照合" in solver_prompt
+    assert profile.solver_reviewer_revision is not None
+    solver_prompt = profile.solver_reviewer_revision.system_prompt
+    assert "全Reviewer Findingを取得済み本文と照合" in solver_prompt
     assert "review_finding_resolutions" in solver_prompt
-    assert "全Findingを処理せず再finalizeしません" in solver_prompt
+    assert "Findingを未処理のまま再度`finalize`しません" in solver_prompt
 
 
 def test_dependency_audit_scope_uses_llm_tool_bindings_for_grounding_only() -> None:
@@ -669,109 +675,121 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
     ]
 
 
-def test_all_solver_stages_include_shared_legal_research_rules() -> None:
+def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
-    assert profile.version == "100"
-    prompts = (
-        profile.solver_research.system_prompt,
-        profile.solver_integration.system_prompt,
-    )
 
-    for prompt in prompts:
-        assert prompt.count("全サイクル共通の規則") == 1
-        assert "各サイクルで元の質問へ戻り" in prompt
-        assert "別法令との関係や条文番号を推測して作業へ加えません" in prompt
-        assert "委任先本文を未確認のまま当該観点をsupportedまたはresolvedにしません" in prompt
-        assert "法令名だけでなく委任事項ごとに行います" in prompt
-        assert "学習済み知識から未取得Articleの内容を補ったりしません" in prompt
-        assert "material_included=falseのEvidenceは本文未提示" in prompt
-        assert "graph_review_batchは今回判断が必要な新規・再採用・新Link差分" in prompt
-        assert "graph_review_ledgerは過去の全評価済みfrontier" in prompt
-        assert "content_statusのnot_requested/pending/succeeded/failed/timeout" in prompt
-        assert "本文中の条番号、法令番号、documentIdを組み合わせ" in prompt
-        assert "各fetch_articles.arguments.article_idsをfetchable_article_ids" in prompt
-        assert "その判断はfinalizeと矛盾する" in prompt
-        assert "fetch_articlesは1回に最大4個のArticle ID" in prompt
-        assert "4個は上限であり目標ではない" in prompt
-        assert "WorkItemや取得目的が異なっても4個以内なら1つ" in prompt
-        assert "Graph探索は1回の要求につき1ホップ" in prompt
-        assert "fetch_articlesだけではGraph探索は行われません" in prompt
-        assert "起点の由来を理由に再探索を禁止しません" in prompt
-        assert "[一致箇所N]" in prompt
-        assert "IMPLEMENTSは親規定→具体化規定" in prompt
-        assert "outgoingは起点Articleがfrom側" in prompt
-        assert "USES_DEFINITIONは、引用符付き用語だけでなく" in prompt
-        assert "relationExplanation、SUBJECT/OBJECTのsupportingQuote" in prompt
-        assert "旧GraphのIMPLEMENTS / APPLIED_BYやstatus" in prompt
-        assert "parent_law_referenceが下位法令本文から親法律・親政令への明示参照" in prompt
-        assert "生成元・監査用の来歴はCaseStateに保持" in prompt
-        assert "legal_graph_neighborsを要求" in prompt
-        assert '"mode": "semantic_assertion"' in prompt
-        assert "複数predicateや両方向を1要求へ束ねません" in prompt
-        assert "evidenceRole=search_navigationの検索結果は、次のlegal_searchまたはfetch_articles" in prompt
-        assert "その本文抜粋をHypothesisのjudgment" in prompt
-        assert "1つのHypothesisは、取得本文で独立に検証できる1つの命題" in prompt
-        assert "特定条文の内容を説明する場合" in prompt
-        assert "cycle_step_timeoutはCycle用の時間切れ" in prompt
-        assert "deferred_frontier_resolutions" in prompt
-        assert "Programは既知ID、全件性、actionと次動作の参照整合だけ" in prompt
-        assert "remaining_unreviewed_count>0" in prompt
-        assert "unreviewed_graph_resolution" in prompt
-        assert "unresolved_work_item_ids" in prompt
-    assert "初回判断では" in profile.solver_research.system_prompt
-    assert "WorkItem数を減らすために" in profile.solver_research.system_prompt
-    assert "直前の全ToolResultとmaterial_evidenceを読み" in (
-        profile.solver_integration.system_prompt
-    )
-    assert "各要求は1ホップ" in (
-        profile.solver_integration.system_prompt
-    )
-    assert "そのArticle IDがfetchable_article_idsにない場合" in (
-        profile.solver_integration.system_prompt
-    )
-    assert "同じDecisionの既知ArticleはWorkItemごとに分けず" in (
-        profile.solver_integration.system_prompt
-    )
-    assert "各open WorkItemへ対応付けます" in (
-        profile.solver_integration.system_prompt
-    )
-    assert "終了整合監査" in profile.solver_integration.system_prompt
-    assert "各法的主張に直接対応するgrounding Evidence" in (
-        profile.solver_integration.system_prompt
-    )
-    assert "目的条項・総則条項" in profile.solver_integration.system_prompt
-    assert "委任元の具体的な文言" in profile.solver_integration.system_prompt
-    assert "取得本文を読んだSolver自身による下位規範確認のチェックリスト" in (
-        profile.solver_integration.system_prompt
-    )
-    assert "predicate=IMPLEMENTS、direction=from_subject" in (
-        profile.solver_integration.system_prompt
-    )
-    assert "DependencyDecisionへ重複登録しません" in (
-        profile.solver_integration.system_prompt
-    )
+    assert profile.version == "102"
+    mode_prompts = {
+        "research": profile.solver_research.system_prompt,
+        "integration": profile.solver_integration.system_prompt,
+        "cycle_close": profile.solver_cycle_close.system_prompt,
+        "finalization": profile.solver_finalization.system_prompt,
+        "reviewer_revision": profile.solver_reviewer_revision.system_prompt,
+    }
+    assert all(prompt is not None for prompt in mode_prompts.values())
+    for prompt in mode_prompts.values():
+        assert [line for line in prompt.splitlines() if line.startswith("# ")] == [
+            "# 法令調査Solver"
+        ]
+        assert "Programへ意味判断" in prompt
+        assert "現在のCycleを閉じて次Cycleへ移る場合だけ`true`" in prompt
+        assert "初回ToolでCycle 1" not in prompt
+        assert "action-observation step" not in prompt
+
+    research_prompt = mode_prompts["research"]
+    assert "## Tool選択ルール" in research_prompt
+    assert "## Researchモード" in research_prompt
+    assert "## 完了ルール" in research_prompt
+    assert "## Integrationモード" not in research_prompt
+    assert "## Cycle Closeモード" not in research_prompt
+
+    integration_prompt = mode_prompts["integration"]
+    assert "## Tool選択ルール" in integration_prompt
+    assert "## Integrationモード" in integration_prompt
+    assert "## 完了ルール" in integration_prompt
+    assert "## Cycle Closeモード" not in integration_prompt
+    assert "## Reviewer Revisionモード" not in integration_prompt
+
+    cycle_close_prompt = mode_prompts["cycle_close"]
+    assert "## Cycle Closeモード" in cycle_close_prompt
+    assert "deferred_frontier_resolutions" in cycle_close_prompt
+    assert "## Tool選択ルール" not in cycle_close_prompt
+
+    finalization_prompt = mode_prompts["finalization"]
+    assert "## Finalizationモード" in finalization_prompt
+    assert "finalize_only=true" in finalization_prompt
+    assert "## Tool選択ルール" not in finalization_prompt
+
+    reviewer_prompt = mode_prompts["reviewer_revision"]
+    assert "## Reviewer Revisionモード" in reviewer_prompt
+    assert "review_finding_resolutions" in reviewer_prompt
+    assert "## Tool選択ルール" in reviewer_prompt
+
+    assert len(research_prompt) < 15000
+    assert len(integration_prompt) < 18000
+    assert len(cycle_close_prompt) < 9000
+    assert len(finalization_prompt) < 7000
+    assert len(reviewer_prompt) < 12000
+
     assert profile.automatic_tools == ()
     assert len(profile.tool_list_argument_limits) == 2
-    assert profile.tool_list_argument_limits[0].tool_name == "fetch_articles"
-    assert profile.tool_list_argument_limits[0].argument_name == "article_ids"
-    assert profile.tool_list_argument_limits[0].max_items == 4
-    assert profile.tool_list_argument_limits[1].tool_name == "legal_graph_neighbors"
-    assert profile.tool_list_argument_limits[1].argument_name == "article_ids"
-    assert profile.tool_list_argument_limits[1].max_items == 4
     assert profile.graph_review_fetch_tool_name == "fetch_articles"
     assert profile.required_dependency_kind == "lower_norm"
-    assert profile.solver_graph_review is not None
-    graph_prompt = profile.solver_graph_review.system_prompt
-    assert "Graph Reviewモード" in graph_prompt
-    assert "batchの全frontier_item_idへ判断を1件ずつ返します" in graph_prompt
-    assert "select、関係するが今回の取得枠外ならdefer" in graph_prompt
-    assert "reviewed_link_idsにはbatch内の全link_id" in graph_prompt
-    assert "start_next_cycle=false" in graph_prompt
-    assert "deferred_frontier_resolutions=[]" in graph_prompt
-    assert "各reasonは判断を区別できる一文" in graph_prompt
-    assert "USES_DEFINITIONはラベルだけで選びません" in graph_prompt
-    assert "relationExplanationと両端supportingQuote" in graph_prompt
 
+
+def test_solver_profile_selection_uses_only_structural_context_flags() -> None:
+    profile = legal_profiles.legal_agent_profile()
+    loop = AgentLoop(
+        store=InMemoryCaseStore(),
+        model=StructuredJSONModelAdapter(FakeStructuredLLM()),
+        tools=ToolRegistry(()),
+        profile=profile,
+    )
+    base_context = build_solver_context(
+        CaseState(case_id="case-mode", question="質問"),
+        profile.limits,
+        remaining_wall_time_sec=120,
+        finalize_only=False,
+    )
+
+    cases = (
+        ({"graph_review_call": True}, "graph_selection"),
+        ({"has_reviewer_findings": True}, "reviewer_revision"),
+        ({"context": base_context.model_copy(update={"finalize_only": True})}, "finalization"),
+        (
+            {
+                "context": base_context.model_copy(
+                    update={"cycle_close_required": True}
+                )
+            },
+            "cycle_close",
+        ),
+        ({"integration_call": True}, "integration"),
+        ({}, "research"),
+    )
+    for overrides, expected_purpose in cases:
+        call = {
+            "context": base_context,
+            "graph_review_call": False,
+            "integration_call": False,
+            "has_reviewer_findings": False,
+            **overrides,
+        }
+        _, purpose = loop._solver_profile_for_context(**call)
+        assert purpose == expected_purpose
+
+
+def test_graph_review_prompt_has_one_document_hierarchy() -> None:
+    graph_prompt = legal_profiles.legal_agent_profile().solver_graph_review
+    assert graph_prompt is not None
+    prompt = graph_prompt.system_prompt
+    assert [line for line in prompt.splitlines() if line.startswith("# ")] == [
+        "# 法令調査Solver：Graph Reviewモード"
+    ]
+    assert "## 入力の定義" in prompt
+    assert "## 実行手順" in prompt
+    assert "## 判断ルール" in prompt
+    assert "## 出力契約" in prompt
 
 def test_cycle_boundary_requires_a_structural_resolution_for_every_deferred_frontier(
 ) -> None:

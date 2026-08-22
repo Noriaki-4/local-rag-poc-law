@@ -161,6 +161,9 @@ class AgentProfile(FrameworkModel):
     solver_integration: ModelCallProfile = Field(
         validation_alias=AliasChoices("solver_integration", "solver_finalize")
     )
+    solver_cycle_close: ModelCallProfile | None = None
+    solver_finalization: ModelCallProfile | None = None
+    solver_reviewer_revision: ModelCallProfile | None = None
     solver_graph_review: ModelCallProfile | None = None
     reviewer: ReviewerProfile
     required_dependency_kind: str | None = Field(default=None, max_length=160)
