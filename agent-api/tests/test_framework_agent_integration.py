@@ -325,7 +325,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "102"
+    assert diagnostic_records[0]["profileVersion"] == "103"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -333,7 +333,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "102"
+    assert transport_input["profileVersion"] == "103"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"][0]["asset"] == (
         "agent_framework/prompts/solver_contract_repair.md"
@@ -678,7 +678,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "102"
+    assert profile.version == "103"
     mode_prompts = {
         "research": profile.solver_research.system_prompt,
         "integration": profile.solver_integration.system_prompt,
@@ -709,6 +709,8 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     assert "## 完了ルール" in integration_prompt
     assert "## Cycle Closeモード" not in integration_prompt
     assert "## Reviewer Revisionモード" not in integration_prompt
+    assert "`fetchable_article_ids`に質問と関係する候補" in integration_prompt
+    assert "同じ観点の再検索より`fetch_articles`を優先" in integration_prompt
 
     cycle_close_prompt = mode_prompts["cycle_close"]
     assert "## Cycle Closeモード" in cycle_close_prompt
@@ -2287,6 +2289,29 @@ def test_contract_repair_prompt_handles_unknown_article_ids() -> None:
     assert "navigation-only evidence" not in prompt
     assert "resolved dependency requires" not in prompt
     assert "final answer citations omit" not in prompt
+
+
+def test_contract_repair_prompt_handles_duplicate_tool_request_ids() -> None:
+    context = build_solver_context(
+        CaseState(case_id="case-1", question="質問"),
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+        contract_feedback=SolverContractFeedback(
+            violation="duplicate tool request ID: legal_search_1",
+            previous_decision=SolverDecision(
+                next="finalize",
+                answer={"text": "回答"},
+            ),
+        ),
+    )
+
+    prompt = _solver_prompt(context, "system")
+
+    assert "相互に異なる新しいrequest_id" in prompt
+    assert "recent_tool_requestsにある過去のrequest_idを再利用しません" in prompt
+    assert "意味判断とToolの種類・引数は変えず、IDだけを修正" in prompt
+    assert "violation: duplicate tool request ID" in prompt
 
 
 def test_minimal_solver_contract_defines_state_field_invariants() -> None:

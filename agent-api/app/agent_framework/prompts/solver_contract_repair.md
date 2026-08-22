@@ -39,6 +39,9 @@ retain_evidence_idsはmax_retained_evidence件以内で、後続Cycleにも本�
 <!-- prompt-section:tool_request_limit -->
 上限内で今回必要な要求をLLMが選び、超過分をProgramへ選別させません。
 
+<!-- prompt-section:unique_tool_request_ids -->
+今回返す各ToolRequestには相互に異なる新しいrequest_idを付け、recent_tool_requestsにある過去のrequest_idを再利用しません。意味判断とToolの種類・引数は変えず、IDだけを修正します。
+
 <!-- prompt-section:article_fetch_contract -->
 本文取得は1 Requestに統合し、既知Articleをremaining_fetch_capacity以内で選びます。
 

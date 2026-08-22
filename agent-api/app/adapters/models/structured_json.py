@@ -426,6 +426,7 @@ _CONTRACT_REPAIR_RULES = (
         ("tool request count", "fetch_articles.article_ids exceeds"),
         "tool_request_limit",
     ),
+    (("duplicate tool request ID",), "unique_tool_request_ids"),
     (("Article body fetch", "fetch_articles"), "article_fetch_contract"),
     (
         ("focus", "ToolRequest", "tool request references"),
@@ -1852,6 +1853,7 @@ update_jsonの状態契約:
 
 参照契約:
 - IDはSolverContextまたは直前Decisionに表示された値だけを完全一致で使い、名前から生成しない。
+- 今回作るToolRequestのrequest_idは相互に一意な新しいIDとし、recent_tool_requestsの過去IDを再利用しない。
 - retain_evidence_idsはmax_retained_evidence件以内で、次Cycleにも本文提示が必要なEvidenceだけを選ぶ。
 - reviewer_findingsがあれば、review_finding_resolutionsで全finding_idを1回ずつ処理する。指摘を受け入れて回答修正または追加調査へ反映する場合はaddressed、提示済み本文と照合して指摘を採用しない場合だけdisputedとし、reasonと実際に使ったbasis_evidence_idsを返す。reviewer_findingsがなければ空配列にする。
 - statusの意味、根拠の十分性、追加調査、Graph候補の採否はsystem promptに従ってSolverが判断する。

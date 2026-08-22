@@ -2,7 +2,8 @@
 
 ### 共通
 
-- 既知Articleの本文取得には`fetch_articles`、Article IDが不明なら`legal_search`を使います。
+- `fetchable_article_ids`にあるArticle IDは、検索等で発見済みで本文取得に使える候補です。質問との関係を判断したうえで、本文未取得なら`fetch_articles`を使います。
+- Article IDが不明なら`legal_search`を使います。
 - manifestにだけある既知Evidence本文には`load_evidence`を使います。
 - ToolRequestは未確認のHypothesisとopen WorkItemへ結び付けます。
 - 同じDecisionの既知Articleは、上限内なら1つの`fetch_articles`へまとめます。上限は目標件数ではありません。
@@ -16,6 +17,7 @@
 
 - 法令本文を探す場合は`law`を使います。行政解釈やガイドも必要な場合だけ`guideline`を加えます。
 - 質問をそのまま繰り返さず、制度名と確認事項を法令に現れやすい表現へ言い換えます。
+- 同じHypothesisについて成功済みの検索結果に本文取得可能な候補がある場合、本文未取得であることだけを理由に同じ検索を繰り返しません。
 
 ### fetch_articles
 

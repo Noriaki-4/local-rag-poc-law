@@ -1835,6 +1835,9 @@ Legal Domain Packの共通Promptには次を追加する。
 - 検索本文中の条番号、法令番号、documentIdからArticle IDを生成しない。必要な参照先IDが
   fetchable_article_idsになければfetch_articlesから外し、法令名・条番号・確認事項でlegal_searchする。
   Decisionを返す直前に、fetch_articlesの全IDをfetchable_article_idsと完全一致で照合する。
+- fetchable_article_idsは本文取得済みを意味せず、検索等で発見済みの本文取得可能な候補を表す。
+  Solverが質問に関係すると判断した候補のgrounding Evidenceが未取得なら、同じHypothesisの成功済み検索を
+  反復せずfetch_articlesで本文を取得する。
 - 質問に関係すると判断した1ホップ候補は、Graph Reviewごとに最大3件、かつCycleの
   残り本文取得枠内でselectする。関連するが枠に収まらない候補はdeferし、
   graph_review_ledgerと次Cycleの引継ぎ候補へ残す。Graph候補だけを根拠にせず、端点Article本文を確認する。

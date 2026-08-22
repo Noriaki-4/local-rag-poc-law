@@ -1206,7 +1206,9 @@ Reviewer Agentとは別の処理モードである。Solverは`graph_review_batc
 プログラムは未終了IDの有無だけを検証し、法的な十分性や終了理由はSolverが判断する。
 SolverContextは、根拠・引用に使える正確なIDを`grounding_evidence_ids`、追加本文取得に使える
 Article IDを`fetchable_article_ids`として別々に渡す。LLMは前者をHypothesis・citationへ、後者を
-`fetch_articles`へ使う。プログラムはIDの完全一致だけを検証する。
+`fetch_articles`へ使う。`fetchable_article_ids`は本文取得済みという意味ではなく、検索等で発見済みの
+本文取得可能な候補を表す。質問に関係する候補の本文が未取得なら、同じ検索の反復より本文取得を優先する。
+プログラムはIDの完全一致だけを検証する。
 Article本文等のEvidence本文は`AGENT_FRAMEWORK_MAX_MATERIAL_EVIDENCE_CHARS`（既定50,000文字）を
 上限とする。全Graph Article・Link・判断履歴はCaseStoreに保持し、Solverへは新規・再採用・新Link差分の
 `graph_review_batch`と、全評価済みfrontierの短い`graph_review_ledger`だけを載せる。同じGraph navigation情報は

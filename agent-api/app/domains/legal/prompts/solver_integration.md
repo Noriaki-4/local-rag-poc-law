@@ -38,7 +38,7 @@
 
 ### 次の行動
 
-- 既知Article本文があれば、同じ観点の再検索より本文取得を優先します。
+- `fetchable_article_ids`に質問と関係する候補があり、そのArticle自身のgrounding Evidenceが未取得なら、同じ観点の再検索より`fetch_articles`を優先します。
 - 複数のopen WorkItemがある場合は、各WorkItemを直接扱う候補を1件ずつ選んでから同じWorkItemの追加候補を選びます。
 - Article IDと必要な関係・方向が明確ならGraph、そうでなければ法令名と確認事項を含むOpenSearchを使います。
 - 回答へ影響する未確認事項が残り、実行可能なら`continue`します。
