@@ -342,7 +342,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "115"
+    assert diagnostic_records[0]["profileVersion"] == "116"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -350,7 +350,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "115"
+    assert transport_input["profileVersion"] == "116"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"][0]["asset"] == (
         "agent_framework/prompts/solver_contract_repair.md"
@@ -702,7 +702,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "115"
+    assert profile.version == "116"
     mode_prompts = {
         "research": profile.solver_research.system_prompt,
         "integration": profile.solver_integration.system_prompt,
@@ -816,10 +816,11 @@ def test_graph_review_prompt_has_one_document_hierarchy() -> None:
     assert [line for line in prompt.splitlines() if line.startswith("# ")] == [
         "# 法令調査Solver：Graph Reviewモード"
     ]
-    assert "## 入力の定義" in prompt
-    assert "## 実行手順" in prompt
-    assert "## 判断ルール" in prompt
-    assert "## 出力契約" in prompt
+    assert "## 入力" in prompt
+    assert "## 手順" in prompt
+    assert "## Relationの読み方" in prompt
+    assert "## 選択ルール" in prompt
+    assert "## 出力" in prompt
 
 
 def test_search_review_prompt_defines_evidence_join_and_limited_role() -> None:
