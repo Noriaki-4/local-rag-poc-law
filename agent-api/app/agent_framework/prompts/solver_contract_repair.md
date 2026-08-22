@@ -9,6 +9,9 @@ violation: ${violation}
 <!-- prompt-section:unknown_evidence -->
 Evidence IDを生成せず、grounding_evidence_idsの完全一致だけをhypothesis_evidence_bindingsで選びます。未取得本文ならHypothesisをunresolvedにします。
 
+<!-- prompt-section:review_finding_resolution -->
+reviewer_findingsの全finding_idをreview_finding_resolutionsへ1回ずつ返します。指摘を反映するならaddressed、提示済み本文に基づき採用しない場合だけdisputedとし、理由と使用した既知Evidence IDを示します。
+
 <!-- prompt-section:hypothesis_requires_evidence -->
 grounding_evidence_idsが空ならHypothesisをunresolved、evidence_ids=[]へ戻し、検索候補から必要なArticleをarticle_fetchで取得します。検索候補だけで完了しません。
 

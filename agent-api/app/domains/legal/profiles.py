@@ -18,7 +18,7 @@ def legal_agent_profile() -> AgentProfile:
     common_solver_prompt = _read_prompt("solver_common.md")
     return AgentProfile(
         name="legal-default",
-        version="99",
+        version="100",
         provider=settings.llm_provider,
         solver_research=ModelCallProfile(
             model=settings.agent_framework_research_model,

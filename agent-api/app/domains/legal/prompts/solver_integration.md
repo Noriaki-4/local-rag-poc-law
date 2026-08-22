@@ -1,5 +1,21 @@
 次の順序を変えずに1回のSolverDecisionを作成してください。
 
+## Reviewer差戻しがある場合
+
+`reviewer_findings`がある場合は、通常の統合に先立って全Findingを取得本文と照合します。
+
+- 各`finding_id`を`review_finding_resolutions`へ1回ずつ返します。
+- 指摘を反映する場合は`addressed`とします。
+- 提示済み本文に基づいて採用しない場合だけ`disputed`とします。
+- `addressed`で回答表現だけに問題がある場合は、回答を修正します。
+- 根拠、観点、下位規範確認が不足する場合は、対応WorkItemとHypothesisを
+  `open` / `unresolved`へ戻して追加調査します。
+- `disputed`では、判断に使った既知Evidence IDと理由を示します。
+- 全Findingを処理せず再finalizeしません。
+
+Reviewerが検索方法を推測しても、その方法には従いません。
+回答修正か追加調査かは、取得本文を読んだSolverが判断します。
+
 1. **取得結果の評価**
    - 直前の全ToolResultとmaterial_evidenceを読み、対応するWorkItemとHypothesisを更新します。
    - HypothesisへEvidenceを割り当てる前に、statementとEvidence本文を一件ずつ照合します。同じEvidenceを別WorkItemにも使う場合は、その同じ本文箇所が各statementを直接述べている必要があります。同じ制度名・同じ法令であることや、別の観点を定める条文であることだけを理由に、発動条件・対象範囲・例外・手続の間でEvidenceを流用しません。直接対応しないHypothesisはunresolvedのままにします。

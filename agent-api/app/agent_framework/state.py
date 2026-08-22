@@ -12,6 +12,15 @@ WorkItemState = Literal["open", "resolved", "dropped"]
 HypothesisJudgment = Literal["supported", "contradicted", "unresolved"]
 ToolStatus = Literal["succeeded", "failed", "timeout"]
 ReviewVerdict = Literal["accept", "revise"]
+ReviewFindingKind = Literal[
+    "unsupported_claim",
+    "citation_mismatch",
+    "coverage_gap",
+    "dependency_gap",
+    "limitation_conflict",
+    "internal_contradiction",
+]
+ReviewFindingResolutionOutcome = Literal["addressed", "disputed"]
 DependencyStatus = Literal["not_required", "needs_action", "resolved"]
 FrontierReviewStatus = Literal[
     "unreviewed",
@@ -229,9 +238,39 @@ class FinalAnswer(FrameworkModel):
 
 
 class ReviewFinding(FrameworkModel):
+    finding_id: str = Field(
+        min_length=1,
+        max_length=160,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$",
+    )
+    kind: ReviewFindingKind
     description: str = Field(min_length=1, max_length=1000)
     work_item_id: str | None = Field(default=None, max_length=160)
     hypothesis_id: str | None = Field(default=None, max_length=160)
+    basis_evidence_ids: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def require_unique_evidence(self) -> ReviewFinding:
+        if len(self.basis_evidence_ids) != len(set(self.basis_evidence_ids)):
+            raise ValueError("review finding evidence IDs must be unique")
+        return self
+
+
+class ReviewFindingResolution(FrameworkModel):
+    finding_id: str = Field(
+        min_length=1,
+        max_length=160,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$",
+    )
+    outcome: ReviewFindingResolutionOutcome
+    reason: str = Field(min_length=1, max_length=1000)
+    basis_evidence_ids: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def require_unique_evidence(self) -> ReviewFindingResolution:
+        if len(self.basis_evidence_ids) != len(set(self.basis_evidence_ids)):
+            raise ValueError("review resolution evidence IDs must be unique")
+        return self
 
 
 class ReviewResult(FrameworkModel):
@@ -266,6 +305,7 @@ class CaseState(FrameworkModel):
     retained_evidence_ids: tuple[str, ...] = ()
     final_answer: FinalAnswer | None = None
     review: ReviewResult | None = None
+    review_finding_resolutions: tuple[ReviewFindingResolution, ...] = ()
     stop_reason: str | None = Field(default=None, max_length=160)
     cycle_step_timeout: bool = False
     created_at: datetime = Field(default_factory=utc_now)

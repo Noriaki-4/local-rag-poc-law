@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 from typing import Any, Literal
 
 from pydantic import Field
@@ -15,8 +15,8 @@ from .state import (
     DeferredFrontierResolutionAction,
     DependencyDecision,
     Evidence,
-    FrontierReviewStatus,
     FrameworkModel,
+    FrontierReviewStatus,
     Hypothesis,
     ReviewFinding,
     ToolRequest,
@@ -265,12 +265,18 @@ def build_solver_context(
         if hypothesis.hypothesis_id in work_item.basis_hypothesis_ids
         for evidence_id in hypothesis.evidence_ids
     )
+    reviewer_basis_evidence_ids = tuple(
+        evidence_id
+        for finding in reviewer_findings
+        for evidence_id in finding.basis_evidence_ids
+    )
     material_ids = tuple(
         dict.fromkeys(
             [
                 *new_evidence_ids,
                 *state.retained_evidence_ids,
                 *declared_basis_evidence_ids,
+                *reviewer_basis_evidence_ids,
             ]
         )
     )

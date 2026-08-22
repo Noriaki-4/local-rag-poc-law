@@ -15,6 +15,7 @@ from .state import (
     GraphCandidateReview,
     Hypothesis,
     HypothesisJudgment,
+    ReviewFindingResolution,
     ToolRequest,
     UnreviewedGraphResolution,
     WorkItem,
@@ -74,6 +75,7 @@ class SolverDecision(FrameworkModel):
     update: CaseUpdate = Field(default_factory=CaseUpdate)
     next_focus_work_item_ids: tuple[str, ...] = ()
     retain_evidence_ids: tuple[str, ...] = ()
+    review_finding_resolutions: tuple[ReviewFindingResolution, ...] = ()
     dependency_decisions: tuple[DependencyDecision, ...] = ()
     graph_candidate_review: GraphCandidateReview | None = None
     frontier_re_adoptions: tuple[FrontierReAdoption, ...] = ()

@@ -15,7 +15,7 @@ from app.agent_framework.diagnostics import AgentDiagnostics
 from app.agent_framework.ports.model import (
     ModelProtocolError,
     ReviewCallResult,
-    ReviewContext,
+    ReviewerView,
     SolverCallResult,
 )
 from app.agent_framework.profiles import ModelCallProfile, ReviewerProfile
@@ -196,28 +196,71 @@ class StructuredJSONModelAdapter:
 
     def review(
         self,
-        context: ReviewContext,
+        context: ReviewerView,
         profile: ReviewerProfile,
     ) -> ReviewCallResult:
         prompt = _review_prompt(context, profile.system_prompt)
+        schema = ReviewResult.model_json_schema()
+        if self._diagnostics is not None:
+            self._diagnostics.record_reviewer_input(
+                view=context,
+                profile=profile,
+                prompt=prompt,
+                schema=schema,
+            )
         try:
             result = self._client.generate_structured_json(
                 prompt=prompt,
-                schema=ReviewResult.model_json_schema(),
+                schema=schema,
                 model=profile.model,
                 max_tokens=profile.max_output_tokens,
                 timeout_sec=max(1, round(profile.timeout_sec)),
             )
         except requests.Timeout as exc:
+            if self._diagnostics is not None:
+                self._diagnostics.record_reviewer_timeout(
+                    view=context,
+                    reason="model provider request timed out",
+                )
             raise TimeoutError("model provider request timed out") from exc
         if result.validationError or result.payload is None:
+            if self._diagnostics is not None:
+                self._diagnostics.record_reviewer_output(
+                    view=context,
+                    payload=result.payload,
+                    review=None,
+                    validation_error=result.validationError or "empty",
+                    input_tokens=result.inputTokens,
+                    output_tokens=result.outputTokens,
+                    provider_retry_count=result.retryCount,
+                )
             raise ModelProtocolError(
                 f"review structured output invalid: {result.validationError or 'empty'}"
             )
         try:
             review = ReviewResult.model_validate(result.payload)
         except ValidationError as exc:
+            if self._diagnostics is not None:
+                self._diagnostics.record_reviewer_output(
+                    view=context,
+                    payload=result.payload,
+                    review=None,
+                    validation_error=str(exc),
+                    input_tokens=result.inputTokens,
+                    output_tokens=result.outputTokens,
+                    provider_retry_count=result.retryCount,
+                )
             raise ModelProtocolError("review result violates schema") from exc
+        if self._diagnostics is not None:
+            self._diagnostics.record_reviewer_output(
+                view=context,
+                payload=result.payload,
+                review=review,
+                validation_error=None,
+                input_tokens=result.inputTokens,
+                output_tokens=result.outputTokens,
+                provider_retry_count=result.retryCount,
+            )
         return ReviewCallResult(
             review=review,
             input_tokens=result.inputTokens,
@@ -329,7 +372,7 @@ def _ensure_solver_prompt_capacity(prompt: str, max_input_chars: int) -> None:
         )
 
 
-def _review_prompt(context: ReviewContext, system_prompt: str) -> str:
+def _review_prompt(context: ReviewerView, system_prompt: str) -> str:
     payload = json.dumps(
         context.model_dump(mode="json"),
         ensure_ascii=False,
@@ -337,9 +380,9 @@ def _review_prompt(context: ReviewContext, system_prompt: str) -> str:
     )
     return (
         f"{system_prompt}\n\n"
-        "以下の質問・回答・実際に引用された根拠だけを確認し、"
+        "以下のReviewerViewだけを確認し、"
         "ReviewResultだけを返してください。\n"
-        f"<review_context>{payload}</review_context>"
+        f"<reviewer_view>{payload}</reviewer_view>"
     )
 
 
@@ -359,6 +402,7 @@ _TRANSPORT_REPAIR_RULES = (
 )
 
 _CONTRACT_REPAIR_RULES = (
+    (("review finding resolutions",), "review_finding_resolution"),
     (("unknown evidence", "hypothesis has unknown evidence"), "unknown_evidence"),
     (
         ("supported or contradicted hypothesis requires evidence",),
@@ -543,6 +587,32 @@ def _solver_transport_schema(context: SolverContext) -> dict:
             "maxItems": required_dependency_count,
         }
         if required_dependency_count
+        else _empty_array_schema()
+    )
+    review_finding_ids = tuple(
+        item.finding_id for item in context.reviewer_findings
+    )
+    review_finding_resolution = _strict_object(
+        {
+            "finding_id": _enum_string(review_finding_ids),
+            "outcome": {
+                "type": "string",
+                "enum": ["addressed", "disputed"],
+            },
+            "reason": {"type": "string"},
+            "basis_evidence_ids": _bounded_enum_array(
+                context.grounding_evidence_ids
+            ),
+        }
+    )
+    review_finding_resolutions = (
+        {
+            "type": "array",
+            "items": review_finding_resolution,
+            "minItems": len(review_finding_ids),
+            "maxItems": len(review_finding_ids),
+        }
+        if review_finding_ids
         else _empty_array_schema()
     )
     batch_candidates = context.graph_review_batch.candidates
@@ -795,6 +865,7 @@ def _solver_transport_schema(context: SolverContext) -> dict:
                 tuple(item.evidence_id for item in context.evidence_manifest),
                 max_items=context.max_retained_evidence,
             ),
+            "review_finding_resolutions": review_finding_resolutions,
             "tool_requests_json": {
                 "type": "string",
                 "description": "ToolRequest array encoded as one JSON array string",
@@ -845,6 +916,7 @@ def _solver_transport_schema(context: SolverContext) -> dict:
             "update_json",
             "next_focus_work_item_ids",
             "retain_evidence_ids",
+            "review_finding_resolutions",
             "tool_requests_json",
             "dependency_decisions",
             "graph_candidate_review",
@@ -1741,6 +1813,8 @@ def _normalize_absent_context_branches(
         normalized["deferred_frontier_resolutions"] = []
     if context.graph_review_batch.remaining_unreviewed_count == 0:
         normalized["unreviewed_graph_resolution"] = None
+    if not context.reviewer_findings:
+        normalized["review_finding_resolutions"] = []
 
 
 def _decode_transport_json(value: Any, *, expected_type: type, label: str) -> Any:
@@ -1779,6 +1853,7 @@ update_jsonの状態契約:
 参照契約:
 - IDはSolverContextまたは直前Decisionに表示された値だけを完全一致で使い、名前から生成しない。
 - retain_evidence_idsはmax_retained_evidence件以内で、次Cycleにも本文提示が必要なEvidenceだけを選ぶ。
+- reviewer_findingsがあれば、review_finding_resolutionsで全finding_idを1回ずつ処理する。指摘を受け入れて回答修正または追加調査へ反映する場合はaddressed、提示済み本文と照合して指摘を採用しない場合だけdisputedとし、reasonと実際に使ったbasis_evidence_idsを返す。reviewer_findingsがなければ空配列にする。
 - statusの意味、根拠の十分性、追加調査、Graph候補の採否はsystem promptに従ってSolverが判断する。
 - 対象がない任意配列は空、任意objectはnull、更新がなければupdateは空objectにする。
 """.strip()
@@ -1799,6 +1874,7 @@ _SOLVER_CONTRACT = """
   },
   "next_focus_work_item_ids": [str],
   "retain_evidence_ids": [str],
+  "review_finding_resolutions": [{"finding_id": str, "outcome": "addressed"|"disputed", "reason": str, "basis_evidence_ids": [str]}],
   "dependency_decisions": [{"dependency_kind": str, "work_item_id": str, "status": "not_required"|"needs_action"|"resolved", "reason": str, "basis_evidence_ids": [str], "action_request_id": str|null}],
   "graph_candidate_review": {"graph_request_ids": [str], "reviewed_link_ids": [str], "frontier_decisions": [{"frontier_item_id": str, "article_id": str, "work_item_id": str, "hypothesis_id": str|null, "action": "select"|"defer"|"reject", "reason": str}], "reason": str} | null,
   "frontier_re_adoptions": [{"article_id": str, "work_item_id": str, "hypothesis_id": str, "reason": str}],

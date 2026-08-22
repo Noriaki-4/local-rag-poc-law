@@ -13,9 +13,10 @@ from typing import Any, Literal
 
 from .context import SolverContext
 from .contracts import SolverDecision
-from .profiles import ModelCallProfile
+from .ports.model import ReviewerView
+from .profiles import ModelCallProfile, ReviewerProfile
 from .prompt_assets import PromptAssetTrace
-from .state import CaseState
+from .state import CaseState, ReviewResult
 
 DiagnosticsMode = Literal["off", "status", "snapshot"]
 logger = logging.getLogger(__name__)
@@ -189,6 +190,150 @@ class AgentDiagnostics:
             record["caseState"] = state.model_dump(mode="json")
         self._write(record)
 
+    def record_reviewer_input(
+        self,
+        *,
+        view: ReviewerView,
+        profile: ReviewerProfile,
+        prompt: str,
+        schema: dict[str, Any],
+    ) -> None:
+        if self.mode == "off":
+            return
+        schema_json = json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
+        record: dict[str, Any] = {
+            "event": "reviewer_input",
+            "caseId": view.case_id,
+            "model": profile.model,
+            "workItemCount": len(view.work_items),
+            "hypothesisCount": len(view.hypotheses),
+            "dependencyDecisionCount": len(view.dependency_decisions),
+            "evidenceCount": len(view.evidence),
+            "promptChars": len(prompt),
+            "schemaChars": len(schema_json),
+            "promptHash": _text_sha256(prompt),
+            "schemaHash": _json_sha256(schema),
+            "systemPromptHash": _text_sha256(profile.system_prompt),
+            "profileName": self._profile_name,
+            "profileVersion": self._profile_version,
+            "promptBuilder": "app.adapters.models.structured_json:_review_prompt",
+        }
+        if self.mode == "snapshot":
+            record.update(
+                {
+                    "reviewerView": view.model_dump(mode="json"),
+                    "prompt": prompt,
+                    "transportSchema": schema,
+                    "modelProfile": profile.model_dump(mode="json"),
+                }
+            )
+        self._write(record)
+
+    def record_reviewer_output(
+        self,
+        *,
+        view: ReviewerView,
+        payload: dict[str, Any] | None,
+        review: ReviewResult | None,
+        validation_error: str | None,
+        input_tokens: int | None,
+        output_tokens: int | None,
+        provider_retry_count: int,
+    ) -> None:
+        if self.mode == "off":
+            return
+        record: dict[str, Any] = {
+            "event": "reviewer_output",
+            "caseId": view.case_id,
+            "validationError": validation_error,
+            "inputTokens": input_tokens,
+            "outputTokens": output_tokens,
+            "providerRetryCount": provider_retry_count,
+            "hasPayload": payload is not None,
+            "payloadHash": _json_sha256(payload) if payload is not None else None,
+            "reviewResultHash": (
+                _json_sha256(review.model_dump(mode="json"))
+                if review is not None
+                else None
+            ),
+            "verdict": review.verdict if review is not None else None,
+            "findingCount": len(review.findings) if review is not None else 0,
+        }
+        if self.mode == "snapshot":
+            record.update(
+                {
+                    "payload": payload,
+                    "reviewResult": (
+                        review.model_dump(mode="json")
+                        if review is not None
+                        else None
+                    ),
+                }
+            )
+        self._write(record)
+
+    def record_reviewer_timeout(self, *, view: ReviewerView, reason: str) -> None:
+        if self.mode == "off":
+            return
+        self._write(
+            {
+                "event": "reviewer_timeout",
+                "caseId": view.case_id,
+                "reason": reason,
+            }
+        )
+
+    def record_reviewer_contract_violation(
+        self,
+        *,
+        view: ReviewerView,
+        review: ReviewResult,
+        violation: str,
+    ) -> None:
+        if self.mode == "off":
+            return
+        record: dict[str, Any] = {
+            "event": "reviewer_contract_violation",
+            "caseId": view.case_id,
+            "violation": violation,
+            "reviewResultHash": _json_sha256(review.model_dump(mode="json")),
+            "verdict": review.verdict,
+            "findingCount": len(review.findings),
+        }
+        if self.mode == "snapshot":
+            record["reviewResult"] = review.model_dump(mode="json")
+        self._write(record)
+
+    def record_reviewer_result_applied(
+        self,
+        *,
+        state_before: CaseState,
+        state_after: CaseState,
+        view: ReviewerView,
+        review: ReviewResult,
+    ) -> None:
+        if self.mode == "off":
+            return
+        record: dict[str, Any] = {
+            "event": "reviewer_result_applied",
+            "caseId": view.case_id,
+            "reviewResultHash": _json_sha256(review.model_dump(mode="json")),
+            "verdict": review.verdict,
+            "findingIds": [item.finding_id for item in review.findings],
+            "stateBeforeStatus": _state_status(state_before),
+            "stateAfterStatus": _state_status(state_after),
+        }
+        if self.mode == "snapshot":
+            record.update(
+                {
+                    "reviewerView": view.model_dump(mode="json"),
+                    "reviewResult": review.model_dump(mode="json"),
+                    "caseStateBefore": state_before.model_dump(mode="json"),
+                    "caseStateAfter": state_after.model_dump(mode="json"),
+                }
+            )
+        self._write(record)
+
     def record_transport_input(
         self,
         *,
@@ -335,6 +480,11 @@ def _state_status(state: CaseState) -> dict[str, Any]:
         "toolRequestCount": len(state.tool_requests),
         "toolResultCount": len(state.tool_results),
         "graphReviewCount": len(state.graph_candidate_reviews),
+        "reviewVerdict": state.review.verdict if state.review is not None else None,
+        "reviewFindingCount": (
+            len(state.review.findings) if state.review is not None else 0
+        ),
+        "reviewFindingResolutionCount": len(state.review_finding_resolutions),
     }
 
 
@@ -376,6 +526,9 @@ def _decision_status(decision: SolverDecision) -> dict[str, Any]:
         "addedHypothesisCount": len(decision.update.add_hypotheses),
         "updatedHypothesisCount": len(decision.update.update_hypotheses),
         "dependencyDecisionCount": len(decision.dependency_decisions),
+        "reviewFindingResolutionCount": len(
+            decision.review_finding_resolutions
+        ),
         "toolRequestCount": len(decision.tool_requests),
         "hasGraphCandidateReview": decision.graph_candidate_review is not None,
         "hasAnswer": decision.answer is not None,

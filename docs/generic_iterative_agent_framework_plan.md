@@ -31,7 +31,7 @@
   `gpt-4o-mini`で、`LLM_MODEL`により同一Runの探索・統合・回答・Reviewerを一括変更できる。
   `LLM_MODEL`未指定時は従来どおり役割別model設定を使う。同一Run内でproviderを統一する制約は維持する。
 - Reviewerの既定値は無効で、新経路のFeature Flagも既定では無効である。
-- 現行Legal Profile v98は本文取得後の自動Graph連動を持たず、`automatic_tools=()`である。
+- 現行Legal Profileは本文取得後の自動Graph連動を持たず、`automatic_tools=()`である。
   Solverは`legal_graph_neighbors`へ、既知起点Article、`semantic_assertion / explicit_reference / explains`の
   いずれか1 mode、意味関係なら5 predicateのうち1つ、方向を明示する。意味方向は
   `from_subject / to_subject`、原文関係は`outgoing / incoming`で、1要求は1ホップである。
@@ -1478,26 +1478,78 @@ reviewer:
 
 ### 6.2 Reviewer契約
 
-Reviewerへ渡すものは次に限定する。
+ReviewerへはCaseState全体をそのまま渡さず、決定的に投影した`ReviewerView`を渡す。
 
 - 利用者の質問
 - Solverの最終回答
-- Solverが実際に選んだ引用Evidence
-- Solverが明示したlimitations
+- WorkItemの問い・state・resolution・basis Hypothesis
+- Hypothesisのstatement・judgment・Evidence・gaps
+- 下位規範のDependencyDecision
+- 取得済みgrounding Evidence。検索候補・Graph候補は含めない
+- Solverが明示したlimitationsと未解決ID
+
+ProjectorはEvidenceの法的関連性を判断しない。`citationEligible=false`のnavigation Evidenceだけを
+型に基づいて除外し、それ以外の取得済みgrounding Evidenceを欠落なく投影する。これによりReviewerは、
+引用済み根拠との一致だけでなく、取得済みなのに回答・basisから漏れた本文も確認できる。
 
 ```python
+class ReviewerView:
+    case_id: str
+    question: str
+    answer: FinalAnswer
+    work_items: list[WorkItem]
+    hypotheses: list[Hypothesis]
+    dependency_decisions: list[DependencyDecision]
+    evidence: list[Evidence]
+
+class ReviewFinding:
+    finding_id: str
+    kind: Literal[
+        "unsupported_claim",
+        "citation_mismatch",
+        "coverage_gap",
+        "dependency_gap",
+        "limitation_conflict",
+        "internal_contradiction",
+    ]
+    description: str
+    work_item_id: str | None
+    hypothesis_id: str | None
+    basis_evidence_ids: list[str]
+
 class ReviewResult:
     verdict: Literal["accept", "revise"]
     findings: list[ReviewFinding]
 ```
 
 Reviewerは追加調査の実行経路を直接選ばない。`revise`では、誤り、根拠不足、引用との不一致を
-具体的に返す。Solverがその指摘を読み、回答修正か追加調査かを判断する。
+具体的に返す。Programはfinding IDの一意性とWorkItem・Hypothesis・Evidenceの既知参照だけを検証し、
+指摘の法的妥当性を補正しない。Solverがその指摘を取得本文と照合し、回答修正か追加調査かを判断する。
+
+Solverは差戻し直後のDecisionで全Findingを1回ずつ処理する。
+
+```python
+class ReviewFindingResolution:
+    finding_id: str
+    outcome: Literal["addressed", "disputed"]
+    reason: str
+    basis_evidence_ids: list[str]
+```
+
+指摘を回答修正または追加調査へ反映する場合は`addressed`、提示済み本文に基づき採用しない場合だけ
+`disputed`とする。Programは全件性、既知ID、提示済みEvidence参照だけを検証する。Solverが
+`addressed`を選んだ場合も、回答だけを直すか、WorkItem・Hypothesisを再度open/unresolvedにして
+Toolを要求するかはSolverが判断する。Findingを処理せず再finalizeできない。
+未処理のGraph候補が残っていても、差戻し直後はGraph Reviewよりintegration profileを先に呼び、
+Findingの評価と次の行動選択をSolverへ一度戻す。
 
 1回の修正後に再確認する場合、Reviewerをもう1回呼ぶ。2回目も`revise`なら
 `review_failed`として未承認を明示し、それ以上繰り返さない。
 
 Reviewer有効時にReviewer自体がtimeoutまたは契約違反になった場合も、勝手に`accept`へしない。
+`reviewer_input / reviewer_output / reviewer_contract_violation /
+reviewer_result_applied`を診断イベントへ記録し、`snapshot`ではReviewerView、Prompt、schema、
+生payload、正規化ReviewResultを保存する。
 
 ## 7. Model ProfileとPrompt
 
@@ -1818,6 +1870,8 @@ Promptだけを先行させて現行SolverContextに存在しない値をLLMへ�
 | `solver_common.md` | 評価済みNodeを別Hypothesisへ使う場合は`frontier_re_adoptions`で明示し、Programが自動転用しないことを定義する。 |
 | `solver_common.md` | 各検索を既知WorkItem・Hypothesis・ExplorationIntentへ結び付け、OpenSearchとGraphの明示selector、候補と根拠の違い、selectorをProgramへ補完させないことを定義する。 |
 | `solver_common.md` / `solver_graph_review.md` | RelationAssertionは`SUBJECT / OBJECT`で接続された未確認候補で、`proposedPredicate`は確定関係ではないと定義する。5 predicateの向き、`ClassificationRun` coverage、検索時の案件判断をNeo4jへ更新・昇格しないことも定義する。`USES_DEFINITION`はラベルだけで扱わず、`relationExplanation`、両端supporting quote、方向から対象概念と探索目的を確認する手順を含める。 |
+| `reviewer.md` | ReviewerViewの各状態、検査順序、`accept / revise`、Finding種別、既知IDの使い方を定義する。Reviewerは検索方法やToolRequestを決めない。 |
+| `solver_integration.md` | Reviewer差戻し時は全Findingを本文と照合し、`addressed / disputed`を全件返す。回答修正か追加調査かはSolverが判断する。 |
 | `solver_research.md` / `solver_integration.md` | 未確認事項から検証目的と最小scopeを作る。Graphの関係種別を選べなければ全種別を要求せず、OpenSearchで根拠または起点を発見する。 |
 | `solver_graph_review.md` | `graph_review_batch`と`graph_review_ledger`を読む。`review_trigger`を解釈し、過去の詳細が再提示されないことを候補の不存在と解釈しない。 |
 | `solver_graph_review.md` | 各batchの全候補をWorkItem・Hypothesis別に評価し、最大3件を`select`、関連する残りを`defer`、無関係と判断したものだけを`reject`する。 |

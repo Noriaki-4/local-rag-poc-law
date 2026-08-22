@@ -26,8 +26,10 @@ flowchart LR
     T --> R[ToolResult / Evidence]
     R --> S
     L --> S
-    D -. 任意 .-> RV[Reviewer LLM]
-    RV -. revise .-> L
+    D -. 最終回答案 .-> RP[Reviewer Projector]
+    S -. 決定的投影 .-> RP
+    RP -. ReviewerView .-> RV[Reviewer LLM]
+    RV -. accept / Finding .-> L
 ```
 
 | 要素 | 一言でいうと |
@@ -39,6 +41,27 @@ flowchart LR
 | AgentLoop | 呼出し、保存、予算、構造検証を進めるプログラム |
 | Tool Adapter | Solverの検索要求を固定されたbackend操作へ変換する処理 |
 | Reviewer | 有効時だけ最終回答案を検査するLLM |
+
+Reviewer有効時も新しい探索Agentは増えない。Reviewer ProjectorはCaseStoreから質問、回答、WorkItem、
+Hypothesis、DependencyDecision、取得済みgrounding Evidenceを機械投影する。Reviewerは不整合をFindingとして
+返し、Solverが回答修正か追加調査かを判断する。
+
+```mermaid
+flowchart TD
+    CS[(CaseStore)] --> RP[Reviewer Projector]
+    RP --> V[ReviewerView]
+    V --> R[Reviewer LLM]
+    R -->|accept| END[完了]
+    R -->|revise + Findings| S[Solver LLM]
+    S --> FR[FindingResolution 全件]
+    FR -->|回答表現の修正| R2[Reviewer再確認]
+    FR -->|根拠不足| T[追加Tool]
+    T --> S
+    FR -->|根拠付きでdisputed| R2
+```
+
+ProgramはFindingとResolutionの既知ID・全件性・参照整合だけを検証し、どの指摘が法的に正しいかや
+どのToolを使うかを決めない。
 
 ## 2. CaseStore、Projector、AgentViewの関係
 

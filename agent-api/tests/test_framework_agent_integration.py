@@ -8,6 +8,8 @@ from typing import Any
 
 import pytest
 import requests
+from pydantic import ValidationError
+
 from app import main
 from app.adapters.models import StructuredJSONModelAdapter
 from app.adapters.models.structured_json import (
@@ -33,14 +35,20 @@ from app.agent_framework.context import (
 from app.agent_framework.contracts import SolverDecision
 from app.agent_framework.diagnostics import AgentDiagnostics
 from app.agent_framework.loop import AgentLoop, _dependency_audit_work_item_ids
-from app.agent_framework.ports.model import ModelProtocolError
-from app.agent_framework.profiles import AgentLimits, ModelCallProfile
+from app.agent_framework.ports.model import ModelProtocolError, ReviewerView
+from app.agent_framework.profiles import (
+    AgentLimits,
+    ModelCallProfile,
+    ReviewerProfile,
+)
 from app.agent_framework.state import (
     CaseState,
     DeferredFrontierResolution,
     Evidence,
     FinalAnswer,
     Hypothesis,
+    ReviewFinding,
+    ReviewResult,
     ToolRequest,
     ToolResult,
     UnreviewedGraphResolution,
@@ -55,7 +63,6 @@ from app.domains.legal import profiles as legal_profiles
 from app.framework_agent import LegalFrameworkAgentService
 from app.llm import StructuredJSONResult
 from app.models import AnswerRequest, AnswerResponse
-from pydantic import ValidationError
 
 
 class FakeStructuredLLM:
@@ -316,7 +323,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "99"
+    assert diagnostic_records[0]["profileVersion"] == "100"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -324,7 +331,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "99"
+    assert transport_input["profileVersion"] == "100"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"][0]["asset"] == (
         "agent_framework/prompts/solver_contract_repair.md"
@@ -404,6 +411,103 @@ def test_framework_snapshot_diagnostics_preserve_full_solver_material(
     assert record["modelProfile"]["system_prompt"] == "prompt"
 
 
+def test_reviewer_transport_records_full_view_and_both_contract_boundaries(
+    tmp_path,
+) -> None:
+    class ReviewLLM:
+        provider = "fake"
+
+        def generate_structured_json(self, **kwargs: Any) -> StructuredJSONResult:
+            assert "<reviewer_view>" in kwargs["prompt"]
+            return StructuredJSONResult(
+                payload={"verdict": "accept", "findings": []},
+                provider="fake",
+                model=kwargs["model"],
+                latencyMs=1,
+                inputTokens=10,
+                outputTokens=5,
+            )
+
+    evidence = Evidence(
+        evidence_id="e1",
+        source_ref="fake://article-1",
+        content="確認本文",
+        created_cycle=1,
+    )
+    view = ReviewerView(
+        case_id="case-review",
+        question="質問",
+        answer=FinalAnswer(text="回答", citation_ids=("e1",)),
+        work_items=(),
+        hypotheses=(),
+        dependency_decisions=(),
+        evidence=(evidence,),
+    )
+    diagnostics = AgentDiagnostics(
+        mode="snapshot",
+        output_dir=tmp_path,
+        case_id=view.case_id,
+        profile_name="legal-default",
+        profile_version="100",
+    )
+
+    result = StructuredJSONModelAdapter(
+        ReviewLLM(),
+        diagnostics=diagnostics,
+    ).review(
+        view,
+        ReviewerProfile(
+            enabled=True,
+            model="review-model",
+            system_prompt="review system prompt",
+        ),
+    )
+
+    assert result.review == ReviewResult(verdict="accept")
+    assert diagnostics.output_path is not None
+    records = [
+        json.loads(line)
+        for line in diagnostics.output_path.read_text(encoding="utf-8").splitlines()
+    ]
+    reviewer_input, reviewer_output = records
+    assert reviewer_input["event"] == "reviewer_input"
+    assert reviewer_input["reviewerView"]["evidence"][0]["evidence_id"] == "e1"
+    assert len(reviewer_input["promptHash"]) == 64
+    assert len(reviewer_input["schemaHash"]) == 64
+    assert reviewer_output["event"] == "reviewer_output"
+    assert reviewer_output["verdict"] == "accept"
+    assert reviewer_output["findingCount"] == 0
+    assert len(reviewer_output["payloadHash"]) == 64
+    assert len(reviewer_output["reviewResultHash"]) == 64
+
+
+def test_solver_transport_requires_one_resolution_per_reviewer_finding() -> None:
+    context = build_solver_context(
+        CaseState(case_id="case-review-repair", question="質問"),
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+        reviewer_findings=(
+            ReviewFinding(
+                finding_id="finding-1",
+                kind="coverage_gap",
+                description="観点が回答にない",
+            ),
+        ),
+    )
+
+    schema = _solver_transport_schema(context)
+    resolutions = schema["properties"]["review_finding_resolutions"]
+
+    assert resolutions["minItems"] == 1
+    assert resolutions["maxItems"] == 1
+    assert resolutions["items"]["properties"]["finding_id"] == {
+        "type": "string",
+        "enum": ["finding-1"],
+    }
+    assert "review_finding_resolutions" in schema["required"]
+
+
 def test_solver_schema_and_prompt_require_a_concise_decision_reason() -> None:
     context = build_solver_context(
         CaseState(case_id="case-reason", question="質問"),
@@ -423,6 +527,23 @@ def test_framework_reviewer_setting_defaults_to_false() -> None:
     from app.config import settings
 
     assert settings.agent_framework_reviewer_enabled is False
+
+
+def test_reviewer_and_solver_prompts_define_the_revision_handoff() -> None:
+    profile = legal_profiles.legal_agent_profile()
+
+    reviewer_prompt = profile.reviewer.system_prompt
+    assert "# ReviewerViewの意味" in reviewer_prompt
+    assert "# 検査順序" in reviewer_prompt
+    assert "# Finding契約" in reviewer_prompt
+    assert "dependency_decisions.status" in reviewer_prompt
+    assert "検索、Tool選択、CaseStateの変更は行いません" in reviewer_prompt
+
+    solver_prompt = profile.solver_integration.system_prompt
+    assert "`reviewer_findings`がある場合" in solver_prompt
+    assert "全Findingを取得本文と照合" in solver_prompt
+    assert "review_finding_resolutions" in solver_prompt
+    assert "全Findingを処理せず再finalizeしません" in solver_prompt
 
 
 def test_dependency_audit_scope_uses_llm_tool_bindings_for_grounding_only() -> None:
@@ -550,7 +671,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 
 def test_all_solver_stages_include_shared_legal_research_rules() -> None:
     profile = legal_profiles.legal_agent_profile()
-    assert profile.version == "99"
+    assert profile.version == "100"
     prompts = (
         profile.solver_research.system_prompt,
         profile.solver_integration.system_prompt,

@@ -30,6 +30,7 @@ def apply_solver_decision(
     required_dependency_kind: str | None = None,
     required_dependency_work_item_ids: Collection[str] | None = None,
     require_dependency_decisions: bool = False,
+    required_review_finding_ids: Collection[str] = (),
     tool_list_argument_limits: Mapping[tuple[str, str], int] | None = None,
     required_graph_review_request_ids: Collection[str] = (),
     graph_candidate_article_ids: Collection[str] = (),
@@ -104,6 +105,28 @@ def apply_solver_decision(
         raise ContractViolation(
             f"material evidence is not stored: {sorted(unknown_material_ids)}"
         )
+    review_resolution_ids = [
+        item.finding_id for item in decision.review_finding_resolutions
+    ]
+    if len(review_resolution_ids) != len(set(review_resolution_ids)):
+        raise ContractViolation("review finding resolutions must be unique")
+    expected_review_finding_ids = set(required_review_finding_ids)
+    if set(review_resolution_ids) != expected_review_finding_ids:
+        missing = sorted(expected_review_finding_ids - set(review_resolution_ids))
+        extra = sorted(set(review_resolution_ids) - expected_review_finding_ids)
+        raise ContractViolation(
+            "review finding resolutions do not match pending findings; "
+            f"missing={missing}, extra={extra}"
+        )
+    for resolution in decision.review_finding_resolutions:
+        unknown_resolution_evidence = (
+            set(resolution.basis_evidence_ids) - material_ids
+        )
+        if unknown_resolution_evidence:
+            raise ContractViolation(
+                "review finding resolution references evidence not shown in full: "
+                f"{sorted(unknown_resolution_evidence)}"
+            )
     changed_hypothesis_ids: set[str] = set()
     added_work_item_ids = {item.work_item_id for item in decision.update.add_work_items}
     dependency_scope_ids = (
@@ -852,6 +875,10 @@ def apply_solver_decision(
         tool_requests=(*state.tool_requests, *decision.tool_requests),
         focus_work_item_ids=focus_ids,
         retained_evidence_ids=retained_ids,
+        review_finding_resolutions=(
+            *state.review_finding_resolutions,
+            *decision.review_finding_resolutions,
+        ),
         dependency_decisions=tuple(dependency_by_key.values()),
         graph_candidate_reviews=(
             (

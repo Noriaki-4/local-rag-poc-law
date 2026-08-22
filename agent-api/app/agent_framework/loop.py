@@ -23,7 +23,7 @@ from .observability import (
     RunTrace,
     ToolCallTrace,
 )
-from .ports.model import ModelPort, ModelProtocolError, ReviewContext
+from .ports.model import ModelPort, ModelProtocolError, ReviewerView
 from .ports.tool import ToolExecution, ToolRegistry
 from .profiles import AgentProfile, ModelCallProfile, ReviewerProfile
 from .state import (
@@ -32,6 +32,7 @@ from .state import (
     Evidence,
     GraphCandidateReview,
     ReviewFinding,
+    ReviewResult,
     RunStatus,
     ToolRequest,
     ToolResult,
@@ -90,7 +91,7 @@ class AgentLoop:
                     state = self._finish(state, "completed")
                     break
 
-                review_context = self._build_review_context(state)
+                reviewer_view = self._build_reviewer_view(state)
                 remaining = self._remaining_wall_time(started_at)
                 if remaining <= 0:
                     state = self._finish(
@@ -110,9 +111,19 @@ class AgentLoop:
                 )
                 review_started = self._clock()
                 review_call = self._model.review(
-                    review_context,
+                    reviewer_view,
                     review_profile,
                 )
+                try:
+                    self._validate_review_result(reviewer_view, review_call.review)
+                except ContractViolation as exc:
+                    if self._diagnostics is not None:
+                        self._diagnostics.record_reviewer_contract_violation(
+                            view=reviewer_view,
+                            review=review_call.review,
+                            violation=str(exc),
+                        )
+                    raise
                 model_traces.append(
                     ModelCallTrace(
                         purpose="review",
@@ -123,8 +134,16 @@ class AgentLoop:
                         attempt_count=review_call.attempt_count,
                     )
                 )
+                state_before_review = state
                 state = self._replace_state(state, review=review_call.review)
                 self._store.save(state)
+                if self._diagnostics is not None:
+                    self._diagnostics.record_reviewer_result_applied(
+                        state_before=state_before_review,
+                        state_after=state,
+                        view=reviewer_view,
+                        review=review_call.review,
+                    )
                 if review_call.review.verdict == "accept":
                     state = self._finish(state, "completed")
                     break
@@ -268,6 +287,7 @@ class AgentLoop:
                     context.required_graph_review_request_ids
                     and self._profile.solver_graph_review is not None
                     and not finalize_only
+                    and not reviewer_findings
                 )
                 if graph_review_call and not finalize_only:
                     context = context.model_copy(
@@ -371,6 +391,9 @@ class AgentLoop:
                         ),
                         require_dependency_decisions=bool(
                             context.required_dependency_work_item_ids
+                        ),
+                        required_review_finding_ids=tuple(
+                            item.finding_id for item in context.reviewer_findings
                         ),
                         tool_list_argument_limits={
                             (item.tool_name, item.argument_name): item.max_items
@@ -1029,22 +1052,70 @@ class AgentLoop:
         if any(item.created_cycle != cycle_no for item in execution.evidence):
             raise ContractViolation("tool evidence cycle does not match")
 
-    def _build_review_context(self, state: CaseState) -> ReviewContext:
+    def _build_reviewer_view(self, state: CaseState) -> ReviewerView:
         if state.final_answer is None:
             raise ContractViolation("review requires a final answer")
-        evidence_by_id = {item.evidence_id: item for item in state.evidence}
-        try:
-            cited = tuple(
-                evidence_by_id[evidence_id]
-                for evidence_id in state.final_answer.citation_ids
+        evidence_ids = {item.evidence_id for item in state.evidence}
+        unknown_citations = set(state.final_answer.citation_ids) - evidence_ids
+        if unknown_citations:
+            raise ContractViolation(
+                f"review citation is not stored: {sorted(unknown_citations)}"
             )
-        except KeyError as exc:
-            raise ContractViolation("review citation is not stored") from exc
-        return ReviewContext(
+        grounding_evidence = tuple(
+            item
+            for item in state.evidence
+            if item.metadata.get("citationEligible") is not False
+        )
+        return ReviewerView(
+            case_id=state.case_id,
             question=state.question,
             answer=state.final_answer,
-            evidence=cited,
+            work_items=state.work_items,
+            hypotheses=state.hypotheses,
+            dependency_decisions=state.dependency_decisions,
+            evidence=grounding_evidence,
         )
+
+    def _validate_review_result(
+        self,
+        view: ReviewerView,
+        review: ReviewResult,
+    ) -> None:
+        finding_ids = [item.finding_id for item in review.findings]
+        if len(finding_ids) != len(set(finding_ids)):
+            raise ContractViolation("Reviewer finding IDs must be unique")
+        work_items = {item.work_item_id: item for item in view.work_items}
+        hypotheses = {item.hypothesis_id: item for item in view.hypotheses}
+        evidence_ids = {item.evidence_id for item in view.evidence}
+        for finding in review.findings:
+            if (
+                finding.work_item_id is not None
+                and finding.work_item_id not in work_items
+            ):
+                raise ContractViolation(
+                    f"Reviewer finding references unknown WorkItem: "
+                    f"{finding.work_item_id}"
+                )
+            if finding.hypothesis_id is not None:
+                hypothesis = hypotheses.get(finding.hypothesis_id)
+                if hypothesis is None:
+                    raise ContractViolation(
+                        f"Reviewer finding references unknown Hypothesis: "
+                        f"{finding.hypothesis_id}"
+                    )
+                if (
+                    finding.work_item_id is not None
+                    and hypothesis.work_item_id != finding.work_item_id
+                ):
+                    raise ContractViolation(
+                        "Reviewer finding Hypothesis does not belong to its WorkItem"
+                    )
+            unknown_evidence = set(finding.basis_evidence_ids) - evidence_ids
+            if unknown_evidence:
+                raise ContractViolation(
+                    "Reviewer finding references unknown Evidence: "
+                    f"{sorted(unknown_evidence)}"
+                )
 
     def _finish(
         self,

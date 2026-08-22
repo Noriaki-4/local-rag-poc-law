@@ -1075,6 +1075,10 @@ UI では回答、検索ルート、citations、Graph paths、trace を確認で
 `AGENT_FRAMEWORK_ACTIVE=false`のままでも、`/answer/framework`は新Frameworkだけを実行する。
 現行経路との取り違えを避けるため、新Frameworkの移行評価ではこのendpointを使う。
 Reviewerは`AGENT_FRAMEWORK_REVIEWER_ENABLED=true`を明示した場合だけ有効になり、既定値は`false`。
+有効時は最終回答案、WorkItem、Hypothesis、DependencyDecision、取得済みgrounding Evidenceから
+`ReviewerView`を機械投影する。Reviewerは`accept`または構造化Findingを返し、差戻し後のSolverは
+全finding IDへ`addressed / disputed`を1回ずつ返す。Programは既知IDと全件性だけを検証し、
+回答修正か追加調査かを決めない。既定の差戻し上限は1回で、再確認も`revise`なら`review_failed`となる。
 検索時にLLMを使う最初の動作確認は、Ollama `gemma4:e4b`をresearchとintegrationの両方へ設定して行う。
 この確認を通す前にHaiku、Sonnet、Lunaへ切り替えない。不具合時はモデル性能だけを原因とせず、実装、
 契約、Prompt、入力、`trace.agentFramework`を先に調べる。Gemmaで一連の経路が動いた後、必要な場合だけ

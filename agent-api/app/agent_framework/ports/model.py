@@ -10,10 +10,13 @@ from ..context import SolverContext
 from ..contracts import SolverDecision
 from ..profiles import ModelCallProfile, ReviewerProfile
 from ..state import (
+    DependencyDecision,
     Evidence,
     FinalAnswer,
     FrameworkModel,
+    Hypothesis,
     ReviewResult,
+    WorkItem,
 )
 
 
@@ -28,10 +31,18 @@ class SolverCallResult(FrameworkModel):
     attempt_count: int = Field(default=1, ge=1)
 
 
-class ReviewContext(FrameworkModel):
+class ReviewerView(FrameworkModel):
+    case_id: str
     question: str
     answer: FinalAnswer
+    work_items: tuple[WorkItem, ...]
+    hypotheses: tuple[Hypothesis, ...]
+    dependency_decisions: tuple[DependencyDecision, ...]
     evidence: tuple[Evidence, ...]
+
+
+# 移行中の呼出し側との互換名。新規コードはReviewerViewを使う。
+ReviewContext = ReviewerView
 
 
 class ReviewCallResult(FrameworkModel):
@@ -50,6 +61,6 @@ class ModelPort(Protocol):
 
     def review(
         self,
-        context: ReviewContext,
+        context: ReviewerView,
         profile: ReviewerProfile,
     ) -> ReviewCallResult: ...

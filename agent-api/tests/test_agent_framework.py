@@ -46,6 +46,7 @@ from app.agent_framework.state import (
     GraphFrontierDecision,
     Hypothesis,
     ReviewFinding,
+    ReviewFindingResolution,
     ReviewResult,
     ToolRequest,
     ToolResult,
@@ -1416,21 +1417,44 @@ def test_dependency_repair_receives_only_work_items_bound_to_grounding_request()
 
 
 def test_reviewer_can_request_one_solver_revision_and_then_accept() -> None:
+    finding = ReviewFinding(
+        finding_id="finding-1",
+        kind="coverage_gap",
+        description="説明が不足",
+        work_item_id="w1",
+    )
     model = FakeModel(
         [
             SolverDecision(
                 next="finalize",
+                update=CaseUpdate(
+                    add_work_items=(
+                        WorkItem(
+                            work_item_id="w1",
+                            question="説明を確認する",
+                            state="resolved",
+                            resolution="初稿で説明した",
+                        ),
+                    ),
+                ),
                 answer=FinalAnswer(text="初稿"),
             ),
             SolverDecision(
                 next="finalize",
+                review_finding_resolutions=(
+                    ReviewFindingResolution(
+                        finding_id="finding-1",
+                        outcome="addressed",
+                        reason="回答へ説明を追加した",
+                    ),
+                ),
                 answer=FinalAnswer(text="修正版"),
             ),
         ],
         reviews=[
             ReviewResult(
                 verdict="revise",
-                findings=(ReviewFinding(description="説明が不足"),),
+                findings=(finding,),
             ),
             ReviewResult(verdict="accept"),
         ],
@@ -1441,7 +1465,9 @@ def test_reviewer_can_request_one_solver_revision_and_then_accept() -> None:
     assert state.run_status == "completed"
     assert state.final_answer == FinalAnswer(text="修正版")
     assert len(model.review_contexts) == 2
+    assert model.review_contexts[0].work_items[0].work_item_id == "w1"
     assert model.solver_contexts[1].reviewer_findings[0].description == "説明が不足"
+    assert state.review_finding_resolutions[0].finding_id == "finding-1"
     assert [item.model for item in trace.model_calls] == [
         "research-model",
         "review-model",
@@ -1450,12 +1476,87 @@ def test_reviewer_can_request_one_solver_revision_and_then_accept() -> None:
     ]
 
 
+def test_reviewer_view_projects_case_structure_and_all_grounding_evidence() -> None:
+    store = InMemoryCaseStore()
+    state = CaseState(
+        case_id="case-review-view",
+        question="質問",
+        work_items=(
+            WorkItem(
+                work_item_id="w1",
+                question="要件を確認する",
+                state="resolved",
+                resolution="要件を確認した",
+                basis_hypothesis_ids=("h1",),
+            ),
+        ),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h1",
+                work_item_id="w1",
+                statement="要件がある",
+                judgment="supported",
+                evidence_ids=("e1",),
+            ),
+        ),
+        evidence=(
+            Evidence(
+                evidence_id="e1",
+                source_ref="fake://1",
+                content="回答に引用した本文",
+                created_cycle=1,
+            ),
+            Evidence(
+                evidence_id="e2",
+                source_ref="fake://2",
+                content="取得済みだが未引用の本文",
+                created_cycle=1,
+            ),
+            Evidence(
+                evidence_id="nav",
+                source_ref="fake://nav",
+                content="検索候補",
+                created_cycle=1,
+                metadata={"citationEligible": False},
+            ),
+        ),
+        final_answer=FinalAnswer(text="回答", citation_ids=("e1",)),
+    )
+    store.create(state)
+    loop = AgentLoop(
+        store=store,
+        model=FakeModel([]),
+        tools=ToolRegistry(()),
+        profile=_profile(reviewer_enabled=True),
+    )
+
+    view = loop._build_reviewer_view(state)
+
+    assert view.work_items == state.work_items
+    assert view.hypotheses == state.hypotheses
+    assert [item.evidence_id for item in view.evidence] == ["e1", "e2"]
+
+
 def test_second_reviewer_rejection_is_explicit_failure() -> None:
-    finding = ReviewFinding(description="なお不整合")
+    finding = ReviewFinding(
+        finding_id="finding-1",
+        kind="internal_contradiction",
+        description="なお不整合",
+    )
     model = FakeModel(
         [
             SolverDecision(next="finalize", answer=FinalAnswer(text="初稿")),
-            SolverDecision(next="finalize", answer=FinalAnswer(text="修正版")),
+            SolverDecision(
+                next="finalize",
+                review_finding_resolutions=(
+                    ReviewFindingResolution(
+                        finding_id="finding-1",
+                        outcome="addressed",
+                        reason="回答内の不整合を修正した",
+                    ),
+                ),
+                answer=FinalAnswer(text="修正版"),
+            ),
         ],
         reviews=[
             ReviewResult(verdict="revise", findings=(finding,)),
@@ -1467,6 +1568,53 @@ def test_second_reviewer_rejection_is_explicit_failure() -> None:
 
     assert state.run_status == "failed"
     assert state.stop_reason == "review_failed"
+
+
+def test_reviewer_cannot_reference_unknown_case_ids() -> None:
+    model = FakeModel(
+        [SolverDecision(next="finalize", answer=FinalAnswer(text="初稿"))],
+        reviews=[
+            ReviewResult(
+                verdict="revise",
+                findings=(
+                    ReviewFinding(
+                        finding_id="finding-1",
+                        kind="coverage_gap",
+                        description="未知の作業を参照した",
+                        work_item_id="unknown-work",
+                    ),
+                ),
+            ),
+        ],
+    )
+
+    state, trace = _run(model, profile=_profile(reviewer_enabled=True))
+
+    assert state.run_status == "failed"
+    assert state.stop_reason == "protocol_error"
+    assert trace.failure_code == (
+        "contract_violation:Reviewer finding references unknown WorkItem: "
+        "unknown-work"
+    )
+
+
+def test_solver_must_resolve_every_pending_reviewer_finding() -> None:
+    with pytest.raises(
+        ContractViolation,
+        match="review finding resolutions do not match pending findings",
+    ):
+        apply_solver_decision(
+            CaseState(case_id="case-1", question="質問"),
+            SolverDecision(
+                next="finalize",
+                answer=FinalAnswer(text="未修正版"),
+            ),
+            limits=AgentLimits(),
+            known_tool_names=(),
+            material_evidence_ids=(),
+            required_review_finding_ids=("finding-1",),
+            finalize_only=False,
+        )
 
 
 def test_contradicted_basis_requires_solver_impact_decision() -> None:

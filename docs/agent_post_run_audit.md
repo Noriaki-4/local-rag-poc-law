@@ -38,6 +38,11 @@ LLM -> Program: transport_output  (生payload / 輸送検証)
 正規化後:        solver_output     (SolverDecision)
 構造検証失敗:    contract_violation
 構造検証成功:    decision_applied  (適用前後のCaseState)
+
+Program -> Reviewer: reviewer_input              (ReviewerView / Prompt / schema)
+Reviewer -> Program: reviewer_output             (生payload / ReviewResult)
+Reviewer契約違反:   reviewer_contract_violation
+ReviewResult適用:   reviewer_result_applied
 ```
 
 `promptHash / schemaHash / payloadHash / solverDecisionHash`は本文を保存しない`status`でも記録する。
