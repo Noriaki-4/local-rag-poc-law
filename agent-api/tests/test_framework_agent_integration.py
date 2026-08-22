@@ -14,6 +14,7 @@ from app import main
 from app.adapters.models import StructuredJSONModelAdapter
 from app.adapters.models.structured_json import (
     _assign_tool_request_ids,
+    _focused_contract_repair_instruction,
     _normalize_absent_context_branches,
     _normalize_solver_payload,
     _search_review_context_payload,
@@ -1666,6 +1667,92 @@ def test_cycle_close_fixture_preserves_the_unresolved_boundary_state() -> None:
         item.work_item_id for item in context.work_tree
     }
     assert state.final_answer is None
+
+
+def test_real_model_cycle_close_fixture_reproduces_unresolved_basis_failure(
+) -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_cycle_close_unresolved_basis_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    state = CaseState.model_validate(fixture["caseState"])
+    decision = SolverDecision.model_validate(fixture["solverDecision"])
+    evidence_ids = tuple(item.evidence_id for item in state.evidence)
+
+    with pytest.raises(ContractViolation) as error:
+        apply_solver_decision(
+            state,
+            decision,
+            limits=AgentLimits(),
+            known_tool_names=set(),
+            material_evidence_ids=evidence_ids,
+            required_dependency_kind="lower_norm",
+            required_dependency_work_item_ids=("work_item_1",),
+            require_dependency_decisions=True,
+            cycle_close_required=True,
+            can_start_next_cycle=True,
+            finalize_only=False,
+        )
+
+    assert str(error.value) == fixture["observation"]["expectedViolation"]
+
+    context = build_solver_context(
+        state,
+        AgentLimits(),
+        remaining_wall_time_sec=120,
+        finalize_only=False,
+        required_dependency_kind="lower_norm",
+        required_dependency_work_item_ids=("work_item_1",),
+        contract_feedback=SolverContractFeedback(
+            violation=str(error.value),
+            previous_decision=decision,
+        ),
+    ).model_copy(
+        update={
+            "remaining_fetch_capacity": 0,
+            "cycle_budget_reached": True,
+            "cycle_close_required": True,
+        }
+    )
+    schema = _solver_compact_transport_schema(context)
+    hypothesis_updates = schema["properties"]["update"]["properties"][
+        "update_hypotheses"
+    ]
+    cycle_close_prompt = legal_profiles.legal_agent_profile().solver_cycle_close
+
+    assert cycle_close_prompt is not None
+    assert "unresolved HypothesisをbasisにしたWorkItemを`resolved`にしません" in (
+        cycle_close_prompt.system_prompt
+    )
+    assert "WorkItemだけをresolvedにしません" in (
+        _focused_contract_repair_instruction(context)
+    )
+    assert "minItems" not in hypothesis_updates
+
+    corrected_payload = json.loads(json.dumps(fixture["solverDecision"]))
+    corrected_payload["update"]["update_hypotheses"] = [
+        fixture["minimalCorrection"]
+    ]
+    corrected = apply_solver_decision(
+        state,
+        SolverDecision.model_validate(corrected_payload),
+        limits=AgentLimits(),
+        known_tool_names=set(),
+        material_evidence_ids=evidence_ids,
+        required_dependency_kind="lower_norm",
+        required_dependency_work_item_ids=("work_item_1",),
+        require_dependency_decisions=True,
+        cycle_close_required=True,
+        can_start_next_cycle=True,
+        finalize_only=False,
+    )
+
+    assert corrected.work_items[0].state == "resolved"
+    assert corrected.hypotheses[0].judgment == "supported"
+    assert corrected.final_answer is not None
 
 
 def test_search_review_view_groups_each_excerpt_with_its_candidate() -> None:

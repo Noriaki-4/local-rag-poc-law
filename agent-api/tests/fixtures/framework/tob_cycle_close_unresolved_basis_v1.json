@@ -1,0 +1,154 @@
+{
+  "fixtureId": "tob-cycle-close-unresolved-basis-v1",
+  "questionId": "tob-overview",
+  "source": {
+    "diagnosticsMode": "snapshot",
+    "diagnosticCaseId": "legal-41ccc91b476b41979ff767742c64edbf",
+    "inputSequence": 20,
+    "violationSequences": [24, 29, 34],
+    "purpose": "cycle_close",
+    "model": "gpt-4o-mini",
+    "profileName": "legal-default",
+    "profileVersion": "124",
+    "initialPromptHash": "dc491d54e5f61078f6498dbf306516bf4a5211e75ddd809e684c48c80f901589",
+    "repairSchemaHash": "733ce51209d88b9c946819a44b0f08d15ad55a5ec7c03c985685babee615c818",
+    "decisionHash": "903b5f43b29dda6662de18d37808f7e6935b5e892852d0d9a8f817c9b37efedd",
+    "reduction": "本文とEvidence件数を縮小し、失敗した状態遷移とDecision形状を保持した"
+  },
+  "observation": {
+    "attemptCount": 3,
+    "identicalDecisionOnEveryAttempt": true,
+    "cycleCloseRequired": true,
+    "canStartNextCycle": true,
+    "remainingFetchCapacity": 0,
+    "expectedViolation": "resolved work item retains unresolved basis hypotheses: work_item_1=['hypothesis_1']",
+    "upstreamPromptMismatches": [
+      "対象範囲・例外・手続を別WorkItemにせず1件へ束ねた",
+      "未知の条件・範囲・行為を分けず、広いHypothesisを1件だけ作った",
+      "手続を公告・届出等の法令表現へ変換せず一般検索を1件だけ要求した"
+    ],
+    "latentViolationAfterHypothesisCorrection": "resolved dependency requires evidence from at least two distinct Articles, but the real output cited only law-323AC0000000025-article-27_3",
+    "providerPayloadAlreadyOmittedHypothesisUpdate": true,
+    "controlledDiagnosis": {
+      "sourcePromptChars": 66335,
+      "sourceInputTokens": 34710,
+      "instructionCharsBeforeContext": 7012,
+      "materialEvidenceChars": 40732,
+      "materialEvidenceCount": 38,
+      "minimalContextRuns": "3回ともHypothesisをsupportedへ更新し、元の未更新違反は再現しなかった",
+      "fullContextBaseline": "保存済みPromptの再実行でもHypothesisを更新せずfinalizeした",
+      "existingRulesRepeatedAfterContext": "ルールの文意を変えずContext後へ再掲するとcontinue/start_next_cycle=trueとなり、状態遷移契約を通過した",
+      "repairFinding": "修復指示の後ろに誤ったprevious_decision全文があり、末尾へ修復規則を再掲してもWorkItemだけresolvedの部分修復が残った"
+    }
+  },
+  "minimalCorrection": {
+    "hypothesis_id": "hypothesis_1",
+    "judgment": "supported",
+    "evidence_ids": ["evidence-delegating-source"],
+    "gaps": []
+  },
+  "caseState": {
+    "case_id": "fixture-tob-cycle-close-unresolved-basis-v1",
+    "question": "上場会社の株式を、市場を通さずに多数の株主から買い集めたいのですが、公開買付けの手続が必要になるのはどのような場合ですか。対象となる株券等の範囲、主な例外、必要な手続も含めて、根拠となる条文とともに説明してください。",
+    "research_cycle_count": 1,
+    "work_items": [
+      {
+        "work_item_id": "work_item_1",
+        "parent_work_item_id": null,
+        "question": "公開買付けの手続が必要になる場合について、対象となる株券等の範囲、主な例外、必要な手続を説明する法令を探す。",
+        "state": "open",
+        "resolution": null,
+        "basis_hypothesis_ids": [],
+        "replaces_work_item_id": null
+      }
+    ],
+    "hypotheses": [
+      {
+        "hypothesis_id": "hypothesis_1",
+        "work_item_id": "work_item_1",
+        "statement": "上場会社が市場を通さずに多数の株主から株式を買い集める場合、公開買付けの手続が必要になる。",
+        "judgment": "unresolved",
+        "evidence_ids": [],
+        "gaps": ["具体的な法令の条文が必要。"]
+      }
+    ],
+    "evidence": [
+      {
+        "evidence_id": "evidence-delegating-source",
+        "source_ref": "fixture://financial-instruments-law/article-27-3",
+        "content": "公開買付開始公告と届出に関する取得済み本文。",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_3",
+          "citationEligible": true
+        }
+      },
+      {
+        "evidence_id": "evidence-terminal-target",
+        "source_ref": "fixture://enforcement-order/article-7",
+        "content": "公開買付けの適用除外に関する取得済み本文。",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "citationEligible": true
+        }
+      }
+    ]
+  },
+  "solverDecision": {
+    "next": "finalize",
+    "decision_reason": "全てのWorkItemが終了し、回答に影響する未確認事項がないため。",
+    "start_next_cycle": false,
+    "update": {
+      "add_work_items": [],
+      "update_work_items": [
+        {
+          "work_item_id": "work_item_1",
+          "state": "resolved",
+          "resolution": "公開買付けの根拠と適用除外を確認済み。",
+          "basis_hypothesis_ids": ["hypothesis_1"]
+        }
+      ],
+      "add_hypotheses": [],
+      "update_hypotheses": [],
+      "impact_decisions": []
+    },
+    "next_focus_work_item_ids": [],
+    "retain_evidence_ids": [
+      "evidence-delegating-source",
+      "evidence-terminal-target"
+    ],
+    "review_finding_resolutions": [],
+    "dependency_decisions": [
+      {
+        "dependency_kind": "lower_norm",
+        "work_item_id": "work_item_1",
+        "status": "resolved",
+        "reason": "委任元と具体化規定を確認済み。",
+        "basis_evidence_ids": [
+          "evidence-delegating-source",
+          "evidence-terminal-target"
+        ],
+        "action_request_id": null
+      }
+    ],
+    "graph_candidate_review": null,
+    "search_candidate_review": null,
+    "frontier_re_adoptions": [],
+    "deferred_frontier_resolutions": [],
+    "unreviewed_graph_resolution": null,
+    "tool_requests": [],
+    "answer": {
+      "text": "取得済み本文に基づく回答。",
+      "citation_ids": [
+        "evidence-delegating-source",
+        "evidence-terminal-target"
+      ],
+      "limitations": [],
+      "unresolved_work_item_ids": [],
+      "unresolved_hypothesis_ids": []
+    }
+  }
+}
