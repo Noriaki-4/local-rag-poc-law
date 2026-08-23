@@ -1,6 +1,6 @@
 # 第二期開発 備忘録
 
-> 更新日: 2026-08-20
+> 更新日: 2026-08-23
 > 状態: 再計画の方向性を忘れないための短いメモ。詳細契約・完了条件の正本ではない。
 
 本書の「第二期開発」は、この法令検索プロジェクトを再計画した次の開発期間を指す。
@@ -33,8 +33,59 @@ Agent Frameworkの`Phase 2`や、AWS移行の`step2_transition_plan.md`とは別
 | 意味分類 | 全件を繰り返し分類すると費用がかかる | snapshot単位で一度分類し、checkpointと成果を再利用する |
 | Agent構成 | 役割追加により契約とPromptが複雑化しやすかった | 回答AgentはSolverと任意Reviewerだけにする。Reviewerは既定無効 |
 | 保守性 | status、schema、Promptが分散し、変更時に修正漏れが起きた | 型付き契約を正本にし、Provider schemaとPrompt用語集を同期する |
+| LLM入出力の確認 | Prompt部品、動的入力、Provider schemaが別々の場所にあり、実際の呼出し内容を事前に照合しにくかった | 固定指示、実行時入力、最終出力契約を分離し、実際のAPI要求と対になる成果物を決定的に出力する |
 
-### 2.1 第二期Step 1：公開買付け3階層ミニデータセット
+### 2.1 Prompt・契約の最終成果物
+
+同じ処理モード、Provider輸送方式、契約versionでは、LLM呼出しごとに指示本文を作り変えない。
+役割、手順、判断基準、出力ルール、契約用語集、輸送ルールは固定指示として組み立て、同じ
+`instructionsHash`を持たせる。質問、検索結果、Evidence、残り枠、許可ID、候補別名、契約違反は
+実行時入力とする。修復時も、固定の修復指示へ違反内容と直前出力を入力として渡し、違反ごとの
+指示文をPythonで組み立てない。
+
+```text
+固定の指示
+├─ 役割
+├─ 手順と判断基準
+├─ 契約項目の意味
+└─ Provider輸送ルール
+          ＋
+実行時入力
+├─ 質問・現在の状態
+├─ 検索候補・取得済みEvidence
+├─ 許可ID・残り枠
+└─ 修復時だけ違反内容・直前出力
+          ＋
+最終出力契約
+└─ Providerへ実際に渡すJSON Schema
+          ↓
+LLM API要求
+```
+
+各LLM呼出しについて、実際の送信処理と同じレンダリング結果から次を出力する。
+
+| 成果物 | 内容 |
+|---|---|
+| `instructions.md` | その処理モードで使う固定指示。動的な検索結果やEvidenceを含めない |
+| `input.json` | 今回の質問、状態、検索結果、Evidence、許可値、修復情報 |
+| `output_schema.json` | Providerへ実際に渡す最終JSON Schema |
+| `normalized_schema.json` | Provider応答の正規化後にPydanticで検証する共通契約 |
+| `request.txt` | Provider制約により連結・直列化した、実際のAPI送信内容 |
+| `manifest.json` | 処理モード、Provider、Profile/version、Prompt asset、各hash |
+
+成果物出力のためにLLM APIは呼ばない。通常実行の成果物は`eval-results/`へ保存してGit管理外とし、
+固定した代表fixtureから作る基準成果物だけをGit管理する。成果物は手編集せず、Prompt asset、Pydantic契約、
+Projectorが作る入力から再生成する。API送信処理と成果物出力処理が別々にPromptやschemaを組み立ててはならない。
+
+第二期Step 1では、research、検索候補評価・再選択、Graph候補評価、integration、Cycle終了・最終化、
+契約修復、任意Reviewerの代表入力を対象にする。OpenAI、Anthropic、Ollamaの各輸送方式について、
+実送信内容と成果物のPrompt・schema・hashが一致することをテストする。
+
+既存fixtureは、現行の型で再投影できるだけでは維持理由としない。現在の処理境界、Promptまたは契約の
+固有の回帰を再現するものだけを残す。新しい代表成果物または小さい単体テストで同じ問題を再現できるもの、
+古いProfileのPrompt文言を固定するだけのもの、修正済み輸送形式しか表さないものは削除する。
+
+### 2.2 第二期Step 1：公開買付け3階層ミニデータセット
 
 Step 1では、`datasets/scenarios/public_tender_offer_three_layer_v1/`を固定入力として、
 「法律→施行令→府令」の連続1ホップ探索を実装・検証する。架空条文やgold本文は作らず、既に保存した
@@ -70,8 +121,10 @@ Step 1の実行順と完了条件は次のとおり。
 2. 条・項・号の構造保持、参照抽出、Graph schemaまたは投入ロジックを変更した後、同じsnapshotから
    OpenSearchとNeo4jを両方再構築する。Neo4jの現行データは消去してよいが、片方だけの更新は成功としない。
 3. 小規模対象だけを非同期意味分類し、publishする。採点用期待値を分類入力へ混ぜない。
-4. OpenSearch検索、仮説selector、連続1ホップGraph探索、Article全文取得を3つの代表質問で検証する。
-5. trace上で必要Articleへの到達、重複本文取得の不在、対象外参照の扱い、OpenSearch／Neo4jの
+4. 検索Agentの各LLM呼出しについて、固定指示、実行時入力、最終出力契約、実送信内容を生成し、
+   Promptと契約を人間が対で確認できる状態にする。
+5. OpenSearch検索、仮説selector、連続1ホップGraph探索、Article全文取得を3つの代表質問で検証する。
+6. trace上で必要Articleへの到達、重複本文取得の不在、対象外参照の扱い、OpenSearch／Neo4jの
    `datasetSnapshotId`一致を確認する。
 
 インデックス構築前のデータセット検証コマンドは次である。
@@ -664,11 +717,13 @@ ReviewerはWorker回答を見て具体的に指摘し、差戻しは1回だけ�
 
 1. 公開買付け3階層ミニデータセットの固定snapshotとgold分離を検証する。
 2. e-Gov XML構造、参照先、OpenSearch本文、Neo4j構造を同じsnapshotで再構築・監査する。
-3. Solverによる法令検索表現生成を契約・Prompt・評価へ追加する。
-4. Hypothesis別Graph selectorと、選択Articleを次の起点にできる1ホップTool契約を実装する。
-5. 非同期意味分類を小規模対象へ実行し、検索時selectorへ接続する。
-6. 代表質問で、仮説、OpenSearch、Graph、本文、Cycle引継ぎをtraceから確認する。
-7. 品質・時間・費用を確認してから対象データを段階的に拡大する。
+3. 固定指示、実行時入力、最終出力契約を分離し、実送信内容と対になる成果物出力フローを実装する。
+4. 既存fixtureを固有の回帰価値で監査し、現行成果物で代替できる古いfixtureを削除する。
+5. Solverによる法令検索表現生成を契約・Prompt・評価へ追加する。
+6. Hypothesis別Graph selectorと、選択Articleを次の起点にできる1ホップTool契約を実装する。
+7. 非同期意味分類を小規模対象へ実行し、検索時selectorへ接続する。
+8. 代表質問で、仮説、OpenSearch、Graph、本文、Cycle引継ぎをtraceから確認する。
+9. 品質・時間・費用を確認してから対象データを段階的に拡大する。
 
 ## 10. 第一期から持ち越す意味分類関連の問題
 

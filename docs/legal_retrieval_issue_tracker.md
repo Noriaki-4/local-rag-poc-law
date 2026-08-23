@@ -71,6 +71,7 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-009` | P1 | 対応中 | Tool数、本文取得数、Cycle数の用語と設定を一致させる | 現行既定は最大4 Cycle、1 step最大5 Tool要求、1 Cycle本文3 Article。過去の「4 Article」記述が一部資料に残る | 正本、Profile、Prompt、fixture、データセット説明の値と意味を照合する |
 | `LR-010` | P2 | 停止中 | 全件Relation分類を安全に再開する | 全件Runは1,615 checkpointで参照scopeと改正法構造の問題が見つかり停止中 | shadow差分監査、影響候補特定、再開条件合格後に同じsnapshot・checkpointから再開する |
 | `LR-011` | P2 | 要設計 | 自治体の条例・規則・要綱を使う小規模データセットを決める | 自治体向け利用像はあるが、データセットは未決定 | 上位法令改正→条例→規則→要綱の逆引きを検証できる最小集合を利用者と決める |
+| `LR-012` | P0 | 未着手 | LLMの固定指示、実行時入力、最終契約を分離し、レビュー可能な成果物として出力する | `snapshot`診断では実送信PromptとProvider schemaを同じJSONLへ保存できるが、指示と動的入力が連結され、実行前の生成・比較フローがない | 実送信処理と共通のレンダリング結果から成果物を生成し、代表fixtureでPrompt・契約・実送信内容の一致を確認する |
 
 ## 4. 最優先分析: 複合問題の統合
 
@@ -295,6 +296,20 @@ Programは既知ID、型、件数、参照整合、予算を検証する。Evide
 - 失敗時は、モデル判断、Prompt、共通契約、Provider輸送、Tool、データのどこで失敗したかをtraceで分離する。
 - Provider疎通やmockテストだけを法令検索の合格としない。
 
+### LR-012 Prompt・契約の最終成果物
+
+- 同じ処理モード、Provider輸送方式、契約versionでは、動的入力が変わっても固定指示の
+  `instructionsHash`が変わらない。
+- 質問、検索結果、Evidence、残り枠、許可ID、候補別名、修復情報を固定指示から分離して
+  `input.json`へ出力する。
+- `instructions.md`、`input.json`、Providerへ渡す`output_schema.json`、正規化後の
+  `normalized_schema.json`、実送信`request.txt`、来歴とhashを持つ`manifest.json`を、LLM APIを
+  呼ばずに生成できる。
+- API送信処理と成果物出力処理が同じレンダリング結果を使い、fake Providerが受け取るPrompt・schemaと
+  成果物が一致する。
+- 通常実行の成果物はGit管理外、代表fixtureの基準成果物だけをGit管理し、再生成差分をテストで検出する。
+- 既存fixtureを固有の回帰価値で監査し、古いPrompt文言または修正済み輸送形式だけを固定するものを削除する。
+
 ## 6. 確認済みの前提
 
 次は新規課題として再度設計し直さず、回帰対象として維持する。
@@ -312,6 +327,8 @@ Programは既知ID、型、件数、参照整合、予算を検証する。Evide
 ## 7. 推奨する実行順
 
 ```text
+LR-012  固定指示・動的入力・最終契約の成果物出力を整備
+    ↓
 LR-004  Cycle 1直後の統合fixtureと計測を整備
     ↓
 LR-004  総合問題だけを実行し、Cycle 2遷移を確認
