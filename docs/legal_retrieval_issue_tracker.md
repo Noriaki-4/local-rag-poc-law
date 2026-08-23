@@ -60,10 +60,10 @@ Neo4jから指定条件の1ホップ候補を取得する
 
 | ID | 優先度 | status | 課題 | 現在地 | 次の確認 |
 |---|---|---|---|---|---|
-| `LR-001` | P0 | 対応中 | 質問から必要な検索仮説を漏れなく作る | Profile v145で必要な4観点とともに根拠指定を余分なWorkItemにした。v146で根拠条文を検証材料と定義し、v147で`add_work_items`を質問分解の唯一の正本にした | 別表現の複合質問でも要求不足がなく、根拠・形式指定を独立WorkItemにしないか実モデルで確認する |
+| `LR-001` | P0 | 対応中 | 質問から必要な検索仮説を漏れなく作る | v150〜v152で規定存在や質問の言い換えを再現した。v153の労働法fixtureではHaikuが要件・上限構造・手続行為を含む仮説を1回で生成した | 収録済みの別分野でもHypothesisと`gaps`の意味形を実モデル確認する |
 | `LR-002` | P0 | 検証待ち | 法令検索表現を作り、同一Cycle内でOpenSearchを適切に再検索する | 「必要な手続」を「公告・届出・通知・提出・期間・様式」等へ言い換えるPromptと複数stepは実装済み | 初回検索、本文観察後の検索語変更、同一scopeの重複防止をtraceで確認する |
 | `LR-003` | P0 | 検証待ち | Graph由来Articleを起点に連続1ホップ探索する | 固定selectorでは法律→施行令→府令へ到達でき、Graph由来Articleの再起点化も実装済み | OpenSearchだけでは末端Articleを発見できない条件で、実モデルが2回の1ホップを選ぶE2E試験を通す |
-| `LR-004` | P0 | 対応中 | 複合問題の統合Decisionを成立させ、次の探索または完了へ進む | Cycle Closeの実モデル失敗をfixture化し、Profile v125〜v131で完了確認、WorkItem単一責務、要求保持、候補ID全件性、実行枠と作業分解の分離を順に明確化した | 公開買付け総合問題を実経路で再実行し、Cycle Closeが次Cycleへ遷移して残り観点を探索できるか確認する |
+| `LR-004` | P0 | 対応中 | 複合問題の統合Decisionを成立させ、次の探索または完了へ進む | v153のHaiku実データE2EはCycle 2まで進んだが、AnthropicがIntegrationのstrict schemaを大きすぎるとして400で拒否した | IntegrationのProvider schemaを現処理に必要な項目へ縮小し、収録済み問題で再実行する |
 | `LR-005` | P0 | 未着手 | `gpt-4o-mini`で新検索経路を実モデル評価する | Provider接続、Structured Outputs、model切替は実装済み。法令E2Eは未実施 | Reviewer無効で公開買付け3問を実行し、Hypothesis、Tool、Evidence、Cycle、時間を記録する |
 | `LR-006` | P1 | 要設計 | 意味分類coverage不足時にも逆引き検索爆発と取りこぼしを両立させる | publish済み意味関係ならselectorで絞れるが、未分類範囲でraw `REFERENCES/to_subject`を使うと高fan-inになる | 限定fallbackの発動条件、scope上限、coverage不足の表示、限定回答条件を決める |
 | `LR-007` | P1 | 未着手 | CycleとStepを再開可能な状態として保存する | WorkItem、Hypothesis、Evidence、Graph review履歴はあるが、目標の`CycleRecord / StepRecord / ExplorationState`は未実装 | Tool観察後の中断から同じStepを再開し、別Cycleとして数えないfixtureを通す |

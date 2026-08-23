@@ -522,7 +522,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "148"
+    assert diagnostic_records[0]["profileVersion"] == "153"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -530,7 +530,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "148"
+    assert transport_input["profileVersion"] == "153"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -883,7 +883,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "148"
+    assert profile.version == "153"
     mode_prompts = {
         "research": profile.solver_research.system_prompt,
         "integration": profile.solver_integration.system_prompt,
@@ -928,6 +928,10 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     assert "1つの完了判定で閉じられる1つの確認事項" in research_prompt
     assert "根拠条文は各WorkItemを検証する材料" in research_prompt
     assert "完了判定に必要なHypothesisを1件以上" in research_prompt
+    assert "本文取得前でも" in research_prompt
+    assert "探す条文や検索作業は書きません" in research_prompt
+    assert "本文取得前でも" in research_prompt
+    assert "内容は質問へ転用しない" in research_prompt
     assert "`question_requirement_checklist`" not in research_prompt
     assert "WorkItemやHypothesisを省略する理由にはしません" in (
         research_prompt
@@ -1067,6 +1071,81 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
         item.work_item_id for item in updated.work_items
     }
     assert all(len(item.hypothesis_ids) == 1 for item in updated.tool_requests)
+
+
+def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "overtime_initial_research_hypothesis_gap_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    observed = fixture["observedResearchOutput"]
+    assessment = fixture["manualAssessment"]
+    accepted = fixture["acceptedExample"]["hypotheses"]
+    validated = fixture["validatedHaikuOutput"]
+    profile = legal_profiles.legal_agent_profile()
+    research = profile.solver_research
+    assert research is not None
+    assert research.completion_check_prompt is not None
+
+    observed_work_item_ids = {
+        item["workItemId"] for item in observed["workItems"]
+    }
+    observed_hypothesis_ids = {
+        item["hypothesisId"] for item in observed["hypotheses"]
+    }
+
+    assert fixture["source"]["profileVersion"] == "149"
+    assert profile.version == "153"
+    assert assessment["workItems"] == "pass"
+    assert assessment["hypotheses"] == "fail"
+    assert assessment["gaps"] == "fail"
+    assert set(assessment["invalidHypothesisIds"]) == observed_hypothesis_ids
+    assert set(assessment["invalidGapHypothesisIds"]) == observed_hypothesis_ids
+    assert all(
+        item["workItemId"] in observed_work_item_ids for item in accepted
+    )
+    assert {
+        item["hypothesisId"] for item in accepted
+    } == observed_hypothesis_ids
+    assert validated["provider"] == "anthropic"
+    assert validated["model"] == "claude-haiku-4-5-20251001"
+    assert validated["attemptCount"] == 1
+    validated_work_item_ids = {
+        item["workItemId"] for item in validated["workItems"]
+    }
+    assert len(validated_work_item_ids) == 3
+    assert len(validated["hypotheses"]) == 3
+    assert all(
+        item["workItemId"] in validated_work_item_ids
+        for item in validated["hypotheses"]
+    )
+    assert len(validated["searchQueries"]) == len(validated_work_item_ids)
+    assert fixture["regressionHistory"][-1]["assessment"] == "pass"
+
+    research_prompt = research.system_prompt
+    completion_prompt = research.completion_check_prompt
+    assert "本文取得前でも" in research_prompt
+    assert "未確認で誤っていても構いません" in research_prompt
+    assert "質問を言い換えただけにしません" in research_prompt
+    assert "制度用語は未確認の候補" in research_prompt
+    assert "探す条文や検索作業は書きません" in research_prompt
+    assert "確認事項の言い換えではなく" in completion_prompt
+
+    update_schema = _case_update_transport_schema()
+    hypothesis_schema = update_schema["properties"]["add_hypotheses"]["items"]
+    statement_description = hypothesis_schema["properties"]["statement"][
+        "description"
+    ]
+    gaps_description = hypothesis_schema["properties"]["gaps"]["description"]
+    assert "本文取得前の未確認" in statement_description
+    assert "未確認で誤り得る暫定回答" in statement_description
+    assert "具体的候補を含み" in statement_description
+    assert "質問の言い換えだけを述べない" in statement_description
+    assert "本文で確認する必要がある具体的な法的内容" in gaps_description
+    assert "探す条文や検索作業ではない" in gaps_description
 
 
 def test_real_research_failure_fixture_is_rebuilt_with_corrected_prompt() -> None:
@@ -2158,7 +2237,8 @@ def test_real_model_initial_research_decomposition_fixture_is_reproducible() -> 
         "law-402M50000040038-article-10",
     } == set(failure["downstreamObservation"]["reselectionDroppedArticleIds"])
     assert "独立して完了判定できる単位でWorkItem" in prompt
-    assert "何らかの規定がある" in prompt
+    assert "未確認で誤っていても構いません" in prompt
+    assert "探す条文や検索作業は書きません" in prompt
     assert "法令表現へ言い換えて使う" in prompt
     assert "元の質問から直接作るopen WorkItem" in prompt
     assert "Hypothesis.work_item_id" in prompt

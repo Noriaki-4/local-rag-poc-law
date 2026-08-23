@@ -419,6 +419,9 @@ class Hypothesis:
 
 - Hypothesisは必ず1つのWorkItemへ所属する。
 - `Hypothesis.work_item_id`は、そのHypothesisが検証するWorkItemを表す。
+- `Hypothesis.statement`には本文取得前の未確認で誤り得る暫定回答を置き、本文で検証できる命題とする。
+  要件、例外構造または手続行為の候補を含め、質問の言い換えだけを命題にしない。
+  `gaps`には判定に必要な未確認の法的内容を置き、探す条文や検索作業は置かない。
 - `WorkItem.basis_hypothesis_ids`は所属関係の逆引きではない。open WorkItemでは作成・継続を
   前提づけるHypothesis、resolved WorkItemではresolutionを支える判定済みHypothesisを表す。
   元の質問から直接作るopen WorkItemでは通常は空にし、別Hypothesisを前提に作る子WorkItemでは

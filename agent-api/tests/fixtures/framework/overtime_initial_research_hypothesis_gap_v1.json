@@ -1,0 +1,186 @@
+{
+  "fixtureId": "overtime-initial-research-hypothesis-gap-v1",
+  "source": {
+    "model": "gpt-4o-mini",
+    "profileVersion": "149",
+    "diagnosticCaseId": "legal-research-v149-overtime-20260824",
+    "attemptCount": 1
+  },
+  "regressionHistory": [
+    {
+      "profileVersion": "150",
+      "diagnosticCaseId": "legal-research-v150-overtime-20260824-r1",
+      "attemptCount": 1,
+      "assessment": "fail",
+      "note": "Promptとschemaへ定義を追加しただけでは、同じ意味上の失敗を再現した。"
+    },
+    {
+      "profileVersion": "151",
+      "diagnosticCaseId": "legal-research-v151-overtime-20260824-r1",
+      "attemptCount": 1,
+      "assessment": "partial",
+      "note": "gapsは改善したが、条件と上限のHypothesisは確認事項の言い換えに留まった。"
+    },
+    {
+      "profileVersion": "152",
+      "diagnosticCaseId": "legal-research-v152-overtime-20260824-r1",
+      "attemptCount": 1,
+      "assessment": "partial",
+      "note": "gapsは維持されたが、条件のHypothesisが『条件を満たす必要がある』という循環表現に留まった。"
+    },
+    {
+      "profileVersion": "153",
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5-20251001",
+      "diagnosticCaseId": "legal-research-v153-overtime-haiku-20260824-r1",
+      "attemptCount": 1,
+      "assessment": "pass",
+      "note": "要件・上限構造・手続行為の候補を含む検索仮説と、それに対応する検索語を作成した。"
+    }
+  ],
+  "question": "使用者が労働者に時間外労働をさせるための条件、上限、必要な手続を説明してください。",
+  "observedResearchOutput": {
+    "workItems": [
+      {
+        "workItemId": "workitem-1",
+        "question": "使用者が労働者に時間外労働をさせるための条件は何か？"
+      },
+      {
+        "workItemId": "workitem-2",
+        "question": "使用者が労働者に時間外労働をさせるための上限は何か？"
+      },
+      {
+        "workItemId": "workitem-3",
+        "question": "使用者が労働者に時間外労働をさせるために必要な手続は何か？"
+      }
+    ],
+    "hypotheses": [
+      {
+        "hypothesisId": "hypothesis-1",
+        "workItemId": "workitem-1",
+        "statement": "労働基準法において、使用者が労働者に時間外労働をさせるための条件が規定されている。",
+        "gaps": [
+          "労働基準法の該当条文"
+        ]
+      },
+      {
+        "hypothesisId": "hypothesis-2",
+        "workItemId": "workitem-2",
+        "statement": "労働基準法において、使用者が労働者に時間外労働をさせるための上限が規定されている。",
+        "gaps": [
+          "労働基準法の該当条文"
+        ]
+      },
+      {
+        "hypothesisId": "hypothesis-3",
+        "workItemId": "workitem-3",
+        "statement": "労働基準法において、使用者が労働者に時間外労働をさせるために必要な手続が規定されている。",
+        "gaps": [
+          "労働基準法の該当条文"
+        ]
+      }
+    ]
+  },
+  "manualAssessment": {
+    "workItems": "pass",
+    "hypotheses": "fail",
+    "gaps": "fail",
+    "invalidHypothesisIds": [
+      "hypothesis-1",
+      "hypothesis-2",
+      "hypothesis-3"
+    ],
+    "invalidGapHypothesisIds": [
+      "hypothesis-1",
+      "hypothesis-2",
+      "hypothesis-3"
+    ],
+    "reasonCodes": [
+      "hypothesis_states_only_that_a_rule_exists",
+      "gap_names_a_source_to_find_instead_of_unknown_legal_content"
+    ]
+  },
+  "acceptedExample": {
+    "purpose": "同じWorkItemに対するHypothesisとgapsの受入可能な意味形。モデル出力の完全一致は要求しない。",
+    "hypotheses": [
+      {
+        "hypothesisId": "hypothesis-1",
+        "workItemId": "workitem-1",
+        "statement": "使用者は、労使協定の締結や届出などの法定条件を満たす場合に、法定労働時間を超えて労働させることができる。",
+        "gaps": [
+          "協定の当事者、対象となる労働、届出時期などの具体的な成立条件"
+        ]
+      },
+      {
+        "hypothesisId": "hypothesis-2",
+        "workItemId": "workitem-2",
+        "statement": "時間外労働には、通常の場合と特別な事情がある場合について、それぞれ上限がある。",
+        "gaps": [
+          "通常時と特別な事情がある場合の具体的な時間上限と適用条件"
+        ]
+      },
+      {
+        "hypothesisId": "hypothesis-3",
+        "workItemId": "workitem-3",
+        "statement": "使用者は、時間外労働に関する労使協定を締結し、行政官庁へ届け出る必要がある。",
+        "gaps": [
+          "協定に必要な事項、届出先、届出時期及び手続方法"
+        ]
+      }
+    ]
+  },
+  "validatedHaikuOutput": {
+    "profileVersion": "153",
+    "provider": "anthropic",
+    "model": "claude-haiku-4-5-20251001",
+    "attemptCount": 1,
+    "workItems": [
+      {
+        "workItemId": "wi-001-condition",
+        "question": "使用者が労働者に時間外労働をさせるための条件は何か"
+      },
+      {
+        "workItemId": "wi-002-limit",
+        "question": "労働者に課される時間外労働の上限は何か"
+      },
+      {
+        "workItemId": "wi-003-procedure",
+        "question": "労働者に時間外労働をさせるために必要な手続は何か"
+      }
+    ],
+    "hypotheses": [
+      {
+        "hypothesisId": "hyp-001-01",
+        "workItemId": "wi-001-condition",
+        "statement": "時間外労働をさせるには、使用者と労働者間で書面による合意（36協定）の締結が必要な条件である。",
+        "gaps": [
+          "36協定の要件と法的効果",
+          "時間外労働が可能となる合意の内容と形式"
+        ]
+      },
+      {
+        "hypothesisId": "hyp-002-01",
+        "workItemId": "wi-002-limit",
+        "statement": "時間外労働には1か月・1年単位での上限時間が労働基準法に定められ、月45時間・年360時間を超える例外がある。",
+        "gaps": [
+          "法定上限の具体的な時間数",
+          "上限の計算単位と例外の要件"
+        ]
+      },
+      {
+        "hypothesisId": "hyp-003-01",
+        "workItemId": "wi-003-procedure",
+        "statement": "時間外労働を実施するには、労働基準監督署への事前届出または36協定の書面合意が必要な手続的要件がある。",
+        "gaps": [
+          "届出義務の有無と対象要件",
+          "合意の成立時期と効力発生のタイミング"
+        ]
+      }
+    ],
+    "searchQueries": [
+      "時間外労働 36協定 締結 要件",
+      "時間外労働 上限 月 年 時間",
+      "時間外労働 手続 届出 監督署"
+    ]
+  }
+}

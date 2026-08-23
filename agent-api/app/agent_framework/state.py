@@ -123,7 +123,12 @@ class Hypothesis(FrameworkModel):
     statement: str = Field(
         min_length=1,
         max_length=1200,
-        description="取得本文で独立に支持または否定を判定できる1つの命題。",
+        description=(
+            "本文取得前の未確認で誤り得る暫定回答。確認対象となる要件、例外構造"
+            "または手続行為の具体的候補を含み、取得本文で独立に支持または否定"
+            "できる1つの命題。"
+            "規定の存在や質問の言い換えだけを述べない。"
+        ),
     )
     judgment: HypothesisJudgment = Field(
         default="unresolved",
@@ -137,7 +142,10 @@ class Hypothesis(FrameworkModel):
     )
     gaps: tuple[str, ...] = Field(
         default=(),
-        description="命題を判定するために、本文でまだ確認すべき具体的情報。",
+        description=(
+            "暫定回答のうち、本文で確認する必要がある具体的な法的内容。"
+            "探す条文や検索作業ではない。"
+        ),
     )
 
     @model_validator(mode="after")

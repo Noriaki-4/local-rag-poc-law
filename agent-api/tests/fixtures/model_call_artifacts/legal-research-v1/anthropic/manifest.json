@@ -1,13 +1,13 @@
 {
   "inputHash": "345b2694320824bed7f811087a4f72107299ac2ac808af4f2f21e03f63f9bbe8",
-  "instructionsHash": "ad139eeb368bd0fe743aaab3af057e50c66bc6599cb8ac8f672e3fab3e0e8f6d",
+  "instructionsHash": "e413d29a5377679197c3ec8a94acbccf4d737c73e6bc28ef864364541f9872a7",
   "model": "gpt-4o-mini",
-  "normalizedSchemaHash": "13648e17ef7b63ecc73af7050ed79ef1e6ffda3aa6379cee32c3211d13373360",
-  "outputSchemaHash": "a7d3f8bd1a6cf4fc56d1df3fe5f3e3938a6fd01330d51ae569500d4cb6ee8887",
+  "normalizedSchemaHash": "ec0892cb0658398f52a51ce011cb2ad901a4c5f41d05eb79bc7c14516213326f",
+  "outputSchemaHash": "3f5733c35f9209b0efd8fafa56dc105a779cf45e49f2988c7674c79644a530b3",
   "profileName": "legal-default",
-  "profileVersion": "148",
+  "profileVersion": "153",
   "promptAssets": [],
   "provider": "anthropic",
-  "requestHash": "8ee92c4af092b0d9fdbdf65ab8682b4febd0743593840908860982c573798a5b",
+  "requestHash": "6c49c56c42dbaecd6b91135316adeb82081a2d0890367cf3a267de529a61110f",
   "stage": "research"
 }
