@@ -5,11 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from app.adapters.models.structured_json import (
-    _normalize_solver_payload,
-    _validate_initial_research_transport_payload,
-    render_solver_model_call,
-)
+from app.adapters.models.structured_json import render_solver_model_call
 from app.agent_framework.context import build_solver_context
 from app.agent_framework.context import SolverContext
 from app.agent_framework.contracts import SolverDecision
@@ -18,7 +14,6 @@ from app.agent_framework.model_call_artifacts import (
     write_model_call_artifacts,
 )
 from app.agent_framework.profiles import AgentLimits, ModelCallProfile
-from app.agent_framework.ports.model import ModelProtocolError
 from app.agent_framework.state import CaseState
 from app.domains.legal.profiles import legal_agent_profile
 
@@ -96,7 +91,6 @@ def test_initial_research_omits_irrelevant_execution_limits() -> None:
         "legal_search"
     ]
     assert set(rendered.output_schema["properties"]) == {
-        "question_requirement_checklist",
         "next",
         "decision_reason",
         "start_next_cycle",
@@ -108,38 +102,9 @@ def test_initial_research_omits_irrelevant_execution_limits() -> None:
     assert rendered.output_schema["properties"]["tool_requests"]["items"][
         "properties"
     ]["tool_name"]["enum"] == ["legal_search"]
-    checklist_schema = rendered.output_schema["properties"][
-        "question_requirement_checklist"
-    ]
-    assert "根拠・出典・引用・出力形式・詳しさの指定は含めない" in (
-        checklist_schema["description"]
-    )
 
 
-def test_initial_research_checklist_validates_only_structure() -> None:
-    payload = {
-        "question_requirement_checklist": ["確認事項A", "確認事項B"],
-        "update": {"add_work_items": [{"id": "a"}, {"id": "b"}]},
-    }
-
-    _validate_initial_research_transport_payload(payload)
-    assert "question_requirement_checklist" not in _normalize_solver_payload(
-        payload
-    )
-
-    payload["question_requirement_checklist"] = ["確認事項A"]
-    with pytest.raises(
-        ModelProtocolError,
-        match="must match add_work_items count",
-    ):
-        _validate_initial_research_transport_payload(payload)
-
-    payload["question_requirement_checklist"] = ["確認事項A", "確認事項A"]
-    with pytest.raises(ModelProtocolError, match="entries must be unique"):
-        _validate_initial_research_transport_payload(payload)
-
-
-def test_real_model_v145_initial_research_transport_fixture_is_reproducible() -> None:
+def test_real_model_v145_fixture_documents_duplicate_checklist() -> None:
     fixture_path = (
         Path(__file__).parent
         / "fixtures"
@@ -160,8 +125,6 @@ def test_real_model_v145_initial_research_transport_fixture_is_reproducible() ->
     assert "remaining_fetch_capacity" in transport_input["instructions"]
     assert transport_output["validationError"] is None
     assert transport_output["providerRetryCount"] == 0
-    _validate_initial_research_transport_payload(payload)
-
     checklist = payload["question_requirement_checklist"]
     questions = [item.question for item in decision.update.add_work_items]
     assert checklist == questions

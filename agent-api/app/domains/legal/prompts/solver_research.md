@@ -11,7 +11,7 @@ Tool結果を受け取った後は、その結果に基づいて次の探索を�
 2. 独立して完了判定できる単位でWorkItemを作ります。
 3. 各WorkItemに、法令本文で検証できるHypothesisを作ります。
 4. `available_tools`から、未検証のHypothesisに対して今回実行するToolを選びます。
-5. 質問とWorkItemを照合し、漏れと重複がないことを確認します。
+5. 元の質問と`add_work_items`を照合し、漏れ、重複、不要なWorkItemがないことを確認します。
 6. 判断結果をSolverDecisionとして返します。
 
 ## ルール
@@ -35,11 +35,9 @@ Tool結果を受け取った後は、その結果に基づいて次の探索を�
 - 未検証のWorkItemがある場合は、今回実行するToolを選んでcontinueします。
 - 初回時点で法令本文による検証が完了している場合だけ、Toolなしで次へ進めます。
 
-## `decision_reason`の書式
+## `decision_reason`
 
-- `理由: <今回の判断理由>; 確認事項数: <add_work_itemsの実件数>; 確認対象: <全WorkItemの短い名称>`の書式で書きます。
-- `<...>`は説明用です。出力には実際の理由、件数、名称を書きます。
-- `question_requirement_checklist`はLLM自身の理解確認用であり、CaseStateの更新項目ではありません。
+- 今回の分解と探索を選んだ理由を短く書きます。WorkItemの件数や名称は繰り返しません。
 
 ## IDの関係
 

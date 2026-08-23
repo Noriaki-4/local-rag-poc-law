@@ -319,13 +319,9 @@ class FakeStructuredLLM:
     def generate_structured_json(self, **kwargs: Any) -> StructuredJSONResult:
         self.calls.append(kwargs)
         decision = self.payloads.pop(0)
-        if "question_requirement_checklist" in kwargs["schema"]["properties"]:
-            work_items = decision.get("update", {}).get("add_work_items", [])
+        if "update" in kwargs["schema"]["properties"]:
             return StructuredJSONResult(
                 payload={
-                    "question_requirement_checklist": [
-                        item["question"] for item in work_items
-                    ],
                     "next": decision["next"],
                     "decision_reason": decision["decision_reason"],
                     "start_next_cycle": False,
@@ -484,9 +480,9 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert "decision_json" not in llm.calls[0]["schema"]["properties"]
     assert "next" in llm.calls[0]["schema"]["properties"]
     assert "decision_reason" in llm.calls[0]["schema"]["required"]
-    assert "question_requirement_checklist" in (
-        llm.calls[0]["schema"]["properties"]
-    )
+    assert "question_requirement_checklist" not in llm.calls[0]["schema"][
+        "properties"
+    ]
     assert "dependency_decisions" not in llm.calls[0]["schema"]["properties"]
     assert "dependency_decisions_json" not in llm.calls[0]["schema"]["properties"]
     search_schema = llm.calls[1]["schema"]
@@ -526,7 +522,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "146"
+    assert diagnostic_records[0]["profileVersion"] == "147"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -534,7 +530,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "146"
+    assert transport_input["profileVersion"] == "147"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -887,7 +883,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "146"
+    assert profile.version == "147"
     mode_prompts = {
         "research": profile.solver_research.system_prompt,
         "integration": profile.solver_integration.system_prompt,
@@ -931,11 +927,11 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     assert "## Researchモードの終了" in research_prompt
     assert "1つの完了判定で閉じられる1つの確認事項" in research_prompt
     assert "根拠条文は各WorkItemを検証する材料" in research_prompt
-    assert "`question_requirement_checklist`" in research_prompt
+    assert "`question_requirement_checklist`" not in research_prompt
     assert "WorkItemやHypothesisを省略する理由にはしません" in (
         research_prompt
     )
-    assert "理由: <今回の判断理由>" in research_prompt
+    assert "WorkItemの件数や名称は繰り返しません" in research_prompt
     assert "#### 最初の探索" not in research_prompt
     assert "Graph" not in research_prompt
     assert "remaining_fetch_capacity" not in research_prompt
@@ -1119,7 +1115,7 @@ def test_real_research_failure_fixture_is_rebuilt_with_corrected_prompt() -> Non
         observed["workItems"][0]["question"]
     )
     assert "複数の確認事項を1つにまとめず" in prompt
-    assert "件数と確認対象が`add_work_items`に一致" in prompt
+    assert "漏れ、重複、不要なWorkItemがないか" in prompt
     assert "必要条件、対象範囲、例外、手続" not in prompt
     assert prompt.rindex("## 出力前の完了確認") > prompt.rindex(
         "</solver_context>"
@@ -1150,7 +1146,7 @@ def test_research_missing_main_request_fixture_is_covered_by_prompt() -> None:
     assert len(observed["workItemQuestions"]) == 3
     assert observed["missingRequest"] not in observed["decisionReason"]
     assert "質問の主文と" in prompt
-    assert "漏れと重複がないこと" in prompt
+    assert "すべて`add_work_items`に含まれているか" in prompt
     assert "明示された確認事項をすべて照合" in prompt
 
 

@@ -120,9 +120,9 @@ WorkItem、Hypothesis、利用可能Tool、契約修復情報だけを投影し�
 初回ResearchのProvider schemaも、`next`、理由、初期WorkItem・Hypothesis、focus、ToolRequestだけに絞ります。
 Adapterは省略項目を正規`SolverDecision`の既定値で補い、完全なPydantic契約で検証します。
 正規契約を用途別に複製せず、Researchに無関係な空配列・null欄をLLMへ生成させません。
-`question_requirement_checklist`は主文と列挙要求をLLM自身に明示させる輸送専用欄です。
-WorkItemと同じ件数・順序で返し、Programは非空・一意・件数一致だけを検証してから破棄します。
-要求の意味やWorkItemへの対応内容はProgramで補完しません。生値は診断時のProvider出力で確認できます。
+質問分解の正本は`add_work_items`です。出力前に、元の質問と`add_work_items`をLLM自身が直接照合します。
+同じ確認事項を輸送専用欄や`decision_reason`へ重複させません。要求の意味やWorkItemへの対応内容は
+Programで補完せず、Programは正規`SolverDecision`の型と参照整合性を検証します。
 
 修復指示のassetは`app/agent_framework/prompts/`にあります。法令判断の手順はこのディレクトリ、
 Provider輸送と契約修復はFramework側へ分け、同じ規則を両方へ重複記載しません。

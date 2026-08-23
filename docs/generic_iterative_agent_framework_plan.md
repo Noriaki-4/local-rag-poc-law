@@ -2145,9 +2145,9 @@ Integration等は完全な`SolverContext`を使う。用途別投影は項目の
 初回ResearchのProvider schemaは、継続、判断理由、初期WorkItem・Hypothesis、focus、ToolRequestだけを要求する。
 Graph review、Cycle引継ぎ、Reviewer、最終回答等の未使用欄はProvider schemaから省き、Adapterが既定値を補ってから
 共通`SolverDecision`で完全検証する。正規契約を用途別に複製せず、輸送表現だけを用途に合わせる。
-初回Researchには、主文と明示的な列挙から読み取った要求をWorkItemと同じ順序で返す
-`question_requirement_checklist`を輸送専用欄として置く。Programは非空・一意・WorkItemとの件数一致だけを検証し、
-意味内容を補正せずCaseStateにも保存しない。診断snapshotの生Provider出力に残し、Prompt理解の確認に使う。
+初回Researchの質問分解は`add_work_items`を正本とする。LLMは出力前に元の質問と`add_work_items`を直接照合し、
+漏れ、重複、不要なWorkItemがあれば修正する。同じ確認事項を輸送専用欄や`decision_reason`へ重複させない。
+Programは意味内容を補正せず、正規`SolverDecision`の型、ID、参照整合性等の決定的条件だけを検証する。
 
 ## 12. 実装Phase
 

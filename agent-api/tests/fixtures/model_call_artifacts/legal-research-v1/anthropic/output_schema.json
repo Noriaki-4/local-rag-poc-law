@@ -20,15 +20,6 @@
       },
       "type": "array"
     },
-    "question_requirement_checklist": {
-      "description": "元の質問の主文と明示的な列挙から読み取った実体的な回答要求。根拠・出典・引用・出力形式・詳しさの指定は含めない。省略や統合をせず、add_work_itemsと同じ順序・件数で短く書く。CaseStateには保存しない理解確認用の一時欄。",
-      "items": {
-        "minLength": 1,
-        "type": "string"
-      },
-      "minItems": 1,
-      "type": "array"
-    },
     "start_next_cycle": {
       "description": "現在Cycleを評価して閉じ、別の仮説・方針で次Cycleを開始する場合だけtrue。",
       "enum": [
@@ -249,7 +240,6 @@
     }
   },
   "required": [
-    "question_requirement_checklist",
     "next",
     "decision_reason",
     "start_next_cycle",

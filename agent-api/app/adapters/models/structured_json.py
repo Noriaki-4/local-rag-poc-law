@@ -145,10 +145,6 @@ class StructuredJSONModelAdapter:
                 )
             else:
                 try:
-                    if profile.context_projection == "initial_research":
-                        _validate_initial_research_transport_payload(
-                            result.payload
-                        )
                     normalized = _normalize_solver_payload(result.payload)
                     _assign_tool_request_ids(normalized, context)
                     _normalize_absent_context_branches(normalized, context)
@@ -631,17 +627,6 @@ def _initial_research_transport_schema(
     update_schema["properties"]["add_hypotheses"]["minItems"] = 1
     return _strict_object(
         {
-            "question_requirement_checklist": {
-                "type": "array",
-                "items": {"type": "string", "minLength": 1},
-                "minItems": 1,
-                "description": (
-                    "元の質問の主文と明示的な列挙から読み取った実体的な回答要求。"
-                    "根拠・出典・引用・出力形式・詳しさの指定は含めない。"
-                    "省略や統合をせず、add_work_itemsと同じ順序・件数で短く書く。"
-                    "CaseStateには保存しない理解確認用の一時欄。"
-                ),
-            },
             "next": _described(
                 {"type": "string", "enum": ["continue"]},
                 SolverDecision,
@@ -674,29 +659,6 @@ def _initial_research_transport_schema(
             ),
         }
     )
-
-
-def _validate_initial_research_transport_payload(
-    payload: dict[str, Any],
-) -> None:
-    requirements = payload.get("question_requirement_checklist")
-    update = payload.get("update")
-    work_items = update.get("add_work_items") if isinstance(update, dict) else None
-    if not isinstance(requirements, list) or not all(
-        isinstance(item, str) and item.strip() for item in requirements
-    ):
-        raise ModelProtocolError(
-            "initial research requires question_requirement_checklist"
-        )
-    if len(requirements) != len(set(requirements)):
-        raise ModelProtocolError(
-            "question requirement checklist entries must be unique"
-        )
-    if not isinstance(work_items, list) or len(requirements) != len(work_items):
-        raise ModelProtocolError(
-            "question requirement checklist must match add_work_items count"
-        )
-
 
 def _solver_prompt(
     context: SolverContext,
@@ -2553,7 +2515,6 @@ def _normalize_solver_payload(payload: dict) -> dict:
         decoded = payload
 
     normalized = dict(decoded)
-    normalized.pop("question_requirement_checklist", None)
     if "update_json" in normalized:
         normalized["update"] = _decode_transport_json(
             normalized.pop("update_json"),
