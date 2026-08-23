@@ -55,13 +55,44 @@ class FrameworkModel(BaseModel):
 
 
 class WorkItem(FrameworkModel):
-    work_item_id: str = Field(min_length=1, max_length=160)
-    parent_work_item_id: str | None = Field(default=None, max_length=160)
-    question: str = Field(min_length=1, max_length=1000)
-    state: WorkItemState = "open"
-    resolution: str | None = Field(default=None, max_length=2000)
-    basis_hypothesis_ids: tuple[str, ...] = ()
-    replaces_work_item_id: str | None = Field(default=None, max_length=160)
+    work_item_id: str = Field(
+        min_length=1,
+        max_length=160,
+        description="WorkItemを参照するためのCase内一意ID。",
+    )
+    parent_work_item_id: str | None = Field(
+        default=None,
+        max_length=160,
+        description="階層分解した場合の親WorkItem ID。最上位ではnull。",
+    )
+    question: str = Field(
+        min_length=1,
+        max_length=1000,
+        description="1つの完了判定で閉じられる1つの確認事項。",
+    )
+    state: WorkItemState = Field(
+        default="open",
+        description="openは未完了、resolvedは回答済み、droppedは不要と判断済み。",
+    )
+    resolution: str | None = Field(
+        default=None,
+        max_length=2000,
+        description="WorkItemをresolvedまたはdroppedへ閉じた理由・結論。",
+    )
+    basis_hypothesis_ids: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "openではWorkItemの作成・継続を前提づけるHypothesis ID、"
+            "resolvedではresolutionを支える判定済みHypothesis ID。"
+            "Hypothesis.work_item_idは所属先を表す別項目であり、単なる逆参照には使わない。"
+            "元の質問から直接作るopen WorkItemでは通常は空。"
+        ),
+    )
+    replaces_work_item_id: str | None = Field(
+        default=None,
+        max_length=160,
+        description="作業分解を修正した場合に、このWorkItemが置き換える旧WorkItem ID。",
+    )
 
     @model_validator(mode="after")
     def validate_identity_and_state(self) -> WorkItem:
@@ -79,12 +110,35 @@ class WorkItem(FrameworkModel):
 
 
 class Hypothesis(FrameworkModel):
-    hypothesis_id: str = Field(min_length=1, max_length=160)
-    work_item_id: str = Field(min_length=1, max_length=160)
-    statement: str = Field(min_length=1, max_length=1200)
-    judgment: HypothesisJudgment = "unresolved"
-    evidence_ids: tuple[str, ...] = ()
-    gaps: tuple[str, ...] = ()
+    hypothesis_id: str = Field(
+        min_length=1,
+        max_length=160,
+        description="Hypothesisを参照するためのCase内一意ID。",
+    )
+    work_item_id: str = Field(
+        min_length=1,
+        max_length=160,
+        description="このHypothesisが検証するWorkItem ID。",
+    )
+    statement: str = Field(
+        min_length=1,
+        max_length=1200,
+        description="取得本文で独立に支持または否定を判定できる1つの命題。",
+    )
+    judgment: HypothesisJudgment = Field(
+        default="unresolved",
+        description=(
+            "unresolvedは未確認、supportedは本文が支持、contradictedは本文が否定。"
+        ),
+    )
+    evidence_ids: tuple[str, ...] = Field(
+        default=(),
+        description="supportedまたはcontradictedの直接根拠となるgrounding Evidence ID。",
+    )
+    gaps: tuple[str, ...] = Field(
+        default=(),
+        description="命題を判定するために、本文でまだ確認すべき具体的情報。",
+    )
 
     @model_validator(mode="after")
     def require_evidence_for_semantic_judgment(self) -> Hypothesis:
@@ -96,68 +150,214 @@ class Hypothesis(FrameworkModel):
 
 
 class Evidence(FrameworkModel):
-    evidence_id: str = Field(min_length=1, max_length=160)
-    source_ref: str = Field(min_length=1, max_length=500)
-    content: str = Field(min_length=1)
-    title: str | None = Field(default=None, max_length=500)
-    created_cycle: int = Field(ge=1)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    evidence_id: str = Field(
+        min_length=1,
+        max_length=160,
+        description="Evidenceを参照するためのCase内一意ID。",
+    )
+    source_ref: str = Field(
+        min_length=1,
+        max_length=500,
+        description="取得元Resourceを識別する参照。Article IDとは限らない。",
+    )
+    content: str = Field(
+        min_length=1,
+        description="Toolから取得して保存した原文または検索・Graphのナビゲーション情報。",
+    )
+    title: str | None = Field(
+        default=None,
+        max_length=500,
+        description="取得元Resourceの表示名。取得できない場合はnull。",
+    )
+    created_cycle: int = Field(
+        ge=1,
+        description="このEvidenceをCaseへ追加したResearch Cycle番号。",
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Programが付与した出典・Article・Evidence役割等の来歴情報。",
+    )
 
 
 class DependencyDecision(FrameworkModel):
-    dependency_kind: str = Field(min_length=1, max_length=160)
-    work_item_id: str = Field(min_length=1, max_length=160)
-    status: DependencyStatus
-    reason: str = Field(min_length=1, max_length=1000)
-    basis_evidence_ids: tuple[str, ...] = ()
-    action_request_id: str | None = Field(default=None, max_length=160)
+    dependency_kind: str = Field(
+        min_length=1,
+        max_length=160,
+        description="確認対象となる下位規範依存の種類。",
+    )
+    work_item_id: str = Field(
+        min_length=1,
+        max_length=160,
+        description="この依存判断が属する既知WorkItem ID。",
+    )
+    status: DependencyStatus = Field(
+        description=(
+            "not_requiredは下位規範確認不要、needs_actionは追加探索必要、"
+            "resolvedは委任元と末端の本文確認済み。"
+        ),
+    )
+    reason: str = Field(
+        min_length=1,
+        max_length=1000,
+        description="statusを選んだ本文に基づく短い理由。",
+    )
+    basis_evidence_ids: tuple[str, ...] = Field(
+        default=(),
+        description="この状態判断に使用した取得済みgrounding Evidence ID。",
+    )
+    action_request_id: str | None = Field(
+        default=None,
+        max_length=160,
+        description="needs_actionを現在stepで実行するToolRequest ID。次Cycleへ送る場合はnull。",
+    )
 
 
 class GraphFrontierDecision(FrameworkModel):
-    frontier_item_id: str = Field(min_length=1, max_length=160)
-    article_id: str = Field(min_length=1, max_length=500)
-    work_item_id: str = Field(min_length=1, max_length=160)
-    hypothesis_id: str | None = Field(default=None, max_length=160)
-    action: FrontierReviewAction
-    reason: str = Field(min_length=1, max_length=1000)
+    frontier_item_id: str = Field(
+        min_length=1,
+        max_length=160,
+        description="今回のgraph_review_batchにある評価単位の完全一致ID。",
+    )
+    article_id: str = Field(
+        min_length=1,
+        max_length=500,
+        description="このFrontierが示すGraph候補Article ID。",
+    )
+    work_item_id: str = Field(
+        min_length=1,
+        max_length=160,
+        description="この候補の関連性を評価するopen WorkItem ID。",
+    )
+    hypothesis_id: str | None = Field(
+        default=None,
+        max_length=160,
+        description="この候補で検証する既知Hypothesis ID。特定されていなければnull。",
+    )
+    action: FrontierReviewAction = Field(
+        description=(
+            "selectは関連すると判断して本文取得対象、deferは関連するが後続へ保留、"
+            "rejectは現在のWorkItem・Hypothesisには不要。"
+        ),
+    )
+    reason: str = Field(
+        min_length=1,
+        max_length=1000,
+        description="Relationの種類・方向とHypothesisに基づくactionの理由。",
+    )
 
 
 class FrontierReAdoption(FrameworkModel):
-    article_id: str = Field(min_length=1, max_length=500)
-    work_item_id: str = Field(min_length=1, max_length=160)
-    hypothesis_id: str = Field(min_length=1, max_length=160)
-    reason: str = Field(min_length=1, max_length=1000)
+    article_id: str = Field(
+        min_length=1,
+        max_length=500,
+        description="評価済みGraph台帳から再採用する既知Article ID。",
+    )
+    work_item_id: str = Field(
+        min_length=1,
+        max_length=160,
+        description="再採用先のopen WorkItem ID。",
+    )
+    hypothesis_id: str = Field(
+        min_length=1,
+        max_length=160,
+        description="再採用したArticleで検証する既知Hypothesis ID。",
+    )
+    reason: str = Field(
+        min_length=1,
+        max_length=1000,
+        description="既存候補をこのWorkItem・Hypothesisへ再採用する理由。",
+    )
 
 
 class DeferredFrontierResolution(FrameworkModel):
     """Solverが以前のdefer判断をCycle境界でどう扱うかを明示する。"""
 
-    frontier_item_id: str = Field(min_length=1, max_length=160)
-    article_id: str = Field(min_length=1, max_length=500)
-    work_item_id: str = Field(min_length=1, max_length=160)
-    hypothesis_id: str | None = Field(default=None, max_length=160)
-    action: DeferredFrontierResolutionAction
-    reason: str = Field(min_length=1, max_length=1000)
-    decided_cycle: int | None = Field(default=None, ge=1)
+    frontier_item_id: str = Field(
+        min_length=1,
+        max_length=160,
+        description="以前relevant_deferredにしたFrontierの完全一致ID。",
+    )
+    article_id: str = Field(
+        min_length=1,
+        max_length=500,
+        description="保留Frontierが示す既知Article ID。",
+    )
+    work_item_id: str = Field(
+        min_length=1,
+        max_length=160,
+        description="保留Frontierが属するopen WorkItem ID。",
+    )
+    hypothesis_id: str | None = Field(
+        default=None,
+        max_length=160,
+        description="保留Frontierが対応するHypothesis ID。特定されていなければnull。",
+    )
+    action: DeferredFrontierResolutionAction = Field(
+        description=(
+            "fetch_next_cycleは次Cycle冒頭で取得、carry_forwardは後続へ保留、"
+            "no_longer_neededは不要、unresolved_at_limitは上限で未解決。"
+        ),
+    )
+    reason: str = Field(
+        min_length=1,
+        max_length=1000,
+        description="保留Frontierの次の扱いを選んだ理由。",
+    )
+    decided_cycle: int | None = Field(
+        default=None,
+        ge=1,
+        description="Programが記録する判断Cycle番号。新しい判断ではnull。",
+    )
 
 
 class UnreviewedGraphResolution(FrameworkModel):
     """SolverがCycle境界で未評価Graph候補群をどう扱うかを明示する。"""
 
-    action: UnreviewedGraphResolutionAction
-    reason: str = Field(min_length=1, max_length=1000)
-    candidate_count: int | None = Field(default=None, ge=1)
-    decided_cycle: int | None = Field(default=None, ge=1)
+    action: UnreviewedGraphResolutionAction = Field(
+        description=(
+            "review_next_cycleは次Cycleで評価、no_longer_neededは全候補不要、"
+            "unresolved_at_limitは上限で未評価のまま残す。"
+        ),
+    )
+    reason: str = Field(
+        min_length=1,
+        max_length=1000,
+        description="未評価Graph候補群の扱いを選んだ理由。",
+    )
+    candidate_count: int | None = Field(
+        default=None,
+        ge=1,
+        description="Programが記録する対象候補数。新しい判断ではnull。",
+    )
+    decided_cycle: int | None = Field(
+        default=None,
+        ge=1,
+        description="Programが記録する判断Cycle番号。新しい判断ではnull。",
+    )
 
 
 class GraphCandidateReview(FrameworkModel):
     """今回の差分batchに対するSolver自身の意味判断。"""
 
-    graph_request_ids: tuple[str, ...]
-    reviewed_link_ids: tuple[str, ...]
-    frontier_decisions: tuple[GraphFrontierDecision, ...]
-    reason: str = Field(min_length=1, max_length=2000)
-    reviewed_cycle: int | None = Field(default=None, ge=1)
+    graph_request_ids: tuple[str, ...] = Field(
+        description="今回のGraph Reviewが処理したGraph ToolRequest IDの全件。",
+    )
+    reviewed_link_ids: tuple[str, ...] = Field(
+        description="今回提示されたGraph Link IDの全件。",
+    )
+    frontier_decisions: tuple[GraphFrontierDecision, ...] = Field(
+        description="各Frontierに対するselect・defer・reject判断。",
+    )
+    reason: str = Field(
+        min_length=1,
+        max_length=2000,
+        description="Graph候補batch全体の評価理由。",
+    )
+    reviewed_cycle: int | None = Field(
+        default=None,
+        ge=1,
+        description="Programが記録する評価Cycle番号。新しい判断ではnull。",
+    )
 
     @model_validator(mode="after")
     def require_unique_ids(self) -> "GraphCandidateReview":
@@ -184,18 +384,40 @@ class GraphCandidateReview(FrameworkModel):
 
 
 class SearchCandidateSelection(FrameworkModel):
-    article_id: str = Field(min_length=1, max_length=500)
-    reason: str = Field(min_length=1, max_length=1000)
+    article_id: str = Field(
+        min_length=1,
+        max_length=500,
+        description="本文取得対象として選ぶ検索候補Article ID。",
+    )
+    reason: str = Field(
+        min_length=1,
+        max_length=1000,
+        description="この候補がWorkItem・Hypothesisを直接検証できる理由。",
+    )
 
 
 class SearchCandidateReview(FrameworkModel):
     """OpenSearch候補に対するSolver自身の意味判断。"""
 
-    search_request_ids: tuple[str, ...]
-    selections: tuple[SearchCandidateSelection, ...]
-    deferred_article_ids: tuple[str, ...]
-    reason: str = Field(min_length=1, max_length=2000)
-    reviewed_cycle: int | None = Field(default=None, ge=1)
+    search_request_ids: tuple[str, ...] = Field(
+        description="今回のSearch Reviewが処理したlegal_search Request IDの全件。",
+    )
+    selections: tuple[SearchCandidateSelection, ...] = Field(
+        description="本文取得対象として選んだ候補と理由。",
+    )
+    deferred_article_ids: tuple[str, ...] = Field(
+        description="関連する可能性はあるが現在の取得枠では選ばなかった候補Article ID。",
+    )
+    reason: str = Field(
+        min_length=1,
+        max_length=2000,
+        description="検索候補全体を選択・保留に分けた理由。",
+    )
+    reviewed_cycle: int | None = Field(
+        default=None,
+        ge=1,
+        description="Programが記録する評価Cycle番号。新しい判断ではnull。",
+    )
 
     @model_validator(mode="after")
     def require_unique_ids(self) -> SearchCandidateReview:
@@ -218,12 +440,34 @@ class SearchCandidateReview(FrameworkModel):
 
 
 class ToolRequest(FrameworkModel):
-    request_id: str = Field(min_length=1, max_length=160)
-    work_item_id: str = Field(min_length=1, max_length=160)
-    tool_name: str = Field(min_length=1, max_length=160)
-    arguments: dict[str, Any] = Field(default_factory=dict)
-    purpose: str = Field(min_length=1, max_length=1000)
-    hypothesis_ids: tuple[str, ...] = ()
+    request_id: str = Field(
+        min_length=1,
+        max_length=160,
+        description="同じSolverDecision内で一意な短い局所ID。",
+    )
+    work_item_id: str = Field(
+        min_length=1,
+        max_length=160,
+        description="このTool結果を利用する主なopen WorkItem ID。",
+    )
+    tool_name: str = Field(
+        min_length=1,
+        max_length=160,
+        description="available_toolsにある正規Tool名。",
+    )
+    arguments: dict[str, Any] = Field(
+        default_factory=dict,
+        description="選んだToolのinput_schemaに完全一致する引数object。",
+    )
+    purpose: str = Field(
+        min_length=1,
+        max_length=1000,
+        description="何を確認するための要求かを示す短い説明。",
+    )
+    hypothesis_ids: tuple[str, ...] = Field(
+        default=(),
+        description="このTool結果で検証する既知Hypothesis ID。",
+    )
 
     @model_validator(mode="after")
     def require_unique_hypotheses(self) -> ToolRequest:
@@ -233,12 +477,32 @@ class ToolRequest(FrameworkModel):
 
 
 class ToolResult(FrameworkModel):
-    request_id: str = Field(min_length=1, max_length=160)
-    status: ToolStatus
-    evidence_ids: tuple[str, ...] = ()
-    error_code: str | None = Field(default=None, max_length=160)
-    elapsed_ms: int = Field(default=0, ge=0)
-    cycle_no: int = Field(ge=1)
+    request_id: str = Field(
+        min_length=1,
+        max_length=160,
+        description="結果が対応する既知ToolRequest ID。",
+    )
+    status: ToolStatus = Field(
+        description="succeededは完了、failedは失敗、timeoutは時間切れ。意味的な成否ではない。",
+    )
+    evidence_ids: tuple[str, ...] = Field(
+        default=(),
+        description="このTool実行でCaseへ追加されたEvidence ID。",
+    )
+    error_code: str | None = Field(
+        default=None,
+        max_length=160,
+        description="failedまたはtimeoutの機械的エラーコード。成功時はnull。",
+    )
+    elapsed_ms: int = Field(
+        default=0,
+        ge=0,
+        description="Tool実行に要したミリ秒。",
+    )
+    cycle_no: int = Field(
+        ge=1,
+        description="このToolを実行したResearch Cycle番号。",
+    )
 
     @model_validator(mode="after")
     def validate_result(self) -> ToolResult:
@@ -252,11 +516,23 @@ class ToolResult(FrameworkModel):
 
 
 class FinalAnswer(FrameworkModel):
-    text: str = Field(min_length=1)
-    citation_ids: tuple[str, ...] = ()
-    limitations: tuple[str, ...] = ()
-    unresolved_work_item_ids: tuple[str, ...] = ()
-    unresolved_hypothesis_ids: tuple[str, ...] = ()
+    text: str = Field(min_length=1, description="質問へ返す根拠付き回答本文。")
+    citation_ids: tuple[str, ...] = Field(
+        default=(),
+        description="回答で実際に使用したgrounding Evidence ID。",
+    )
+    limitations: tuple[str, ...] = Field(
+        default=(),
+        description="上限等により確認できなかった事項と回答上の制約。",
+    )
+    unresolved_work_item_ids: tuple[str, ...] = Field(
+        default=(),
+        description="限定回答で未解決のまま残すWorkItem ID。",
+    )
+    unresolved_hypothesis_ids: tuple[str, ...] = Field(
+        default=(),
+        description="限定回答で未解決のまま残すHypothesis ID。",
+    )
 
     @model_validator(mode="after")
     def require_unique_unresolved_ids(self) -> FinalAnswer:
@@ -276,12 +552,30 @@ class ReviewFinding(FrameworkModel):
         min_length=1,
         max_length=160,
         pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$",
+        description="このReviewResult内で一意な短いASCII ID。",
     )
-    kind: ReviewFindingKind
-    description: str = Field(min_length=1, max_length=1000)
-    work_item_id: str | None = Field(default=None, max_length=160)
-    hypothesis_id: str | None = Field(default=None, max_length=160)
-    basis_evidence_ids: tuple[str, ...] = ()
+    kind: ReviewFindingKind = Field(
+        description="指摘の種類。値ごとの意味はReviewer PromptのFinding契約に従う。",
+    )
+    description: str = Field(
+        min_length=1,
+        max_length=1000,
+        description="何と何が整合しないかを示す具体的な指摘。",
+    )
+    work_item_id: str | None = Field(
+        default=None,
+        max_length=160,
+        description="指摘に対応する既知WorkItem ID。特定できなければnull。",
+    )
+    hypothesis_id: str | None = Field(
+        default=None,
+        max_length=160,
+        description="指摘に対応する既知Hypothesis ID。特定できなければnull。",
+    )
+    basis_evidence_ids: tuple[str, ...] = Field(
+        default=(),
+        description="指摘の判断に使用した既知grounding Evidence ID。",
+    )
 
     @model_validator(mode="after")
     def require_unique_evidence(self) -> ReviewFinding:
@@ -295,10 +589,20 @@ class ReviewFindingResolution(FrameworkModel):
         min_length=1,
         max_length=160,
         pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$",
+        description="今回処理する既知Reviewer Finding ID。",
     )
-    outcome: ReviewFindingResolutionOutcome
-    reason: str = Field(min_length=1, max_length=1000)
-    basis_evidence_ids: tuple[str, ...] = ()
+    outcome: ReviewFindingResolutionOutcome = Field(
+        description="addressedは修正済み、disputedは本文根拠により採用しない。",
+    )
+    reason: str = Field(
+        min_length=1,
+        max_length=1000,
+        description="指摘への対応または不採用の理由。",
+    )
+    basis_evidence_ids: tuple[str, ...] = Field(
+        default=(),
+        description="disputed判断に使用した既知grounding Evidence ID。",
+    )
 
     @model_validator(mode="after")
     def require_unique_evidence(self) -> ReviewFindingResolution:
@@ -308,8 +612,13 @@ class ReviewFindingResolution(FrameworkModel):
 
 
 class ReviewResult(FrameworkModel):
-    verdict: ReviewVerdict
-    findings: tuple[ReviewFinding, ...] = ()
+    verdict: ReviewVerdict = Field(
+        description="acceptは回答を承認、reviseはFindingに基づくSolver再判断が必要。",
+    )
+    findings: tuple[ReviewFinding, ...] = Field(
+        default=(),
+        description="verdict=reviseの場合に返す、独立した問題ごとの指摘。",
+    )
 
     @model_validator(mode="after")
     def validate_findings(self) -> ReviewResult:

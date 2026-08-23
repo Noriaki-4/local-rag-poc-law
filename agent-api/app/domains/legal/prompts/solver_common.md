@@ -19,6 +19,11 @@
 - WorkItemの一部分だけを解決し、別の部分を未解決のまま残せる場合は、別WorkItemに分けます。
 - 1つの確認事項へ答えるための条件、手順または根拠が複数あるだけなら、機械的に分割しません。
 - 1つのHypothesisは、取得本文で独立に検証できる1つの命題にします。
+- `Hypothesis.work_item_id`は、そのHypothesisが検証するWorkItemへの所属を表します。
+- open WorkItemの`basis_hypothesis_ids`は、その作業の作成・継続を前提づけるHypothesisです。
+  元の質問から直接作るopen WorkItemでは通常空にし、所属Hypothesisの逆参照には使いません。
+- WorkItemを`resolved`にするときは、`resolution`を支える判定済みHypothesis IDを
+  `basis_hypothesis_ids`へ設定します。
 - 未確認のHypothesisは`unresolved`にします。
 - `supported / contradicted`には、命題を直接支持または否定するgrounding Evidenceだけを使います。
 - 同じ制度や近い手続に関する本文でも、Hypothesisが問う主体、条件、範囲、例外または行為を示さなければ直接根拠ではありません。
@@ -26,16 +31,7 @@
 
 ### IDと本文
 
-次のIDは役割が異なります。別の役割へ読み替えません。
-
-| SolverContextの項目 | 意味 | 使用先 |
-|---|---|---|
-| `fetchable_article_ids` | 発見済みで、本文をまだ取得できるArticleのID | `fetch_articles.arguments.article_ids`に指定できる唯一のID |
-| `grounding_evidence_ids` | 取得済み本文のArticle・Paragraph・Item等を表すEvidence ID | Hypothesis、DependencyDecision、回答の根拠 |
-| `material_evidence` | 今回の入力に本文が含まれるEvidence | 本文の意味評価と引用 |
-| `navigation_evidence_ids` | 検索抜粋またはGraph候補の所在を表すEvidence ID | 次の候補選択だけ |
-| `search_candidates[].article_id` | OpenSearchで発見した候補ArticleのID | 関連性を評価し、`fetchable_article_ids`にもある場合だけ本文取得 |
-| `material_evidence[].metadata.articleId` | Evidenceが属するArticleのID | 根拠の所属確認。本文取得要求へそのまま転記しない |
+項目の意味は`contract_glossary`を正本とします。次の利用ルールに従い、異なる種類のIDを読み替えません。
 
 - `dependency_decisions[].basis_evidence_ids`は、その状態を判断した取得済み本文のEvidence IDです。次に取得するArticle IDではありません。
 - `fetch_articles.arguments.article_ids`は、`fetchable_article_ids`から完全一致で選びます。Evidence ID、`basis_evidence_ids`、`metadata.articleId`から作りません。

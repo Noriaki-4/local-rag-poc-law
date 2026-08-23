@@ -3,15 +3,29 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from time import monotonic
 from typing import Any
 from uuid import uuid4
 
 import requests
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from app.agent_framework.context import ContextCapacityExceeded, SolverContext
-from app.agent_framework.contracts import SolverDecision
+from app.agent_framework.contract_rendering import (
+    contract_field_description,
+    render_solver_contract_glossary,
+)
+from app.agent_framework.contracts import (
+    CaseUpdate,
+    HypothesisUpdate,
+    SearchAssessmentDecision,
+    SearchCandidateAssessment,
+    SearchReselectionDecision,
+    SolverDecision,
+    WorkItemImpactDecision,
+    WorkItemUpdate,
+)
 from app.agent_framework.diagnostics import AgentDiagnostics
 from app.agent_framework.ports.model import (
     ModelProtocolError,
@@ -25,7 +39,21 @@ from app.agent_framework.prompt_assets import (
     prompt_asset_trace,
     render_prompt_section,
 )
-from app.agent_framework.state import ReviewResult
+from app.agent_framework.state import (
+    DeferredFrontierResolution,
+    DependencyDecision,
+    FinalAnswer,
+    FrontierReAdoption,
+    GraphCandidateReview,
+    GraphFrontierDecision,
+    Hypothesis,
+    ReviewFindingResolution,
+    ReviewResult,
+    SearchCandidateSelection,
+    UnreviewedGraphResolution,
+    ToolRequest,
+    WorkItem,
+)
 from app.llm import LLMClient
 
 
@@ -328,6 +356,13 @@ class StructuredJSONModelAdapter:
             raise ModelProtocolError(
                 f"search reselection transport invalid: {selection_error}"
             )
+        try:
+            SearchReselectionDecision.model_validate(selection_result.payload)
+        except ValidationError as exc:
+            detail = exc.errors(include_url=False, include_input=False)[0]
+            raise ModelProtocolError(
+                f"search reselection contract invalid: {detail['msg']}"
+            ) from exc
 
         combined_payload = {
             **assessment_result.payload,
@@ -457,25 +492,22 @@ def _solver_prompt(
         separators=(",", ":"),
     )
     contract_repair_instruction = _focused_contract_repair_instruction(context)
-    article_fetch_aliases = _article_fetch_alias_map(context)
-    article_fetch_alias_instruction = (
-        "article_fetchのarticle_ref_NにはArticle ID本体でなく、次の既知候補別名を指定します。"
+    fetch_articles_aliases = _article_fetch_alias_map(context)
+    fetch_articles_alias_instruction = (
+        "専用fetch_articles欄のarticle_ref_NにはArticle ID本体でなく、次の既知候補別名を指定します。"
         "Adapterが対応するArticle IDへ機械変換します。"
-        f"<article_fetch_aliases>{json.dumps(article_fetch_aliases, ensure_ascii=False, separators=(',', ':'))}"
-        "</article_fetch_aliases>"
-        if article_fetch_aliases
+        f"<fetch_articles_aliases>{json.dumps(fetch_articles_aliases, ensure_ascii=False, separators=(',', ':'))}"
+        "</fetch_articles_aliases>"
+        if fetch_articles_aliases
         else ""
     )
     transport_instruction = (
         "以下は現在のSolverContextです。コンパクト輸送schemaに従い、"
         "復元後SolverDecisionのうちupdateを構造化object、tool_requestsを"
-        "構造化配列として直接返してください。各ToolRequestのargumentsだけは"
-        "arguments_jsonへ1個のJSON object文字列として格納します。"
-        "legal_searchのarguments_jsonは例として"
-        "{\"query\":\"公開買付け 公告 届出\",\"doc_types\":[\"law\"],\"document_ids\":[]}"
-        "の形にし、scope、tool_input、mode、predicate等を追加しません。"
-        "update_jsonとtool_requests_jsonは返しません。Adapterがarguments_jsonを"
-        "復元し、SolverDecisionとして上記契約で完全検証します。\n"
+        "構造化配列として直接返してください。各ToolRequestのargumentsは、"
+        "available_toolsにある該当Toolのinput_schemaへ一致するJSON objectとして返します。"
+        "update_json、tool_requests_json、arguments_jsonは返しません。"
+        "AdapterがSolverDecisionとして上記契約で完全検証します。\n"
         if compact_transport
         else (
             "以下は現在のSolverContextです。Anthropic軽量輸送schemaに従い、"
@@ -501,15 +533,15 @@ def _solver_prompt(
             "使わないslotはnullにします。新規request_idは"
             "160文字以内の短いASCII識別子にし、説明文はpurposeへ入れます。"
             "fetch_articlesだけはtool_requestsへ入れず、"
-            "article_fetchへ1件だけ返し、article_ref_1から順に上記の既知候補別名を指定してください。"
-            "article_fetchはfetch_articles ToolRequestそのものの輸送表現であり、追加情報ではありません。"
-            "article_fetchを返す場合も返さない場合も、tool_requestsの各slotへ"
+            "専用fetch_articles欄へ1件だけ返し、article_ref_1から順に上記の既知候補別名を指定してください。"
+            "専用fetch_articles欄は正規のfetch_articles ToolRequestの輸送表現であり、追加情報ではありません。"
+            "専用fetch_articles欄を返す場合も返さない場合も、tool_requestsの各slotへ"
             "tool_name=fetch_articlesを決して再掲しません。"
             "不要な残りslotはnullにします。"
             "各ToolRequest内のargumentsはJSON objectのまま格納し、arguments_jsonと"
             "tool_requests_jsonは返しません。"
-            "Adapterがupdate_json、Evidence対応、各ToolRequest文字列、article_fetchを復元し、SolverDecisionとして"
-            f"上記契約で完全検証します。{article_fetch_alias_instruction}\n"
+            "Adapterがupdate_json、Evidence対応、各ToolRequest文字列、専用fetch_articles欄を復元し、SolverDecisionとして"
+            f"上記契約で完全検証します。{fetch_articles_alias_instruction}\n"
             if structured_tool_transport
             else (
                 "以下は現在のSolverContextです。Provider輸送schemaに従い、"
@@ -529,6 +561,7 @@ def _solver_prompt(
     )
     prompt = (
         f"{system_prompt}\n\n"
+        f"{render_solver_contract_glossary()}\n\n"
         f"{_MINIMAL_SOLVER_CONTRACT}\n\n"
         f"{contract_feedback_rule}\n"
         f"{contract_repair_instruction}"
@@ -851,37 +884,70 @@ def _solver_transport_schema(context: SolverContext) -> dict:
     string_array = {"type": "array", "items": {"type": "string"}}
     answer = _strict_object(
         {
-            "text": {"type": "string"},
-            "citation_ids": string_array,
-            "limitations": string_array,
-            "unresolved_work_item_ids": string_array,
-            "unresolved_hypothesis_ids": string_array,
+            "text": _described({"type": "string"}, FinalAnswer, "text"),
+            "citation_ids": _described(
+                string_array,
+                FinalAnswer,
+                "citation_ids",
+            ),
+            "limitations": _described(
+                string_array,
+                FinalAnswer,
+                "limitations",
+            ),
+            "unresolved_work_item_ids": _described(
+                string_array,
+                FinalAnswer,
+                "unresolved_work_item_ids",
+            ),
+            "unresolved_hypothesis_ids": _described(
+                string_array,
+                FinalAnswer,
+                "unresolved_hypothesis_ids",
+            ),
         }
     )
     required_dependency_kind = context.required_dependency_kind
     required_dependency_work_item_ids = context.required_dependency_work_item_ids
     dependency_decision = _strict_object(
         {
-            "dependency_kind": (
-                {"type": "string", "enum": [required_dependency_kind]}
-                if required_dependency_kind is not None
-                else {"type": "string"}
-            ),
-            "work_item_id": _enum_string(required_dependency_work_item_ids),
-            "status": {
-                "type": "string",
-                "enum": ["not_required", "needs_action", "resolved"],
-            },
-            "reason": {"type": "string", "minLength": 1},
-            "basis_evidence_ids": {
-                **_bounded_enum_array(context.grounding_evidence_ids),
-                "description": (
-                    "Grounding body Evidence used by the LLM for this audit decision"
+            "dependency_kind": _described(
+                (
+                    {"type": "string", "enum": [required_dependency_kind]}
+                    if required_dependency_kind is not None
+                    else {"type": "string"}
                 ),
-            },
-            "action_request_id": {
-                "anyOf": [{"type": "string"}, {"type": "null"}]
-            },
+                DependencyDecision,
+                "dependency_kind",
+            ),
+            "work_item_id": _described(
+                _enum_string(required_dependency_work_item_ids),
+                DependencyDecision,
+                "work_item_id",
+            ),
+            "status": _described(
+                {
+                    "type": "string",
+                    "enum": ["not_required", "needs_action", "resolved"],
+                },
+                DependencyDecision,
+                "status",
+            ),
+            "reason": _described(
+                {"type": "string", "minLength": 1},
+                DependencyDecision,
+                "reason",
+            ),
+            "basis_evidence_ids": _described(
+                _bounded_enum_array(context.grounding_evidence_ids),
+                DependencyDecision,
+                "basis_evidence_ids",
+            ),
+            "action_request_id": _described(
+                {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                DependencyDecision,
+                "action_request_id",
+            ),
         }
     )
     required_dependency_count = len(required_dependency_work_item_ids)
@@ -900,14 +966,28 @@ def _solver_transport_schema(context: SolverContext) -> dict:
     )
     review_finding_resolution = _strict_object(
         {
-            "finding_id": _enum_string(review_finding_ids),
-            "outcome": {
-                "type": "string",
-                "enum": ["addressed", "disputed"],
-            },
-            "reason": {"type": "string", "minLength": 1},
-            "basis_evidence_ids": _bounded_enum_array(
-                context.grounding_evidence_ids
+            "finding_id": _described(
+                _enum_string(review_finding_ids),
+                ReviewFindingResolution,
+                "finding_id",
+            ),
+            "outcome": _described(
+                {
+                    "type": "string",
+                    "enum": ["addressed", "disputed"],
+                },
+                ReviewFindingResolution,
+                "outcome",
+            ),
+            "reason": _described(
+                {"type": "string", "minLength": 1},
+                ReviewFindingResolution,
+                "reason",
+            ),
+            "basis_evidence_ids": _described(
+                _bounded_enum_array(context.grounding_evidence_ids),
+                ReviewFindingResolution,
+                "basis_evidence_ids",
             ),
         }
     )
@@ -970,17 +1050,44 @@ def _solver_transport_schema(context: SolverContext) -> dict:
     )
     graph_frontier_decision = _strict_object(
         {
-            "frontier_item_id": _enum_string(selectable_frontier_ids),
-            "article_id": _enum_string(graph_article_ids),
-            "work_item_id": _enum_string(graph_work_item_ids),
-            "hypothesis_id": {
-                "anyOf": [_enum_string(graph_hypothesis_ids), {"type": "null"}]
-            },
-            "action": {
-                "type": "string",
-                "enum": ["select", "defer", "reject"],
-            },
-            "reason": {"type": "string"},
+            "frontier_item_id": _described(
+                _enum_string(selectable_frontier_ids),
+                GraphFrontierDecision,
+                "frontier_item_id",
+            ),
+            "article_id": _described(
+                _enum_string(graph_article_ids),
+                GraphFrontierDecision,
+                "article_id",
+            ),
+            "work_item_id": _described(
+                _enum_string(graph_work_item_ids),
+                GraphFrontierDecision,
+                "work_item_id",
+            ),
+            "hypothesis_id": _described(
+                {
+                    "anyOf": [
+                        _enum_string(graph_hypothesis_ids),
+                        {"type": "null"},
+                    ]
+                },
+                GraphFrontierDecision,
+                "hypothesis_id",
+            ),
+            "action": _described(
+                {
+                    "type": "string",
+                    "enum": ["select", "defer", "reject"],
+                },
+                GraphFrontierDecision,
+                "action",
+            ),
+            "reason": _described(
+                {"type": "string"},
+                GraphFrontierDecision,
+                "reason",
+            ),
         }
     )
     reviewed_link_ids = tuple(
@@ -992,25 +1099,43 @@ def _solver_transport_schema(context: SolverContext) -> dict:
     )
     graph_candidate_review = _strict_object(
         {
-            "graph_request_ids": {
-                "type": "array",
-                "items": _enum_string(context.required_graph_review_request_ids),
-                "minItems": len(context.required_graph_review_request_ids),
-                "maxItems": len(context.required_graph_review_request_ids),
-            },
-            "reviewed_link_ids": {
-                "type": "array",
-                "items": _enum_string(reviewed_link_ids),
-                "minItems": len(reviewed_link_ids),
-                "maxItems": len(reviewed_link_ids),
-            },
-            "frontier_decisions": {
-                "type": "array",
-                "items": graph_frontier_decision,
-                "minItems": len(batch_frontier_ids),
-                "maxItems": len(selectable_frontier_ids),
-            },
-            "reason": {"type": "string"},
+            "graph_request_ids": _described(
+                {
+                    "type": "array",
+                    "items": _enum_string(
+                        context.required_graph_review_request_ids
+                    ),
+                    "minItems": len(context.required_graph_review_request_ids),
+                    "maxItems": len(context.required_graph_review_request_ids),
+                },
+                GraphCandidateReview,
+                "graph_request_ids",
+            ),
+            "reviewed_link_ids": _described(
+                {
+                    "type": "array",
+                    "items": _enum_string(reviewed_link_ids),
+                    "minItems": len(reviewed_link_ids),
+                    "maxItems": len(reviewed_link_ids),
+                },
+                GraphCandidateReview,
+                "reviewed_link_ids",
+            ),
+            "frontier_decisions": _described(
+                {
+                    "type": "array",
+                    "items": graph_frontier_decision,
+                    "minItems": len(batch_frontier_ids),
+                    "maxItems": len(selectable_frontier_ids),
+                },
+                GraphCandidateReview,
+                "frontier_decisions",
+            ),
+            "reason": _described(
+                {"type": "string"},
+                GraphCandidateReview,
+                "reason",
+            ),
         }
     )
     known_ledger_article_ids = tuple(
@@ -1026,10 +1151,26 @@ def _solver_transport_schema(context: SolverContext) -> dict:
     )
     frontier_re_adoption = _strict_object(
         {
-            "article_id": _enum_string(known_ledger_article_ids),
-            "work_item_id": _enum_string(open_work_item_ids),
-            "hypothesis_id": _enum_string(open_hypothesis_ids),
-            "reason": {"type": "string"},
+            "article_id": _described(
+                _enum_string(known_ledger_article_ids),
+                FrontierReAdoption,
+                "article_id",
+            ),
+            "work_item_id": _described(
+                _enum_string(open_work_item_ids),
+                FrontierReAdoption,
+                "work_item_id",
+            ),
+            "hypothesis_id": _described(
+                _enum_string(open_hypothesis_ids),
+                FrontierReAdoption,
+                "hypothesis_id",
+            ),
+            "reason": _described(
+                {"type": "string"},
+                FrontierReAdoption,
+                "reason",
+            ),
         }
     )
     active_deferred = tuple(
@@ -1041,39 +1182,69 @@ def _solver_transport_schema(context: SolverContext) -> dict:
     )
     deferred_frontier_resolution = _strict_object(
         {
-            "frontier_item_id": _enum_string(
-                tuple(item.frontier_item_id for item in active_deferred)
+            "frontier_item_id": _described(
+                _enum_string(
+                    tuple(item.frontier_item_id for item in active_deferred)
+                ),
+                DeferredFrontierResolution,
+                "frontier_item_id",
             ),
-            "article_id": _enum_string(
-                tuple(dict.fromkeys(item.article_id for item in active_deferred))
+            "article_id": _described(
+                _enum_string(
+                    tuple(
+                        dict.fromkeys(item.article_id for item in active_deferred)
+                    )
+                ),
+                DeferredFrontierResolution,
+                "article_id",
             ),
-            "work_item_id": _enum_string(
-                tuple(dict.fromkeys(item.work_item_id for item in active_deferred))
-            ),
-            "hypothesis_id": {
-                "anyOf": [
-                    _enum_string(
-                        tuple(
-                            dict.fromkeys(
-                                item.hypothesis_id
-                                for item in active_deferred
-                                if item.hypothesis_id is not None
-                            )
+            "work_item_id": _described(
+                _enum_string(
+                    tuple(
+                        dict.fromkeys(
+                            item.work_item_id for item in active_deferred
                         )
-                    ),
-                    {"type": "null"},
-                ]
-            },
-            "action": {
-                "type": "string",
-                "enum": [
-                    "fetch_next_cycle",
-                    "carry_forward",
-                    "no_longer_needed",
-                    "unresolved_at_limit",
-                ],
-            },
-            "reason": {"type": "string"},
+                    )
+                ),
+                DeferredFrontierResolution,
+                "work_item_id",
+            ),
+            "hypothesis_id": _described(
+                {
+                    "anyOf": [
+                        _enum_string(
+                            tuple(
+                                dict.fromkeys(
+                                    item.hypothesis_id
+                                    for item in active_deferred
+                                    if item.hypothesis_id is not None
+                                )
+                            )
+                        ),
+                        {"type": "null"},
+                    ]
+                },
+                DeferredFrontierResolution,
+                "hypothesis_id",
+            ),
+            "action": _described(
+                {
+                    "type": "string",
+                    "enum": [
+                        "fetch_next_cycle",
+                        "carry_forward",
+                        "no_longer_needed",
+                        "unresolved_at_limit",
+                    ],
+                },
+                DeferredFrontierResolution,
+                "action",
+            ),
+            "reason": _described(
+                {"type": "string"},
+                DeferredFrontierResolution,
+                "reason",
+            ),
         }
     )
     force_next_cycle_repair = _preserve_previous_update_for_cycle_repair(context)
@@ -1116,43 +1287,56 @@ def _solver_transport_schema(context: SolverContext) -> dict:
     )
     unreviewed_graph_resolution = _strict_object(
         {
-            "action": {
-                "type": "string",
-                "enum": unreviewed_graph_action_values,
-            },
-            "reason": {"type": "string"},
+            "action": _described(
+                {
+                    "type": "string",
+                    "enum": unreviewed_graph_action_values,
+                },
+                UnreviewedGraphResolution,
+                "action",
+            ),
+            "reason": _described(
+                {"type": "string"},
+                UnreviewedGraphResolution,
+                "reason",
+            ),
         }
     )
     return {
         "type": "object",
         "additionalProperties": False,
         "properties": {
-            "next": {
-                "type": "string",
-                "enum": (
-                    ["continue"]
-                    if selection_mode
-                    or force_next_cycle_repair
-                    or force_continue_repair
-                    else ["continue", "finalize"]
+            "next": _described(
+                {
+                    "type": "string",
+                    "enum": (
+                        ["continue"]
+                        if selection_mode
+                        or force_next_cycle_repair
+                        or force_continue_repair
+                        else ["continue", "finalize"]
+                    ),
+                },
+                SolverDecision,
+                "next",
+            ),
+            "decision_reason": _described(
+                {"type": "string"},
+                SolverDecision,
+                "decision_reason",
+            ),
+            "start_next_cycle": _described(
+                (
+                    {"type": "boolean", "enum": [False]}
+                    if selection_mode or force_continue_repair
+                    else (
+                        {"type": "boolean", "enum": [True]}
+                        if force_next_cycle_repair
+                        else {"type": "boolean"}
+                    )
                 ),
-            },
-            "decision_reason": {
-                "type": "string",
-                "description": (
-                    "One concise sentence explaining why this step chooses "
-                    "continue or finalize from the shown evidence, gaps, and limits; "
-                    "do not provide hidden chain-of-thought"
-                ),
-            },
-            "start_next_cycle": (
-                {"type": "boolean", "enum": [False]}
-                if selection_mode or force_continue_repair
-                else (
-                    {"type": "boolean", "enum": [True]}
-                    if force_next_cycle_repair
-                    else {"type": "boolean"}
-                )
+                SolverDecision,
+                "start_next_cycle",
             ),
             "update_json": {
                 "type": "string",
@@ -1163,66 +1347,121 @@ def _solver_transport_schema(context: SolverContext) -> dict:
                     else {}
                 ),
             },
-            "next_focus_work_item_ids": (
-                _empty_array_schema()
-                if selection_mode
-                else (
-                    _bounded_enum_array(repair_open_work_item_ids)
-                    if context.contract_feedback is not None
-                    else string_array
-                )
+            "next_focus_work_item_ids": _described(
+                (
+                    _empty_array_schema()
+                    if selection_mode
+                    else (
+                        _bounded_enum_array(repair_open_work_item_ids)
+                        if context.contract_feedback is not None
+                        else string_array
+                    )
+                ),
+                SolverDecision,
+                "next_focus_work_item_ids",
             ),
-            "retain_evidence_ids": (
-                _empty_array_schema()
-                if selection_mode
-                else _bounded_enum_array(
-                    tuple(item.evidence_id for item in context.evidence_manifest),
-                    max_items=context.max_retained_evidence,
-                )
+            "retain_evidence_ids": _described(
+                (
+                    _empty_array_schema()
+                    if selection_mode
+                    else _bounded_enum_array(
+                        tuple(
+                            item.evidence_id
+                            for item in context.evidence_manifest
+                        ),
+                        max_items=context.max_retained_evidence,
+                    )
+                ),
+                SolverDecision,
+                "retain_evidence_ids",
             ),
-            "review_finding_resolutions": review_finding_resolutions,
+            "review_finding_resolutions": _described(
+                review_finding_resolutions,
+                SolverDecision,
+                "review_finding_resolutions",
+            ),
             "tool_requests_json": {
                 "type": "string",
                 "description": "ToolRequest array encoded as one JSON array string",
                 **({"enum": ["[]"]} if tool_requests_forbidden else {}),
             },
-            "dependency_decisions": dependency_decisions,
+            "dependency_decisions": _described(
+                dependency_decisions,
+                SolverDecision,
+                "dependency_decisions",
+            ),
             "graph_candidate_review": (
-                graph_candidate_review
+                _described(
+                    graph_candidate_review,
+                    SolverDecision,
+                    "graph_candidate_review",
+                )
                 if graph_review_mode
-                else {"type": "null"}
+                else _described(
+                    {"type": "null"},
+                    SolverDecision,
+                    "graph_candidate_review",
+                )
             ),
-            "search_candidate_review": {"type": "null"},
-            "frontier_re_adoptions": (
-                _empty_array_schema()
-                if selection_mode
-                else {
-                    "type": "array",
-                    "items": frontier_re_adoption,
-                    "maxItems": len(context.graph_review_ledger),
-                }
+            "search_candidate_review": _described(
+                {"type": "null"},
+                SolverDecision,
+                "search_candidate_review",
             ),
-            "deferred_frontier_resolutions": (
-                _empty_array_schema()
-                if selection_mode
-                else {
-                    "type": "array",
-                    "items": deferred_frontier_resolution,
-                    "maxItems": len(active_deferred),
-                }
+            "frontier_re_adoptions": _described(
+                (
+                    _empty_array_schema()
+                    if selection_mode
+                    else {
+                        "type": "array",
+                        "items": frontier_re_adoption,
+                        "maxItems": len(context.graph_review_ledger),
+                    }
+                ),
+                SolverDecision,
+                "frontier_re_adoptions",
+            ),
+            "deferred_frontier_resolutions": _described(
+                (
+                    _empty_array_schema()
+                    if selection_mode
+                    else {
+                        "type": "array",
+                        "items": deferred_frontier_resolution,
+                        "maxItems": len(active_deferred),
+                    }
+                ),
+                SolverDecision,
+                "deferred_frontier_resolutions",
             ),
             "unreviewed_graph_resolution": (
-                {"type": "null"}
+                _described(
+                    {"type": "null"},
+                    SolverDecision,
+                    "unreviewed_graph_resolution",
+                )
                 if selection_mode
                 or context.graph_review_batch.remaining_unreviewed_count == 0
-                else unreviewed_graph_resolution
+                else _described(
+                    unreviewed_graph_resolution,
+                    SolverDecision,
+                    "unreviewed_graph_resolution",
+                )
             ),
             "answer": (
-                {"type": "null"}
+                _described(
+                    {"type": "null"},
+                    SolverDecision,
+                    "answer",
+                )
                 if selection_mode
                 or force_next_cycle_repair
                 or force_continue_repair
-                else {"anyOf": [answer, {"type": "null"}]}
+                else _described(
+                    {"anyOf": [answer, {"type": "null"}]},
+                    SolverDecision,
+                    "answer",
+                )
             ),
         },
         "required": [
@@ -1251,35 +1490,63 @@ def _search_review_transport_schema(context: SolverContext) -> dict[str, Any]:
     candidate_ids = tuple(item.article_id for item in context.search_candidates)
     return _strict_object(
         {
-            "search_request_ids": {
-                "type": "array",
-                "items": _enum_string(
-                    context.required_search_review_request_ids
-                ),
-                "minItems": len(context.required_search_review_request_ids),
-                "maxItems": len(context.required_search_review_request_ids),
-            },
-            "assessments": {
-                "type": "array",
-                "items": _strict_object(
-                    {
-                        "article_id": _enum_string(candidate_ids),
-                        "legal_function": {
-                            "type": "string",
-                            "enum": [
-                                "applicability",
-                                "exception",
-                                "procedure",
-                                "scope",
-                            ],
-                        },
-                        "summary": {"type": "string", "minLength": 1},
-                    }
-                ),
-                "minItems": len(candidate_ids),
-                "maxItems": len(candidate_ids),
-            },
-            "reason": {"type": "string", "minLength": 1},
+            "search_request_ids": _described(
+                {
+                    "type": "array",
+                    "items": _enum_string(
+                        context.required_search_review_request_ids
+                    ),
+                    "minItems": len(
+                        context.required_search_review_request_ids
+                    ),
+                    "maxItems": len(
+                        context.required_search_review_request_ids
+                    ),
+                },
+                SearchAssessmentDecision,
+                "search_request_ids",
+            ),
+            "assessments": _described(
+                {
+                    "type": "array",
+                    "items": _strict_object(
+                        {
+                            "article_id": _described(
+                                _enum_string(candidate_ids),
+                                SearchCandidateAssessment,
+                                "article_id",
+                            ),
+                            "legal_function": _described(
+                                {
+                                    "type": "string",
+                                    "enum": [
+                                        "applicability",
+                                        "exception",
+                                        "procedure",
+                                        "scope",
+                                    ],
+                                },
+                                SearchCandidateAssessment,
+                                "legal_function",
+                            ),
+                            "summary": _described(
+                                {"type": "string", "minLength": 1},
+                                SearchCandidateAssessment,
+                                "summary",
+                            ),
+                        }
+                    ),
+                    "minItems": len(candidate_ids),
+                    "maxItems": len(candidate_ids),
+                },
+                SearchAssessmentDecision,
+                "assessments",
+            ),
+            "reason": _described(
+                {"type": "string", "minLength": 1},
+                SearchAssessmentDecision,
+                "reason",
+            ),
         }
     )
 
@@ -1290,20 +1557,36 @@ def _search_reselection_transport_schema(
     candidate_ids = tuple(item.article_id for item in context.search_candidates)
     return _strict_object(
         {
-            "selections": {
-                "type": "array",
-                "items": _strict_object(
-                    {
-                        "article_id": _enum_string(candidate_ids),
-                        "reason": {"type": "string", "minLength": 1},
-                    }
-                ),
-                "maxItems": min(
-                    len(candidate_ids),
-                    context.remaining_fetch_capacity,
-                ),
-            },
-            "reason": {"type": "string", "minLength": 1},
+            "selections": _described(
+                {
+                    "type": "array",
+                    "items": _strict_object(
+                        {
+                            "article_id": _described(
+                                _enum_string(candidate_ids),
+                                SearchCandidateSelection,
+                                "article_id",
+                            ),
+                            "reason": _described(
+                                {"type": "string", "minLength": 1},
+                                SearchCandidateSelection,
+                                "reason",
+                            ),
+                        }
+                    ),
+                    "maxItems": min(
+                        len(candidate_ids),
+                        context.remaining_fetch_capacity,
+                    ),
+                },
+                SearchReselectionDecision,
+                "selections",
+            ),
+            "reason": _described(
+                {"type": "string", "minLength": 1},
+                SearchReselectionDecision,
+                "reason",
+            ),
         }
     )
 
@@ -1314,10 +1597,14 @@ def _solver_compact_transport_schema(context: SolverContext) -> dict:
     schema = _solver_transport_schema(context)
     properties = schema["properties"]
     if context.research_cycle_count == 0:
-        properties["start_next_cycle"] = {
-            "type": "boolean",
-            "enum": [False],
-        }
+        properties["start_next_cycle"] = _described(
+            {
+                "type": "boolean",
+                "enum": [False],
+            },
+            SolverDecision,
+            "start_next_cycle",
+        )
     tool_requests_forbidden = properties["tool_requests_json"].get("enum") == [
         "[]"
     ]
@@ -1326,35 +1613,53 @@ def _solver_compact_transport_schema(context: SolverContext) -> dict:
     selection_mode = bool(
         context.graph_review_batch.candidates
     ) and not context.finalize_only
-    properties["update"] = (
-        _empty_case_update_transport_schema()
-        if selection_mode
-        or _preserve_previous_update_for_contract_repair(context)
-        else _case_update_transport_schema()
+    properties["update"] = _described(
+        (
+            _empty_case_update_transport_schema()
+            if selection_mode
+            or _preserve_previous_update_for_contract_repair(context)
+            else _case_update_transport_schema()
+        ),
+        SolverDecision,
+        "update",
     )
     if not context.work_tree and context.contract_feedback is None:
         properties["update"]["properties"]["add_work_items"]["minItems"] = 1
         properties["update"]["properties"]["add_hypotheses"]["minItems"] = 1
     projected_open_work_item_ids = _repair_open_work_item_ids(context)
     evidence_ids = tuple(item.evidence_id for item in context.evidence_manifest)
-    properties["retain_evidence_ids"] = (
-        _empty_array_schema()
-        if selection_mode
-        else _bounded_enum_array(
-            evidence_ids,
-            max_items=context.max_retained_evidence,
-        )
+    properties["retain_evidence_ids"] = _described(
+        (
+            _empty_array_schema()
+            if selection_mode
+            else _bounded_enum_array(
+                evidence_ids,
+                max_items=context.max_retained_evidence,
+            )
+        ),
+        SolverDecision,
+        "retain_evidence_ids",
     )
     if selection_mode:
-        properties["next_focus_work_item_ids"] = _empty_array_schema()
-    elif projected_open_work_item_ids:
-        properties["next_focus_work_item_ids"] = _bounded_enum_array(
-            projected_open_work_item_ids
+        properties["next_focus_work_item_ids"] = _described(
+            _empty_array_schema(),
+            SolverDecision,
+            "next_focus_work_item_ids",
         )
-    properties["tool_requests"] = (
-        _empty_array_schema()
-        if tool_requests_forbidden
-        else _tool_requests_transport_schema(context)
+    elif projected_open_work_item_ids:
+        properties["next_focus_work_item_ids"] = _described(
+            _bounded_enum_array(projected_open_work_item_ids),
+            SolverDecision,
+            "next_focus_work_item_ids",
+        )
+    properties["tool_requests"] = _described(
+        (
+            _empty_array_schema()
+            if tool_requests_forbidden
+            else _tool_requests_transport_schema(context)
+        ),
+        SolverDecision,
+        "tool_requests",
     )
     schema["required"] = [
         "update" if item == "update_json" else (
@@ -1370,8 +1675,10 @@ def _solver_anthropic_transport_schema(context: SolverContext) -> dict:
 
     schema = _solver_transport_schema(context)
     properties = schema["properties"]
-    properties["dependency_decisions"] = _anthropic_dependency_decisions_schema(
-        context
+    properties["dependency_decisions"] = _described(
+        _anthropic_dependency_decisions_schema(context),
+        SolverDecision,
+        "dependency_decisions",
     )
     grounding_article_ids = tuple(
         dict.fromkeys(
@@ -1381,82 +1688,131 @@ def _solver_anthropic_transport_schema(context: SolverContext) -> dict:
             and isinstance(article_id, str)
         )
     )
-    properties["dependency_article_bindings"] = (
-        {
-            "type": "array",
-            "items": _strict_object(
-                {
-                    "work_item_id": _enum_string(
-                        context.required_dependency_work_item_ids
-                    ),
-                    "article_ids": _bounded_enum_array(
-                        grounding_article_ids
-                    ),
-                }
-            ),
-        }
-        if context.required_dependency_work_item_ids
-        else {"type": "null"}
-    )
-    properties["hypothesis_evidence_bindings"] = (
-        {
-            "type": "array",
-            "items": _strict_object(
-                {
-                    "hypothesis_id": {"type": "string"},
-                    "evidence_ids": _bounded_enum_array(
-                        context.grounding_evidence_ids
-                    ),
-                }
-            ),
-        }
-        if context.grounding_evidence_ids
-        else {"type": "null"}
-    )
+    properties["dependency_article_bindings"] = {
+        **(
+            {
+                "type": "array",
+                "items": _strict_object(
+                    {
+                        "work_item_id": {
+                            **_enum_string(
+                                context.required_dependency_work_item_ids
+                            ),
+                            "description": (
+                                "DependencyDecisionへ復元する対象WorkItem ID。"
+                            ),
+                        },
+                        "article_ids": {
+                            **_bounded_enum_array(grounding_article_ids),
+                            "description": (
+                                "basis_evidence_idsへ機械変換する取得済みArticle ID。"
+                            ),
+                        },
+                    }
+                ),
+            }
+            if context.required_dependency_work_item_ids
+            else {"type": "null"}
+        ),
+        "description": (
+            "Anthropic輸送専用。DependencyDecisionの判断根拠Articleを既知IDから指定する。"
+        ),
+    }
+    properties["hypothesis_evidence_bindings"] = {
+        **(
+            {
+                "type": "array",
+                "items": _strict_object(
+                    {
+                        "hypothesis_id": {
+                            "type": "string",
+                            "description": (
+                                "今回追加・更新するHypothesis ID。"
+                            ),
+                        },
+                        "evidence_ids": {
+                            **_bounded_enum_array(
+                                context.grounding_evidence_ids
+                            ),
+                            "description": (
+                                "Hypothesis判定へ復元する取得済みgrounding Evidence ID。"
+                            ),
+                        },
+                    }
+                ),
+            }
+            if context.grounding_evidence_ids
+            else {"type": "null"}
+        ),
+        "description": (
+            "Anthropic輸送専用。Hypothesis更新JSONと既知Evidenceの対応を指定する。"
+        ),
+    }
     tool_requests_forbidden = properties["tool_requests_json"].get("enum") == [
         "[]"
     ]
     properties.pop("tool_requests_json")
-    article_fetch_schema = _anthropic_article_fetch_schema(context)
+    fetch_articles_schema = _anthropic_fetch_articles_schema(context)
     non_fetch_capacity = (
         0
         if tool_requests_forbidden
         else context.max_tool_requests_per_step
-        - (0 if article_fetch_schema == {"type": "null"} else 1)
+        - (0 if fetch_articles_schema == {"type": "null"} else 1)
     )
-    properties["tool_requests"] = _strict_object(
-        {
-            f"tool_request_{index}_json": {
-                "anyOf": [
-                    _strict_object(
-                        {
-                            "tool_name": {
-                                "type": "string",
-                                "enum": [
-                                    "legal_search",
-                                    "legal_graph_neighbors",
-                                    "load_evidence",
-                                ],
-                            },
-                            "request_json": {
-                                "type": "string",
-                                "description": (
-                                    "one ToolRequest JSON object without tool_name; "
-                                    "the outer tool_name is authoritative"
-                                ),
-                            },
-                        }
+    non_fetch_tool_names = [
+        definition.name
+        for definition in context.available_tools
+        if definition.name != "fetch_articles"
+    ] or ["legal_search", "legal_graph_neighbors", "load_evidence"]
+    properties["tool_requests"] = {
+        **_strict_object(
+            {
+                f"tool_request_{index}_json": {
+                    "anyOf": [
+                        _strict_object(
+                            {
+                                "tool_name": {
+                                    "type": "string",
+                                    "enum": non_fetch_tool_names,
+                                    "description": (
+                                        "request_jsonを復元するときの正規Tool名。"
+                                    ),
+                                },
+                                "request_json": {
+                                    "type": "string",
+                                    "description": (
+                                        "tool_nameを除く1件のToolRequest JSON object。"
+                                    ),
+                                },
+                            }
+                        ),
+                        {"type": "null"},
+                    ],
+                    "description": (
+                        "Anthropic輸送専用のToolRequest slot。使わない場合はnull。"
                     ),
-                    {"type": "null"},
-                ]
+                }
+                for index in range(1, non_fetch_capacity + 1)
             }
-            for index in range(1, non_fetch_capacity + 1)
-        }
-    )
-    properties["article_fetch"] = article_fetch_schema
-    properties["retain_evidence_ids"] = _bounded_enum_array(
-        tuple(item.evidence_id for item in context.evidence_manifest),
-        max_items=context.max_retained_evidence,
+        ),
+        "description": contract_field_description(
+            SolverDecision,
+            "tool_requests",
+        ),
+    }
+    properties["fetch_articles"] = {
+        **fetch_articles_schema,
+        "description": (
+            "Anthropic輸送専用のfetch_articles ToolRequest。候補がない場合はnull。"
+        ),
+    }
+    properties["retain_evidence_ids"] = _described(
+        _bounded_enum_array(
+            tuple(item.evidence_id for item in context.evidence_manifest),
+            max_items=context.max_retained_evidence,
+        ),
+        SolverDecision,
+        "retain_evidence_ids",
     )
     answer_schema = properties.get("answer")
     if isinstance(answer_schema, dict):
@@ -1464,8 +1820,10 @@ def _solver_anthropic_transport_schema(context: SolverContext) -> dict:
         for variant in variants:
             if not isinstance(variant, dict) or variant.get("type") != "object":
                 continue
-            variant["properties"]["citation_ids"] = _bounded_enum_array(
-                context.grounding_evidence_ids
+            variant["properties"]["citation_ids"] = _described(
+                _bounded_enum_array(context.grounding_evidence_ids),
+                FinalAnswer,
+                "citation_ids",
             )
     schema["required"] = [
         "tool_requests" if item == "tool_requests_json" else item
@@ -1473,7 +1831,7 @@ def _solver_anthropic_transport_schema(context: SolverContext) -> dict:
     ]
     schema["required"].append("hypothesis_evidence_bindings")
     schema["required"].append("dependency_article_bindings")
-    schema["required"].append("article_fetch")
+    schema["required"].append("fetch_articles")
     return schema
 
 
@@ -1506,7 +1864,7 @@ def _anthropic_dependency_decisions_schema(
     )
 
 
-def _anthropic_article_fetch_schema(context: SolverContext) -> dict[str, Any]:
+def _anthropic_fetch_articles_schema(context: SolverContext) -> dict[str, Any]:
     graph_review_mode = bool(
         context.graph_review_batch.candidates and not context.finalize_only
     )
@@ -1524,18 +1882,44 @@ def _anthropic_article_fetch_schema(context: SolverContext) -> dict[str, Any]:
         return {"type": "null"}
 
     article_properties: dict[str, Any] = {
-        "request_id": {"type": "string"},
-        "work_item_id": _enum_string(_repair_open_work_item_ids(context)),
-        "purpose": {"type": "string"},
-        "hypothesis_ids": _bounded_enum_array(_repair_hypothesis_ids(context)),
+        "request_id": _described(
+            {"type": "string"},
+            ToolRequest,
+            "request_id",
+        ),
+        "work_item_id": _described(
+            _enum_string(_repair_open_work_item_ids(context)),
+            ToolRequest,
+            "work_item_id",
+        ),
+        "purpose": _described(
+            {"type": "string"},
+            ToolRequest,
+            "purpose",
+        ),
+        "hypothesis_ids": _described(
+            _bounded_enum_array(_repair_hypothesis_ids(context)),
+            ToolRequest,
+            "hypothesis_ids",
+        ),
     }
     aliases = tuple(_article_fetch_alias_map(context))
     for index in range(1, capacity + 1):
         article_schema = _enum_string(aliases)
         article_properties[f"article_ref_{index}"] = (
-            article_schema
+            {
+                **article_schema,
+                "description": (
+                    "fetchable_article_idsに対応する既知Article別名。"
+                ),
+            }
             if index == 1
-            else {"anyOf": [article_schema, {"type": "null"}]}
+            else {
+                "anyOf": [article_schema, {"type": "null"}],
+                "description": (
+                    "追加取得する既知Article別名。使わない場合はnull。"
+                ),
+            }
         )
     return {
         "anyOf": [
@@ -1555,31 +1939,93 @@ def _article_fetch_alias_map(context: SolverContext) -> dict[str, str]:
 def _tool_requests_transport_schema(context: SolverContext) -> dict[str, Any]:
     projected_open_work_item_ids = _repair_open_work_item_ids(context)
     projected_hypothesis_ids = _repair_hypothesis_ids(context)
-    return {
-        "type": "array",
-        "items": _strict_object(
-            {
-                "request_id": {"type": "string"},
-                "work_item_id": _enum_string(projected_open_work_item_ids),
-                "tool_name": {"type": "string"},
-                "arguments_json": {
-                    "type": "string",
-                    "description": (
-                        "one exact Tool arguments object encoded as JSON; "
-                        "legal_search allows only query, doc_types, document_ids; "
-                        "fetch_articles allows only article_ids; "
-                        "legal_graph_neighbors allows only article_ids, mode, "
-                        "predicate when semantic, direction, max_relations"
+    common_properties = {
+        "request_id": _described(
+            {"type": "string"},
+            ToolRequest,
+            "request_id",
+        ),
+        "work_item_id": _described(
+            _enum_string(projected_open_work_item_ids),
+            ToolRequest,
+            "work_item_id",
+        ),
+        "purpose": _described(
+            {"type": "string"},
+            ToolRequest,
+            "purpose",
+        ),
+        "hypothesis_ids": _described(
+            (
+                _bounded_enum_array(projected_hypothesis_ids)
+                if projected_hypothesis_ids
+                else _string_array_schema()
+            ),
+            ToolRequest,
+            "hypothesis_ids",
+        ),
+    }
+    variants: list[dict[str, Any]] = []
+    for definition in context.available_tools:
+        argument_schema = deepcopy(definition.input_schema)
+        if definition.name == "fetch_articles":
+            article_ids = argument_schema.get("properties", {}).get("article_ids")
+            if isinstance(article_ids, dict):
+                article_ids["items"] = _enum_string(context.fetchable_article_ids)
+                article_ids["maxItems"] = min(
+                    4,
+                    context.remaining_fetch_capacity,
+                    len(context.fetchable_article_ids),
+                )
+        elif definition.name == "load_evidence":
+            evidence_ids = argument_schema.get("properties", {}).get("evidence_ids")
+            if isinstance(evidence_ids, dict):
+                evidence_ids["items"] = _enum_string(context.omitted_evidence_ids)
+        variants.append(
+            _strict_object(
+                {
+                    **common_properties,
+                    "tool_name": _described(
+                        {
+                            "type": "string",
+                            "enum": [definition.name],
+                            "description": definition.description,
+                        },
+                        ToolRequest,
+                        "tool_name",
+                        append=True,
                     ),
-                },
-                "purpose": {"type": "string"},
-                "hypothesis_ids": (
-                    _bounded_enum_array(projected_hypothesis_ids)
-                    if projected_hypothesis_ids
-                    else _string_array_schema()
+                    "arguments": _described(
+                        argument_schema,
+                        ToolRequest,
+                        "arguments",
+                    ),
+                }
+            )
+        )
+    if variants:
+        item_schema = variants[0] if len(variants) == 1 else {"anyOf": variants}
+    else:
+        item_schema = _strict_object(
+            {
+                **common_properties,
+                "tool_name": _described(
+                    {"type": "string"},
+                    ToolRequest,
+                    "tool_name",
+                ),
+                "arguments": _described(
+                    {"type": "object"},
+                    ToolRequest,
+                    "arguments",
                 ),
             }
-        ),
+        )
+    return {
+        "type": "array",
+        "items": item_schema,
+        "maxItems": context.max_tool_requests_per_step,
+        "description": contract_field_description(SolverDecision, "tool_requests"),
     }
 
 
@@ -1590,79 +2036,141 @@ def _case_update_transport_schema() -> dict[str, Any]:
     }
     work_item = _strict_object(
         {
-            "work_item_id": {"type": "string"},
-            "parent_work_item_id": nullable_string,
-            "question": {"type": "string"},
-            "state": {
-                "type": "string",
-                "enum": ["open"],
-            },
-            "resolution": {"type": "null"},
-            "basis_hypothesis_ids": string_array,
-            "replaces_work_item_id": nullable_string,
+            "work_item_id": _described({"type": "string"}, WorkItem, "work_item_id"),
+            "parent_work_item_id": _described(nullable_string, WorkItem, "parent_work_item_id"),
+            "question": _described({"type": "string"}, WorkItem, "question"),
+            "state": _described(
+                {"type": "string", "enum": ["open"]},
+                WorkItem,
+                "state",
+            ),
+            "resolution": _described({"type": "null"}, WorkItem, "resolution"),
+            "basis_hypothesis_ids": _described(
+                string_array,
+                WorkItem,
+                "basis_hypothesis_ids",
+            ),
+            "replaces_work_item_id": _described(
+                nullable_string,
+                WorkItem,
+                "replaces_work_item_id",
+            ),
         }
     )
     work_item_update = _strict_object(
         {
-            "work_item_id": {"type": "string"},
-            "state": {
-                "type": "string",
-                "enum": ["open", "resolved", "dropped"],
-            },
-            "resolution": nullable_string,
-            "basis_hypothesis_ids": string_array,
+            "work_item_id": _described({"type": "string"}, WorkItemUpdate, "work_item_id"),
+            "state": _described(
+                {"type": "string", "enum": ["open", "resolved", "dropped"]},
+                WorkItemUpdate,
+                "state",
+            ),
+            "resolution": _described(nullable_string, WorkItemUpdate, "resolution"),
+            "basis_hypothesis_ids": _described(
+                string_array,
+                WorkItemUpdate,
+                "basis_hypothesis_ids",
+            ),
         }
     )
     hypothesis = _strict_object(
         {
-            "hypothesis_id": {"type": "string"},
-            "work_item_id": {"type": "string"},
-            "statement": {"type": "string"},
-            "judgment": {
-                "type": "string",
-                "enum": ["supported", "contradicted", "unresolved"],
-            },
-            "evidence_ids": string_array,
-            "gaps": string_array,
+            "hypothesis_id": _described({"type": "string"}, Hypothesis, "hypothesis_id"),
+            "work_item_id": _described({"type": "string"}, Hypothesis, "work_item_id"),
+            "statement": _described({"type": "string"}, Hypothesis, "statement"),
+            "judgment": _described(
+                {"type": "string", "enum": ["supported", "contradicted", "unresolved"]},
+                Hypothesis,
+                "judgment",
+            ),
+            "evidence_ids": _described(string_array, Hypothesis, "evidence_ids"),
+            "gaps": _described(string_array, Hypothesis, "gaps"),
         }
     )
     hypothesis_update = _strict_object(
         {
-            "hypothesis_id": {"type": "string"},
-            "judgment": {
-                "type": "string",
-                "enum": ["supported", "contradicted", "unresolved"],
-            },
-            "evidence_ids": string_array,
-            "gaps": string_array,
+            "hypothesis_id": _described(
+                {"type": "string"},
+                HypothesisUpdate,
+                "hypothesis_id",
+            ),
+            "judgment": _described(
+                {"type": "string", "enum": ["supported", "contradicted", "unresolved"]},
+                HypothesisUpdate,
+                "judgment",
+            ),
+            "evidence_ids": _described(
+                string_array,
+                HypothesisUpdate,
+                "evidence_ids",
+            ),
+            "gaps": _described(string_array, HypothesisUpdate, "gaps"),
         }
     )
     impact = _strict_object(
         {
-            "work_item_id": {"type": "string"},
-            "action": {
-                "type": "string",
-                "enum": ["retain", "replace", "drop"],
-            },
-            "reason": {"type": "string"},
-            "new_basis_hypothesis_ids": string_array,
-            "replacement_work_item_id": nullable_string,
-            "drop_subtree": {"type": "boolean"},
+            "work_item_id": _described(
+                {"type": "string"},
+                WorkItemImpactDecision,
+                "work_item_id",
+            ),
+            "action": _described(
+                {
+                    "type": "string",
+                    "enum": ["retain", "replace", "drop"],
+                },
+                WorkItemImpactDecision,
+                "action",
+            ),
+            "reason": _described(
+                {"type": "string"},
+                WorkItemImpactDecision,
+                "reason",
+            ),
+            "new_basis_hypothesis_ids": _described(
+                string_array,
+                WorkItemImpactDecision,
+                "new_basis_hypothesis_ids",
+            ),
+            "replacement_work_item_id": _described(
+                nullable_string,
+                WorkItemImpactDecision,
+                "replacement_work_item_id",
+            ),
+            "drop_subtree": _described(
+                {"type": "boolean"},
+                WorkItemImpactDecision,
+                "drop_subtree",
+            ),
         }
     )
     return _strict_object(
         {
-            "add_work_items": {"type": "array", "items": work_item},
-            "update_work_items": {
-                "type": "array",
-                "items": work_item_update,
-            },
-            "add_hypotheses": {"type": "array", "items": hypothesis},
-            "update_hypotheses": {
-                "type": "array",
-                "items": hypothesis_update,
-            },
-            "impact_decisions": {"type": "array", "items": impact},
+            "add_work_items": _described(
+                {"type": "array", "items": work_item},
+                CaseUpdate,
+                "add_work_items",
+            ),
+            "update_work_items": _described(
+                {"type": "array", "items": work_item_update},
+                CaseUpdate,
+                "update_work_items",
+            ),
+            "add_hypotheses": _described(
+                {"type": "array", "items": hypothesis},
+                CaseUpdate,
+                "add_hypotheses",
+            ),
+            "update_hypotheses": _described(
+                {"type": "array", "items": hypothesis_update},
+                CaseUpdate,
+                "update_hypotheses",
+            ),
+            "impact_decisions": _described(
+                {"type": "array", "items": impact},
+                CaseUpdate,
+                "impact_decisions",
+            ),
         }
     )
 
@@ -1715,6 +2223,21 @@ def _strict_object(properties: dict[str, Any]) -> dict[str, Any]:
         "properties": properties,
         "required": list(properties),
     }
+
+
+def _described(
+    schema: dict[str, Any],
+    model_type: type[BaseModel],
+    field_name: str,
+    *,
+    append: bool = False,
+) -> dict[str, Any]:
+    result = deepcopy(schema)
+    description = contract_field_description(model_type, field_name)
+    if append and result.get("description"):
+        description = f"{description} {result['description']}"
+    result["description"] = description
+    return result
 
 
 def _preserve_previous_update_for_cycle_repair(context: SolverContext) -> bool:
@@ -1868,9 +2391,14 @@ def _normalize_solver_payload(payload: dict) -> dict:
                     )
                 )
         normalized["tool_requests"] = normalized_requests
-    has_article_fetch_sidecar = "article_fetch" in normalized
-    article_fetch = normalized.pop("article_fetch", None)
-    if has_article_fetch_sidecar:
+    has_fetch_sidecar = (
+        "fetch_articles" in normalized or "article_fetch" in normalized
+    )
+    fetch_articles = normalized.pop(
+        "fetch_articles",
+        normalized.pop("article_fetch", None),
+    )
+    if has_fetch_sidecar:
         for request in normalized.get("tool_requests") or []:
             if (
                 isinstance(request, dict)
@@ -1885,7 +2413,7 @@ def _normalize_solver_payload(payload: dict) -> dict:
         normalized["start_next_cycle"] = False
         normalized["tool_requests"] = []
         normalized["frontier_re_adoptions"] = []
-    if normalized.get("next") == "continue" and isinstance(article_fetch, dict):
+    if normalized.get("next") == "continue" and isinstance(fetch_articles, dict):
         if any(
             isinstance(request, dict)
             and request.get("tool_name") == "fetch_articles"
@@ -1895,20 +2423,20 @@ def _normalize_solver_payload(payload: dict) -> dict:
                 "article body fetch is duplicated across generic and dedicated slots"
             )
         article_ids = [
-            article_fetch[key]
-            for key in sorted(article_fetch)
+            fetch_articles[key]
+            for key in sorted(fetch_articles)
             if key.startswith(("article_id_", "article_ref_"))
-            and isinstance(article_fetch[key], str)
-            and article_fetch[key]
+            and isinstance(fetch_articles[key], str)
+            and fetch_articles[key]
         ]
         normalized.setdefault("tool_requests", []).append(
             {
-                "request_id": article_fetch.get("request_id"),
-                "work_item_id": article_fetch.get("work_item_id"),
+                "request_id": fetch_articles.get("request_id"),
+                "work_item_id": fetch_articles.get("work_item_id"),
                 "tool_name": "fetch_articles",
                 "arguments": {"article_ids": article_ids},
-                "purpose": article_fetch.get("purpose"),
-                "hypothesis_ids": article_fetch.get("hypothesis_ids") or [],
+                "purpose": fetch_articles.get("purpose"),
+                "hypothesis_ids": fetch_articles.get("hypothesis_ids") or [],
             }
         )
     raw_dependencies = normalized.get("dependency_decisions") or []
@@ -2075,6 +2603,13 @@ def _validate_search_assessment_payload(
         raise ModelProtocolError("search assessments must be unique")
     if set(assessment_ids) != expected_ids:
         raise ModelProtocolError("search assessments must cover every candidate")
+    try:
+        SearchAssessmentDecision.model_validate(payload)
+    except ValidationError as exc:
+        detail = exc.errors(include_url=False, include_input=False)[0]
+        raise ModelProtocolError(
+            f"search assessment contract invalid: {detail['msg']}"
+        ) from exc
 
 
 def _apply_hypothesis_evidence_bindings(
@@ -2333,11 +2868,11 @@ _MINIMAL_SOLVER_CONTRACT = """
 出力原則:
 - Provider schemaに従い、CaseState全体ではなく今回の差分だけを返す。
 - decision_reasonには、提示された根拠・gap・上限から今回continueまたはfinalizeを選ぶ理由を一文で書く。内部思考の逐語記録や長い検討過程は書かない。
-- update_jsonに許されるキーはadd_work_items、update_work_items、add_hypotheses、update_hypotheses、impact_decisionsだけ。work_tree等の現在状態を返さない。
+- 正規契約のupdateに許されるキーはadd_work_items、update_work_items、add_hypotheses、update_hypotheses、impact_decisionsだけ。work_tree等の現在状態を返さない。
 - continueは同Cycleの次step、またはstart_next_cycle=trueによる次Cycle開始であり、answerは返さない。
 - finalizeは追加Toolを返さず、通常完了では全WorkItemを閉じる。上限時の限定回答だけ未解決IDとlimitationsを対応させる。
 
-update_jsonの状態契約:
+updateの状態契約:
 - add_work_items要素: work_item_id、parent_work_item_id、question、state、resolution、basis_hypothesis_ids、replaces_work_item_id。statusは使わない。
 - update_work_items要素: work_item_id、state、resolution、basis_hypothesis_ids。
 - add_hypotheses要素: hypothesis_id、work_item_id、statement、judgment、evidence_ids、gaps。statusは使わない。
@@ -2347,7 +2882,7 @@ update_jsonの状態契約:
 - Hypothesisのjudgment=unresolvedは未確認、supported/contradictedは本文根拠で確認済みなので空でないevidence_idsを持つ。
 - impact_decisions要素: work_item_id、action、reason、new_basis_hypothesis_ids、replacement_work_item_id、drop_subtree。既存Hypothesisをcontradictedへ変える場合だけ使い、actionはretain / replace / dropのいずれか。それ以外は空配列にする。
 - required_dependency_work_item_idsがあれば各WorkItemのDependencyDecisionを1件ずつ返す。not_required/resolvedはaction_request_id=null。needs_actionは通常は同じDecisionのToolを参照するが、Cycle境界でstart_next_cycle=trueならToolを返さずaction_request_id=nullにする。
-- 通常finalizeでは現在openの全WorkItemを同じupdate_jsonでresolved/droppedへ閉じる。未確認なら閉じずcontinueし、上限時だけ未解決IDとlimitationsを対応させる。
+- 通常finalizeでは現在openの全WorkItemを同じupdateでresolved/droppedへ閉じる。未確認なら閉じずcontinueし、上限時だけ未解決IDとlimitationsを対応させる。
 - finalize時のanswer.citation_idsには、resolved WorkItemのbasis Hypothesisが選んだEvidenceを漏れなく含める。不要なEvidenceならHypothesis側から外す。
 
 参照契約:

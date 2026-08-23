@@ -1,6 +1,6 @@
 # シンプルな汎用反復型エージェント基盤 実装計画
 
-> 更新日: 2026-08-22
+> 更新日: 2026-08-23
 >
 > 本書を新しい実装ロードマップの正本とする。
 > 人間向けの概念図と処理イメージは、対になる
@@ -9,7 +9,7 @@
 > 過去の実装計画やProfile変更履歴は本書へ残さない。現在のコードから目標仕様へ移すために
 > 必要な差分、実装順、完了条件だけを記載する。
 
-## 実装状況（2026-08-22）
+## 実装状況（2026-08-23）
 
 この節は変更履歴ではなく、12章の完了条件に対する差分だけを示す。個別のProfile version、
 不具合修正、実測結果はGit履歴、[RUNBOOK](../RUNBOOK.md)、
@@ -17,8 +17,8 @@
 
 | Phase | 状況 | 未完了の中心 |
 |---|---|---|
-| Phase 0 | 一部完了 | 代表2問の現行baseline、説明付きstatus契約、生成schema・Prompt用語集のfixture |
-| Phase 1 | 一部実装 | `CycleRecord / StepRecord`、discriminator付きCommand、型付きstatusと遷移の一元化、再開契約 |
+| Phase 0 | 一部完了 | 代表2問の現行baseline、全statusのowner・遷移を含む説明付き契約fixture |
+| Phase 1 | 一部実装 | `CycleRecord / StepRecord`、discriminator付きCommand、型付きstatusと遷移の一元化、再開契約。主要Solver項目の説明付き型契約・生成Prompt用語集・ToolDefinitionは実装済み |
 | Phase 2 | 全件Runは中間構造監査のためbuilding状態で停止中。別に、公開買付け3階層ミニsnapshotの両index、意味分類publish、Hypothesis別Graph Toolまで実装済み | ミニsnapshotの実モデル完了、探索契約の単純化、全件Runの参照scope差分監査・再開・publish |
 | Phase 3 | 未評価 | 新契約に基づくtrace、再開、入力増加、latencyの完了条件 |
 | Phase 4 | 未完了 | 新経路による代表2問の合格、既定経路切替、旧試作の撤去 |
@@ -30,6 +30,12 @@
 - 共通Model PortはOllama、Anthropic、OpenAI APIを選択できる。`LLM_PROVIDER=openai`の既定modelは
   `gpt-4o-mini`で、`LLM_MODEL`により同一Runの探索・統合・回答・Reviewerを一括変更できる。
   `LLM_MODEL`未指定時は従来どおり役割別model設定を使う。同一Run内でproviderを統一する制約は維持する。
+- 現行経路では、主要な`SolverContext / SolverDecision / CaseUpdate / WorkItem / Hypothesis /
+  ToolRequest / DependencyDecision / FinalAnswer`の`Field.description`から`contract_glossary`を決定的に生成し、
+  全Solver呼出しへ合成する。Toolは`ToolDefinition`に正規名、用途、Provider非依存の入力Schema、
+  戻り値説明を持ち、利用可能な定義だけを`available_tools`へ投影する。OpenAI輸送は
+  `arguments`を構造化objectのまま受け、Provider別Adapterは意味名を変えず輸送制約だけを吸収する。
+  ただし全statusのowner・遷移・永続化versionを1つの正本から生成するPhase 1全体は未完了である。
 - Reviewerの既定値は無効で、新経路のFeature Flagも既定では無効である。
 - 現行Legal Profileは本文取得後の自動Graph連動を持たず、`automatic_tools=()`である。
   Solverは`legal_graph_neighbors`へ、既知起点Article、`semantic_assertion / explicit_reference / explains`の
@@ -412,6 +418,11 @@ class Hypothesis:
 ```
 
 - Hypothesisは必ず1つのWorkItemへ所属する。
+- `Hypothesis.work_item_id`は、そのHypothesisが検証するWorkItemを表す。
+- `WorkItem.basis_hypothesis_ids`は所属関係の逆引きではない。open WorkItemでは作成・継続を
+  前提づけるHypothesis、resolved WorkItemではresolutionを支える判定済みHypothesisを表す。
+  元の質問から直接作るopen WorkItemでは通常は空にし、別Hypothesisを前提に作る子WorkItemでは
+  その前提IDを設定する。resolvedへ更新するときは、resolutionの根拠とした判定済みHypothesis IDへ更新する。
 - Evidenceは複数HypothesisからIDで共有参照し、WorkItemごとに複製しない。
 - Hypothesisのstatementを別の意味へ上書きしない。見立てを変更する場合は新しいHypothesisを作る。
 - WorkItemのquestionを別の問いへ上書きしない。問いを変更する場合は旧WorkItemを`dropped`にし、
@@ -1716,6 +1727,20 @@ Profileにはsystem promptの参照先とversionを持たせ、法令固有のpr
 
 Profileを切り替えても、CaseStateの意味とTool契約は変わらない。
 
+契約とPromptの正本を次のように分ける。
+
+| 内容 | 正本 | LLMへの渡し方 |
+|---|---|---|
+| 入出力項目の形状と基本的な意味 | Pydantic型の制約と`Field.description` | Provider schemaと`contract_glossary`へ生成 |
+| Toolの正規名、用途、引数、戻り値 | `ToolDefinition` | そのstepで利用可能な定義だけを`available_tools`へ投影 |
+| 処理モードの手順と判断ルール | `domains/<domain>/prompts/` | 構造的な現在モードに必要なfragmentだけを合成 |
+| Provider固有の構造化出力制約 | Provider adapter | 正規名と意味を変えず、輸送表現だけを変換 |
+
+Provider schemaの`enum`や項目名だけで使い方を推測させない。一方で、同じ基本定義やJSON例を
+Domain Promptへ複製しない。例は契約の必須要素ではない。説明とルールで解消できない誤解を
+fixtureで確認したときだけ、契約定義と分けた`examples`セクションへ追加する。その際は特定の質問、
+件数、ID、法令名を一般ルールとして学習させないよう、複数の異なる例で境界を示す。
+
 修復Prompt本文をPythonの文字列へ埋め込まない。Markdown内の名前付きsectionを
 `prompt_assets.py`がUTF-8で読み込み、初回読込み後にcacheする。Pythonには違反markerと適用する
 section名の対応だけを残し、実際の契約検証は引き続きValidatorを正本とする。契約テストは、registryが
@@ -2029,12 +2054,13 @@ agent-api/app/
 │   ├── context.py                   # WorkTree・探索frontier・focus・Evidenceの機械的表示
 │   ├── validation.py                # 既知ID・権限・上限等の構造検証。状態遷移規則を重複定義しない
 │   ├── contract_rendering.py        # Provider schema基礎・LLM-visible status用語集の決定的生成
+│   ├── tool_contracts.py            # ToolDefinition・Provider非依存の入力Schema生成
 │   ├── profiles.py                  # Profile読込みと用途別model解決
 │   ├── store.py                     # 小さいCaseStore Protocol
 │   ├── observability.py             # 構造化ログとtrace計測
 │   └── ports/
 │       ├── model.py                 # ModelPort
-│       └── tool.py                  # ToolPort / ToolDefinition
+│       └── tool.py                  # ToolPort / ToolRegistry
 │
 ├── domains/
 │   └── legal/                       # 法令業務ドメイン

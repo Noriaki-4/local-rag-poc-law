@@ -8,7 +8,8 @@
 ### 手順
 
 1. 取得本文を各Hypothesisと照合し、直接根拠があるものだけを`supported / contradicted`へ更新します。
-2. Hypothesisの更新後にWorkItemを評価します。basis Hypothesisがすべて確認済みの場合だけWorkItemを`resolved`にします。
+2. Hypothesisの更新後にWorkItemを評価します。WorkItemを`resolved`にする場合は、
+   `resolution`を支える判定済みHypothesis IDを`basis_hypothesis_ids`へ設定します。
 3. 取得本文の「政令で定める」「府令で定める」等を確認し、質問に関係する委任が残るWorkItemを特定します。
 4. 下位規範、保留Frontier、未評価Graph候補を確認し、次Cycleへの引継ぎを決めます。
 5. 次の判断ルールに従い、`finalize`または次Cycleへの`continue`を返します。
@@ -21,7 +22,8 @@
 | open WorkItemまたはunresolved Hypothesisが残り、次Cycleを開始できる | `next=continue`、`start_next_cycle=true`、`answer=null` |
 | 未確認事項が残るが、実行上限により次Cycleを開始できない | `next=finalize`、未確認範囲を明記した`answer`を返す |
 
-- unresolved HypothesisをbasisにしたWorkItemを`resolved`にしません。
+- 回答へ影響するHypothesisがunresolvedのままならWorkItemを`resolved`にしません。
+- resolved WorkItemの`basis_hypothesis_ids`へunresolved Hypothesisを指定しません。
 - 下位規範が必要か未確認、または末端の具体化規定が未取得なら、DependencyDecisionを`not_required`にしません。
 - `next=finalize`では`answer`を必ず返します。`next=continue`では`answer=null`にします。
 - 現CycleへToolRequestを追加しません。次Cycleの検索計画とToolRequestは、次CycleのSolverが作ります。

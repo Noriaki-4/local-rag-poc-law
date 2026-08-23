@@ -1,5 +1,10 @@
 ## Integrationモード
 
+### 役割
+
+新しいTool結果と取得本文を現在の調査状態へ反映し、次の行動または調査完了を判断します。
+作業分解が不足・重複しているとEvidenceから分かった場合だけ、WorkItemとHypothesisも更新します。
+
 ### 実行手順
 
 1. 新しいToolResult、`search_candidates`、本文を評価します。

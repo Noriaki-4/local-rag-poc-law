@@ -2,6 +2,8 @@
 
 ### 共通
 
+利用可能なTool名、引数、戻り値の意味は`available_tools`を正本とします。以下はToolを選ぶ条件です。
+
 - `fetchable_article_ids`にあるArticle IDは、検索等で発見済みで本文取得に使える候補です。質問との関係を判断したうえで、本文未取得なら`fetch_articles`を使います。
 - `search_candidates`は、候補Article、発見元の検索要求・WorkItem・Hypothesis、検索抜粋Evidenceを対応付けた一覧です。発見元は来歴であり、意味上の採用先を限定しません。
 - Article IDが不明なら`legal_search`を使います。
@@ -12,10 +14,6 @@
 
 ### legal_search
 
-```json
-{"query":"検索語","doc_types":["law"],"document_ids":["既知documentId"]}
-```
-
 - 法令本文を探す場合は`law`を使います。行政解釈やガイドも必要な場合だけ`guideline`を加えます。
 - 質問をそのまま繰り返さず、制度名と確認事項を法令に現れやすい表現へ言い換えます。
 - 同じHypothesisについて成功済みの検索結果に本文取得可能な候補がある場合、本文未取得であることだけを理由に同じ検索を繰り返しません。
@@ -23,11 +21,7 @@
 
 ### fetch_articles
 
-```json
-{"article_ids":["既知articleId"]}
-```
-
-- 1要求は最大4 Articleです。
+- 1要求の上限は`available_tools`の`input_schema`と`remaining_fetch_capacity`に従います。
 - `work_item_id`には主対象、`hypothesis_ids`には本文で検証する全Hypothesisを指定します。
 - `fetch_articles`だけではGraph探索を行いません。
 
@@ -37,18 +31,6 @@
 - `semantic_assertion`では1 predicateだけを指定します。
 - Article ID、現在のHypothesis、必要な関係と方向を説明できる場合だけ使います。
 - Graphから得たArticleも、必要なら後続Stepの新しい起点にできます。
-
-```json
-{"article_ids":["既知articleId"],"mode":"semantic_assertion","predicate":"IMPLEMENTS","direction":"from_subject","max_relations":20}
-```
-
-```json
-{"article_ids":["既知articleId"],"mode":"explicit_reference","direction":"incoming","max_relations":20}
-```
-
-```json
-{"article_ids":["既知articleId"],"mode":"explains","direction":"incoming","max_relations":20}
-```
 
 #### 関係と方向
 

@@ -24,27 +24,54 @@ from .state import (
     ToolStatus,
     WorkItem,
 )
+from .tool_contracts import ToolDefinition
 
 
 class WorkTreeItem(FrameworkModel):
-    work_item_id: str
-    parent_work_item_id: str | None
-    question: str
-    state: str
-    resolution: str | None
-    basis_hypothesis_ids: tuple[str, ...]
-    replaces_work_item_id: str | None
-    hypothesis_ids: tuple[str, ...]
-    evidence_count: int = Field(ge=0)
+    work_item_id: str = Field(description="投影元WorkItemのCase内一意ID。")
+    parent_work_item_id: str | None = Field(
+        description="階層分解上の親WorkItem ID。最上位ではnull。"
+    )
+    question: str = Field(description="1つの完了判定で閉じる確認事項。")
+    state: str = Field(
+        description="openは未完了、resolvedは回答済み、droppedは不要と判断済み。"
+    )
+    resolution: str | None = Field(
+        description="resolvedまたはdroppedの理由・結論。openではnull。"
+    )
+    basis_hypothesis_ids: tuple[str, ...] = Field(
+        description=(
+            "openでは作成・継続の前提Hypothesis ID、resolvedではresolutionを支える"
+            "判定済みHypothesis ID。Hypothesisの所属一覧ではない。"
+        )
+    )
+    replaces_work_item_id: str | None = Field(
+        description="作業分解の修正で置き換えた旧WorkItem ID。なければnull。"
+    )
+    hypothesis_ids: tuple[str, ...] = Field(
+        description="Hypothesis.work_item_idにより、このWorkItemへ所属する全Hypothesis ID。"
+    )
+    evidence_count: int = Field(
+        ge=0,
+        description="このWorkItem所属Hypothesisが参照する重複なしEvidence件数。",
+    )
 
 
 class EvidenceManifestItem(FrameworkModel):
-    evidence_id: str
-    source_ref: str
-    title: str | None
-    content_chars: int = Field(ge=0)
-    created_cycle: int = Field(ge=1)
-    material_included: bool
+    evidence_id: str = Field(description="Caseで既知のEvidence ID。")
+    source_ref: str = Field(description="Evidenceの取得元Resource参照。")
+    title: str | None = Field(description="取得元Resourceの表示名。なければnull。")
+    content_chars: int = Field(
+        ge=0,
+        description="保存済みEvidence本文の文字数。",
+    )
+    created_cycle: int = Field(
+        ge=1,
+        description="EvidenceをCaseへ追加したResearch Cycle番号。",
+    )
+    material_included: bool = Field(
+        description="trueの場合だけ、今回のmaterial_evidenceに本文が提示されている。"
+    )
 
 
 GraphCandidateContentStatus = Literal[
@@ -59,138 +86,304 @@ GraphCandidateContentStatus = Literal[
 class GraphCandidateArticle(FrameworkModel):
     """Graph端点ArticleのSolver向け正規化投影。"""
 
-    article_id: str
-    document_id: str | None
-    title: str | None
-    heading: str | None
-    content_status: GraphCandidateContentStatus
+    article_id: str = Field(description="Graphで発見した候補Article ID。")
+    document_id: str | None = Field(description="候補の所属Document ID。なければnull。")
+    title: str | None = Field(description="候補Documentの表示名。なければnull。")
+    heading: str | None = Field(description="候補Articleの見出し。なければnull。")
+    content_status: GraphCandidateContentStatus = Field(
+        description=(
+            "not_requestedは本文未要求、pendingは要求済み未完了、succeededは全文取得済み、"
+            "failedは取得失敗、timeoutは取得時間切れ。"
+        )
+    )
 
 
 class GraphCandidateLink(FrameworkModel):
     """Articleの重複なしに全発見経路を保持する投影。"""
 
-    link_id: str
-    seed_article_id: str
-    candidate_article_id: str
-    work_item_ids: tuple[str, ...]
-    hypothesis_ids: tuple[str, ...]
-    relations: tuple[dict[str, Any], ...]
-    graph_request_ids: tuple[str, ...]
+    link_id: str = Field(description="同じGraph発見経路を識別する安定ID。")
+    seed_article_id: str = Field(description="1ホップGraph検索の起点Article ID。")
+    candidate_article_id: str = Field(description="1ホップ先で発見した候補Article ID。")
+    work_item_ids: tuple[str, ...] = Field(
+        description="この発見経路を要求したToolRequestに紐づくWorkItem ID。"
+    )
+    hypothesis_ids: tuple[str, ...] = Field(
+        description="この発見経路を要求したToolRequestに紐づくHypothesis ID。"
+    )
+    relations: tuple[dict[str, Any], ...] = Field(
+        description="起点と候補の間でToolが返した関係・方向・分類根拠の一覧。"
+    )
+    graph_request_ids: tuple[str, ...] = Field(
+        description="このLinkを発見したlegal_graph_neighbors Request ID。"
+    )
 
 
 class GraphCandidateCatalog(FrameworkModel):
-    articles: tuple[GraphCandidateArticle, ...] = ()
-    links: tuple[GraphCandidateLink, ...] = ()
+    articles: tuple[GraphCandidateArticle, ...] = Field(
+        default=(),
+        description="Article IDで重複排除したGraph候補一覧。",
+    )
+    links: tuple[GraphCandidateLink, ...] = Field(
+        default=(),
+        description="各Graph候補を発見した全経路。",
+    )
 
 
 class GraphReviewCandidate(FrameworkModel):
-    frontier_item_id: str
-    article_id: str
-    document_id: str | None
-    title: str | None
-    heading: str | None
-    work_item_id: str
-    hypothesis_id: str | None
-    review_trigger: Literal["new_frontier", "re_adopted", "new_link"]
-    prior_review_status: FrontierReviewStatus | None
-    content_status: GraphCandidateContentStatus
-    links: tuple[GraphCandidateLink, ...]
+    frontier_item_id: str = Field(
+        description="Article・WorkItem・Hypothesisの組で作る今回の評価単位ID。"
+    )
+    article_id: str = Field(description="評価するGraph候補Article ID。")
+    document_id: str | None = Field(description="候補の所属Document ID。なければnull。")
+    title: str | None = Field(description="候補Documentの表示名。なければnull。")
+    heading: str | None = Field(description="候補Articleの見出し。なければnull。")
+    work_item_id: str = Field(description="候補との関連性を評価するopen WorkItem ID。")
+    hypothesis_id: str | None = Field(
+        description="候補で検証するHypothesis ID。発見元で特定されていなければnull。"
+    )
+    review_trigger: Literal["new_frontier", "re_adopted", "new_link"] = Field(
+        description=(
+            "new_frontierは初見、re_adoptedは別Hypothesisへの再採用、"
+            "new_linkは既評価候補に新しい発見経路が追加された状態。"
+        )
+    )
+    prior_review_status: FrontierReviewStatus | None = Field(
+        description="以前の関連性評価状態。初回はnull。"
+    )
+    content_status: GraphCandidateContentStatus = Field(
+        description="候補Article本文の取得状態。関連性評価とは別。"
+    )
+    links: tuple[GraphCandidateLink, ...] = Field(
+        description="この候補を今回のWorkItem・Hypothesisへ結び付ける全発見経路。"
+    )
 
 
 class GraphReviewLedgerItem(FrameworkModel):
-    frontier_item_id: str
-    article_id: str
-    title: str | None
-    heading: str | None
-    work_item_id: str
-    hypothesis_id: str | None
-    review_status: Literal["selected", "relevant_deferred", "rejected"]
-    reason: str
-    content_status: GraphCandidateContentStatus
-    last_reviewed_cycle: int | None
-    deferred_resolution_action: DeferredFrontierResolutionAction | None = None
-    deferred_resolution_reason: str | None = None
+    frontier_item_id: str = Field(description="評価済みFrontierの安定ID。")
+    article_id: str = Field(description="評価済みGraph候補Article ID。")
+    title: str | None = Field(description="候補Documentの表示名。なければnull。")
+    heading: str | None = Field(description="候補Articleの見出し。なければnull。")
+    work_item_id: str = Field(description="この評価が属するWorkItem ID。")
+    hypothesis_id: str | None = Field(
+        description="この評価が属するHypothesis ID。特定されていなければnull。"
+    )
+    review_status: Literal["selected", "relevant_deferred", "rejected"] = Field(
+        description="selectedは採用、relevant_deferredは関連するが保留、rejectedは不要。"
+    )
+    reason: str = Field(description="最新の関連性評価理由。")
+    content_status: GraphCandidateContentStatus = Field(
+        description="候補Article本文の最新取得状態。関連性評価とは別。"
+    )
+    last_reviewed_cycle: int | None = Field(
+        description="最後に関連性を評価したCycle番号。未記録ならnull。"
+    )
+    deferred_resolution_action: DeferredFrontierResolutionAction | None = Field(
+        default=None,
+        description="relevant_deferred候補について最後に決めた後続処理。未決ならnull。",
+    )
+    deferred_resolution_reason: str | None = Field(
+        default=None,
+        description="保留候補の後続処理を選んだ理由。未決ならnull。",
+    )
 
 
 class GraphReviewBatch(FrameworkModel):
-    candidates: tuple[GraphReviewCandidate, ...] = ()
-    remaining_unreviewed_count: int = Field(default=0, ge=0)
+    candidates: tuple[GraphReviewCandidate, ...] = Field(
+        default=(),
+        description="今回の専用Graph Reviewで意味評価する未評価差分。",
+    )
+    remaining_unreviewed_count: int = Field(
+        default=0,
+        ge=0,
+        description="今回のbatch上限から漏れ、まだ意味評価されていない候補数。",
+    )
 
 
 class SolverToolResult(FrameworkModel):
     """CaseStateのToolResultからLLMに必要な実行状態だけを投影する。"""
 
-    request_id: str
-    status: ToolStatus
-    evidence_ids: tuple[str, ...]
-    evidence_count: int = Field(ge=0)
-    graph_projection_updated: bool
-    error_code: str | None
-    elapsed_ms: int = Field(ge=0)
-    cycle_no: int = Field(ge=1)
+    request_id: str = Field(description="結果が対応する既知ToolRequest ID。")
+    status: ToolStatus = Field(
+        description="succeededは実行完了、failedは失敗、timeoutは時間切れ。意味的な成否ではない。"
+    )
+    evidence_ids: tuple[str, ...] = Field(
+        description="このToolResultが追加したEvidence ID。"
+    )
+    evidence_count: int = Field(
+        ge=0,
+        description="このToolResultが追加したEvidence件数。",
+    )
+    graph_projection_updated: bool = Field(
+        description="Graphナビゲーション情報をCase投影へ反映したか。関連性や本文取得済みを意味しない。"
+    )
+    error_code: str | None = Field(
+        description="failedまたはtimeoutの機械的エラーコード。成功時はnull。"
+    )
+    elapsed_ms: int = Field(ge=0, description="Tool実行に要したミリ秒。")
+    cycle_no: int = Field(ge=1, description="Toolを実行したResearch Cycle番号。")
 
 
 class SearchCandidateArticle(FrameworkModel):
     """OpenSearch候補と、その発見要求を意味選別なしで対応付ける。"""
 
-    article_id: str
-    document_id: str | None
-    title: str | None
-    headings: tuple[str, ...]
-    discovery_work_item_ids: tuple[str, ...]
-    discovery_hypothesis_ids: tuple[str, ...]
-    search_request_ids: tuple[str, ...]
-    navigation_evidence_ids: tuple[str, ...]
+    article_id: str = Field(description="OpenSearchで発見した候補Article ID。")
+    document_id: str | None = Field(description="候補の所属Document ID。なければnull。")
+    title: str | None = Field(description="候補Documentの表示名。なければnull。")
+    headings: tuple[str, ...] = Field(description="検索結果に含まれた候補Articleの見出し。")
+    discovery_work_item_ids: tuple[str, ...] = Field(
+        description="この候補を発見した検索要求に紐づくWorkItem ID。意味上の採用先を限定しない。"
+    )
+    discovery_hypothesis_ids: tuple[str, ...] = Field(
+        description="この候補を発見した検索要求に紐づくHypothesis ID。意味上の採用先を限定しない。"
+    )
+    search_request_ids: tuple[str, ...] = Field(
+        description="この候補を発見したlegal_search Request ID。"
+    )
+    navigation_evidence_ids: tuple[str, ...] = Field(
+        description="候補選択にだけ使える検索抜粋Evidence ID。回答根拠には使わない。"
+    )
 
 
 class SolverContractFeedback(FrameworkModel):
-    violation: str
-    previous_decision: SolverDecision
+    violation: str = Field(
+        description="直前SolverDecisionを未適用にした決定的な契約違反。"
+    )
+    previous_decision: SolverDecision = Field(
+        description="修正対象となる、CaseStateへ未適用の直前SolverDecision。"
+    )
 
 
 class SolverContext(FrameworkModel):
-    case_id: str
-    question: str
-    research_cycle_count: int
-    remaining_research_cycles: int
-    remaining_wall_time_sec: float
-    min_next_cycle_budget_sec: float
-    can_start_next_cycle: bool
-    max_tool_requests_per_step: int
-    max_fetched_resources_per_cycle: int
-    fetched_resource_ids_this_cycle: tuple[str, ...]
-    remaining_fetch_capacity: int = Field(ge=0)
-    max_selected_frontier_per_step: int
-    cycle_budget_reached: bool
-    cycle_close_required: bool
-    cycle_step_timeout: bool
-    max_retained_evidence: int
-    max_material_evidence_chars: int
-    max_solver_input_chars: int
-    finalize_only: bool
-    grounding_evidence_ids: tuple[str, ...]
-    navigation_evidence_ids: tuple[str, ...]
-    fetchable_article_ids: tuple[str, ...]
-    search_candidates: tuple[SearchCandidateArticle, ...] = ()
-    work_tree: tuple[WorkTreeItem, ...]
-    hypotheses: tuple[Hypothesis, ...]
-    focus_work_items: tuple[WorkItem, ...]
-    affected_work_items: tuple[WorkItem, ...]
+    case_id: str = Field(description="Programが管理する現在CaseのID。")
+    question: str = Field(description="利用者が回答を求めている元の質問。")
+    research_cycle_count: int = Field(description="開始済みResearch Cycle数。")
+    remaining_research_cycles: int = Field(description="開始可能な残りResearch Cycle数。")
+    remaining_wall_time_sec: float = Field(description="Case全体の残り実行秒数。")
+    min_next_cycle_budget_sec: float = Field(
+        description="次Cycleを安全に開始するためProgramが必要とする最小残り秒数。",
+    )
+    can_start_next_cycle: bool = Field(
+        description="時間とCycle上限から、Programが次Cycle開始を許可できるか。",
+    )
+    max_tool_requests_per_step: int = Field(
+        description="今回のSolverDecisionで返せるToolRequest総数の上限。",
+    )
+    max_fetched_resources_per_cycle: int = Field(
+        description="1 Cycleで本文取得できるArticle総数の上限。",
+    )
+    fetched_resource_ids_this_cycle: tuple[str, ...] = Field(
+        description="現在Cycleですでに本文取得したArticle ID。",
+    )
+    remaining_fetch_capacity: int = Field(
+        ge=0,
+        description="現在Cycleでfetch_articlesに追加できるArticle数。WorkItem数の上限ではない。",
+    )
+    max_selected_frontier_per_step: int = Field(
+        description="今回のGraph reviewでselectedにできる候補数上限。",
+    )
+    cycle_budget_reached: bool = Field(
+        description="現在Cycleの決定的な実行上限へ到達したか。",
+    )
+    cycle_close_required: bool = Field(
+        description="現在CycleへToolを追加せず、完了または次Cycle移行を判断すべきか。",
+    )
+    cycle_step_timeout: bool = Field(
+        description="直前stepが時間切れで終了したか。法的不存在や仮説否定を意味しない。",
+    )
+    max_retained_evidence: int = Field(
+        description="後続Cycleへ本文を再表示できるEvidence件数上限。",
+    )
+    max_material_evidence_chars: int = Field(
+        description="今回Promptへ載せるEvidence本文の文字数上限。意味的な採否基準ではない。",
+    )
+    max_solver_input_chars: int = Field(
+        description="Solverへ渡すPrompt全体の安全上限。意味的な採否基準ではない。",
+    )
+    finalize_only: bool = Field(
+        description="追加Toolを使わず、既知根拠から最終回答だけを作る呼出しか。",
+    )
+    available_tools: tuple[ToolDefinition, ...] = Field(
+        default=(),
+        description=(
+            "現在Solverが要求できる正規Tool名、用途、入力Schema、戻り値説明。"
+            "Tool選択はSolver、形式検証と実行はProgramが担当する。"
+        ),
+    )
+    grounding_evidence_ids: tuple[str, ...] = Field(
+        description="Hypothesis、DependencyDecision、回答の根拠に使用できる取得済み本文Evidence ID。",
+    )
+    navigation_evidence_ids: tuple[str, ...] = Field(
+        description="候補の所在を示す検索・Graph Evidence ID。意味判断や回答根拠には使わない。",
+    )
+    fetchable_article_ids: tuple[str, ...] = Field(
+        description="発見済みかつ本文未取得で、fetch_articlesに指定できるArticle ID。",
+    )
+    search_candidates: tuple[SearchCandidateArticle, ...] = Field(
+        default=(),
+        description="OpenSearchで発見した候補Articleと発見元・検索抜粋の対応。",
+    )
+    work_tree: tuple[WorkTreeItem, ...] = Field(
+        description="WorkItemの階層、状態、対応HypothesisをProgramが投影した一覧。",
+    )
+    hypotheses: tuple[Hypothesis, ...] = Field(
+        description="現在の全Hypothesisとその判定・gap。",
+    )
+    focus_work_items: tuple[WorkItem, ...] = Field(
+        description="現在stepで優先するopen WorkItem。全作業範囲を置き換えない。",
+    )
+    affected_work_items: tuple[WorkItem, ...] = Field(
+        description="前提Hypothesisの否定により維持・置換・破棄を再判断するWorkItem。",
+    )
     used_tool_request_ids: tuple[str, ...] = Field(default=(), exclude=True)
-    recent_tool_requests: tuple[ToolRequest, ...]
-    recent_tool_results: tuple[SolverToolResult, ...]
-    evidence_manifest: tuple[EvidenceManifestItem, ...]
-    graph_review_batch: GraphReviewBatch
-    graph_review_ledger: tuple[GraphReviewLedgerItem, ...]
-    required_graph_review_request_ids: tuple[str, ...] = ()
-    required_search_review_request_ids: tuple[str, ...] = ()
-    material_evidence: tuple[Evidence, ...]
-    omitted_evidence_ids: tuple[str, ...]
-    required_dependency_kind: str | None = None
-    required_dependency_work_item_ids: tuple[str, ...] = ()
-    dependency_decisions: tuple[DependencyDecision, ...] = ()
-    reviewer_findings: tuple[ReviewFinding, ...] = ()
-    contract_feedback: SolverContractFeedback | None = None
+    recent_tool_requests: tuple[ToolRequest, ...] = Field(
+        description="現在Cycleで結果が観察済みの直近ToolRequest。",
+    )
+    recent_tool_results: tuple[SolverToolResult, ...] = Field(
+        description="直近Toolの機械的な成功・失敗・timeoutとEvidence件数。",
+    )
+    evidence_manifest: tuple[EvidenceManifestItem, ...] = Field(
+        description="Caseで既知のEvidenceと、今回本文が提示されているかの一覧。",
+    )
+    graph_review_batch: GraphReviewBatch = Field(
+        description="今回まだ意味評価すべきGraph候補差分。",
+    )
+    graph_review_ledger: tuple[GraphReviewLedgerItem, ...] = Field(
+        description="過去に評価済みのGraph候補と現在の本文取得状態。",
+    )
+    required_graph_review_request_ids: tuple[str, ...] = Field(
+        default=(),
+        description="現在のGraph差分Reviewが処理すべき既知Graph ToolRequest ID。",
+    )
+    required_search_review_request_ids: tuple[str, ...] = Field(
+        default=(),
+        description="現在の検索候補Reviewが処理すべき既知legal_search Request ID。",
+    )
+    material_evidence: tuple[Evidence, ...] = Field(
+        description="今回のPromptに本文が実際に含まれるEvidence。本文評価はこの内容だけで行う。",
+    )
+    omitted_evidence_ids: tuple[str, ...] = Field(
+        description="Caseでは既知だが今回本文を省略したEvidence ID。必要ならload_evidenceで取得する。",
+    )
+    required_dependency_kind: str | None = Field(
+        default=None,
+        description="対象WorkItemで確認する下位規範依存の種類。指定がなければnull。",
+    )
+    required_dependency_work_item_ids: tuple[str, ...] = Field(
+        default=(),
+        description="今回DependencyDecisionを必ず返す既知WorkItem ID。",
+    )
+    dependency_decisions: tuple[DependencyDecision, ...] = Field(
+        default=(),
+        description="これまでに適用済みの下位規範確認判断。",
+    )
+    reviewer_findings: tuple[ReviewFinding, ...] = Field(
+        default=(),
+        description="任意Reviewerから差し戻され、今回処理すべき指摘。",
+    )
+    contract_feedback: SolverContractFeedback | None = Field(
+        default=None,
+        description="直前Decisionが未適用になった構造違反と、その未適用Decision。",
+    )
 
     @property
     def material_evidence_ids(self) -> frozenset[str]:
@@ -207,6 +400,7 @@ def build_solver_context(
     contract_feedback: SolverContractFeedback | None = None,
     required_dependency_kind: str | None = None,
     required_dependency_work_item_ids: tuple[str, ...] = (),
+    available_tools: tuple[ToolDefinition, ...] = (),
 ) -> SolverContext:
     hypotheses_by_work: dict[str, list[Hypothesis]] = {}
     for hypothesis in state.hypotheses:
@@ -529,6 +723,7 @@ def build_solver_context(
         max_material_evidence_chars=limits.max_material_evidence_chars,
         max_solver_input_chars=limits.max_solver_input_chars,
         finalize_only=finalize_only,
+        available_tools=available_tools,
         grounding_evidence_ids=grounding_ids,
         navigation_evidence_ids=navigation_ids,
         fetchable_article_ids=fetchable_article_ids,

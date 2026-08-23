@@ -104,6 +104,13 @@ class FakeReadTool:
     ) -> None:
         self._definition = ToolDefinition(
             name=name,
+            description="テスト用のread-only Tool。",
+            input_schema={
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+            result_description="テスト用Evidenceを返す。",
             read_only=read_only,
             parallel_safe=parallel_safe,
         )

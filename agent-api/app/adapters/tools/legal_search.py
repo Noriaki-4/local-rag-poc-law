@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from app.agent_framework.ports.tool import ToolDefinition, ToolExecution
 from app.agent_framework.state import Evidence, ToolRequest, ToolResult
+from app.agent_framework.tool_contracts import model_input_schema
 from app.config import settings
 from app.domains.legal.graph_schema import (
     GraphDirection,
@@ -28,9 +29,26 @@ _MAX_ARTICLES_PER_FETCH = 4
 class _LegalSearchArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    query: str = Field(min_length=1, max_length=1000)
-    doc_types: tuple[str, ...] = ("law", "guideline")
-    document_ids: tuple[str, ...] = Field(default=(), max_length=12)
+    query: str = Field(
+        min_length=1,
+        max_length=1000,
+        description="制度名と確認事項を法令に現れやすい表現へ言い換えた検索語。",
+    )
+    doc_types: tuple[str, ...] = Field(
+        default=("law", "guideline"),
+        description=(
+            "検索対象。法令本文はlaw、行政解釈やガイドはguideline。"
+            "現在の検索に必要な値を配列で返す。"
+        ),
+    )
+    document_ids: tuple[str, ...] = Field(
+        default=(),
+        max_length=12,
+        description=(
+            "検索対象文書を限定する既知documentId。"
+            "限定しない場合は空配列。"
+        ),
+    )
 
 
 class _FetchArticlesArguments(BaseModel):
@@ -39,6 +57,10 @@ class _FetchArticlesArguments(BaseModel):
     article_ids: tuple[str, ...] = Field(
         min_length=1,
         max_length=_MAX_ARTICLES_PER_FETCH,
+        description=(
+            "本文を取得する既知Article ID。SolverContext.fetchable_article_idsの"
+            "完全一致だけを指定する。"
+        ),
     )
 
 
@@ -48,15 +70,26 @@ class _GraphNeighborsArguments(BaseModel):
     article_ids: tuple[str, ...] = Field(
         min_length=1,
         max_length=_MAX_ARTICLES_PER_FETCH,
+        description="1ホップの起点にする既知Article ID。",
     )
-    mode: GraphSearchMode
-    predicate: ProposedPredicate | None = None
-    direction: Literal["from_subject", "to_subject", "outgoing", "incoming"]
+    mode: GraphSearchMode = Field(
+        description="物理参照または意味分類済み関係のどちらを探索するか。",
+    )
+    predicate: ProposedPredicate | None = Field(
+        default=None,
+        description=(
+            "semantic_assertionで探索する仮説に合う1つの意味関係。"
+            "それ以外のmodeではnull。"
+        ),
+    )
+    direction: Literal["from_subject", "to_subject", "outgoing", "incoming"] = Field(
+        description="起点Articleから見た関係の向き。",
+    )
     max_relations: int = Field(
         default=50,
         ge=1,
         le=50,
-        description="Maximum navigation relations returned for each seed article.",
+        description="起点Articleごとに返すnavigation関係数の上限。",
     )
 
     @model_validator(mode="after")
@@ -77,6 +110,16 @@ class _GraphNeighborsArguments(BaseModel):
 class LegalSearchTool:
     definition = ToolDefinition(
         name="legal_search",
+        description=(
+            "Article IDがまだ分からないとき、OpenSearchで法令またはガイドの候補を探す。"
+            "質問をそのまま繰り返さず、確認事項を法令表現へ言い換えて使う。"
+            "返す検索抜粋は候補選択用であり、回答やHypothesisの根拠にはしない。"
+        ),
+        input_schema=model_input_schema(_LegalSearchArguments),
+        result_description=(
+            "候補Articleの所在と短い検索抜粋をnavigation Evidenceとして返す。"
+            "Article本文のgrounding Evidenceは返さない。"
+        ),
         read_only=True,
         parallel_safe=True,
     )
@@ -181,6 +224,15 @@ class LegalSearchTool:
 class LegalFetchArticlesTool:
     definition = ToolDefinition(
         name="fetch_articles",
+        description=(
+            "発見済みArticleの本文をOpenSearchから取得する。"
+            "fetchable_article_idsにある既知IDから、質問とHypothesisに必要なものを選んで使う。"
+            "検索やGraph展開は行わず、未知IDや取得済みEvidence IDは受け付けない。"
+        ),
+        input_schema=model_input_schema(_FetchArticlesArguments),
+        result_description=(
+            "指定Articleに属するArticle・Paragraph・Itemの本文をgrounding Evidenceとして返す。"
+        ),
         read_only=True,
         parallel_safe=True,
     )
@@ -220,6 +272,16 @@ class LegalFetchArticlesTool:
 class LegalGraphNeighborsTool:
     definition = ToolDefinition(
         name="legal_graph_neighbors",
+        description=(
+            "既知Articleを起点に、仮説に合う法令関係を1ホップだけ探索する。"
+            "関係のmode、意味predicate、向きを説明できる場合に使う。"
+            "返す候補は本文ではなくnavigation情報であり、関連性と次の取得対象はSolverが判断する。"
+        ),
+        input_schema=model_input_schema(_GraphNeighborsArguments),
+        result_description=(
+            "起点と隣接Articleの関係、向き、根拠所在をGraph navigation Evidenceとして返す。"
+            "隣接Articleの本文は返さない。"
+        ),
         read_only=True,
         parallel_safe=True,
     )

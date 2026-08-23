@@ -27,7 +27,7 @@ from .observability import (
     ToolCallTrace,
 )
 from .ports.model import ModelPort, ModelProtocolError, ReviewerView
-from .ports.tool import ToolExecution, ToolRegistry
+from .ports.tool import ToolDefinition, ToolExecution, ToolRegistry
 from .profiles import AgentProfile, ModelCallProfile, ReviewerProfile
 from .state import (
     CaseState,
@@ -46,6 +46,30 @@ from .store import CaseStore
 from .validation import ContractViolation, apply_solver_decision
 
 LOAD_EVIDENCE_TOOL = "load_evidence"
+LOAD_EVIDENCE_DEFINITION = ToolDefinition(
+    name=LOAD_EVIDENCE_TOOL,
+    description=(
+        "Caseでは取得済みだが現在のPromptから省略されたEvidence本文を再表示する。"
+        "omitted_evidence_idsにある既知IDだけを指定する。"
+        "新しい検索、Article本文取得、Graph探索は行わない。"
+    ),
+    input_schema={
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "evidence_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 1,
+                "description": "今回再表示するomitted_evidence_idsの完全一致。",
+            }
+        },
+        "required": ["evidence_ids"],
+    },
+    result_description="指定した既知Evidenceの本文をmaterial_evidenceへ再投影する。",
+    read_only=True,
+    parallel_safe=True,
+)
 MAX_SOLVER_CONTRACT_ATTEMPTS = 3
 logger = logging.getLogger(__name__)
 
@@ -286,6 +310,7 @@ class AgentLoop:
                         if dependency_audit_required
                         else ()
                     ),
+                    available_tools=self._solver_tool_definitions,
                 )
                 graph_review_call = bool(
                     context.required_graph_review_request_ids
@@ -847,6 +872,18 @@ class AgentLoop:
             if not automatic.solver_may_request:
                 names.discard(automatic.tool_name)
         return frozenset(names)
+
+    @property
+    def _solver_tool_definitions(self) -> tuple[ToolDefinition, ...]:
+        allowed_names = self._read_only_tool_names
+        definitions = [
+            definition
+            for definition in self._tools.definitions
+            if definition.name in allowed_names
+        ]
+        if LOAD_EVIDENCE_TOOL in allowed_names:
+            definitions.append(LOAD_EVIDENCE_DEFINITION)
+        return tuple(definitions)
 
     def _with_automatic_tools(
         self,

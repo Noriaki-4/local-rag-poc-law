@@ -1,0 +1,497 @@
+{
+  "fixtureId": "tob-overview-initial-research-decomposition-v1",
+  "questionId": "tob-overview",
+  "source": {
+    "diagnosticsMode": "snapshot",
+    "diagnosticCaseId": "legal-63ced349aebe4bf68cbb529d5ffa19c9",
+    "sequence": 1,
+    "purpose": "research",
+    "model": "gpt-4o-mini",
+    "profileVersion": "135"
+  },
+  "expectations": {
+    "researchCycleCount": 0,
+    "remainingFetchCapacity": 3,
+    "workItemCount": 0,
+    "hypothesisCount": 0,
+    "materialEvidenceCount": 0,
+    "recentToolResultCount": 0,
+    "fetchableArticleCount": 0,
+    "fetchedResourceCount": 0,
+    "evidenceRoleCounts": {}
+  },
+  "caseState": {
+    "case_id": "fixture-tob-overview-initial-research-decomposition-v1",
+    "question": "上場会社の株式を、市場を通さずに多数の株主から買い集めたいのですが、公開買付けの手続が必要になるのはどのような場合ですか。対象となる株券等の範囲、主な例外、必要な手続も含めて、根拠となる条文とともに説明してください。",
+    "run_status": "running",
+    "research_cycle_count": 0,
+    "work_items": [],
+    "hypotheses": [],
+    "tool_requests": [],
+    "evidence": [],
+    "dependency_decisions": [],
+    "graph_candidate_reviews": [],
+    "search_candidate_reviews": [],
+    "frontier_re_adoptions": [],
+    "deferred_frontier_resolutions": [],
+    "unreviewed_graph_resolutions": [],
+    "tool_results": [],
+    "focus_work_item_ids": [],
+    "retained_evidence_ids": [],
+    "final_answer": null,
+    "review": null,
+    "review_finding_resolutions": [],
+    "stop_reason": null,
+    "cycle_step_timeout": false,
+    "created_at": "2026-08-23T04:45:35.513349Z",
+    "updated_at": "2026-08-23T04:45:35.513355Z"
+  },
+  "solverContext": {
+    "case_id": "fixture-tob-overview-initial-research-decomposition-v1",
+    "question": "上場会社の株式を、市場を通さずに多数の株主から買い集めたいのですが、公開買付けの手続が必要になるのはどのような場合ですか。対象となる株券等の範囲、主な例外、必要な手続も含めて、根拠となる条文とともに説明してください。",
+    "research_cycle_count": 0,
+    "remaining_research_cycles": 4,
+    "remaining_wall_time_sec": 239.9999870419997,
+    "min_next_cycle_budget_sec": 25.0,
+    "can_start_next_cycle": true,
+    "max_tool_requests_per_step": 5,
+    "max_fetched_resources_per_cycle": 3,
+    "fetched_resource_ids_this_cycle": [],
+    "remaining_fetch_capacity": 3,
+    "max_selected_frontier_per_step": 3,
+    "cycle_budget_reached": false,
+    "cycle_close_required": false,
+    "cycle_step_timeout": false,
+    "max_retained_evidence": 12,
+    "max_material_evidence_chars": 50000,
+    "max_solver_input_chars": 240000,
+    "finalize_only": false,
+    "available_tools": [
+      {
+        "name": "legal_search",
+        "description": "Article IDがまだ分からないとき、OpenSearchで法令またはガイドの候補を探す。質問をそのまま繰り返さず、確認事項を法令表現へ言い換えて使う。返す検索抜粋は候補選択用であり、回答やHypothesisの根拠にはしない。",
+        "input_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "description": "制度名と確認事項を法令に現れやすい表現へ言い換えた検索語。",
+              "maxLength": 1000,
+              "minLength": 1,
+              "type": "string"
+            },
+            "doc_types": {
+              "description": "検索対象。法令本文はlaw、行政解釈やガイドはguideline。現在の検索に必要な値を配列で返す。",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "document_ids": {
+              "description": "検索対象文書を限定する既知documentId。限定しない場合は空配列。",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 12,
+              "type": "array"
+            }
+          },
+          "required": [
+            "query",
+            "doc_types",
+            "document_ids"
+          ],
+          "type": "object"
+        },
+        "result_description": "候補Articleの所在と短い検索抜粋をnavigation Evidenceとして返す。Article本文のgrounding Evidenceは返さない。",
+        "read_only": true,
+        "parallel_safe": true
+      },
+      {
+        "name": "fetch_articles",
+        "description": "発見済みArticleの本文をOpenSearchから取得する。fetchable_article_idsにある既知IDから、質問とHypothesisに必要なものを選んで使う。検索やGraph展開は行わず、未知IDや取得済みEvidence IDは受け付けない。",
+        "input_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "article_ids": {
+              "description": "本文を取得する既知Article ID。SolverContext.fetchable_article_idsの完全一致だけを指定する。",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 4,
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "article_ids"
+          ],
+          "type": "object"
+        },
+        "result_description": "指定Articleに属するArticle・Paragraph・Itemの本文をgrounding Evidenceとして返す。",
+        "read_only": true,
+        "parallel_safe": true
+      },
+      {
+        "name": "legal_graph_neighbors",
+        "description": "既知Articleを起点に、仮説に合う法令関係を1ホップだけ探索する。関係のmode、意味predicate、向きを説明できる場合に使う。返す候補は本文ではなくnavigation情報であり、関連性と次の取得対象はSolverが判断する。",
+        "input_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "article_ids": {
+              "description": "1ホップの起点にする既知Article ID。",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 4,
+              "minItems": 1,
+              "type": "array"
+            },
+            "mode": {
+              "description": "物理参照または意味分類済み関係のどちらを探索するか。",
+              "enum": [
+                "semantic_assertion",
+                "explicit_reference",
+                "explains"
+              ],
+              "type": "string"
+            },
+            "predicate": {
+              "anyOf": [
+                {
+                  "description": "RelationAssertionが提示できる未確認の意味関係。",
+                  "enum": [
+                    "IMPLEMENTS",
+                    "INCORPORATES",
+                    "USES_DEFINITION",
+                    "EXCEPTION_TO",
+                    "OVERRIDES"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "semantic_assertionで探索する仮説に合う1つの意味関係。それ以外のmodeではnull。"
+            },
+            "direction": {
+              "description": "起点Articleから見た関係の向き。",
+              "enum": [
+                "from_subject",
+                "to_subject",
+                "outgoing",
+                "incoming"
+              ],
+              "type": "string"
+            },
+            "max_relations": {
+              "description": "起点Articleごとに返すnavigation関係数の上限。",
+              "maximum": 50,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "article_ids",
+            "mode",
+            "predicate",
+            "direction",
+            "max_relations"
+          ],
+          "type": "object"
+        },
+        "result_description": "起点と隣接Articleの関係、向き、根拠所在をGraph navigation Evidenceとして返す。隣接Articleの本文は返さない。",
+        "read_only": true,
+        "parallel_safe": true
+      },
+      {
+        "name": "load_evidence",
+        "description": "Caseでは取得済みだが現在のPromptから省略されたEvidence本文を再表示する。omitted_evidence_idsにある既知IDだけを指定する。新しい検索、Article本文取得、Graph探索は行わない。",
+        "input_schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "evidence_ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "description": "今回再表示するomitted_evidence_idsの完全一致。"
+            }
+          },
+          "required": [
+            "evidence_ids"
+          ]
+        },
+        "result_description": "指定した既知Evidenceの本文をmaterial_evidenceへ再投影する。",
+        "read_only": true,
+        "parallel_safe": true
+      }
+    ],
+    "grounding_evidence_ids": [],
+    "navigation_evidence_ids": [],
+    "fetchable_article_ids": [],
+    "search_candidates": [],
+    "work_tree": [],
+    "hypotheses": [],
+    "focus_work_items": [],
+    "affected_work_items": [],
+    "recent_tool_requests": [],
+    "recent_tool_results": [],
+    "evidence_manifest": [],
+    "graph_review_batch": {
+      "candidates": [],
+      "remaining_unreviewed_count": 0
+    },
+    "graph_review_ledger": [],
+    "required_graph_review_request_ids": [],
+    "required_search_review_request_ids": [],
+    "material_evidence": [],
+    "omitted_evidence_ids": [],
+    "required_dependency_kind": null,
+    "required_dependency_work_item_ids": [],
+    "dependency_decisions": [],
+    "reviewer_findings": [],
+    "contract_feedback": null
+  },
+  "observedResearchOutput": {
+    "sequence": 3,
+    "decision": {
+      "next": "continue",
+      "decision_reason": "質問の確認事項を分解し、初回の探索行動を選んだ理由は、公開買付けの手続きに関する法令を明確にするための必要な情報を取得するためです; 確認事項数: 3; 確認対象: 公開買付けの手続きの必要条件, 対象となる株券等の範囲, 主な例外と必要手続きの根拠条文の説明",
+      "start_next_cycle": false,
+      "update": {
+        "add_work_items": [
+          {
+            "work_item_id": "wi-1",
+            "parent_work_item_id": null,
+            "question": "公開買付けの手続きが必要になる条件は何か？",
+            "state": "open",
+            "resolution": null,
+            "basis_hypothesis_ids": ["h-1"],
+            "replaces_work_item_id": null
+          },
+          {
+            "work_item_id": "wi-2",
+            "parent_work_item_id": null,
+            "question": "公開買付けの対象となる株券等の範囲は何か？",
+            "state": "open",
+            "resolution": null,
+            "basis_hypothesis_ids": ["h-2"],
+            "replaces_work_item_id": null
+          },
+          {
+            "work_item_id": "wi-3",
+            "parent_work_item_id": null,
+            "question": "公開買付けに関する主な例外と必要手続きは何か？",
+            "state": "open",
+            "resolution": null,
+            "basis_hypothesis_ids": ["h-3"],
+            "replaces_work_item_id": null
+          }
+        ],
+        "add_hypotheses": [
+          {
+            "hypothesis_id": "h-1",
+            "work_item_id": "wi-1",
+            "statement": "公開買付けの手続きが必要になるのは、特定の条件を満たす場合である。",
+            "judgment": "unresolved",
+            "evidence_ids": [],
+            "gaps": ["公開買付けが必要になる具体的な条件の詳細"]
+          },
+          {
+            "hypothesis_id": "h-2",
+            "work_item_id": "wi-2",
+            "statement": "公開買付けの対象となる株券等は、特定の範囲に限定される。",
+            "judgment": "unresolved",
+            "evidence_ids": [],
+            "gaps": ["公開買付けの対象となる株券等の具体的な範囲"]
+          },
+          {
+            "hypothesis_id": "h-3",
+            "work_item_id": "wi-3",
+            "statement": "公開買付けには主な例外があり、特定の手続きが必要である。",
+            "judgment": "unresolved",
+            "evidence_ids": [],
+            "gaps": ["公開買付けに関する主な例外と必要手続きの詳細"]
+          }
+        ]
+      },
+      "tool_requests": [
+        {
+          "request_id": "tr-1",
+          "work_item_id": "wi-1",
+          "purpose": "公開買付けの手続きが必要になる条件を確認するための法令を探す。",
+          "hypothesis_ids": ["h-1"],
+          "tool_name": "legal_search",
+          "arguments": {
+            "query": "公開買付けの手続きが必要になる条件",
+            "doc_types": ["law"],
+            "document_ids": []
+          }
+        },
+        {
+          "request_id": "tr-2",
+          "work_item_id": "wi-2",
+          "purpose": "公開買付けの対象となる株券等の範囲を確認するための法令を探す。",
+          "hypothesis_ids": ["h-2"],
+          "tool_name": "legal_search",
+          "arguments": {
+            "query": "公開買付けの対象となる株券等の範囲",
+            "doc_types": ["law"],
+            "document_ids": []
+          }
+        },
+        {
+          "request_id": "tr-3",
+          "work_item_id": "wi-3",
+          "purpose": "公開買付けに関する主な例外と必要手続きについて確認するための法令を探す。",
+          "hypothesis_ids": ["h-3"],
+          "tool_name": "legal_search",
+          "arguments": {
+            "query": "公開買付けの主な例外と必要手続き",
+            "doc_types": ["law"],
+            "document_ids": []
+          }
+        }
+      ]
+    }
+  },
+  "expectedResearchDecision": {
+    "next": "continue",
+    "decision_reason": "理由: 質問が求める適用条件、対象範囲、適用除外、実施手続を独立に検証するため、4つの確認事項と対応する検索を作成する; 確認事項数: 4; 確認対象: 適用条件, 対象株券等, 適用除外, 公告・届出手続",
+    "start_next_cycle": false,
+    "update": {
+      "add_work_items": [
+        {
+          "work_item_id": "wi-condition",
+          "question": "市場外で株券等を買い付ける場合、どのような条件で公開買付けが必要になるか？",
+          "basis_hypothesis_ids": []
+        },
+        {
+          "work_item_id": "wi-scope",
+          "question": "公開買付けの対象となる株券等には何が含まれるか？",
+          "basis_hypothesis_ids": []
+        },
+        {
+          "work_item_id": "wi-exception",
+          "question": "公開買付けが不要となる主な適用除外は何か？",
+          "basis_hypothesis_ids": []
+        },
+        {
+          "work_item_id": "wi-procedure",
+          "question": "公開買付けを行う場合に必要な公告・届出等の手続は何か？",
+          "basis_hypothesis_ids": []
+        }
+      ],
+      "add_hypotheses": [
+        {
+          "hypothesis_id": "h-condition",
+          "work_item_id": "wi-condition",
+          "statement": "市場外で多数の株主から上場会社の株券等を買い付ける行為は、買付方法や取得状況等の法定条件を満たす場合、公開買付けによる必要がある。",
+          "gaps": [
+            "公開買付けが必要となる具体的な判定条件",
+            "人数、所有割合、買付方法等が判定へ与える影響"
+          ]
+        },
+        {
+          "hypothesis_id": "h-scope",
+          "work_item_id": "wi-scope",
+          "statement": "公開買付けの対象となる株券等の範囲は、普通株式だけでなく法令上指定された有価証券を含む。",
+          "gaps": [
+            "対象となる有価証券の具体的な種類",
+            "対象範囲を定める下位法令"
+          ]
+        },
+        {
+          "hypothesis_id": "h-exception",
+          "work_item_id": "wi-exception",
+          "statement": "公開買付けの要件に該当する市場外買付けでも、法令上の適用除外を満たす場合は公開買付けによる必要がない。",
+          "gaps": [
+            "適用除外となる具体的な買付け",
+            "適用除外を具体化する下位法令"
+          ]
+        },
+        {
+          "hypothesis_id": "h-procedure",
+          "work_item_id": "wi-procedure",
+          "statement": "公開買付けを行う者には、買付開始に関する公告や書類提出等の法定手続が課される。",
+          "gaps": [
+            "必要な公告、届出、提出書類",
+            "各手続の時期と記載事項"
+          ]
+        }
+      ]
+    },
+    "tool_requests": [
+      {
+        "request_id": "tr-condition",
+        "work_item_id": "wi-condition",
+        "hypothesis_ids": ["h-condition"],
+        "tool_name": "legal_search",
+        "purpose": "公開買付けが必要となる条件を定める条文を探す。",
+        "arguments": {
+          "query": "公開買付けによらなければならない 買付け等 市場外 所有割合",
+          "doc_types": ["law"],
+          "document_ids": []
+        }
+      },
+      {
+        "request_id": "tr-scope",
+        "work_item_id": "wi-scope",
+        "hypothesis_ids": ["h-scope"],
+        "tool_name": "legal_search",
+        "purpose": "公開買付けの対象となる株券等の範囲を定める条文を探す。",
+        "arguments": {
+          "query": "公開買付け 株券等 政令で定める 有価証券",
+          "doc_types": ["law"],
+          "document_ids": []
+        }
+      },
+      {
+        "request_id": "tr-exception",
+        "work_item_id": "wi-exception",
+        "hypothesis_ids": ["h-exception"],
+        "tool_name": "legal_search",
+        "purpose": "公開買付けの適用除外を定める条文を探す。",
+        "arguments": {
+          "query": "公開買付け 適用除外 政令で定める 買付け等",
+          "doc_types": ["law"],
+          "document_ids": []
+        }
+      },
+      {
+        "request_id": "tr-procedure",
+        "work_item_id": "wi-procedure",
+        "hypothesis_ids": ["h-procedure"],
+        "tool_name": "legal_search",
+        "purpose": "公開買付けの公告、届出及び記載事項を定める条文を探す。",
+        "arguments": {
+          "query": "公開買付開始公告 公開買付届出書 内閣府令 記載事項",
+          "doc_types": ["law"],
+          "document_ids": []
+        }
+      }
+    ]
+  },
+  "observedFailure": {
+    "stage": "initial_research",
+    "problems": [
+      "例外と必要手続を一つのWorkItemへまとめた",
+      "Hypothesisが具体的な検証命題ではなく未知事項の言い換えになった",
+      "検索語を法令に現れやすい表現へ変換せず質問表現をほぼ反復した",
+      "質問から直接作ったopen WorkItemへ、自身に所属する未解決Hypothesisを前提basisとして設定した"
+    ],
+    "downstreamObservation": {
+      "searchAssessmentFoundArticleIds": [
+        "law-402M50000040038-article-2_5",
+        "law-402M50000040038-article-10"
+      ],
+      "reselectionDroppedArticleIds": [
+        "law-402M50000040038-article-2_5",
+        "law-402M50000040038-article-10"
+      ]
+    }
+  }
+}

@@ -45,6 +45,7 @@
 |---|---|---|
 | [generic_iterative_agent_framework_plan.md](generic_iterative_agent_framework_plan.md) | 反復Cycle、WorkItem、Hypothesis、Evidence、Graph探索状態、Solver、任意Reviewer、Model Profile、Prompt、CaseStore、trace | 新Agent Frameworkの実装ロードマップの正本 |
 | [generic_iterative_agent_framework_plan_visual.md](generic_iterative_agent_framework_plan_visual.md) | 正本の構成、探索、Cycle引継ぎ、Graph、5つの意味関係と検索方向、保守性、現行3系統からの切替を図と平易な表現で示す | 上記実装計画と対になる人間向けガイド。仕様判断には使わない |
+| [agent_contract_semantics.md](agent_contract_semantics.md) | WorkItem、Hypothesis、Evidence、Tool、Cycle等について、型契約・validator・Context投影・Provider Schema・Promptの対応を示す | 契約項目の意味をPromptだけで再定義しないための保守ガイド |
 | [agent_post_run_audit.md](agent_post_run_audit.md) | 判断理由の保存、診断Snapshot、読み取り専用の事後監査API、設定と応答の見方 | 新Agent Frameworkの問題分析時だけ使う簡潔な機能・運用ガイド |
 | [relation_classification_rollout_checklist.md](relation_classification_rollout_checklist.md) | 非同期Relation分類の契約固定、構造修正、export/import、100件品質ゲート、全件実行、検索接続の順序と停止条件 | 全件意味分類の実行可否を確認するチェックリスト |
 | [llm_directed_legal_retrieval.md](llm_directed_legal_retrieval.md) | LLM主導の検索・本文取得・Graph展開、LLMとプログラムの責務分担、旧Research Cycle | 新基盤への切替完了までの現行経路仕様 |

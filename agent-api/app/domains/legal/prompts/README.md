@@ -21,6 +21,9 @@ solver_completion.md ──┤       │
 用途別Prompt ──────────┴───────┘
                                │
                                ▼
+             型から生成した契約用語集・ToolDefinition
+                               │
+                               ▼
                   共通出力契約・輸送指示・SolverContext
                                │
                                ▼
@@ -51,6 +54,10 @@ solver_completion.md ──┤       │
 両モードは入力と出力が他モードより限定されるため、共通fragmentを合成しない独立Promptにしています。
 
 ### 各ファイルの役割
+
+担当する判断が切り替わる用途別Promptには、そのモードの役割を明記します。
+共通ルール、Toolルール、完了ルール、出力前チェック、修復断片は独立した担当者ではなく、
+合成先の役割を補足するため、重複する役割説明を置きません。
 
 | ファイル | 内容 |
 |---|---|
@@ -91,6 +98,8 @@ Search Reviewで保留した候補と、本文取得が未完了の選択候補�
 このディレクトリのPromptだけがProvider入力の全体ではありません。
 `StructuredJSONModelAdapter`が、用途別Promptへ次を追加します。
 
+- Pydanticの`Field.description`から生成した`contract_glossary`
+- 実行時に利用できる`available_tools`と各Toolの用途・入力Schema・戻り値説明
 - `SolverDecision`の共通出力原則と状態契約
 - Provider別の構造化出力・輸送指示
 - 現在の`SolverContext`
@@ -98,7 +107,9 @@ Search Reviewで保留した候補と、本文取得が未完了の選択候補�
 
 修復指示のassetは`app/agent_framework/prompts/`にあります。法令判断の手順はこのディレクトリ、
 Provider輸送と契約修復はFramework側へ分け、同じ規則を両方へ重複記載しません。
-JSON SchemaとPydantic型が出力形状の正本であり、Promptは値の意味と使い方を説明します。
+Pydantic型とその`Field.description`が項目の形状と基本的な意味の正本です。
+`contract_rendering.py`が用語集とProvider schemaの基礎へ決定的に反映します。
+Domain Promptは同じ定義表を手書きせず、現在の処理での手順と判断ルールを説明します。
 LLMが返すToolRequestの`request_id`は同じDecision内の参照用です。AdapterがCase内で一意な
 永続化用IDへ置き換え、同じDecisionの`action_request_id`も機械的に追随させます。
 Toolの種類、引数、対象WorkItem・Hypothesisは変更しません。
@@ -124,6 +135,8 @@ Toolの種類、引数、対象WorkItem・Hypothesisは変更しません。
 - 手順は用途別Prompt、共有する判断ルールは必要最小限のfragmentへ置きます。
 - 指示と出力書式を同じ箇条書きへ混在させません。出力書式には固定された実データ例を置かず、
   プレースホルダーと実際の値を区別します。
+- 例は契約項目の必須要素にしません。`description`とルールで解消できない誤解を
+  fixtureで確認した場合だけ、契約と分けた例セクションに、固定件数を誘導しない複数例を追加します。
 - 出力前完了確認は対応する処理の`*_check.md`へ置き、長い入力の前にだけ記載しません。
 - 完了確認のためにSolverContextの項目や本文を削除しません。
 - モード固有の例外を`solver_common.md`へ追加しません。

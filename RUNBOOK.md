@@ -1079,10 +1079,11 @@ Reviewerは`AGENT_FRAMEWORK_REVIEWER_ENABLED=true`を明示した場合だけ有
 `ReviewerView`を機械投影する。Reviewerは`accept`または構造化Findingを返し、差戻し後のSolverは
 全finding IDへ`addressed / disputed`を1回ずつ返す。Programは既知IDと全件性だけを検証し、
 回答修正か追加調査かを決めない。既定の差戻し上限は1回で、再確認も`revise`なら`review_failed`となる。
-検索時にLLMを使う最初の動作確認は、Ollama `gemma4:e4b`をresearchとintegrationの両方へ設定して行う。
-この確認を通す前にHaiku、Sonnet、Lunaへ切り替えない。不具合時はモデル性能だけを原因とせず、実装、
-契約、Prompt、入力、`trace.agentFramework`を先に調べる。Gemmaで一連の経路が動いた後、必要な場合だけ
-別Profileで品質・性能を比較する。これはLunaを使う非同期Relation分類とは別の運用である。
+検索時LLMの現在の基準検証はOpenAI API `gpt-4o-mini`をresearchとintegrationの両方へ設定して行う。
+共通fixtureと公開買付け3問が安定するまでは、Haiku比較を同時に進めない。不具合時はモデル性能だけを原因とせず、
+実装、契約の`description`、Prompt、Provider輸送、入力、`trace.agentFramework`を先に調べる。
+`gpt-4o-mini`で合格後、同じfixtureと合格条件のままHaikuへ変更し、Provider差だけを確認する。
+これはLunaを使う非同期Relation分類とは別の運用である。
 初回の作業分解とTool選択には`AGENT_FRAMEWORK_RESEARCH_MODEL`、ToolResult取得後の意味評価・
 状態統合・追加調査または終了の判断には`AGENT_FRAMEWORK_INTEGRATION_MODEL`を使う。
 旧`AGENT_FRAMEWORK_FINALIZE_MODEL`も互換設定として読めるが、新規設定ではintegration名を使う。
@@ -1138,6 +1139,13 @@ LLMへの入力tokenは増えない。通常は`off`を維持し、再現対象�
 `payloadHash`、輸送検証エラーを持ち、`solver_output`以降は正規化済み`SolverDecision`と
 `solverDecisionHash`を持つ。同じhashにより、生応答、正規化後、契約違反、CaseState適用の境界を区別する。
 Prompt assetの本文を変更した場合はProfile versionも更新し、実行時の来歴と設定上の契約versionを一致させる。
+
+Solverへ渡る項目の基本的な意味はPydanticの`Field.description`から`contract_glossary`へ生成する。
+Toolの正規名、用途、入力Schema、戻り値は実行時の`available_tools`へ投影する。
+`snapshot`では、Providerへ実際に渡したPrompt内の`contract_glossary`と
+`solver_context.available_tools`、構造化出力schemaが同じ正規項目名を使っていることを確認する。
+OpenAI経路のTool引数は`arguments` objectであり、`arguments_json`の二重JSONを新規出力しない。
+Anthropic adapterに輸送上のsidecarが必要でも、正規の契約名と意味は変更しない。
 
 特定の`solver_input`を外部LLMなしで再現するfixtureへ固定する場合は、診断JSONLの`sequence`を指定する。
 `sequence`は診断ファイル内の対象recordを`jq`等で確認してから選ぶ。次は公開買付け総合問題の、初回

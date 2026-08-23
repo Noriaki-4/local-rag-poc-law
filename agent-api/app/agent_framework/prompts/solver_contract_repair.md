@@ -7,13 +7,13 @@ ${focused_instructions}
 violation: ${violation}
 
 <!-- prompt-section:unknown_evidence -->
-Evidence IDを生成せず、grounding_evidence_idsの完全一致だけをhypothesis_evidence_bindingsで選びます。未取得本文ならHypothesisをunresolvedにします。
+Evidence IDを生成せず、正規契約のHypothesis.evidence_idsにはgrounding_evidence_idsの完全一致だけを選びます。Provider輸送上の対応欄はschemaの指示に従います。未取得本文ならHypothesisをunresolvedにします。
 
 <!-- prompt-section:review_finding_resolution -->
 reviewer_findingsの全finding_idをreview_finding_resolutionsへ1回ずつ返します。指摘を反映するならaddressed、提示済み本文に基づき採用しない場合だけdisputedとし、理由と使用した既知Evidence IDを示します。
 
 <!-- prompt-section:hypothesis_requires_evidence -->
-grounding_evidence_idsが空ならHypothesisをunresolved、evidence_ids=[]へ戻し、検索候補から必要なArticleをarticle_fetchで取得します。検索候補だけで完了しません。
+grounding_evidence_idsが空ならHypothesisをunresolved、evidence_ids=[]へ戻し、検索候補から必要なArticleをfetch_articlesで取得します。検索候補だけで完了しません。
 
 <!-- prompt-section:navigation_only_evidence -->
 search_navigationは根拠にせず、必要なArticle本文を取得するか未解決のままにします。
@@ -61,4 +61,4 @@ WorkItem・Hypothesis・Requestは既知IDへ完全一致させます。必要�
 表示されたGraph batch・ledgerの既知IDだけを使い、候補の必要性はSolverが判断します。
 
 <!-- prompt-section:citation_coverage -->
-回答で使うHypothesis Evidenceをcitation_idsへ含め、使わないEvidenceはHypothesisから外します。resolved DependencyDecisionのbasisに選んだ各Articleから少なくとも1つのEvidenceを引用します。直前Decisionは未適用なので、finalizeを維持するならWorkItem・Hypothesisの完了更新もupdate_jsonへ再掲します。
+回答で使うHypothesis Evidenceをcitation_idsへ含め、使わないEvidenceはHypothesisから外します。resolved DependencyDecisionのbasisに選んだ各Articleから少なくとも1つのEvidenceを引用します。直前Decisionは未適用なので、finalizeを維持するならWorkItem・Hypothesisの完了更新も正規契約のupdateへ再掲します。

@@ -14,12 +14,15 @@ from app import main
 from app.adapters.models import StructuredJSONModelAdapter
 from app.adapters.models.structured_json import (
     _assign_tool_request_ids,
+    _case_update_transport_schema,
     _focused_contract_repair_instruction,
     _normalize_absent_context_branches,
     _normalize_solver_payload,
     _search_reselection_prompt,
+    _search_reselection_transport_schema,
     _search_review_prompt,
     _search_review_context_payload,
+    _search_review_transport_schema,
     _solver_anthropic_transport_schema,
     _solver_compact_transport_schema,
     _solver_prompt,
@@ -28,6 +31,15 @@ from app.adapters.models.structured_json import (
     _validate_search_assessment_payload,
 )
 from app.adapters.persistence.simple_in_memory import InMemoryCaseStore
+from app.adapters.tools.legal_search import (
+    LegalFetchArticlesTool,
+    LegalGraphNeighborsTool,
+    LegalSearchTool,
+)
+from app.agent_framework.contract_rendering import (
+    contract_field_description,
+    render_solver_contract_glossary,
+)
 from app.agent_framework.context import (
     ContextCapacityExceeded,
     GraphCandidateArticle,
@@ -40,7 +52,7 @@ from app.agent_framework.context import (
     _graph_review_projection,
     build_solver_context,
 )
-from app.agent_framework.contracts import SolverDecision
+from app.agent_framework.contracts import SolverDecision, WorkItemImpactDecision
 from app.agent_framework.diagnostics import AgentDiagnostics
 from app.agent_framework.loop import AgentLoop, _dependency_audit_work_item_ids
 from app.agent_framework.ports.model import ModelProtocolError, ReviewerView
@@ -53,10 +65,12 @@ from app.agent_framework.profiles import (
 from app.agent_framework.state import (
     CaseState,
     DeferredFrontierResolution,
+    DependencyDecision,
     Evidence,
     FinalAnswer,
     Hypothesis,
     ReviewFinding,
+    ReviewFindingResolution,
     ReviewResult,
     SearchCandidateReview,
     SearchCandidateSelection,
@@ -74,6 +88,126 @@ from app.domains.legal import profiles as legal_profiles
 from app.framework_agent import LegalFrameworkAgentService
 from app.llm import StructuredJSONResult
 from app.models import AnswerRequest, AnswerResponse
+
+
+def test_solver_contract_glossary_is_generated_from_field_descriptions() -> None:
+    glossary = render_solver_contract_glossary()
+
+    assert "`SolverContext.fetchable_article_ids`" in glossary
+    assert "fetch_articlesに指定できるArticle ID" in glossary
+    assert "`ToolRequest.arguments`" in glossary
+    assert "正規Tool名、用途、入力Schema、戻り値説明" in glossary
+    assert "`Hypothesis.gaps`" in glossary
+    assert "`WorkItemImpactDecision.action`" in glossary
+    assert "`GraphFrontierDecision.action`" in glossary
+
+
+@pytest.mark.parametrize("model_type", [SolverContext, SolverDecision])
+def test_every_llm_visible_contract_field_has_a_description(model_type) -> None:
+    schema = model_type.model_json_schema()
+    missing: set[str] = set()
+
+    def collect(value: object, path: str) -> None:
+        if not isinstance(value, dict):
+            return
+        properties = value.get("properties", {})
+        if isinstance(properties, dict):
+            for field_name, field_schema in properties.items():
+                field_path = f"{path}.{field_name}"
+                if not isinstance(field_schema, dict) or not field_schema.get(
+                    "description"
+                ):
+                    missing.add(field_path)
+        definitions = value.get("$defs", {})
+        if isinstance(definitions, dict):
+            for definition_name, definition in definitions.items():
+                collect(definition, definition_name)
+
+    collect(schema, model_type.__name__)
+    assert missing <= {"SolverContext.used_tool_request_ids"}
+
+
+def test_provider_update_schema_uses_the_canonical_field_descriptions() -> None:
+    properties = _case_update_transport_schema()["properties"]
+    work_item = properties["add_work_items"]["items"]["properties"]
+    hypothesis = properties["add_hypotheses"]["items"]["properties"]
+    impact = properties["impact_decisions"]["items"]["properties"]
+
+    assert work_item["basis_hypothesis_ids"]["description"] == (
+        contract_field_description(WorkItem, "basis_hypothesis_ids")
+    )
+    assert hypothesis["work_item_id"]["description"] == (
+        contract_field_description(Hypothesis, "work_item_id")
+    )
+    assert impact["action"]["description"] == contract_field_description(
+        WorkItemImpactDecision,
+        "action",
+    )
+
+
+@pytest.mark.parametrize(
+    "schema_factory",
+    [
+        _solver_compact_transport_schema,
+        _solver_anthropic_transport_schema,
+        _search_review_transport_schema,
+        _search_reselection_transport_schema,
+    ],
+)
+def test_provider_contract_schema_explains_every_visible_property(
+    schema_factory,
+) -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_overview_cycle2_repeated_search_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    context = SolverContext.model_validate(fixture["solverContext"])
+    missing: set[str] = set()
+
+    def collect(value: object, path: str) -> None:
+        if not isinstance(value, dict):
+            return
+        properties = value.get("properties", {})
+        if isinstance(properties, dict):
+            for field_name, field_schema in properties.items():
+                field_path = f"{path}.{field_name}" if path else field_name
+                if not isinstance(field_schema, dict) or not field_schema.get(
+                    "description"
+                ):
+                    missing.add(field_path)
+                collect(field_schema, field_path)
+        collect(value.get("items"), f"{path}[]")
+        for union_name in ("anyOf", "oneOf", "allOf"):
+            union = value.get(union_name, ())
+            if isinstance(union, list):
+                for index, branch in enumerate(union):
+                    collect(branch, f"{path}.{union_name}[{index}]")
+
+    collect(schema_factory(context), "")
+    assert missing == set()
+
+
+def test_legal_tool_contracts_describe_input_and_result_semantics() -> None:
+    definitions = (
+        LegalSearchTool.definition,
+        LegalFetchArticlesTool.definition,
+        LegalGraphNeighborsTool.definition,
+    )
+
+    assert [item.name for item in definitions] == [
+        "legal_search",
+        "fetch_articles",
+        "legal_graph_neighbors",
+    ]
+    for definition in definitions:
+        assert definition.description
+        assert definition.result_description
+        assert definition.input_schema["additionalProperties"] is False
+        for property_schema in definition.input_schema["properties"].values():
+            assert property_schema["description"]
 
 
 class FakeStructuredLLM:
@@ -338,10 +472,14 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     ]
     assert final_dependency_schema["minItems"] == 1
     assert final_dependency_schema["maxItems"] == 1
-    assert final_dependency_schema["items"]["properties"]["dependency_kind"] == {
-        "type": "string",
-        "enum": ["lower_norm"],
-    }
+    dependency_kind_schema = final_dependency_schema["items"]["properties"][
+        "dependency_kind"
+    ]
+    assert dependency_kind_schema["type"] == "string"
+    assert dependency_kind_schema["enum"] == ["lower_norm"]
+    assert dependency_kind_schema["description"] == (
+        contract_field_description(DependencyDecision, "dependency_kind")
+    )
     assert framework_trace["dependencyDecisions"][0]["status"] == "not_required"
     assert len(framework_trace["appliedDecisionSequences"]) == 3
     diagnostic_records = [
@@ -355,7 +493,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "134"
+    assert diagnostic_records[0]["profileVersion"] == "137"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -363,7 +501,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "134"
+    assert transport_input["profileVersion"] == "137"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"][0]["asset"] == (
         "agent_framework/prompts/solver_contract_repair.md"
@@ -540,10 +678,13 @@ def test_solver_transport_requires_one_resolution_per_reviewer_finding() -> None
 
     assert resolutions["minItems"] == 1
     assert resolutions["maxItems"] == 1
-    assert resolutions["items"]["properties"]["finding_id"] == {
-        "type": "string",
-        "enum": ["finding-1"],
-    }
+    finding_id_schema = resolutions["items"]["properties"]["finding_id"]
+    assert finding_id_schema["type"] == "string"
+    assert finding_id_schema["enum"] == ["finding-1"]
+    assert finding_id_schema["description"] == contract_field_description(
+        ReviewFindingResolution,
+        "finding_id",
+    )
     assert "review_finding_resolutions" in schema["required"]
 
 
@@ -715,7 +856,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "134"
+    assert profile.version == "137"
     mode_prompts = {
         "research": profile.solver_research.system_prompt,
         "integration": profile.solver_integration.system_prompt,
@@ -747,6 +888,7 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     research_prompt = mode_prompts["research"]
     assert "## Tool選択ルール" in research_prompt
     assert "## Researchモード" in research_prompt
+    assert "案件開始時に、元の質問の回答範囲" in research_prompt
     assert "## 完了ルール" in research_prompt
     assert "1つの完了判定で閉じられる1つの確認事項" in research_prompt
     assert "複数の回答対象を含む元の質問全体" in research_prompt
@@ -768,6 +910,9 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     integration_prompt = mode_prompts["integration"]
     assert "## Tool選択ルール" in integration_prompt
     assert "## Integrationモード" in integration_prompt
+    assert "新しいTool結果と取得本文を現在の調査状態へ反映" in (
+        integration_prompt
+    )
     assert "### 次の行動を決める手順" in integration_prompt
     assert "### Tool選択ルール" in integration_prompt
     assert "`request_id`を`action_request_id`へそのままコピー" in integration_prompt
@@ -779,9 +924,7 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     assert "新しい`legal_search`を考える前に全候補" in integration_prompt
     assert "1つの`fetch_articles`で本文取得" in integration_prompt
     assert "次に取得するArticle IDではありません" in integration_prompt
-    assert "`fetch_articles.arguments.article_ids`に指定できる唯一のID" in (
-        integration_prompt
-    )
+    assert "項目の意味は`contract_glossary`を正本" in integration_prompt
     assert "`basis_evidence_ids`、`metadata.articleId`から作りません" in (
         integration_prompt
     )
@@ -793,11 +936,13 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
 
     finalization_prompt = mode_prompts["finalization"]
     assert "## Finalizationモード" in finalization_prompt
+    assert "追加調査できない実行上限時" in finalization_prompt
     assert "finalize_only=true" in finalization_prompt
     assert "## Tool選択ルール" not in finalization_prompt
 
     reviewer_prompt = mode_prompts["reviewer_revision"]
     assert "## Reviewer Revisionモード" in reviewer_prompt
+    assert "Reviewerの指摘を受け取ったSolver" in reviewer_prompt
     assert "review_finding_resolutions" in reviewer_prompt
     assert "## Tool選択ルール" in reviewer_prompt
 
@@ -872,6 +1017,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
         "wi-exception": "h-exception",
         "wi-procedure": "h-procedure",
     }
+    assert all(item.basis_hypothesis_ids == () for item in updated.work_items)
     assert {item.work_item_id for item in updated.tool_requests} == {
         item.work_item_id for item in updated.work_items
     }
@@ -1010,6 +1156,7 @@ def test_search_review_duplicate_fixture_gets_ordered_id_checklist() -> None:
     checklist_end = prompt.index("</search_candidate_checklist>")
     checklist = json.loads(prompt[checklist_start:checklist_end])
     observed_payload = {
+        "search_request_ids": fixture["requiredSearchRequestIds"],
         "assessments": [
             {
                 "article_id": article_id,
@@ -1017,7 +1164,8 @@ def test_search_review_duplicate_fixture_gets_ordered_id_checklist() -> None:
                 "summary": "要約",
             }
             for article_id in fixture["observedAssessmentArticleIds"]
-        ]
+        ],
+        "reason": "全候補を確認した",
     }
 
     assert checklist == {
@@ -1034,6 +1182,7 @@ def test_search_review_duplicate_fixture_gets_ordered_id_checklist() -> None:
         _validate_search_assessment_payload(observed_payload, context)
     _validate_search_assessment_payload(
         {
+            "search_request_ids": fixture["requiredSearchRequestIds"],
             "assessments": [
                 {
                     "article_id": article_id,
@@ -1041,7 +1190,8 @@ def test_search_review_duplicate_fixture_gets_ordered_id_checklist() -> None:
                     "summary": "要約",
                 }
                 for article_id in candidate_ids
-            ]
+            ],
+            "reason": "全候補を確認した",
         },
         context,
     )
@@ -1281,9 +1431,7 @@ def test_solver_completion_check_follows_the_complete_context() -> None:
         mode="json"
     )
     assert prompt.endswith(profile.completion_check_prompt)
-    assert "unresolved Hypothesisを今回確認済みに更新しない限り" in prompt[
-        check_start:
-    ]
+    assert "resolutionを支える判定済みHypothesis ID" in prompt[check_start:]
 
 
 def test_candidate_selection_profiles_have_post_context_checks() -> None:
@@ -1711,7 +1859,7 @@ def test_cycle_boundary_schema_requires_unreviewed_graph_resolution() -> None:
     assert "anyOf" not in resolution_schema
 
 
-def test_compact_transport_structures_update_and_only_encodes_tool_arguments() -> None:
+def test_compact_transport_structures_update_and_tool_arguments() -> None:
     context = build_solver_context(
         CaseState(case_id="case-1", question="質問"),
         AgentLimits(),
@@ -1727,8 +1875,8 @@ def test_compact_transport_structures_update_and_only_encodes_tool_arguments() -
     assert "update_json" not in properties
     assert "tool_requests_json" not in properties
     request_properties = properties["tool_requests"]["items"]["properties"]
-    assert "arguments_json" in request_properties
-    assert "arguments" not in request_properties
+    assert "arguments" in request_properties
+    assert "arguments_json" not in request_properties
     assert properties["update"]["properties"]["add_work_items"]["minItems"] == 1
     assert properties["update"]["properties"]["add_hypotheses"]["minItems"] == 1
 
@@ -1911,6 +2059,153 @@ def test_diagnostic_integration_fixture_rebuilds_the_same_solver_context() -> No
         role = str(evidence.metadata.get("evidenceRole", "unknown"))
         role_counts[role] = role_counts.get(role, 0) + 1
     assert role_counts == expectations["evidenceRoleCounts"]
+
+
+def test_real_model_initial_research_decomposition_fixture_is_reproducible() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_overview_initial_research_decomposition_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    state = CaseState.model_validate(fixture["caseState"])
+    saved = SolverContext.model_validate(fixture["solverContext"])
+    observed = SolverDecision.model_validate(
+        fixture["observedResearchOutput"]["decision"]
+    )
+    expected = SolverDecision.model_validate(fixture["expectedResearchDecision"])
+    failure = fixture["observedFailure"]
+    limits = AgentLimits(
+        max_research_cycles=(
+            saved.research_cycle_count + saved.remaining_research_cycles
+        ),
+        max_tool_requests_per_step=saved.max_tool_requests_per_step,
+        max_fetched_resources_per_cycle=saved.max_fetched_resources_per_cycle,
+        max_selected_frontier_per_step=saved.max_selected_frontier_per_step,
+        max_retained_evidence=saved.max_retained_evidence,
+        max_material_evidence_chars=saved.max_material_evidence_chars,
+        max_solver_input_chars=saved.max_solver_input_chars,
+        min_next_cycle_budget_sec=saved.min_next_cycle_budget_sec,
+        max_wall_time_sec=240,
+    )
+
+    rebuilt = build_solver_context(
+        state,
+        limits,
+        remaining_wall_time_sec=saved.remaining_wall_time_sec,
+        finalize_only=saved.finalize_only,
+        required_dependency_kind=saved.required_dependency_kind,
+        required_dependency_work_item_ids=(
+            saved.required_dependency_work_item_ids
+        ),
+        available_tools=saved.available_tools,
+    )
+    profile = legal_profiles.legal_agent_profile().solver_research
+    assert profile.completion_check_prompt is not None
+    prompt = _solver_prompt(
+        saved,
+        profile.system_prompt,
+        completion_check_prompt=profile.completion_check_prompt,
+        compact_transport=True,
+    )
+
+    assert rebuilt.model_dump(mode="json") == saved.model_dump(mode="json")
+    assert fixture["source"]["purpose"] == "research"
+    assert fixture["source"]["model"] == "gpt-4o-mini"
+    assert fixture["source"]["profileVersion"] == "135"
+    assert len(observed.update.add_work_items) == 3
+    assert "例外と必要手続き" in observed.update.add_work_items[2].question
+    assert all(
+        "特定の" in item.statement
+        for item in observed.update.add_hypotheses
+    )
+    assert len(expected.update.add_work_items) == 4
+    expected_hypotheses = {
+        item.hypothesis_id: item for item in expected.update.add_hypotheses
+    }
+    for work_item in expected.update.add_work_items:
+        assert work_item.basis_hypothesis_ids == ()
+        assert any(
+            hypothesis.work_item_id == work_item.work_item_id
+            for hypothesis in expected_hypotheses.values()
+        )
+    for request in expected.tool_requests:
+        assert len(request.hypothesis_ids) == 1
+        hypothesis = expected_hypotheses[request.hypothesis_ids[0]]
+        assert request.work_item_id == hypothesis.work_item_id
+    assert failure["stage"] == "initial_research"
+    assert {
+        "law-402M50000040038-article-2_5",
+        "law-402M50000040038-article-10",
+    } == set(failure["downstreamObservation"]["reselectionDroppedArticleIds"])
+    assert "1つの確認事項につき1つのWorkItem" in prompt
+    assert "何らかの規定がある" in prompt
+    assert "条文に現れやすい法令表現へ言い換えます" in prompt
+    assert "WorkItem wi-condition" in prompt
+    assert "basis_hypothesis_ids: []" in prompt
+    assert "Hypothesis.work_item_id" in prompt
+    assert "ToolRequest tr-condition" in prompt
+
+
+def test_real_model_cycle2_repeated_search_fixture_is_reproducible() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_overview_cycle2_repeated_search_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    state = CaseState.model_validate(fixture["caseState"])
+    saved = SolverContext.model_validate(fixture["solverContext"])
+    failure = fixture["observedFailure"]
+    limits = AgentLimits(
+        max_research_cycles=(
+            saved.research_cycle_count + saved.remaining_research_cycles
+        ),
+        max_tool_requests_per_step=saved.max_tool_requests_per_step,
+        max_fetched_resources_per_cycle=saved.max_fetched_resources_per_cycle,
+        max_selected_frontier_per_step=saved.max_selected_frontier_per_step,
+        max_retained_evidence=saved.max_retained_evidence,
+        max_material_evidence_chars=saved.max_material_evidence_chars,
+        max_solver_input_chars=saved.max_solver_input_chars,
+        min_next_cycle_budget_sec=saved.min_next_cycle_budget_sec,
+        max_wall_time_sec=240,
+    )
+
+    rebuilt = build_solver_context(
+        state,
+        limits,
+        remaining_wall_time_sec=saved.remaining_wall_time_sec,
+        finalize_only=saved.finalize_only,
+        required_dependency_kind=saved.required_dependency_kind,
+        required_dependency_work_item_ids=(
+            saved.required_dependency_work_item_ids
+        ),
+        available_tools=saved.available_tools,
+    )
+    profile = legal_profiles.legal_agent_profile().solver_integration
+    assert profile is not None
+    assert profile.completion_check_prompt is not None
+    prompt = _solver_prompt(
+        saved,
+        profile.system_prompt,
+        completion_check_prompt=profile.completion_check_prompt,
+        compact_transport=True,
+    )
+
+    assert rebuilt.model_dump(mode="json") == saved.model_dump(mode="json")
+    assert fixture["source"]["model"] == "gpt-4o-mini"
+    assert failure["violation"] == (
+        "successful legal_search scope was already completed"
+    )
+    assert failure["contractAttemptCount"] == 3
+    assert {
+        "law-402M50000040038-article-2_5",
+        "law-402M50000040038-article-10",
+    } <= set(saved.fetchable_article_ids)
+    assert "新しい`legal_search`を考える前に全候補" in prompt
+    assert "成功済みの同じ`legal_search`を繰り返さず" in prompt
 
 
 def test_solver_context_keeps_used_tool_ids_across_cycle_boundaries() -> None:
@@ -2275,7 +2570,7 @@ def test_real_model_cycle_close_fixture_reproduces_unresolved_basis_failure(
 
     assert cycle_close_prompt is not None
     assert cycle_close_prompt.completion_check_prompt is not None
-    assert "unresolved HypothesisをbasisにしたWorkItemを`resolved`にしません" in (
+    assert "resolved WorkItemの`basis_hypothesis_ids`へunresolved Hypothesis" in (
         cycle_close_prompt.system_prompt
     )
     rendered_prompt = _solver_prompt(
@@ -2438,10 +2733,10 @@ def test_openai_solver_uses_structured_tool_request_transport() -> None:
                             "request_id": "r1",
                             "work_item_id": "w1",
                             "tool_name": "legal_search",
-                            "arguments_json": (
-                                '{"query":"公開買付け 手続 条文",'
-                                '"doc_types":["law"]}'
-                            ),
+                            "arguments": {
+                                "query": "公開買付け 手続 条文",
+                                "doc_types": ["law"],
+                            },
                             "purpose": "根拠Articleの候補を検索する",
                             "hypothesis_ids": ["h1"],
                         }
@@ -2483,7 +2778,7 @@ def test_openai_solver_uses_structured_tool_request_transport() -> None:
         "request_id",
         "work_item_id",
         "tool_name",
-        "arguments_json",
+        "arguments",
         "purpose",
         "hypothesis_ids",
     }
@@ -2523,7 +2818,7 @@ def test_anthropic_transport_uses_one_fixed_slot_article_fetch() -> None:
 
     schema = _solver_anthropic_transport_schema(context)
     properties = schema["properties"]
-    fetch_object = properties["article_fetch"]["anyOf"][0]
+    fetch_object = properties["fetch_articles"]["anyOf"][0]
 
     assert "update_json" in schema["required"]
     assert "update_json" in properties
@@ -2532,7 +2827,7 @@ def test_anthropic_transport_uses_one_fixed_slot_article_fetch() -> None:
         "properties"
     ]["evidence_ids"]
     assert binding_evidence_ids["items"]["enum"] == ["shown-evidence-1"]
-    assert "article_fetch" in schema["required"]
+    assert "fetch_articles" in schema["required"]
     assert set(fetch_object["properties"]) == {
         "request_id",
         "work_item_id",
@@ -2819,7 +3114,7 @@ def test_transport_repair_explains_continue_requires_an_actual_action() -> None:
     )
 
     assert "next=continueを維持するなら" in prompt
-    assert "article_fetchを少なくとも1件" in prompt
+    assert "fetch_articlesを少なくとも1件" in prompt
     assert "next=finalizeとanswer" in prompt
 
 
@@ -2851,7 +3146,7 @@ def test_anthropic_prompt_limits_bindings_to_current_hypothesis_updates() -> Non
 
     assert "今回のupdate_jsonのadd_hypotheses" in prompt
     assert "変更しない既存Hypothesisは返しません" in prompt
-    assert "article_fetchはfetch_articles ToolRequestそのもの" in prompt
+    assert "専用fetch_articles欄は正規のfetch_articles ToolRequestの輸送表現" in prompt
     assert "tool_name=fetch_articlesを決して再掲しません" in prompt
     assert "dependency_article_bindingsへ判断に使った取得済みArticle ID" in prompt
     assert "160文字以内の短いASCII識別子" in prompt
@@ -2951,7 +3246,11 @@ def test_open_finalize_repair_schema_forces_the_next_cycle_shape() -> None:
     assert properties["next"]["enum"] == ["continue"]
     assert properties["start_next_cycle"]["enum"] == [True]
     assert properties["tool_requests_json"]["enum"] == ["[]"]
-    assert properties["answer"] == {"type": "null"}
+    assert properties["answer"]["type"] == "null"
+    assert properties["answer"]["description"] == contract_field_description(
+        SolverDecision,
+        "answer",
+    )
     assert properties["unreviewed_graph_resolution"]["properties"]["action"][
         "enum"
     ] == ["review_next_cycle"]
@@ -2985,7 +3284,11 @@ def test_open_finalize_repair_schema_forces_continue_within_cycle() -> None:
     assert properties["next"]["enum"] == ["continue"]
     assert properties["start_next_cycle"]["enum"] == [False]
     assert "enum" not in properties["tool_requests_json"]
-    assert properties["answer"] == {"type": "null"}
+    assert properties["answer"]["type"] == "null"
+    assert properties["answer"]["description"] == contract_field_description(
+        SolverDecision,
+        "answer",
+    )
     assert "enum" not in properties["update_json"]
 
 
@@ -3054,13 +3357,16 @@ def test_cycle_boundary_transport_schemas_expose_no_new_tool_slots() -> None:
     assert base["properties"]["tool_requests_json"]["enum"] == ["[]"]
     assert compact["properties"]["tool_requests"]["maxItems"] == 0
     assert anthropic["properties"]["tool_requests"]["properties"] == {}
-    assert anthropic["properties"]["article_fetch"] == {"type": "null"}
-    assert anthropic["properties"]["hypothesis_evidence_bindings"] == {
-        "type": "null"
-    }
-    assert anthropic["properties"]["dependency_article_bindings"] == {
-        "type": "null"
-    }
+    assert anthropic["properties"]["fetch_articles"]["type"] == "null"
+    assert "description" in anthropic["properties"]["fetch_articles"]
+    assert anthropic["properties"]["hypothesis_evidence_bindings"][
+        "type"
+    ] == "null"
+    assert "description" in anthropic["properties"][
+        "hypothesis_evidence_bindings"
+    ]
+    assert anthropic["properties"]["dependency_article_bindings"]["type"] == "null"
+    assert "description" in anthropic["properties"]["dependency_article_bindings"]
     assert anthropic["properties"]["retain_evidence_ids"]["items"] == {
         "type": "null"
     }
@@ -3558,7 +3864,7 @@ def test_minimal_solver_contract_defines_state_field_invariants() -> None:
     assert "resolved/droppedは終了状態なので空でないresolution" in prompt
     assert "judgment=unresolvedは未確認" in prompt
     assert "supported/contradictedは本文根拠で確認済み" in prompt
-    assert "update_jsonに許されるキーはadd_work_items" in prompt
+    assert "正規契約のupdateに許されるキーはadd_work_items" in prompt
     assert "work_tree等の現在状態を返さない" in prompt
     assert "add_work_items要素: work_item_id" in prompt
     assert "state、resolution" in prompt

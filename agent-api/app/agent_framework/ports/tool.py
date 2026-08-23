@@ -4,15 +4,8 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from pydantic import Field
-
 from ..state import Evidence, FrameworkModel, ToolRequest, ToolResult
-
-
-class ToolDefinition(FrameworkModel):
-    name: str = Field(min_length=1, max_length=160)
-    read_only: bool = True
-    parallel_safe: bool = True
+from ..tool_contracts import ToolDefinition
 
 
 class ToolExecution(FrameworkModel):
@@ -42,6 +35,10 @@ class ToolRegistry:
     @property
     def names(self) -> frozenset[str]:
         return frozenset(self._tools)
+
+    @property
+    def definitions(self) -> tuple[ToolDefinition, ...]:
+        return tuple(tool.definition for tool in self._tools.values())
 
     def get(self, name: str) -> ToolPort:
         try:

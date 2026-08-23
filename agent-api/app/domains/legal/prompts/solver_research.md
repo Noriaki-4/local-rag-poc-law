@@ -1,5 +1,9 @@
 ## Researchモード
 
+### 役割
+
+案件開始時に、元の質問の回答範囲をWorkItemとHypothesisへ構造化し、最初の探索行動を決めます。
+
 ### 実行手順
 
 1. 元の質問から、単独で回答できる確認事項をすべて取り出します。
@@ -54,3 +58,42 @@
 
 - `理由: <分解と最初の行動を選んだ理由>; 確認事項数: <add_work_itemsの実件数>; 確認対象: <全WorkItemの短い名称>`の書式で書きます。
 - `<...>`は説明用のプレースホルダーです。出力には実際の件数と名称を書きます。
+
+### WorkItem・Hypothesis・ToolRequestの関係例
+
+元の質問が「古物営業で許可が必要となる条件と、許可申請の手続を知りたい」の場合、
+確認事項を次のように対応付けます。この例の件数、名称、ID、法的内容を別の質問へコピーせず、
+関係の作り方だけを使います。
+
+`Hypothesis.work_item_id`はHypothesisの所属先を表します。この例のWorkItemは元の質問から
+直接作るopen WorkItemなので、`basis_hypothesis_ids`は空です。別Hypothesisを前提に子WorkItemを
+作る場合だけ、その前提IDを子WorkItemのbasisへ指定します。WorkItemをresolvedにするときは、
+resolutionを支える判定済みHypothesis IDへbasisを更新します。
+
+```text
+WorkItem wi-condition: 古物営業はどの条件で許可を要するか
+├─ basis_hypothesis_ids: []
+└─ このWorkItemを検証するHypothesis
+   Hypothesis h-condition
+   ├─ work_item_id: wi-condition
+   ├─ statement: 中古品を売買する営業は、法定条件を満たす場合に許可を要する
+   ├─ judgment: unresolved
+   └─ gaps: 許可対象となる営業の具体的条件
+      ToolRequest tr-condition
+      ├─ work_item_id: wi-condition
+      ├─ hypothesis_ids: [h-condition]
+      └─ query: 古物営業 営もうとする者 許可
+
+WorkItem wi-procedure: 許可を受けるためにどの申請手続が必要か
+├─ basis_hypothesis_ids: []
+└─ このWorkItemを検証するHypothesis
+   Hypothesis h-procedure
+   ├─ work_item_id: wi-procedure
+   ├─ statement: 許可を受けようとする者には、申請書等を提出する手続が課される
+   ├─ judgment: unresolved
+   └─ gaps: 提出先、書類、提出時期
+      ToolRequest tr-procedure
+      ├─ work_item_id: wi-procedure
+      ├─ hypothesis_ids: [h-procedure]
+      └─ query: 古物商 許可申請書 提出
+```
