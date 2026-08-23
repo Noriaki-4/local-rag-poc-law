@@ -35,7 +35,7 @@ WorkItemだけをresolvedにしません。提示本文がbasis Hypothesisを直
 required_dependency_work_item_idsの各IDへ1件返し、各basis_evidence_idsへ判断に使ったgrounding Evidenceを1件以上指定します。needs_actionには未解決の委任を確認した本文Evidenceを使います。現Cycleを続ける場合は、対応するtool_requests[].request_idをaction_request_idへ同じ文字列のままコピーします。次Cycleへ引き継ぐ場合はnullにします。
 
 <!-- prompt-section:retained_evidence_limit -->
-retain_evidence_idsはmax_retained_evidence件以内で、後続Cycleにも本文が必要なEvidenceをLLMが選びます。
+retain_evidence_idsは同じIDを重複させずmax_retained_evidence件以内で、後続Cycleにも本文が必要なEvidenceをLLMが選びます。
 
 <!-- prompt-section:tool_request_limit -->
 上限内で今回必要な要求をLLMが選び、超過分をProgramへ選別させません。

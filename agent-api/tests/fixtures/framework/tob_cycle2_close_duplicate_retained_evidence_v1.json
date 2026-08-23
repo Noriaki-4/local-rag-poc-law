@@ -1,0 +1,3022 @@
+{
+  "fixtureId": "tob-cycle2-close-duplicate-retained-evidence-v1",
+  "questionId": "tob-overview",
+  "source": {
+    "diagnosticsMode": "snapshot",
+    "diagnosticCaseId": "legal-3a53ec1f06b9417faa59d5d35bae0441",
+    "sequence": 30,
+    "purpose": "cycle_close",
+    "model": "gpt-4o-mini",
+    "profileName": "legal-default",
+    "profileVersion": "138",
+    "outputSequence": 33,
+    "decisionHash": "298783f76422690a87bd91905788a1ffa48f1e7afb91ecb41a773827b89a9d33",
+    "violationSequence": 34
+  },
+  "expectations": {
+    "researchCycleCount": 2,
+    "remainingFetchCapacity": 0,
+    "workItemCount": 3,
+    "hypothesisCount": 1,
+    "materialEvidenceCount": 25,
+    "recentToolResultCount": 2,
+    "fetchableArticleCount": 9,
+    "fetchedResourceCount": 3,
+    "evidenceRoleCounts": {
+      "search_navigation": 13,
+      "retrieved_text": 12
+    }
+  },
+  "caseState": {
+    "case_id": "fixture-tob-cycle2-close-duplicate-retained-evidence-v1",
+    "question": "上場会社の株式を、市場を通さずに多数の株主から買い集めたいのですが、公開買付けの手続が必要になるのはどのような場合ですか。対象となる株券等の範囲、主な例外、必要な手続も含めて、根拠となる条文とともに説明してください。",
+    "run_status": "running",
+    "research_cycle_count": 2,
+    "work_items": [
+      {
+        "work_item_id": "wi-procedure",
+        "parent_work_item_id": null,
+        "question": "公開買付けの手続きが必要になる条件は何か",
+        "state": "open",
+        "resolution": null,
+        "basis_hypothesis_ids": [],
+        "replaces_work_item_id": null
+      },
+      {
+        "work_item_id": "wi-scope",
+        "parent_work_item_id": null,
+        "question": "公開買付けの対象となる株券等の範囲はどのようなものか",
+        "state": "open",
+        "resolution": null,
+        "basis_hypothesis_ids": [],
+        "replaces_work_item_id": null
+      },
+      {
+        "work_item_id": "wi-exception",
+        "parent_work_item_id": null,
+        "question": "公開買付けにおける主な例外は何か",
+        "state": "open",
+        "resolution": null,
+        "basis_hypothesis_ids": [],
+        "replaces_work_item_id": null
+      }
+    ],
+    "hypotheses": [
+      {
+        "hypothesis_id": "h-procedure",
+        "work_item_id": "wi-procedure",
+        "statement": "公開買付けを行う場合、一定の条件を満たす必要がある",
+        "judgment": "unresolved",
+        "evidence_ids": [],
+        "gaps": []
+      }
+    ],
+    "tool_requests": [
+      {
+        "request_id": "solver-tool-878247d181ab458eab33ffbe881673fb",
+        "work_item_id": "wi-procedure",
+        "tool_name": "legal_search",
+        "arguments": {
+          "query": "公開買付け 手続き 必要条件",
+          "doc_types": [
+            "law"
+          ],
+          "document_ids": []
+        },
+        "purpose": "公開買付けの手続きが必要になる条件を確認するための法令検索",
+        "hypothesis_ids": [
+          "h-procedure"
+        ]
+      },
+      {
+        "request_id": "search-review-fetch-cba9e783adb76e34a68e3634",
+        "work_item_id": "wi-procedure",
+        "tool_name": "fetch_articles",
+        "arguments": {
+          "article_ids": [
+            "law-340CO0000000321-article-12",
+            "law-340CO0000000321-article-7",
+            "law-402M50000040038-article-19"
+          ]
+        },
+        "purpose": "Solverが選んだ検索候補Article本文を取得する",
+        "hypothesis_ids": [
+          "h-procedure"
+        ]
+      },
+      {
+        "request_id": "solver-tool-9907c1b2a49e40b4857cf179cc71cc17",
+        "work_item_id": "wi-procedure",
+        "tool_name": "legal_search",
+        "arguments": {
+          "query": "公開買付けに関する手続きの政令で定める事項",
+          "doc_types": [
+            "law"
+          ],
+          "document_ids": []
+        },
+        "purpose": "公開買付けに関する手続きについて、政令で定める事項を確認するための法令を探す。",
+        "hypothesis_ids": [
+          "h-procedure"
+        ]
+      },
+      {
+        "request_id": "search-review-fetch-b6842e0d4e80926a00df81e9",
+        "work_item_id": "wi-procedure",
+        "tool_name": "fetch_articles",
+        "arguments": {
+          "article_ids": [
+            "law-402M50000040038-article-30",
+            "law-340CO0000000321-article-14_3_2",
+            "law-340CO0000000321-article-14"
+          ]
+        },
+        "purpose": "Solverが選んだ検索候補Article本文を取得する",
+        "hypothesis_ids": [
+          "h-procedure"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_6-paragraph-2:4be569d0b7b855e4",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_6-paragraph-2",
+        "content": "[一致箇所1] 第二十七条の六 （公開買付けに係る買付条件等の変更） 第2項\n２公開買付者は、前項各号に規定するもの以外の買付条件等の変更を行うことができる。この場合において、当該変更を行おうとする公開買付者は、公開買付期間中に、政令で定めるところにより、買付条件等の変更の内容（第二十七条の十第三項の規定により買付け等の期間が延長された場合における当該買付け等の期間の延長を除く。）その他内閣府令で定める事項を公告しなければならない。\n\n[一致箇所2] 第二十七条の六 （公開買付けに係る買付条件等の変更） 第1項\n公開買付者は、次に掲げる買付条件等の変更を行うことができない。買付け等の価格の引下げ（公開買付開始公告及び公開買付届出書において公開買付期間中に対象者（第二十七条の十第一項に規定する対象者をいう。）が株式の分割その他の政令で定める行為を行つたときは内閣府令で定める基準に従い買付け等の価格の引下げを行うことがある旨の条件を付した場合に行うものを除く。）買付予定の株券等の数の減少買付け等の期間の短縮その他政令で定める買付条件等の変更\n\n[一致箇所3] 第二十七条の六 （公開買付けに係る買付条件等の変更） 第3項\n３前項の規定による公告を公開買付期間の末日までに行うことが困難である場合には、公開買付者は、当該末日までに同項に規定する内容及び事項を内閣府令で定めるところにより公表し、その後直ちに同項の規定の例により公告を行わなければならない。",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_6",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_6-paragraph-2",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十七条の六 （公開買付けに係る買付条件等の変更） 第2項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": 3,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-12",
+        "source_ref": "opensearch:law-340CO0000000321-article-12",
+        "content": "（公開買付けによらないで買付け等ができる場合）\n第十二条\n法第二十七条の五第三号（法第二十七条の八第十項において準用する場合を含む。）に規定する政令で定める場合は、次に掲げる場合とする。第十条各号に掲げる者が公開買付者及びその特別関係者（法第二十七条の二第七項に規定する特別関係者をいい、法第二十七条の五第二号の規定による申出を金融庁長官に行つた者を除く。以下この節において同じ。）以外の者の委託を受けて買付け等をする場合第十条各号に掲げる者が金融商品取引所又は認可金融商品取引業協会の定める規則において有価証券の流通の円滑化を図るため認められている買付け等をする場合新株予約権を有する者が当該新株予約権を行使することにより買付け等をする場合第七条第一項第二号から第六号までに掲げる買付け等をする場合第十条各号に掲げる者が、その有する株券等の売買に係るオプションを行使し、又はその付与していた株券等の",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-12",
+          "sourceContentUnitId": "law-340CO0000000321-article-12",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第十二条 （公開買付けによらないで買付け等ができる場合）",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": true
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-7-paragraph-1-item-13",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-13",
+        "content": "法第二十七条の二第一項ただし書に規定する政令で定める株券等の買付け等は、次に掲げる株券等の買付け等（同項に規定する買付け等をいう。以下この節において同じ。）とする。ただし、第七号及び第八号に掲げる株券等の買付け等にあつては、同項第二号に規定する特定市場外買付け等を除く。\n第13号　公開買付けが行われる場合において当該公開買付けに係る株券等の発行者が発行する株券等について行う買付け等であつて、次に掲げる要件の全てに該当するもの当該公開買付けによる買付け等を行う者と同一の者が行うものであること。当該買付け等に係る買付け等の価格（法第二十七条の二第三項に規定する買付け等の価格をいう。以下ロ及び次条第三項において同じ。）が当該公開買付けに係る買付け等の価格を下回ること。当該買付け等に係る株券等の受渡しその他の決済が当該公開買付けに係る株券等の受渡しその他の決済と同時に行われること。当該買付け等に係",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "sourceContentUnitId": "law-340CO0000000321-article-7-paragraph-1-item-13",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第七条 （公開買付けの適用除外となる買付け等） 第1項第13号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": true
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-19-paragraph-2",
+        "source_ref": "opensearch:law-402M50000040038-article-19-paragraph-2",
+        "content": "２公開買付者が令第十三条第二項第二号ハに規定する承認を受けようとする場合には、次に掲げる事項を記載した承認申請書を関東財務局長に提出しなければならない。当該公開買付けの内容令第十三条第二項第二号ハに規定する事情当該公開買付けに関して当該承認を受けようとする期間当該公開買付けに関して当該承認を必要とする理由",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-19",
+          "sourceContentUnitId": "law-402M50000040038-article-19-paragraph-2",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第十九条 （買付条件等の変更の公告の掲載事項） 第2項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_3-paragraph-2",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_3-paragraph-2",
+        "content": "２前項の規定による公告（以下この節において「公開買付開始公告」という。）を行つた者（以下この節において「公開買付者」という。）は、内閣府令で定めるところにより、当該公開買付開始公告を行つた日に、次に掲げる事項を記載した書類及び内閣府令で定める添付書類（以下この節並びに第百九十七条第一項第三号及び第百九十七条の二第一項第五号において「公開買付届出書」という。）を内閣総理大臣に提出をしなければならない。ただし、当該提出をしなければならない日（以下この項において「提出日」という。）が日曜日その他内閣府令で定める日（以下この項において「日曜日等」という。）に該当するときは、日曜日等以外の日であつて、当該提出日後に最初に到来する日に提出するものとする。買付け等の価格、買付予定の株券等の数、買付け等の期間（前項後段の規定により公告において明示した内容を含む。）、買付け等に係る受渡しその他の決済及び公開",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_3",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_3-paragraph-2",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十七条の三 （公開買付開始公告及び公開買付届出書の提出） 第2項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": true
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-5-paragraph-5",
+        "source_ref": "opensearch:law-402M50000040038-article-5-paragraph-5",
+        "content": "５公開買付者（公開買付けによる株券等の買付け等を行おうとする者を含む。）が第三項第三号に規定する承認を受けようとする場合には、次に掲げる事項を記載した承認申請書を関東財務局長に提出しなければならない。当該公開買付けの内容当該公開買付けに関して当該承認を受けようとする株券等の種類及びその内容当該公開買付けに関して当該承認を必要とする理由",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-5",
+          "sourceContentUnitId": "law-402M50000040038-article-5-paragraph-5",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第五条 （買付け等の通知書の記載事項等） 第5項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-22-paragraph-2",
+        "source_ref": "opensearch:law-402M50000040038-article-22-paragraph-2",
+        "content": "２公開買付者が前項第三号に規定する承認を受けようとする場合には、次に掲げる事項を記載した承認申請書を関東財務局長に提出しなければならない。当該公開買付けの内容当該訂正届出書の内容当該公開買付けに関して当該承認を必要とする理由",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-22",
+          "sourceContentUnitId": "law-402M50000040038-article-22-paragraph-2",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十二条 （買付け等の期間の延長を要しない訂正届出書等） 第2項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-26-paragraph-5",
+        "source_ref": "opensearch:law-402M50000040038-article-26-paragraph-5",
+        "content": "５公開買付者が前項第七号に規定する承認を受けようとする場合には、次に掲げる事項を記載した承認申請書を関東財務局長に提出しなければならない。当該公開買付けの内容当該公開買付けの撤回等を行う日及びその理由",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-26",
+          "sourceContentUnitId": "law-402M50000040038-article-26-paragraph-5",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十六条 （撤回条件から除外される場合） 第5項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-12",
+        "source_ref": "opensearch:law-340CO0000000321-article-12",
+        "content": "（公開買付けによらないで買付け等ができる場合）\n第十二条\n法第二十七条の五第三号（法第二十七条の八第十項において準用する場合を含む。）に規定する政令で定める場合は、次に掲げる場合とする。第十条各号に掲げる者が公開買付者及びその特別関係者（法第二十七条の二第七項に規定する特別関係者をいい、法第二十七条の五第二号の規定による申出を金融庁長官に行つた者を除く。以下この節において同じ。）以外の者の委託を受けて買付け等をする場合第十条各号に掲げる者が金融商品取引所又は認可金融商品取引業協会の定める規則において有価証券の流通の円滑化を図るため認められている買付け等をする場合新株予約権を有する者が当該新株予約権を行使することにより買付け等をする場合第七条第一項第二号から第六号までに掲げる買付け等をする場合第十条各号に掲げる者が、その有する株券等の売買に係るオプションを行使し、又はその付与していた株券等の売買に係るオプションが行使されることにより買付け等をする場合第七条第一項第十三号に掲げる買付け等をする場合第七条第一項第十六号に掲げる買付け等をする場合その株券等が上場されている外国の金融商品取引所が所在する外国において、当該外国の法令の規定に基づき海外公開買付け（公開買付けに類するものであつて外国の法令に基づいて不特定かつ多数の者に対して行われる株券等の買付け等の申込み又は売付け等の申込みの勧誘をいう。第十四条の三の七第二号において同じ。）により買付け等をする場合会社法第百十六条第一項、第百八十二条の四第一項、第百九十二条第一項、第四百六十九条第一項、第七百八十五条第一項、第七百九十七条第一項、第八百六条第一項若しくは第八百十六条の六第一項の規定による株式の買取りの請求又は投資信託及び投資法人に関する法律第百四十一条第一項、第百四十九条の三第一項、第百四十九条の八第一項若しくは第百四十九条の十三第一項の規定による投資口の買取りの請求に基づき株券等に係る買付け等をする場合",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-12",
+          "sourceContentUnitId": "law-340CO0000000321-article-12",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第十二条 （公開買付けによらないで買付け等ができる場合）",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1",
+        "content": "1法第二十七条の二第一項ただし書に規定する政令で定める株券等の買付け等は、次に掲げる株券等の買付け等（同項に規定する買付け等をいう。以下この節において同じ。）とする。ただし、第七号及び第八号に掲げる株券等の買付け等にあつては、同項第二号に規定する特定市場外買付け等を除く。",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "sourceContentUnitId": "law-340CO0000000321-article-7-paragraph-1",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第七条 （公開買付けの適用除外となる買付け等） 第1項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-1",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-1",
+        "content": "法第二十七条の二第一項ただし書に規定する政令で定める株券等の買付け等は、次に掲げる株券等の買付け等（同項に規定する買付け等をいう。以下この節において同じ。）とする。ただし、第七号及び第八号に掲げる株券等の買付け等にあつては、同項第二号に規定する特定市場外買付け等を除く。\n第1号　金融商品取引業者のうち第一種金融商品取引業（法第二十八条第一項に規定する第一種金融商品取引業をいう。以下同じ。）を行う者（第十一号、第十条第一号及び第十四条の三の五第一号において「第一種金融商品取引業者」という。）又は外国の法令に準拠して設立された法人で外国において第一種金融商品取引業と同種類の業務を行う者が行う株券等の買付け等であつて、株券等の売付け等（法第二十七条の二第六項に規定する売付け等をいう。次条第五項第三号、第十二条第八号及び第十四条の三の二第三項において同じ。）の取次ぎに準ずる行為として内閣府令で定める行為のために行うもの",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "sourceContentUnitId": "law-340CO0000000321-article-7-paragraph-1-item-1",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第七条 （公開買付けの適用除外となる買付け等） 第1項第1号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-2",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-2",
+        "content": "法第二十七条の二第一項ただし書に規定する政令で定める株券等の買付け等は、次に掲げる株券等の買付け等（同項に規定する買付け等をいう。以下この節において同じ。）とする。ただし、第七号及び第八号に掲げる株券等の買付け等にあつては、同項第二号に規定する特定市場外買付け等を除く。\n第2号　株式の割当てを受ける権利を有する者が当該権利を行使することにより行う株券等の買付け等",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "sourceContentUnitId": "law-340CO0000000321-article-7-paragraph-1-item-2",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第七条 （公開買付けの適用除外となる買付け等） 第1項第2号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-3",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-3",
+        "content": "法第二十七条の二第一項ただし書に規定する政令で定める株券等の買付け等は、次に掲げる株券等の買付け等（同項に規定する買付け等をいう。以下この節において同じ。）とする。ただし、第七号及び第八号に掲げる株券等の買付け等にあつては、同項第二号に規定する特定市場外買付け等を除く。\n第3号　投資信託及び投資法人に関する法律施行令第十二条第一号に掲げる投資信託の受益証券を有する者が同号イの交換により行う株券等の買付け等",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "sourceContentUnitId": "law-340CO0000000321-article-7-paragraph-1-item-3",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第七条 （公開買付けの適用除外となる買付け等） 第1項第3号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-4",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-4",
+        "content": "法第二十七条の二第一項ただし書に規定する政令で定める株券等の買付け等は、次に掲げる株券等の買付け等（同項に規定する買付け等をいう。以下この節において同じ。）とする。ただし、第七号及び第八号に掲げる株券等の買付け等にあつては、同項第二号に規定する特定市場外買付け等を除く。\n第4号　投資信託及び投資法人に関する法律施行令第十二条第二号に掲げる投資信託の受益証券を有する者が同号ハの交換により行う株券等の買付け等",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "sourceContentUnitId": "law-340CO0000000321-article-7-paragraph-1-item-4",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第七条 （公開買付けの適用除外となる買付け等） 第1項第4号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-5",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-5",
+        "content": "法第二十七条の二第一項ただし書に規定する政令で定める株券等の買付け等は、次に掲げる株券等の買付け等（同項に規定する買付け等をいう。以下この節において同じ。）とする。ただし、第七号及び第八号に掲げる株券等の買付け等にあつては、同項第二号に規定する特定市場外買付け等を除く。\n第5号　発行者がその発行する全部又は一部の株式の内容として株主が当該発行者に対して当該株式の取得を請求することができる旨の定めを設けている場合において、当該株式の取得と引換えに交付される株券等の買付け等",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "sourceContentUnitId": "law-340CO0000000321-article-7-paragraph-1-item-5",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第七条 （公開買付けの適用除外となる買付け等） 第1項第5号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-6",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-6",
+        "content": "法第二十七条の二第一項ただし書に規定する政令で定める株券等の買付け等は、次に掲げる株券等の買付け等（同項に規定する買付け等をいう。以下この節において同じ。）とする。ただし、第七号及び第八号に掲げる株券等の買付け等にあつては、同項第二号に規定する特定市場外買付け等を除く。\n第6号　発行者がその発行する全部若しくは一部の株式又は新株予約権の内容として当該発行者が一定の事由が生じたことを条件として当該株式又は新株予約権を取得することができる旨の定めを設けている場合において、当該株式又は新株予約権の取得と引換えに交付される株券等の買付け等",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "sourceContentUnitId": "law-340CO0000000321-article-7-paragraph-1-item-6",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第七条 （公開買付けの適用除外となる買付け等） 第1項第6号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-7",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-7",
+        "content": "法第二十七条の二第一項ただし書に規定する政令で定める株券等の買付け等は、次に掲げる株券等の買付け等（同項に規定する買付け等をいう。以下この節において同じ。）とする。ただし、第七号及び第八号に掲げる株券等の買付け等にあつては、同項第二号に規定する特定市場外買付け等を除く。\n第7号　法人等の行う株券等の買付け等であつて、当該法人等に対してその総株主等の議決権の数の百分の五十を超える数の議決権（社債、株式等の振替に関する法律第百四十七条第一項又は第百四十八条第一項（これらの規定を同法第二百二十八条第一項、第二百三十五条第一項、第二百三十九条第一項及び第二百七十六条（第二号に係る部分に限る。）において準用する場合を含む。）の規定により発行者に対抗することができない株式又は出資に係る議決権を含む。）に係る株式又は出資を所有する関係（内閣府令で定める場合を除く。以下この号において「特別支配関係」という。）を有する法人等（次号において「親法人等」という。）が他の法人等に対して特別支配関係を有する場合における当該他の法人等から行うもの",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "sourceContentUnitId": "law-340CO0000000321-article-7-paragraph-1-item-7",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第七条 （公開買付けの適用除外となる買付け等） 第1項第7号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-8",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-8",
+        "content": "法第二十七条の二第一項ただし書に規定する政令で定める株券等の買付け等は、次に掲げる株券等の買付け等（同項に規定する買付け等をいう。以下この節において同じ。）とする。ただし、第七号及び第八号に掲げる株券等の買付け等にあつては、同項第二号に規定する特定市場外買付け等を除く。\n第8号　株券等の買付け等を行う者と当該株券等の買付け等を行う者の親法人等その他の内閣府令で定める者（以下この号において「関係法人等」という。）が合わせて他の発行者の総株主等の議決権の数の百分の三十を超える数の議決権（社債、株式等の振替に関する法律第百四十七条第一項又は第百四十八条第一項（これらの規定を同法第二百二十八条第一項において準用する場合を含む。）の規定により発行者に対抗することができない株式又は投資口（投資信託及び投資法人に関する法律第二条第十四項に規定する投資口をいう。以下この節において同じ。）に係る議決権を含む。次項第二号において同じ。）に係る株式又は投資口（外国投資法人（投資信託及び投資法人に関する法律第二条第二十五項に規定する外国投資法人をいう。以下同じ。）の社員の地位を含む。以下この節において同じ。）を所有している場合における当該関係法人等（内閣府令で定める者を除く。）から行う当該他の発行者の株券等の買付け等（前号に掲げるものを除く。）",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "sourceContentUnitId": "law-340CO0000000321-article-7-paragraph-1-item-8",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第七条 （公開買付けの適用除外となる買付け等） 第1項第8号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-9",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-9",
+        "content": "法第二十七条の二第一項ただし書に規定する政令で定める株券等の買付け等は、次に掲げる株券等の買付け等（同項に規定する買付け等をいう。以下この節において同じ。）とする。ただし、第七号及び第八号に掲げる株券等の買付け等にあつては、同項第二号に規定する特定市場外買付け等を除く。\n第9号　株券等の所有者が少数である場合として内閣府令で定める場合であつて、当該株券等の買付け等を公開買付けによらないで行うことにつき、当該株券等の全ての所有者が同意している場合として内閣府令で定める場合における当該株券等の買付け等",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "sourceContentUnitId": "law-340CO0000000321-article-7-paragraph-1-item-9",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第七条 （公開買付けの適用除外となる買付け等） 第1項第9号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-10",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-10",
+        "content": "法第二十七条の二第一項ただし書に規定する政令で定める株券等の買付け等は、次に掲げる株券等の買付け等（同項に規定する買付け等をいう。以下この節において同じ。）とする。ただし、第七号及び第八号に掲げる株券等の買付け等にあつては、同項第二号に規定する特定市場外買付け等を除く。\n第10号　株券等の売出しに応じて行う株券等の買付け等（当該売出しにつき、法第四条第一項の規定による届出が行われている場合又は法第二十三条の八第一項の規定により同項に規定する発行登録追補書類が提出されている場合に限る。）",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "sourceContentUnitId": "law-340CO0000000321-article-7-paragraph-1-item-10",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第七条 （公開買付けの適用除外となる買付け等） 第1項第10号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-11",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-11",
+        "content": "法第二十七条の二第一項ただし書に規定する政令で定める株券等の買付け等は、次に掲げる株券等の買付け等（同項に規定する買付け等をいう。以下この節において同じ。）とする。ただし、第七号及び第八号に掲げる株券等の買付け等にあつては、同項第二号に規定する特定市場外買付け等を除く。\n第11号　株券等の発行者の役員（取締役、執行役、会計参与（会計参与が法人である場合は、その職務を行うべき社員を含む。第九条第二項第一号及び第十四条の八の二第一項において同じ。）及び監査役をいい、投資法人（投資信託及び投資法人に関する法律第二条第十二項に規定する投資法人をいい、外国投資法人を含む。）にあつては、執行役員、監督役員その他これらに準ずる者をいう。以下この号において同じ。）又は従業員が当該発行者の他の役員又は従業員と共同して当該発行者の株券等の買付け等を第一種金融商品取引業者に委託して行う場合であつて、当該買付け等が一定の計画に従い、個別の投資判断に基づかず、継続的に行われる場合その他の内閣府令で定める場合における株券等の買付け等",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "sourceContentUnitId": "law-340CO0000000321-article-7-paragraph-1-item-11",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第七条 （公開買付けの適用除外となる買付け等） 第1項第11号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-12",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-12",
+        "content": "法第二十七条の二第一項ただし書に規定する政令で定める株券等の買付け等は、次に掲げる株券等の買付け等（同項に規定する買付け等をいう。以下この節において同じ。）とする。ただし、第七号及び第八号に掲げる株券等の買付け等にあつては、同項第二号に規定する特定市場外買付け等を除く。\n第12号　法第二十四条第一項（同条第五項（法第二十七条において準用する場合を含む。）において準用する場合を含む。）の規定により有価証券報告書を提出しなければならない発行者以外の発行者（特定上場有価証券又は特定店頭売買有価証券である株券等の発行者を除く。）が発行する株券等の買付け等",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "sourceContentUnitId": "law-340CO0000000321-article-7-paragraph-1-item-12",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第七条 （公開買付けの適用除外となる買付け等） 第1項第12号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-13",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-13",
+        "content": "法第二十七条の二第一項ただし書に規定する政令で定める株券等の買付け等は、次に掲げる株券等の買付け等（同項に規定する買付け等をいう。以下この節において同じ。）とする。ただし、第七号及び第八号に掲げる株券等の買付け等にあつては、同項第二号に規定する特定市場外買付け等を除く。\n第13号　公開買付けが行われる場合において当該公開買付けに係る株券等の発行者が発行する株券等について行う買付け等であつて、次に掲げる要件の全てに該当するもの当該公開買付けによる買付け等を行う者と同一の者が行うものであること。当該買付け等に係る買付け等の価格（法第二十七条の二第三項に規定する買付け等の価格をいう。以下ロ及び次条第三項において同じ。）が当該公開買付けに係る買付け等の価格を下回ること。当該買付け等に係る株券等の受渡しその他の決済が当該公開買付けに係る株券等の受渡しその他の決済と同時に行われること。当該買付け等に係る契約の締結までに、当該買付け等を行う者が、当該買付け等の相手方に対し、当該公開買付けの内容を記載した書面を交付し、又は当該内容を記録した電磁的記録（法第十三条第五項に規定する電磁的記録をいう。第十七条の十二第二項第四号、第三十六条の三及び第三十六条の四において同じ。）を提供したこと。当該公開買付けに係る公開買付開始公告（法第二十七条の三第二項に規定する公開買付開始公告をいう。以下この節において同じ。）及び公開買付届出書（同項に規定する公開買付届出書をいう。ヘにおいて同じ。）において法第二十七条の十三第四項第二号の条件を付していないこと。当該公開買付けに係る公開買付届出書（その訂正届出書を含む。）においてニに規定する契約があること及びその内容を明らかにしていること。",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "sourceContentUnitId": "law-340CO0000000321-article-7-paragraph-1-item-13",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第七条 （公開買付けの適用除外となる買付け等） 第1項第13号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-14",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-14",
+        "content": "法第二十七条の二第一項ただし書に規定する政令で定める株券等の買付け等は、次に掲げる株券等の買付け等（同項に規定する買付け等をいう。以下この節において同じ。）とする。ただし、第七号及び第八号に掲げる株券等の買付け等にあつては、同項第二号に規定する特定市場外買付け等を除く。\n第14号　担保権の実行による株券等の買付け等",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "sourceContentUnitId": "law-340CO0000000321-article-7-paragraph-1-item-14",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第七条 （公開買付けの適用除外となる買付け等） 第1項第14号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-15",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-15",
+        "content": "法第二十七条の二第一項ただし書に規定する政令で定める株券等の買付け等は、次に掲げる株券等の買付け等（同項に規定する買付け等をいう。以下この節において同じ。）とする。ただし、第七号及び第八号に掲げる株券等の買付け等にあつては、同項第二号に規定する特定市場外買付け等を除く。\n第15号　事業の全部又は一部の譲受けによる株券等の買付け等",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "sourceContentUnitId": "law-340CO0000000321-article-7-paragraph-1-item-15",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第七条 （公開買付けの適用除外となる買付け等） 第1項第15号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-16",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-16",
+        "content": "法第二十七条の二第一項ただし書に規定する政令で定める株券等の買付け等は、次に掲げる株券等の買付け等（同項に規定する買付け等をいう。以下この節において同じ。）とする。ただし、第七号及び第八号に掲げる株券等の買付け等にあつては、同項第二号に規定する特定市場外買付け等を除く。\n第16号　金融商品取引清算機関（当該金融商品取引清算機関が法第百五十六条の二十の十六第一項に規定する連携金融商品債務引受業務を行う場合には、同項に規定する連携清算機関等を含む。以下この号において同じ。）又は外国金融商品取引清算機関に対し株券等を引き渡す債務を負う清算参加者（法第百五十六条の七第二項第三号に規定する清算参加者をいう。）が、当該金融商品取引清算機関又は外国金融商品取引清算機関の業務方法書において履行すべき期限として定められる時までに当該債務を履行しなかつた場合に、当該業務方法書に定めるところにより行う株券等の買付け等",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "sourceContentUnitId": "law-340CO0000000321-article-7-paragraph-1-item-16",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第七条 （公開買付けの適用除外となる買付け等） 第1項第16号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-17",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-17",
+        "content": "法第二十七条の二第一項ただし書に規定する政令で定める株券等の買付け等は、次に掲げる株券等の買付け等（同項に規定する買付け等をいう。以下この節において同じ。）とする。ただし、第七号及び第八号に掲げる株券等の買付け等にあつては、同項第二号に規定する特定市場外買付け等を除く。\n第17号　株式等売渡請求（会社法第百七十九条の三第一項に規定する株式等売渡請求をいう。第二十八条の二第十三号、第二十九条の二の五第六号及び第三十一条において同じ。）による株券等の買付け等（当該買付け等の時点において当該株券等の発行者が新株予約権証券を発行している場合（当該新株予約権証券の全てが次条第五項第三号に規定する内閣府令で定めるものである場合を除く。）には、同法第百七十九条第二項に規定する株式売渡請求に併せて同条第三項に規定する新株予約権売渡請求をした場合に限る。）",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "sourceContentUnitId": "law-340CO0000000321-article-7-paragraph-1-item-17",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第七条 （公開買付けの適用除外となる買付け等） 第1項第17号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-2",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-2",
+        "content": "２法第二十七条の二第一項第一号に規定する所有に準ずるものとして政令で定める場合は、次に掲げる場合とする。売買その他の契約に基づき株券等の引渡請求権を有する場合金銭の信託契約その他の契約又は法律の規定に基づき、株券等の発行者の株主若しくは投資主（投資信託及び投資法人に関する法律第二条第十六項に規定する投資主をいい、外国投資法人の社員を含む。第十四条の六の二第二号において同じ。）としての議決権を行使することができる権限又は当該議決権の行使について指図を行うことができる権限を有する場合投資一任契約（法第二条第八項第十二号ロに規定する投資一任契約をいう。以下同じ。）その他の契約又は法律の規定に基づき、株券等に投資するのに必要な権限を有する場合株券等の売買の一方の予約を行つている場合（当該売買を完結する権利を有し、かつ、当該権利の行使により買主としての地位を取得する場合に限る。）株券等の売買に係るオプションの取得（当該オプションの行使により当該行使をした者が当該売買において買主としての地位を取得するものに限る。）をしている場合その他内閣府令で定める場合",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "sourceContentUnitId": "law-340CO0000000321-article-7-paragraph-2",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第七条 （公開買付けの適用除外となる買付け等） 第2項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-3",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-3",
+        "content": "３法第二十七条の二第一項第一号に規定する買付け等を行う株券等の数又は買付け等の価格の総額が著しく少ない場合として政令で定める場合は、当該株券等の買付け等により増加する当該株券等の買付け等を行う者の所有に係る株券等の株券等所有割合（同号に規定する株券等所有割合をいう。次条第五項第三号及び第十四条第一項第二号イにおいて同じ。）が千分の五未満である場合（当該株券等の買付け等を行う者が当該株券等の買付け等を行う日前六月間において当該株券等の発行者が発行する株券等の買付け等（公開買付けによる買付け等及び法第二十七条の二第一項ただし書に規定する適用除外買付け等を除く。）を行つている場合を除く。）とする。",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "sourceContentUnitId": "law-340CO0000000321-article-7-paragraph-3",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第七条 （公開買付けの適用除外となる買付け等） 第3項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-4",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-4",
+        "content": "４法第二十七条の二第一項第一号に規定する政令で定める割合は、三分の二とする。",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "sourceContentUnitId": "law-340CO0000000321-article-7-paragraph-4",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第七条 （公開買付けの適用除外となる買付け等） 第4項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-5",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-5",
+        "content": "５法第二十七条の二第一項第二号に規定する政令で定める取引は、次に掲げる取引とする。店頭売買有価証券市場における店頭売買有価証券の取引法第二条第八項第十号に掲げる行為（次のイ又はロに掲げる場合の区分に応じ、当該イ又はロに定める要件を満たすものとして金融庁長官が指定する電子情報処理組織を使用して行われるものに限る。）による有価証券（金融商品取引所に上場されているものに限る。以下この号において同じ。）の取引（当該有価証券が特定上場有価証券である場合にあつては、特定投資家等のみを当事者として行われるものに限る。）電子情報処理組織を使用して行われる売付け若しくは買付けの申込み又は売買に係る売買価格の決定方法が競売買の方法その他多数の者の参加の下に価格の形成が行われる方法として内閣府令で定める方法である場合次に掲げる要件の全てを満たすこと。電子情報処理組織を使用して行われた売付け若しくは買付けの申込み又は売買についてその対象となつた有価証券の種類、銘柄、価格その他当該申込み又は売買の内容を示すべき事項として内閣府令で定める事項が直ちに公表されることとなつていること。電子情報処理組織を使用して行われた買付けの申込みに係る有価証券を所有する者が当該電子情報処理組織を使用して当該有価証券を適時に売却する機会が確保されていると認められること。売買価格の決定方法がイに規定する方法以外の方法である場合次に掲げる要件の全てを満たすこと。電子情報処理組織を使用して行われた売買についてその対象となつた有価証券の種類、銘柄、価格その他当該売買の内容を示すべき事項として内閣府令で定める事項が日ごとに公表されることとなつていること。電子情報処理組織を使用して行われる売買の価格について取引所金融商品市場における売買の価格を基礎として内閣府令で定める価格の範囲内とするために必要な措置がとられていること。取引所金融商品市場に準ずるものとして金融庁長官が指定する外国金融商品市場における競売買の方法その他これに準ずるものとして内閣府令で定める方法による有価証券の取引",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "sourceContentUnitId": "law-340CO0000000321-article-7-paragraph-5",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第七条 （公開買付けの適用除外となる買付け等） 第5項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-6",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-6",
+        "content": "６法第二十七条の二第一項第二号に規定する政令で定める場合は、株券等の買付け等を行う相手方の人数と、当該買付け等を行う日前六十日間に、取引所金融商品市場外において行つた当該株券等の発行者の発行する株券等の買付け等（公開買付けによる買付け等、前項各号に掲げる取引による株券等の買付け等、新株予約権を有する者が当該新株予約権を行使することにより行う株券等の買付け等並びに第一項第一号から第六号まで及び第九号から第十七号までに掲げる買付け等を除く。）の相手方（内閣府令で定めるものを除く。）の人数との合計が十名以下である場合とする。",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "sourceContentUnitId": "law-340CO0000000321-article-7-paragraph-6",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第七条 （公開買付けの適用除外となる買付け等） 第6項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-19-paragraph-1",
+        "source_ref": "opensearch:law-402M50000040038-article-19-paragraph-1",
+        "content": "法第二十七条の六第一項第一号に規定する内閣府令で定める基準は、次の各号に掲げる区分に応じ、当該各号に定める価格を下限とする方法とする。株式若しくは投資口の分割又はこれらの行為に係る令第十三条第一項第四号に掲げる行為法第二十七条の六第二項の規定により変更される前の買付け等の価格に、１÷（当該分割前の一株又は一口に係る当該分割後の株式又は投資口の数）の算式により算定した率を乗じて得た価格株主に対する株式若しくは新株予約権の割当て（新たに払込みをさせないで行うものに限る。）若しくは投資主（投資信託及び投資法人に関する法律第二条第十六項に規定する投資主をいう。）に対する新投資口予約権の割当て又はこれらの行為に係る令第十三条第一項第四号に掲げる行為法第二十七条の六第二項の規定により変更される前の買付け等の価格に、１÷｛１＋（これらの割当てにより一株に対して割り当てる株式の数（新株予約権の割当ての場合にあっては、株式に換算した数）又は一口に対して割り当てる新投資口予約権を投資口に換算した数）｝の算式により算定した率を乗じて得た価格剰余金の配当若しくは金銭の分配（投資信託及び投資法人に関する法律第百三十七条第一項に規定する金銭の分配をいう。）又はこれらの行為に係る令第十三条第一項第四号に掲げる行為法第二十七条の六第二項の規定により変更される前の買付け等の価格から、当該配当又は分配により一株又は一口に対して割り当てられる配当財産の価額又は金銭の額を控除した価格",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-19",
+          "sourceContentUnitId": "law-402M50000040038-article-19-paragraph-1",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第十九条 （買付条件等の変更の公告の掲載事項） 第1項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-19-paragraph-2",
+        "source_ref": "opensearch:law-402M50000040038-article-19-paragraph-2",
+        "content": "２公開買付者が令第十三条第二項第二号ハに規定する承認を受けようとする場合には、次に掲げる事項を記載した承認申請書を関東財務局長に提出しなければならない。当該公開買付けの内容令第十三条第二項第二号ハに規定する事情当該公開買付けに関して当該承認を受けようとする期間当該公開買付けに関して当該承認を必要とする理由",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-19",
+          "sourceContentUnitId": "law-402M50000040038-article-19-paragraph-2",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第十九条 （買付条件等の変更の公告の掲載事項） 第2項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-19-paragraph-3",
+        "source_ref": "opensearch:law-402M50000040038-article-19-paragraph-3",
+        "content": "３法第二十七条の六第二項に規定する内閣府令で定める事項は、次に掲げるものとする。公開買付者の氏名又は名称及び住所又は所在地公開買付けの内容に関する事項のうち次に掲げるもの対象者の名称買付け等を行う株券等の種類公開買付期間買付条件等を変更する旨及びその理由変更前の買付条件等の内容と変更後の買付条件等の内容との比較当該公告を行う日以前に既に公開買付けに応じて株券等の売付け等をした者の取扱い買付条件等の変更により公開買付期間が延長される場合には、延長後の公開買付期間の末日及び延長後の買付け等に係る決済の開始日",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-19",
+          "sourceContentUnitId": "law-402M50000040038-article-19-paragraph-3",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第十九条 （買付条件等の変更の公告の掲載事項） 第3項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-30-paragraph-1:8aff461b058a9c2b",
+        "source_ref": "opensearch:law-402M50000040038-article-30-paragraph-1",
+        "content": "[一致箇所1] 第三十条 （公開買付けの結果の公告の掲載事項） 第1項\n法第二十七条の十三第一項に規定する内閣府令で定める事項は、次に掲げる事項とする。公開買付者の氏名又は名称及び住所又は所在地公開買付けの内容に関する事項のうち次に掲げるもの対象者の名称買付け等に係る株券等の種類公開買付期間公開買付届出書において法第二十七条の十三第四項第一号に掲げる条件を付した場合における当該条件の成否応募株券等の数及び買付け等を行う株券等の数決済の方法及び開始日公開買付報告書の写しを縦覧に供する場所\n\n[一致箇所2] 第三十条 （公開買付けの結果の公告の掲載事項） 第2項\n２公開買付者は、法第二十七条の十三第一項の規定により公告又は公表を行うに当たり、あん分比例方式により買付け等をする株券等の数の公告又は公表を行うことが困難である場合には、当該株券等の数以外の事項の公告又は公表を行った後、遅滞なく、当該株券等の数の公告又は公表を行うものとする。",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-30",
+          "sourceContentUnitId": "law-402M50000040038-article-30-paragraph-1",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第三十条 （公開買付けの結果の公告の掲載事項） 第1項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": 2,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-419M60000002059-article-62_2-paragraph-1",
+        "source_ref": "opensearch:law-419M60000002059-article-62_2-paragraph-1",
+        "content": "1法第百六十七条第五項第八号ハに規定する公開買付け等の実施に関する事実の内容として内閣府令で定める事項は、次に掲げる場合の区分に応じ、次に掲げる事項とする。",
+        "title": "有価証券の取引等の規制に関する内閣府令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-419M60000002059-article-62_2",
+          "sourceContentUnitId": "law-419M60000002059-article-62_2-paragraph-1",
+          "documentId": "law-419M60000002059",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第六十二条の二 （伝達を受けた公開買付け等の実施に関する事実の内容） 第1項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/419M60000002059",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-14_3_2-paragraph-2",
+        "source_ref": "opensearch:law-340CO0000000321-article-14_3_2-paragraph-2",
+        "content": "２法第二十七条の二十二の二第一項第一号に規定する政令で定めるものは、投資信託及び投資法人に関する法律第八十条の二第一項（同法第八十条の五第二項の規定により読み替えて適用する場合を含む。）の規定とする。",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-14_3_2",
+          "sourceContentUnitId": "law-340CO0000000321-article-14_3_2-paragraph-2",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第十四条の三の二 （公開買付けの適用範囲） 第2項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-14-paragraph-1-item-2",
+        "source_ref": "opensearch:law-340CO0000000321-article-14-paragraph-1-item-2",
+        "content": "法第二十七条の十一第一項ただし書に規定する政令で定める事情は、次に掲げるものとする。ただし、第一号から第三号までに掲げるものにあつては、軽微なものとして内閣府令で定める基準に該当するものを除く。\n第2号　対象者の業務執行を決定する機関が次に掲げる場合の区分に応じ、次に定める決定をしたこと（公開買付開始公告を行つた日以後に公表されたものに限る。）。公開買付開始公告をした日において、対象者の業務執行を決定する機関が当該公開買付けの後に当該公開買付者の株券等所有割合を内閣府令で定める割合以上減少させることとなる新株の発行その他の行為（当該公開買付けに係る買付け等の期間の末日後に行うものに限る。）を行うことがある旨の決定を既に行つており、かつ、当該決定の内容を公表している場合当該決定を維持する旨の決定公開買付開始公告をした日において、対象者又はその子会社が会社法第百八条第一項第八号又は第九号に掲げ",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-14",
+          "sourceContentUnitId": "law-340CO0000000321-article-14-paragraph-1-item-2",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第十四条 （公開買付けの撤回等） 第1項第2号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": true
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-419M60000002059-article-63-paragraph-1",
+        "source_ref": "opensearch:law-419M60000002059-article-63-paragraph-1",
+        "content": "1法第百六十七条第五項第十四号に規定する公開買付者等の公開買付け等事実を知る前に締結された当該公開買付け等に係る株券等に係る買付け等若しくは売付け等に関する契約の履行又は公開買付者等の公開買付け等事実を知る前に決定された当該公開買付け等に係る株券等に係る買付け等若しくは売付け等の計画の実行として買付け等又は売付け等をする場合のうち内閣府令で定める場合は、次に掲げる場合とする。",
+        "title": "有価証券の取引等の規制に関する内閣府令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-419M60000002059-article-63",
+          "sourceContentUnitId": "law-419M60000002059-article-63-paragraph-1",
+          "documentId": "law-419M60000002059",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第六十三条 （公開買付け等に係る規制の適用除外） 第1項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/419M60000002059",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_3-paragraph-1",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_3-paragraph-1",
+        "content": "前条第一項本文の規定により同項に規定する公開買付け（以下この節において「公開買付け」という。）によつて株券等の買付け等を行わなければならない者は、政令で定めるところにより、当該公開買付けについて、その目的、買付け等の価格、買付予定の株券等の数（株券については株式の数を、その他のものについては内閣府令で定める数をいう。以下この節において同じ。）、買付け等の期間その他の内閣府令で定める事項を公告しなければならない。この場合において、当該買付け等の期間が政令で定める期間より短いときは、第二十七条の十第三項の規定により当該買付け等の期間が延長されることがある旨を当該公告において明示しなければならない。",
+        "title": "金融商品取引法",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_3",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_3-paragraph-1",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十七条の三 （公開買付開始公告及び公開買付届出書の提出） 第1項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-10",
+        "source_ref": "opensearch:law-402M50000040038-article-10",
+        "content": "（公開買付開始公告の掲載事項）\n第十条\n法第二十七条の三第一項に規定する内閣府令で定める事項は、次に掲げる事項とする。公開買付者の氏名又は名称及び住所又は所在地公開買付けにより株券等の買付け等を行う旨公開買付けの目的公開買付けの内容に関する事項のうち次に掲げるもの対象者の名称買付け等を行う株券等の種類買付け等の期間、買付け等の価格及び買付予定の株券等の数買付け等の申込みに対する承諾又は売付け等の申込みの方法及び場所買付け等の決済をする金融商品取引業者又は銀行等の名称、決済の開始日、方法及び場所並びに株券等の返還方法その他買付け等の条件及び方法公開買付届出書の写しを縦覧に供する場所",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-10",
+          "sourceContentUnitId": "law-402M50000040038-article-10",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第十条 （公開買付開始公告の掲載事項）",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-24-paragraph-2",
+        "source_ref": "opensearch:law-402M50000040038-article-24-paragraph-2",
+        "content": "２法第二十七条の九第一項に規定する内閣府令で定める事項は、次に掲げるものとする。当該公開買付けが法第二章の二第一節の規定の適用を受ける公開買付けである旨当該公開買付説明書が法第二十七条の九の規定による公開買付説明書である旨",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-24",
+          "sourceContentUnitId": "law-402M50000040038-article-24-paragraph-2",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十四条 （公開買付説明書の作成等） 第2項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-30-paragraph-1",
+        "source_ref": "opensearch:law-402M50000040038-article-30-paragraph-1",
+        "content": "法第二十七条の十三第一項に規定する内閣府令で定める事項は、次に掲げる事項とする。公開買付者の氏名又は名称及び住所又は所在地公開買付けの内容に関する事項のうち次に掲げるもの対象者の名称買付け等に係る株券等の種類公開買付期間公開買付届出書において法第二十七条の十三第四項第一号に掲げる条件を付した場合における当該条件の成否応募株券等の数及び買付け等を行う株券等の数決済の方法及び開始日公開買付報告書の写しを縦覧に供する場所",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-30",
+          "sourceContentUnitId": "law-402M50000040038-article-30-paragraph-1",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第三十条 （公開買付けの結果の公告の掲載事項） 第1項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-30-paragraph-2",
+        "source_ref": "opensearch:law-402M50000040038-article-30-paragraph-2",
+        "content": "２公開買付者は、法第二十七条の十三第一項の規定により公告又は公表を行うに当たり、あん分比例方式により買付け等をする株券等の数の公告又は公表を行うことが困難である場合には、当該株券等の数以外の事項の公告又は公表を行った後、遅滞なく、当該株券等の数の公告又は公表を行うものとする。",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-30",
+          "sourceContentUnitId": "law-402M50000040038-article-30-paragraph-2",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第三十条 （公開買付けの結果の公告の掲載事項） 第2項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14_3_2-paragraph-1",
+        "source_ref": "opensearch:law-340CO0000000321-article-14_3_2-paragraph-1",
+        "content": "法第二十七条の二十二の二第一項に規定する政令で定める取引は、店頭売買有価証券市場における店頭売買有価証券の取引とする。",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-14_3_2",
+          "sourceContentUnitId": "law-340CO0000000321-article-14_3_2-paragraph-1",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第十四条の三の二 （公開買付けの適用範囲） 第1項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14_3_2-paragraph-2",
+        "source_ref": "opensearch:law-340CO0000000321-article-14_3_2-paragraph-2",
+        "content": "２法第二十七条の二十二の二第一項第一号に規定する政令で定めるものは、投資信託及び投資法人に関する法律第八十条の二第一項（同法第八十条の五第二項の規定により読み替えて適用する場合を含む。）の規定とする。",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-14_3_2",
+          "sourceContentUnitId": "law-340CO0000000321-article-14_3_2-paragraph-2",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第十四条の三の二 （公開買付けの適用範囲） 第2項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14_3_2-paragraph-3",
+        "source_ref": "opensearch:law-340CO0000000321-article-14_3_2-paragraph-3",
+        "content": "３法第二十七条の二十二の二第一項第二号に規定する多数の者が買付け等（同項に規定する買付け等をいう。以下この節において同じ。）に関する事項を知り得る状態に置かれる方法により行われる買付け等として政令で定めるものは、当該買付け等に関する事項（当該買付け等に係る上場株券等（法第二十四条の六第一項に規定する上場株券等をいう。以下この節において同じ。）の買付け等の申込み又は売付け等の申込みの勧誘を行う旨の文言が含まれるものに限る。）を新聞若しくは雑誌に掲載し、又は文書、放送、映画その他の方法を用いることにより多数の者に知らせて行う買付け等とする。",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-14_3_2",
+          "sourceContentUnitId": "law-340CO0000000321-article-14_3_2-paragraph-3",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第十四条の三の二 （公開買付けの適用範囲） 第3項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14-paragraph-1",
+        "source_ref": "opensearch:law-340CO0000000321-article-14-paragraph-1",
+        "content": "1法第二十七条の十一第一項ただし書に規定する政令で定める事情は、次に掲げるものとする。ただし、第一号から第三号までに掲げるものにあつては、軽微なものとして内閣府令で定める基準に該当するものを除く。",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-14",
+          "sourceContentUnitId": "law-340CO0000000321-article-14-paragraph-1",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第十四条 （公開買付けの撤回等） 第1項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14-paragraph-1-item-1",
+        "source_ref": "opensearch:law-340CO0000000321-article-14-paragraph-1-item-1",
+        "content": "法第二十七条の十一第一項ただし書に規定する政令で定める事情は、次に掲げるものとする。ただし、第一号から第三号までに掲げるものにあつては、軽微なものとして内閣府令で定める基準に該当するものを除く。\n第1号　対象者又はその子会社（会社法第二条第三号に規定する子会社をいう。以下この条及び第十四条の八の二において同じ。）の業務執行を決定する機関が次に掲げる事項を行うことについての決定をしたこと（公開買付開始公告を行つた日以後に公表されたものに限る。）。株式交換株式移転株式交付会社の分割合併解散（合併による解散を除く。）破産手続開始、再生手続開始又は更生手続開始の申立て資本金の額の減少事業の全部又は一部の譲渡、譲受け、休止又は廃止金融商品取引所に対する株券等の上場の廃止に係る申請認可金融商品取引業協会に対する株券等の登録の取消しに係る申請預金保険法第七十四条第五項の規定による申出株式又は投資口の分割株式若しくは新株予約権の割当て（新たに払込みをさせないで行うものに限る。）又は新投資口予約権の割当て株式、新株予約権、新株予約権付社債又は投資口の発行（ワ及びカに掲げるものを除く。）自己株式（会社法第百十三条第四項に規定する自己株式をいう。）の処分（カに掲げるものを除く。）既に発行されている株式について、会社法第百八条第一項第八号又は第九号に掲げる事項について異なる定めをすること。重要な財産の処分又は譲渡多額の借財イからツまでに掲げる事項に準ずる事項で公開買付者が公開買付開始公告及び公開買付届出書（法第二十七条の三第二項に規定する公開買付届出書をいう。以下この条において同じ。）において指定したもの",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-14",
+          "sourceContentUnitId": "law-340CO0000000321-article-14-paragraph-1-item-1",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第十四条 （公開買付けの撤回等） 第1項第1号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14-paragraph-1-item-2",
+        "source_ref": "opensearch:law-340CO0000000321-article-14-paragraph-1-item-2",
+        "content": "法第二十七条の十一第一項ただし書に規定する政令で定める事情は、次に掲げるものとする。ただし、第一号から第三号までに掲げるものにあつては、軽微なものとして内閣府令で定める基準に該当するものを除く。\n第2号　対象者の業務執行を決定する機関が次に掲げる場合の区分に応じ、次に定める決定をしたこと（公開買付開始公告を行つた日以後に公表されたものに限る。）。公開買付開始公告をした日において、対象者の業務執行を決定する機関が当該公開買付けの後に当該公開買付者の株券等所有割合を内閣府令で定める割合以上減少させることとなる新株の発行その他の行為（当該公開買付けに係る買付け等の期間の末日後に行うものに限る。）を行うことがある旨の決定を既に行つており、かつ、当該決定の内容を公表している場合当該決定を維持する旨の決定公開買付開始公告をした日において、対象者又はその子会社が会社法第百八条第一項第八号又は第九号に掲げる事項について異なる定めをした内容の異なる二以上の種類の株式に係る株券等を発行している場合当該異なる定めを変更しない旨の決定",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-14",
+          "sourceContentUnitId": "law-340CO0000000321-article-14-paragraph-1-item-2",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第十四条 （公開買付けの撤回等） 第1項第2号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14-paragraph-1-item-3",
+        "source_ref": "opensearch:law-340CO0000000321-article-14-paragraph-1-item-3",
+        "content": "法第二十七条の十一第一項ただし書に規定する政令で定める事情は、次に掲げるものとする。ただし、第一号から第三号までに掲げるものにあつては、軽微なものとして内閣府令で定める基準に該当するものを除く。\n第3号　対象者に次に掲げる事実が発生したこと（公開買付開始公告を行つた日以後に発生したものに限る。）。ただし、イ、ハ、ホ及びトにあつては、公開買付者及びその特別関係者によつて行われた場合を除く。事業の差止めその他これに準ずる処分を求める仮処分命令の申立てがなされたこと。免許の取消し、事業の停止その他これらに準ずる行政庁による法令に基づく処分がなされたこと。当該対象者以外の者による破産手続開始、再生手続開始、更生手続開始、企業担保権の実行又は企業価値担保権の実行の申立て（以下「破産手続開始の申立て等」という。）がなされたこと。手形若しくは小切手の不渡り（支払資金の不足を事由とするものに限る。）又は手形交換所による取引停止処分（以下「不渡り等」という。）があつたこと。主要取引先（前事業年度における売上高又は仕入高が売上高の総額又は仕入高の総額の百分の十以上である取引先をいう。）から取引の停止を受けたこと。災害に起因する損害財産権上の請求に係る訴えが提起されたこと。株券の上場の廃止（当該株券を上場している全ての金融商品取引所において上場が廃止された場合に限る。）株券の登録の取消し（当該株券を登録している全ての認可金融商品取引業協会において登録が取り消された場合（当該株券が上場されたことによる場合を除く。）に限る。）イからリまでに掲げる事実に準ずる事実で公開買付者が公開買付開始公告及び公開買付届出書において指定したもの",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-14",
+          "sourceContentUnitId": "law-340CO0000000321-article-14-paragraph-1-item-3",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第十四条 （公開買付けの撤回等） 第1項第3号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14-paragraph-1-item-4",
+        "source_ref": "opensearch:law-340CO0000000321-article-14-paragraph-1-item-4",
+        "content": "法第二十七条の十一第一項ただし書に規定する政令で定める事情は、次に掲げるものとする。ただし、第一号から第三号までに掲げるものにあつては、軽微なものとして内閣府令で定める基準に該当するものを除く。\n第4号　株券等の取得につき他の法令に基づく行政庁の許可、認可、承認その他これらに類するもの（以下この号において「許可等」という。）を必要とする場合において、公開買付期間の末日の前日までに、当該許可等を得られなかつたこと。",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-14",
+          "sourceContentUnitId": "law-340CO0000000321-article-14-paragraph-1-item-4",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第十四条 （公開買付けの撤回等） 第1項第4号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14-paragraph-1-item-5",
+        "source_ref": "opensearch:law-340CO0000000321-article-14-paragraph-1-item-5",
+        "content": "法第二十七条の十一第一項ただし書に規定する政令で定める事情は、次に掲げるものとする。ただし、第一号から第三号までに掲げるものにあつては、軽微なものとして内閣府令で定める基準に該当するものを除く。\n第5号　その他前各号に準ずるものとして内閣府令で定めるもの",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-14",
+          "sourceContentUnitId": "law-340CO0000000321-article-14-paragraph-1-item-5",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第十四条 （公開買付けの撤回等） 第1項第5号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14-paragraph-2",
+        "source_ref": "opensearch:law-340CO0000000321-article-14-paragraph-2",
+        "content": "２法第二十七条の十一第一項ただし書に規定する政令で定める重要な事情の変更は、次に掲げる事項とする。死亡後見開始の審判を受けたこと。解散破産手続開始の決定、再生手続開始の決定又は更生手続開始の決定を受けたこと。当該公開買付者及びその特別関係者以外の者による破産手続開始の申立て等がなされたこと。不渡り等があつたこと。",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-14",
+          "sourceContentUnitId": "law-340CO0000000321-article-14-paragraph-2",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第十四条 （公開買付けの撤回等） 第2項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      }
+    ],
+    "dependency_decisions": [
+      {
+        "dependency_kind": "lower_norm",
+        "work_item_id": "wi-procedure",
+        "status": "needs_action",
+        "reason": "公開買付けに関する手続きについて、政令で定める事項の確認が必要であるため。",
+        "basis_evidence_ids": [
+          "law-340CO0000000321-article-12",
+          "law-402M50000040038-article-19-paragraph-1"
+        ],
+        "action_request_id": "solver-tool-9907c1b2a49e40b4857cf179cc71cc17"
+      }
+    ],
+    "graph_candidate_reviews": [],
+    "search_candidate_reviews": [
+      {
+        "search_request_ids": [
+          "solver-tool-878247d181ab458eab33ffbe881673fb"
+        ],
+        "selections": [
+          {
+            "article_id": "law-340CO0000000321-article-12",
+            "reason": "legal_function=exception; 特定の条件を満たす場合、公開買付けによらずに株券等の買付けが可能であるため、公開買付けの手続が必要になる場合を直接検証できる。"
+          },
+          {
+            "article_id": "law-340CO0000000321-article-7",
+            "reason": "legal_function=exception; 公開買付けが行われる場合において、特定の条件を満たす株券等の買付けは公開買付けの適用除外となるため、例外の範囲を確認できる。"
+          },
+          {
+            "article_id": "law-402M50000040038-article-19",
+            "reason": "legal_function=procedure; 公開買付者が承認を受ける場合の手続きについて、必要な事項を記載した申請書を関東財務局長に提出しなければならないことを確認できる。"
+          }
+        ],
+        "deferred_article_ids": [
+          "law-323AC0000000025-article-27_6",
+          "law-323AC0000000025-article-27_3",
+          "law-402M50000040038-article-5",
+          "law-402M50000040038-article-22",
+          "law-402M50000040038-article-26"
+        ],
+        "reason": "公開買付けの手続が必要になる場合を明確にするため、例外や手続きに関する条文を選択した。",
+        "reviewed_cycle": 1
+      },
+      {
+        "search_request_ids": [
+          "solver-tool-9907c1b2a49e40b4857cf179cc71cc17"
+        ],
+        "selections": [
+          {
+            "article_id": "law-402M50000040038-article-30",
+            "reason": "legal_function=procedure: 公開買付けの結果を公告する際の必要事項を明示するため。"
+          },
+          {
+            "article_id": "law-340CO0000000321-article-14_3_2",
+            "reason": "legal_function=scope: 公開買付けの適用範囲を特定の法律に基づく投資信託及び投資法人に関する規定に従って説明するため。"
+          },
+          {
+            "article_id": "law-340CO0000000321-article-14",
+            "reason": "legal_function=exception: 公開買付けの撤回が可能な条件を明示するため。"
+          }
+        ],
+        "deferred_article_ids": [
+          "law-419M60000002059-article-62_2",
+          "law-419M60000002059-article-63",
+          "law-323AC0000000025-article-27_3",
+          "law-402M50000040038-article-10",
+          "law-402M50000040038-article-24"
+        ],
+        "reason": "公開買付けに関する手続き、適用範囲、例外を明確にするために、関連する法的機能を持つ条文を選択した。",
+        "reviewed_cycle": 2
+      }
+    ],
+    "frontier_re_adoptions": [],
+    "deferred_frontier_resolutions": [],
+    "unreviewed_graph_resolutions": [],
+    "tool_results": [
+      {
+        "request_id": "solver-tool-878247d181ab458eab33ffbe881673fb",
+        "status": "succeeded",
+        "evidence_ids": [
+          "search-nav-law-323AC0000000025-article-27_6-paragraph-2:4be569d0b7b855e4",
+          "search-nav-law-340CO0000000321-article-12",
+          "search-nav-law-340CO0000000321-article-7-paragraph-1-item-13",
+          "search-nav-law-402M50000040038-article-19-paragraph-2",
+          "search-nav-law-323AC0000000025-article-27_3-paragraph-2",
+          "search-nav-law-402M50000040038-article-5-paragraph-5",
+          "search-nav-law-402M50000040038-article-22-paragraph-2",
+          "search-nav-law-402M50000040038-article-26-paragraph-5"
+        ],
+        "error_code": null,
+        "elapsed_ms": 259,
+        "cycle_no": 1
+      },
+      {
+        "request_id": "search-review-fetch-cba9e783adb76e34a68e3634",
+        "status": "succeeded",
+        "evidence_ids": [
+          "law-340CO0000000321-article-12",
+          "law-340CO0000000321-article-7-paragraph-1",
+          "law-340CO0000000321-article-7-paragraph-1-item-1",
+          "law-340CO0000000321-article-7-paragraph-1-item-2",
+          "law-340CO0000000321-article-7-paragraph-1-item-3",
+          "law-340CO0000000321-article-7-paragraph-1-item-4",
+          "law-340CO0000000321-article-7-paragraph-1-item-5",
+          "law-340CO0000000321-article-7-paragraph-1-item-6",
+          "law-340CO0000000321-article-7-paragraph-1-item-7",
+          "law-340CO0000000321-article-7-paragraph-1-item-8",
+          "law-340CO0000000321-article-7-paragraph-1-item-9",
+          "law-340CO0000000321-article-7-paragraph-1-item-10",
+          "law-340CO0000000321-article-7-paragraph-1-item-11",
+          "law-340CO0000000321-article-7-paragraph-1-item-12",
+          "law-340CO0000000321-article-7-paragraph-1-item-13",
+          "law-340CO0000000321-article-7-paragraph-1-item-14",
+          "law-340CO0000000321-article-7-paragraph-1-item-15",
+          "law-340CO0000000321-article-7-paragraph-1-item-16",
+          "law-340CO0000000321-article-7-paragraph-1-item-17",
+          "law-340CO0000000321-article-7-paragraph-2",
+          "law-340CO0000000321-article-7-paragraph-3",
+          "law-340CO0000000321-article-7-paragraph-4",
+          "law-340CO0000000321-article-7-paragraph-5",
+          "law-340CO0000000321-article-7-paragraph-6",
+          "law-402M50000040038-article-19-paragraph-1",
+          "law-402M50000040038-article-19-paragraph-2",
+          "law-402M50000040038-article-19-paragraph-3"
+        ],
+        "error_code": null,
+        "elapsed_ms": 52,
+        "cycle_no": 1
+      },
+      {
+        "request_id": "solver-tool-9907c1b2a49e40b4857cf179cc71cc17",
+        "status": "succeeded",
+        "evidence_ids": [
+          "search-nav-law-402M50000040038-article-30-paragraph-1:8aff461b058a9c2b",
+          "search-nav-law-419M60000002059-article-62_2-paragraph-1",
+          "search-nav-law-340CO0000000321-article-14_3_2-paragraph-2",
+          "search-nav-law-340CO0000000321-article-14-paragraph-1-item-2",
+          "search-nav-law-419M60000002059-article-63-paragraph-1",
+          "search-nav-law-323AC0000000025-article-27_3-paragraph-1",
+          "search-nav-law-402M50000040038-article-10",
+          "search-nav-law-402M50000040038-article-24-paragraph-2"
+        ],
+        "error_code": null,
+        "elapsed_ms": 177,
+        "cycle_no": 2
+      },
+      {
+        "request_id": "search-review-fetch-b6842e0d4e80926a00df81e9",
+        "status": "succeeded",
+        "evidence_ids": [
+          "law-402M50000040038-article-30-paragraph-1",
+          "law-402M50000040038-article-30-paragraph-2",
+          "law-340CO0000000321-article-14_3_2-paragraph-1",
+          "law-340CO0000000321-article-14_3_2-paragraph-2",
+          "law-340CO0000000321-article-14_3_2-paragraph-3",
+          "law-340CO0000000321-article-14-paragraph-1",
+          "law-340CO0000000321-article-14-paragraph-1-item-1",
+          "law-340CO0000000321-article-14-paragraph-1-item-2",
+          "law-340CO0000000321-article-14-paragraph-1-item-3",
+          "law-340CO0000000321-article-14-paragraph-1-item-4",
+          "law-340CO0000000321-article-14-paragraph-1-item-5",
+          "law-340CO0000000321-article-14-paragraph-2"
+        ],
+        "error_code": null,
+        "elapsed_ms": 32,
+        "cycle_no": 2
+      }
+    ],
+    "focus_work_item_ids": [],
+    "retained_evidence_ids": [],
+    "final_answer": null,
+    "review": null,
+    "review_finding_resolutions": [],
+    "stop_reason": null,
+    "cycle_step_timeout": false,
+    "created_at": "2026-08-23T08:15:03.209990Z",
+    "updated_at": "2026-08-23T08:15:37.857015Z"
+  },
+  "solverContext": {
+    "case_id": "fixture-tob-cycle2-close-duplicate-retained-evidence-v1",
+    "question": "上場会社の株式を、市場を通さずに多数の株主から買い集めたいのですが、公開買付けの手続が必要になるのはどのような場合ですか。対象となる株券等の範囲、主な例外、必要な手続も含めて、根拠となる条文とともに説明してください。",
+    "research_cycle_count": 2,
+    "remaining_research_cycles": 2,
+    "remaining_wall_time_sec": 205.352415818008,
+    "min_next_cycle_budget_sec": 25.0,
+    "can_start_next_cycle": true,
+    "max_tool_requests_per_step": 5,
+    "max_fetched_resources_per_cycle": 3,
+    "fetched_resource_ids_this_cycle": [
+      "law-402M50000040038-article-30",
+      "law-340CO0000000321-article-14_3_2",
+      "law-340CO0000000321-article-14"
+    ],
+    "remaining_fetch_capacity": 0,
+    "max_selected_frontier_per_step": 3,
+    "cycle_budget_reached": true,
+    "cycle_close_required": true,
+    "cycle_step_timeout": false,
+    "max_retained_evidence": 12,
+    "max_material_evidence_chars": 50000,
+    "max_solver_input_chars": 240000,
+    "finalize_only": false,
+    "available_tools": [
+      {
+        "name": "legal_search",
+        "description": "Article IDがまだ分からないとき、OpenSearchで法令またはガイドの候補を探す。質問をそのまま繰り返さず、確認事項を法令表現へ言い換えて使う。返す検索抜粋は候補選択用であり、回答やHypothesisの根拠にはしない。",
+        "input_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "description": "制度名と確認事項を法令に現れやすい表現へ言い換えた検索語。",
+              "maxLength": 1000,
+              "minLength": 1,
+              "type": "string"
+            },
+            "doc_types": {
+              "description": "検索対象。法令本文はlaw、行政解釈やガイドはguideline。現在の検索に必要な値を配列で返す。",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "document_ids": {
+              "description": "検索対象文書を限定する既知documentId。限定しない場合は空配列。",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 12,
+              "type": "array"
+            }
+          },
+          "required": [
+            "query",
+            "doc_types",
+            "document_ids"
+          ],
+          "type": "object"
+        },
+        "result_description": "候補Articleの所在と短い検索抜粋をnavigation Evidenceとして返す。Article本文のgrounding Evidenceは返さない。",
+        "read_only": true,
+        "parallel_safe": true
+      },
+      {
+        "name": "fetch_articles",
+        "description": "発見済みArticleの本文をOpenSearchから取得する。fetchable_article_idsにある既知IDから、質問とHypothesisに必要なものを選んで使う。検索やGraph展開は行わず、未知IDや取得済みEvidence IDは受け付けない。",
+        "input_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "article_ids": {
+              "description": "本文を取得する既知Article ID。SolverContext.fetchable_article_idsの完全一致だけを指定する。",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 4,
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "article_ids"
+          ],
+          "type": "object"
+        },
+        "result_description": "指定Articleに属するArticle・Paragraph・Itemの本文をgrounding Evidenceとして返す。",
+        "read_only": true,
+        "parallel_safe": true
+      },
+      {
+        "name": "legal_graph_neighbors",
+        "description": "既知Articleを起点に、仮説に合う法令関係を1ホップだけ探索する。関係のmode、意味predicate、向きを説明できる場合に使う。返す候補は本文ではなくnavigation情報であり、関連性と次の取得対象はSolverが判断する。",
+        "input_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "article_ids": {
+              "description": "1ホップの起点にする既知Article ID。",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 4,
+              "minItems": 1,
+              "type": "array"
+            },
+            "mode": {
+              "description": "物理参照または意味分類済み関係のどちらを探索するか。",
+              "enum": [
+                "semantic_assertion",
+                "explicit_reference",
+                "explains"
+              ],
+              "type": "string"
+            },
+            "predicate": {
+              "anyOf": [
+                {
+                  "description": "RelationAssertionが提示できる未確認の意味関係。",
+                  "enum": [
+                    "IMPLEMENTS",
+                    "INCORPORATES",
+                    "USES_DEFINITION",
+                    "EXCEPTION_TO",
+                    "OVERRIDES"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "semantic_assertionで探索する仮説に合う1つの意味関係。それ以外のmodeではnull。"
+            },
+            "direction": {
+              "description": "起点Articleから見た関係の向き。",
+              "enum": [
+                "from_subject",
+                "to_subject",
+                "outgoing",
+                "incoming"
+              ],
+              "type": "string"
+            },
+            "max_relations": {
+              "description": "起点Articleごとに返すnavigation関係数の上限。",
+              "maximum": 50,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "article_ids",
+            "mode",
+            "predicate",
+            "direction",
+            "max_relations"
+          ],
+          "type": "object"
+        },
+        "result_description": "起点と隣接Articleの関係、向き、根拠所在をGraph navigation Evidenceとして返す。隣接Articleの本文は返さない。",
+        "read_only": true,
+        "parallel_safe": true
+      },
+      {
+        "name": "load_evidence",
+        "description": "Caseでは取得済みだが現在のPromptから省略されたEvidence本文を再表示する。omitted_evidence_idsにある既知IDだけを指定する。新しい検索、Article本文取得、Graph探索は行わない。",
+        "input_schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "evidence_ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "description": "今回再表示するomitted_evidence_idsの完全一致。"
+            }
+          },
+          "required": [
+            "evidence_ids"
+          ]
+        },
+        "result_description": "指定した既知Evidenceの本文をmaterial_evidenceへ再投影する。",
+        "read_only": true,
+        "parallel_safe": true
+      }
+    ],
+    "grounding_evidence_ids": [
+      "law-402M50000040038-article-30-paragraph-1",
+      "law-402M50000040038-article-30-paragraph-2",
+      "law-340CO0000000321-article-14_3_2-paragraph-1",
+      "law-340CO0000000321-article-14_3_2-paragraph-2",
+      "law-340CO0000000321-article-14_3_2-paragraph-3",
+      "law-340CO0000000321-article-14-paragraph-1",
+      "law-340CO0000000321-article-14-paragraph-1-item-1",
+      "law-340CO0000000321-article-14-paragraph-1-item-2",
+      "law-340CO0000000321-article-14-paragraph-1-item-3",
+      "law-340CO0000000321-article-14-paragraph-1-item-4",
+      "law-340CO0000000321-article-14-paragraph-1-item-5",
+      "law-340CO0000000321-article-14-paragraph-2"
+    ],
+    "navigation_evidence_ids": [
+      "search-nav-law-402M50000040038-article-30-paragraph-1:8aff461b058a9c2b",
+      "search-nav-law-419M60000002059-article-62_2-paragraph-1",
+      "search-nav-law-340CO0000000321-article-14_3_2-paragraph-2",
+      "search-nav-law-340CO0000000321-article-14-paragraph-1-item-2",
+      "search-nav-law-419M60000002059-article-63-paragraph-1",
+      "search-nav-law-323AC0000000025-article-27_3-paragraph-1",
+      "search-nav-law-402M50000040038-article-10",
+      "search-nav-law-402M50000040038-article-24-paragraph-2",
+      "search-nav-law-323AC0000000025-article-27_6-paragraph-2:4be569d0b7b855e4",
+      "search-nav-law-323AC0000000025-article-27_3-paragraph-2",
+      "search-nav-law-402M50000040038-article-5-paragraph-5",
+      "search-nav-law-402M50000040038-article-22-paragraph-2",
+      "search-nav-law-402M50000040038-article-26-paragraph-5"
+    ],
+    "fetchable_article_ids": [
+      "law-419M60000002059-article-62_2",
+      "law-419M60000002059-article-63",
+      "law-323AC0000000025-article-27_3",
+      "law-402M50000040038-article-10",
+      "law-402M50000040038-article-24",
+      "law-323AC0000000025-article-27_6",
+      "law-402M50000040038-article-5",
+      "law-402M50000040038-article-22",
+      "law-402M50000040038-article-26"
+    ],
+    "search_candidates": [
+      {
+        "article_id": "law-323AC0000000025-article-27_6",
+        "document_id": "law-323AC0000000025",
+        "title": "金融商品取引法",
+        "headings": [
+          "第二十七条の六 （公開買付けに係る買付条件等の変更） 第2項"
+        ],
+        "discovery_work_item_ids": [
+          "wi-procedure"
+        ],
+        "discovery_hypothesis_ids": [
+          "h-procedure"
+        ],
+        "search_request_ids": [
+          "solver-tool-878247d181ab458eab33ffbe881673fb"
+        ],
+        "navigation_evidence_ids": [
+          "search-nav-law-323AC0000000025-article-27_6-paragraph-2:4be569d0b7b855e4"
+        ]
+      },
+      {
+        "article_id": "law-323AC0000000025-article-27_3",
+        "document_id": "law-323AC0000000025",
+        "title": "金融商品取引法",
+        "headings": [
+          "第二十七条の三 （公開買付開始公告及び公開買付届出書の提出） 第2項",
+          "第二十七条の三 （公開買付開始公告及び公開買付届出書の提出） 第1項"
+        ],
+        "discovery_work_item_ids": [
+          "wi-procedure"
+        ],
+        "discovery_hypothesis_ids": [
+          "h-procedure"
+        ],
+        "search_request_ids": [
+          "solver-tool-878247d181ab458eab33ffbe881673fb",
+          "solver-tool-9907c1b2a49e40b4857cf179cc71cc17"
+        ],
+        "navigation_evidence_ids": [
+          "search-nav-law-323AC0000000025-article-27_3-paragraph-2",
+          "search-nav-law-323AC0000000025-article-27_3-paragraph-1"
+        ]
+      },
+      {
+        "article_id": "law-402M50000040038-article-5",
+        "document_id": "law-402M50000040038",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "headings": [
+          "第五条 （買付け等の通知書の記載事項等） 第5項"
+        ],
+        "discovery_work_item_ids": [
+          "wi-procedure"
+        ],
+        "discovery_hypothesis_ids": [
+          "h-procedure"
+        ],
+        "search_request_ids": [
+          "solver-tool-878247d181ab458eab33ffbe881673fb"
+        ],
+        "navigation_evidence_ids": [
+          "search-nav-law-402M50000040038-article-5-paragraph-5"
+        ]
+      },
+      {
+        "article_id": "law-402M50000040038-article-22",
+        "document_id": "law-402M50000040038",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "headings": [
+          "第二十二条 （買付け等の期間の延長を要しない訂正届出書等） 第2項"
+        ],
+        "discovery_work_item_ids": [
+          "wi-procedure"
+        ],
+        "discovery_hypothesis_ids": [
+          "h-procedure"
+        ],
+        "search_request_ids": [
+          "solver-tool-878247d181ab458eab33ffbe881673fb"
+        ],
+        "navigation_evidence_ids": [
+          "search-nav-law-402M50000040038-article-22-paragraph-2"
+        ]
+      },
+      {
+        "article_id": "law-402M50000040038-article-26",
+        "document_id": "law-402M50000040038",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "headings": [
+          "第二十六条 （撤回条件から除外される場合） 第5項"
+        ],
+        "discovery_work_item_ids": [
+          "wi-procedure"
+        ],
+        "discovery_hypothesis_ids": [
+          "h-procedure"
+        ],
+        "search_request_ids": [
+          "solver-tool-878247d181ab458eab33ffbe881673fb"
+        ],
+        "navigation_evidence_ids": [
+          "search-nav-law-402M50000040038-article-26-paragraph-5"
+        ]
+      },
+      {
+        "article_id": "law-419M60000002059-article-62_2",
+        "document_id": "law-419M60000002059",
+        "title": "有価証券の取引等の規制に関する内閣府令",
+        "headings": [
+          "第六十二条の二 （伝達を受けた公開買付け等の実施に関する事実の内容） 第1項"
+        ],
+        "discovery_work_item_ids": [
+          "wi-procedure"
+        ],
+        "discovery_hypothesis_ids": [
+          "h-procedure"
+        ],
+        "search_request_ids": [
+          "solver-tool-9907c1b2a49e40b4857cf179cc71cc17"
+        ],
+        "navigation_evidence_ids": [
+          "search-nav-law-419M60000002059-article-62_2-paragraph-1"
+        ]
+      },
+      {
+        "article_id": "law-419M60000002059-article-63",
+        "document_id": "law-419M60000002059",
+        "title": "有価証券の取引等の規制に関する内閣府令",
+        "headings": [
+          "第六十三条 （公開買付け等に係る規制の適用除外） 第1項"
+        ],
+        "discovery_work_item_ids": [
+          "wi-procedure"
+        ],
+        "discovery_hypothesis_ids": [
+          "h-procedure"
+        ],
+        "search_request_ids": [
+          "solver-tool-9907c1b2a49e40b4857cf179cc71cc17"
+        ],
+        "navigation_evidence_ids": [
+          "search-nav-law-419M60000002059-article-63-paragraph-1"
+        ]
+      },
+      {
+        "article_id": "law-402M50000040038-article-10",
+        "document_id": "law-402M50000040038",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "headings": [
+          "第十条 （公開買付開始公告の掲載事項）"
+        ],
+        "discovery_work_item_ids": [
+          "wi-procedure"
+        ],
+        "discovery_hypothesis_ids": [
+          "h-procedure"
+        ],
+        "search_request_ids": [
+          "solver-tool-9907c1b2a49e40b4857cf179cc71cc17"
+        ],
+        "navigation_evidence_ids": [
+          "search-nav-law-402M50000040038-article-10"
+        ]
+      },
+      {
+        "article_id": "law-402M50000040038-article-24",
+        "document_id": "law-402M50000040038",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "headings": [
+          "第二十四条 （公開買付説明書の作成等） 第2項"
+        ],
+        "discovery_work_item_ids": [
+          "wi-procedure"
+        ],
+        "discovery_hypothesis_ids": [
+          "h-procedure"
+        ],
+        "search_request_ids": [
+          "solver-tool-9907c1b2a49e40b4857cf179cc71cc17"
+        ],
+        "navigation_evidence_ids": [
+          "search-nav-law-402M50000040038-article-24-paragraph-2"
+        ]
+      }
+    ],
+    "work_tree": [
+      {
+        "work_item_id": "wi-procedure",
+        "parent_work_item_id": null,
+        "question": "公開買付けの手続きが必要になる条件は何か",
+        "state": "open",
+        "resolution": null,
+        "basis_hypothesis_ids": [],
+        "replaces_work_item_id": null,
+        "hypothesis_ids": [
+          "h-procedure"
+        ],
+        "evidence_count": 0
+      },
+      {
+        "work_item_id": "wi-scope",
+        "parent_work_item_id": null,
+        "question": "公開買付けの対象となる株券等の範囲はどのようなものか",
+        "state": "open",
+        "resolution": null,
+        "basis_hypothesis_ids": [],
+        "replaces_work_item_id": null,
+        "hypothesis_ids": [],
+        "evidence_count": 0
+      },
+      {
+        "work_item_id": "wi-exception",
+        "parent_work_item_id": null,
+        "question": "公開買付けにおける主な例外は何か",
+        "state": "open",
+        "resolution": null,
+        "basis_hypothesis_ids": [],
+        "replaces_work_item_id": null,
+        "hypothesis_ids": [],
+        "evidence_count": 0
+      }
+    ],
+    "hypotheses": [
+      {
+        "hypothesis_id": "h-procedure",
+        "work_item_id": "wi-procedure",
+        "statement": "公開買付けを行う場合、一定の条件を満たす必要がある",
+        "judgment": "unresolved",
+        "evidence_ids": [],
+        "gaps": []
+      }
+    ],
+    "focus_work_items": [],
+    "affected_work_items": [],
+    "recent_tool_requests": [
+      {
+        "request_id": "solver-tool-9907c1b2a49e40b4857cf179cc71cc17",
+        "work_item_id": "wi-procedure",
+        "tool_name": "legal_search",
+        "arguments": {
+          "query": "公開買付けに関する手続きの政令で定める事項",
+          "doc_types": [
+            "law"
+          ],
+          "document_ids": []
+        },
+        "purpose": "公開買付けに関する手続きについて、政令で定める事項を確認するための法令を探す。",
+        "hypothesis_ids": [
+          "h-procedure"
+        ]
+      },
+      {
+        "request_id": "search-review-fetch-b6842e0d4e80926a00df81e9",
+        "work_item_id": "wi-procedure",
+        "tool_name": "fetch_articles",
+        "arguments": {
+          "article_ids": [
+            "law-402M50000040038-article-30",
+            "law-340CO0000000321-article-14_3_2",
+            "law-340CO0000000321-article-14"
+          ]
+        },
+        "purpose": "Solverが選んだ検索候補Article本文を取得する",
+        "hypothesis_ids": [
+          "h-procedure"
+        ]
+      }
+    ],
+    "recent_tool_results": [
+      {
+        "request_id": "solver-tool-9907c1b2a49e40b4857cf179cc71cc17",
+        "status": "succeeded",
+        "evidence_ids": [
+          "search-nav-law-402M50000040038-article-30-paragraph-1:8aff461b058a9c2b",
+          "search-nav-law-419M60000002059-article-62_2-paragraph-1",
+          "search-nav-law-340CO0000000321-article-14_3_2-paragraph-2",
+          "search-nav-law-340CO0000000321-article-14-paragraph-1-item-2",
+          "search-nav-law-419M60000002059-article-63-paragraph-1",
+          "search-nav-law-323AC0000000025-article-27_3-paragraph-1",
+          "search-nav-law-402M50000040038-article-10",
+          "search-nav-law-402M50000040038-article-24-paragraph-2"
+        ],
+        "evidence_count": 8,
+        "graph_projection_updated": false,
+        "error_code": null,
+        "elapsed_ms": 177,
+        "cycle_no": 2
+      },
+      {
+        "request_id": "search-review-fetch-b6842e0d4e80926a00df81e9",
+        "status": "succeeded",
+        "evidence_ids": [
+          "law-402M50000040038-article-30-paragraph-1",
+          "law-402M50000040038-article-30-paragraph-2",
+          "law-340CO0000000321-article-14_3_2-paragraph-1",
+          "law-340CO0000000321-article-14_3_2-paragraph-2",
+          "law-340CO0000000321-article-14_3_2-paragraph-3",
+          "law-340CO0000000321-article-14-paragraph-1",
+          "law-340CO0000000321-article-14-paragraph-1-item-1",
+          "law-340CO0000000321-article-14-paragraph-1-item-2",
+          "law-340CO0000000321-article-14-paragraph-1-item-3",
+          "law-340CO0000000321-article-14-paragraph-1-item-4",
+          "law-340CO0000000321-article-14-paragraph-1-item-5",
+          "law-340CO0000000321-article-14-paragraph-2"
+        ],
+        "evidence_count": 12,
+        "graph_projection_updated": false,
+        "error_code": null,
+        "elapsed_ms": 32,
+        "cycle_no": 2
+      }
+    ],
+    "evidence_manifest": [
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_6-paragraph-2:4be569d0b7b855e4",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_6-paragraph-2",
+        "title": "金融商品取引法",
+        "content_chars": 631,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-12",
+        "source_ref": "opensearch:law-340CO0000000321-article-12",
+        "title": "金融商品取引法施行令",
+        "content_chars": 400,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-7-paragraph-1-item-13",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-13",
+        "title": "金融商品取引法施行令",
+        "content_chars": 400,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-19-paragraph-2",
+        "source_ref": "opensearch:law-402M50000040038-article-19-paragraph-2",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "content_chars": 153,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_3-paragraph-2",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_3-paragraph-2",
+        "title": "金融商品取引法",
+        "content_chars": 400,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-5-paragraph-5",
+        "source_ref": "opensearch:law-402M50000040038-article-5-paragraph-5",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "content_chars": 168,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-22-paragraph-2",
+        "source_ref": "opensearch:law-402M50000040038-article-22-paragraph-2",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "content_chars": 112,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-26-paragraph-5",
+        "source_ref": "opensearch:law-402M50000040038-article-26-paragraph-5",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "content_chars": 100,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-12",
+        "source_ref": "opensearch:law-340CO0000000321-article-12",
+        "title": "金融商品取引法施行令",
+        "content_chars": 842,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1",
+        "title": "金融商品取引法施行令",
+        "content_chars": 136,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-1",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-1",
+        "title": "金融商品取引法施行令",
+        "content_chars": 411,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-2",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-2",
+        "title": "金融商品取引法施行令",
+        "content_chars": 182,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-3",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-3",
+        "title": "金融商品取引法施行令",
+        "content_chars": 204,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-4",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-4",
+        "title": "金融商品取引法施行令",
+        "content_chars": 204,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-5",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-5",
+        "title": "金融商品取引法施行令",
+        "content_chars": 237,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-6",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-6",
+        "title": "金融商品取引法施行令",
+        "content_chars": 268,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-7",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-7",
+        "title": "金融商品取引法施行令",
+        "content_chars": 466,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-8",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-8",
+        "title": "金融商品取引法施行令",
+        "content_chars": 569,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-9",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-9",
+        "title": "金融商品取引法施行令",
+        "content_chars": 251,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-10",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-10",
+        "title": "金融商品取引法施行令",
+        "content_chars": 245,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-11",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-11",
+        "title": "金融商品取引法施行令",
+        "content_chars": 459,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-12",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-12",
+        "title": "金融商品取引法施行令",
+        "content_chars": 276,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-13",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-13",
+        "title": "金融商品取引法施行令",
+        "content_chars": 737,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-14",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-14",
+        "title": "金融商品取引法施行令",
+        "content_chars": 158,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-15",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-15",
+        "title": "金融商品取引法施行令",
+        "content_chars": 165,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-16",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-16",
+        "title": "金融商品取引法施行令",
+        "content_chars": 403,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-1-item-17",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-17",
+        "title": "金融商品取引法施行令",
+        "content_chars": 374,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-2",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-2",
+        "title": "金融商品取引法施行令",
+        "content_chars": 478,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-3",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-3",
+        "title": "金融商品取引法施行令",
+        "content_chars": 299,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-4",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-4",
+        "title": "金融商品取引法施行令",
+        "content_chars": 38,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-5",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-5",
+        "title": "金融商品取引法施行令",
+        "content_chars": 875,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-7-paragraph-6",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-6",
+        "title": "金融商品取引法施行令",
+        "content_chars": 262,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-19-paragraph-1",
+        "source_ref": "opensearch:law-402M50000040038-article-19-paragraph-1",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "content_chars": 632,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-19-paragraph-2",
+        "source_ref": "opensearch:law-402M50000040038-article-19-paragraph-2",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "content_chars": 153,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-19-paragraph-3",
+        "source_ref": "opensearch:law-402M50000040038-article-19-paragraph-3",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "content_chars": 254,
+        "created_cycle": 1,
+        "material_included": false
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-30-paragraph-1:8aff461b058a9c2b",
+        "source_ref": "opensearch:law-402M50000040038-article-30-paragraph-1",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "content_chars": 421,
+        "created_cycle": 2,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-419M60000002059-article-62_2-paragraph-1",
+        "source_ref": "opensearch:law-419M60000002059-article-62_2-paragraph-1",
+        "title": "有価証券の取引等の規制に関する内閣府令",
+        "content_chars": 78,
+        "created_cycle": 2,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-14_3_2-paragraph-2",
+        "source_ref": "opensearch:law-340CO0000000321-article-14_3_2-paragraph-2",
+        "title": "金融商品取引法施行令",
+        "content_chars": 100,
+        "created_cycle": 2,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-14-paragraph-1-item-2",
+        "source_ref": "opensearch:law-340CO0000000321-article-14-paragraph-1-item-2",
+        "title": "金融商品取引法施行令",
+        "content_chars": 400,
+        "created_cycle": 2,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-419M60000002059-article-63-paragraph-1",
+        "source_ref": "opensearch:law-419M60000002059-article-63-paragraph-1",
+        "title": "有価証券の取引等の規制に関する内閣府令",
+        "content_chars": 189,
+        "created_cycle": 2,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_3-paragraph-1",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_3-paragraph-1",
+        "title": "金融商品取引法",
+        "content_chars": 300,
+        "created_cycle": 2,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-10",
+        "source_ref": "opensearch:law-402M50000040038-article-10",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "content_chars": 293,
+        "created_cycle": 2,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-24-paragraph-2",
+        "source_ref": "opensearch:law-402M50000040038-article-24-paragraph-2",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "content_chars": 111,
+        "created_cycle": 2,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-30-paragraph-1",
+        "source_ref": "opensearch:law-402M50000040038-article-30-paragraph-1",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "content_chars": 209,
+        "created_cycle": 2,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-30-paragraph-2",
+        "source_ref": "opensearch:law-402M50000040038-article-30-paragraph-2",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "content_chars": 138,
+        "created_cycle": 2,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14_3_2-paragraph-1",
+        "source_ref": "opensearch:law-340CO0000000321-article-14_3_2-paragraph-1",
+        "title": "金融商品取引法施行令",
+        "content_chars": 59,
+        "created_cycle": 2,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14_3_2-paragraph-2",
+        "source_ref": "opensearch:law-340CO0000000321-article-14_3_2-paragraph-2",
+        "title": "金融商品取引法施行令",
+        "content_chars": 100,
+        "created_cycle": 2,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14_3_2-paragraph-3",
+        "source_ref": "opensearch:law-340CO0000000321-article-14_3_2-paragraph-3",
+        "title": "金融商品取引法施行令",
+        "content_chars": 271,
+        "created_cycle": 2,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14-paragraph-1",
+        "source_ref": "opensearch:law-340CO0000000321-article-14-paragraph-1",
+        "title": "金融商品取引法施行令",
+        "content_chars": 98,
+        "created_cycle": 2,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14-paragraph-1-item-1",
+        "source_ref": "opensearch:law-340CO0000000321-article-14-paragraph-1-item-1",
+        "title": "金融商品取引法施行令",
+        "content_chars": 702,
+        "created_cycle": 2,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14-paragraph-1-item-2",
+        "source_ref": "opensearch:law-340CO0000000321-article-14-paragraph-1-item-2",
+        "title": "金融商品取引法施行令",
+        "content_chars": 462,
+        "created_cycle": 2,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14-paragraph-1-item-3",
+        "source_ref": "opensearch:law-340CO0000000321-article-14-paragraph-1-item-3",
+        "title": "金融商品取引法施行令",
+        "content_chars": 713,
+        "created_cycle": 2,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14-paragraph-1-item-4",
+        "source_ref": "opensearch:law-340CO0000000321-article-14-paragraph-1-item-4",
+        "title": "金融商品取引法施行令",
+        "content_chars": 208,
+        "created_cycle": 2,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14-paragraph-1-item-5",
+        "source_ref": "opensearch:law-340CO0000000321-article-14-paragraph-1-item-5",
+        "title": "金融商品取引法施行令",
+        "content_chars": 127,
+        "created_cycle": 2,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14-paragraph-2",
+        "source_ref": "opensearch:law-340CO0000000321-article-14-paragraph-2",
+        "title": "金融商品取引法施行令",
+        "content_chars": 157,
+        "created_cycle": 2,
+        "material_included": true
+      }
+    ],
+    "graph_review_batch": {
+      "candidates": [],
+      "remaining_unreviewed_count": 0
+    },
+    "graph_review_ledger": [],
+    "required_graph_review_request_ids": [],
+    "required_search_review_request_ids": [],
+    "material_evidence": [
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-30-paragraph-1:8aff461b058a9c2b",
+        "source_ref": "opensearch:law-402M50000040038-article-30-paragraph-1",
+        "content": "[一致箇所1] 第三十条 （公開買付けの結果の公告の掲載事項） 第1項\n法第二十七条の十三第一項に規定する内閣府令で定める事項は、次に掲げる事項とする。公開買付者の氏名又は名称及び住所又は所在地公開買付けの内容に関する事項のうち次に掲げるもの対象者の名称買付け等に係る株券等の種類公開買付期間公開買付届出書において法第二十七条の十三第四項第一号に掲げる条件を付した場合における当該条件の成否応募株券等の数及び買付け等を行う株券等の数決済の方法及び開始日公開買付報告書の写しを縦覧に供する場所\n\n[一致箇所2] 第三十条 （公開買付けの結果の公告の掲載事項） 第2項\n２公開買付者は、法第二十七条の十三第一項の規定により公告又は公表を行うに当たり、あん分比例方式により買付け等をする株券等の数の公告又は公表を行うことが困難である場合には、当該株券等の数以外の事項の公告又は公表を行った後、遅滞なく、当該株券等の数の公告又は公表を行うものとする。",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-30",
+          "sourceContentUnitId": "law-402M50000040038-article-30-paragraph-1",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第三十条 （公開買付けの結果の公告の掲載事項） 第1項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": 2,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-30-paragraph-1",
+        "source_ref": "opensearch:law-402M50000040038-article-30-paragraph-1",
+        "content": "法第二十七条の十三第一項に規定する内閣府令で定める事項は、次に掲げる事項とする。公開買付者の氏名又は名称及び住所又は所在地公開買付けの内容に関する事項のうち次に掲げるもの対象者の名称買付け等に係る株券等の種類公開買付期間公開買付届出書において法第二十七条の十三第四項第一号に掲げる条件を付した場合における当該条件の成否応募株券等の数及び買付け等を行う株券等の数決済の方法及び開始日公開買付報告書の写しを縦覧に供する場所",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-30",
+          "sourceContentUnitId": "law-402M50000040038-article-30-paragraph-1",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第三十条 （公開買付けの結果の公告の掲載事項） 第1項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-419M60000002059-article-62_2-paragraph-1",
+        "source_ref": "opensearch:law-419M60000002059-article-62_2-paragraph-1",
+        "content": "1法第百六十七条第五項第八号ハに規定する公開買付け等の実施に関する事実の内容として内閣府令で定める事項は、次に掲げる場合の区分に応じ、次に掲げる事項とする。",
+        "title": "有価証券の取引等の規制に関する内閣府令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-419M60000002059-article-62_2",
+          "sourceContentUnitId": "law-419M60000002059-article-62_2-paragraph-1",
+          "documentId": "law-419M60000002059",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第六十二条の二 （伝達を受けた公開買付け等の実施に関する事実の内容） 第1項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/419M60000002059",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-30-paragraph-2",
+        "source_ref": "opensearch:law-402M50000040038-article-30-paragraph-2",
+        "content": "２公開買付者は、法第二十七条の十三第一項の規定により公告又は公表を行うに当たり、あん分比例方式により買付け等をする株券等の数の公告又は公表を行うことが困難である場合には、当該株券等の数以外の事項の公告又は公表を行った後、遅滞なく、当該株券等の数の公告又は公表を行うものとする。",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-30",
+          "sourceContentUnitId": "law-402M50000040038-article-30-paragraph-2",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第三十条 （公開買付けの結果の公告の掲載事項） 第2項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-14_3_2-paragraph-2",
+        "source_ref": "opensearch:law-340CO0000000321-article-14_3_2-paragraph-2",
+        "content": "２法第二十七条の二十二の二第一項第一号に規定する政令で定めるものは、投資信託及び投資法人に関する法律第八十条の二第一項（同法第八十条の五第二項の規定により読み替えて適用する場合を含む。）の規定とする。",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-14_3_2",
+          "sourceContentUnitId": "law-340CO0000000321-article-14_3_2-paragraph-2",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第十四条の三の二 （公開買付けの適用範囲） 第2項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14_3_2-paragraph-1",
+        "source_ref": "opensearch:law-340CO0000000321-article-14_3_2-paragraph-1",
+        "content": "法第二十七条の二十二の二第一項に規定する政令で定める取引は、店頭売買有価証券市場における店頭売買有価証券の取引とする。",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-14_3_2",
+          "sourceContentUnitId": "law-340CO0000000321-article-14_3_2-paragraph-1",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第十四条の三の二 （公開買付けの適用範囲） 第1項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-14-paragraph-1-item-2",
+        "source_ref": "opensearch:law-340CO0000000321-article-14-paragraph-1-item-2",
+        "content": "法第二十七条の十一第一項ただし書に規定する政令で定める事情は、次に掲げるものとする。ただし、第一号から第三号までに掲げるものにあつては、軽微なものとして内閣府令で定める基準に該当するものを除く。\n第2号　対象者の業務執行を決定する機関が次に掲げる場合の区分に応じ、次に定める決定をしたこと（公開買付開始公告を行つた日以後に公表されたものに限る。）。公開買付開始公告をした日において、対象者の業務執行を決定する機関が当該公開買付けの後に当該公開買付者の株券等所有割合を内閣府令で定める割合以上減少させることとなる新株の発行その他の行為（当該公開買付けに係る買付け等の期間の末日後に行うものに限る。）を行うことがある旨の決定を既に行つており、かつ、当該決定の内容を公表している場合当該決定を維持する旨の決定公開買付開始公告をした日において、対象者又はその子会社が会社法第百八条第一項第八号又は第九号に掲げ",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-14",
+          "sourceContentUnitId": "law-340CO0000000321-article-14-paragraph-1-item-2",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第十四条 （公開買付けの撤回等） 第1項第2号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": true
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14_3_2-paragraph-2",
+        "source_ref": "opensearch:law-340CO0000000321-article-14_3_2-paragraph-2",
+        "content": "２法第二十七条の二十二の二第一項第一号に規定する政令で定めるものは、投資信託及び投資法人に関する法律第八十条の二第一項（同法第八十条の五第二項の規定により読み替えて適用する場合を含む。）の規定とする。",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-14_3_2",
+          "sourceContentUnitId": "law-340CO0000000321-article-14_3_2-paragraph-2",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第十四条の三の二 （公開買付けの適用範囲） 第2項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-419M60000002059-article-63-paragraph-1",
+        "source_ref": "opensearch:law-419M60000002059-article-63-paragraph-1",
+        "content": "1法第百六十七条第五項第十四号に規定する公開買付者等の公開買付け等事実を知る前に締結された当該公開買付け等に係る株券等に係る買付け等若しくは売付け等に関する契約の履行又は公開買付者等の公開買付け等事実を知る前に決定された当該公開買付け等に係る株券等に係る買付け等若しくは売付け等の計画の実行として買付け等又は売付け等をする場合のうち内閣府令で定める場合は、次に掲げる場合とする。",
+        "title": "有価証券の取引等の規制に関する内閣府令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-419M60000002059-article-63",
+          "sourceContentUnitId": "law-419M60000002059-article-63-paragraph-1",
+          "documentId": "law-419M60000002059",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第六十三条 （公開買付け等に係る規制の適用除外） 第1項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/419M60000002059",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14_3_2-paragraph-3",
+        "source_ref": "opensearch:law-340CO0000000321-article-14_3_2-paragraph-3",
+        "content": "３法第二十七条の二十二の二第一項第二号に規定する多数の者が買付け等（同項に規定する買付け等をいう。以下この節において同じ。）に関する事項を知り得る状態に置かれる方法により行われる買付け等として政令で定めるものは、当該買付け等に関する事項（当該買付け等に係る上場株券等（法第二十四条の六第一項に規定する上場株券等をいう。以下この節において同じ。）の買付け等の申込み又は売付け等の申込みの勧誘を行う旨の文言が含まれるものに限る。）を新聞若しくは雑誌に掲載し、又は文書、放送、映画その他の方法を用いることにより多数の者に知らせて行う買付け等とする。",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-14_3_2",
+          "sourceContentUnitId": "law-340CO0000000321-article-14_3_2-paragraph-3",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第十四条の三の二 （公開買付けの適用範囲） 第3項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_3-paragraph-1",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_3-paragraph-1",
+        "content": "前条第一項本文の規定により同項に規定する公開買付け（以下この節において「公開買付け」という。）によつて株券等の買付け等を行わなければならない者は、政令で定めるところにより、当該公開買付けについて、その目的、買付け等の価格、買付予定の株券等の数（株券については株式の数を、その他のものについては内閣府令で定める数をいう。以下この節において同じ。）、買付け等の期間その他の内閣府令で定める事項を公告しなければならない。この場合において、当該買付け等の期間が政令で定める期間より短いときは、第二十七条の十第三項の規定により当該買付け等の期間が延長されることがある旨を当該公告において明示しなければならない。",
+        "title": "金融商品取引法",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_3",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_3-paragraph-1",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十七条の三 （公開買付開始公告及び公開買付届出書の提出） 第1項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14-paragraph-1",
+        "source_ref": "opensearch:law-340CO0000000321-article-14-paragraph-1",
+        "content": "1法第二十七条の十一第一項ただし書に規定する政令で定める事情は、次に掲げるものとする。ただし、第一号から第三号までに掲げるものにあつては、軽微なものとして内閣府令で定める基準に該当するものを除く。",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-14",
+          "sourceContentUnitId": "law-340CO0000000321-article-14-paragraph-1",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第十四条 （公開買付けの撤回等） 第1項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-10",
+        "source_ref": "opensearch:law-402M50000040038-article-10",
+        "content": "（公開買付開始公告の掲載事項）\n第十条\n法第二十七条の三第一項に規定する内閣府令で定める事項は、次に掲げる事項とする。公開買付者の氏名又は名称及び住所又は所在地公開買付けにより株券等の買付け等を行う旨公開買付けの目的公開買付けの内容に関する事項のうち次に掲げるもの対象者の名称買付け等を行う株券等の種類買付け等の期間、買付け等の価格及び買付予定の株券等の数買付け等の申込みに対する承諾又は売付け等の申込みの方法及び場所買付け等の決済をする金融商品取引業者又は銀行等の名称、決済の開始日、方法及び場所並びに株券等の返還方法その他買付け等の条件及び方法公開買付届出書の写しを縦覧に供する場所",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-10",
+          "sourceContentUnitId": "law-402M50000040038-article-10",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第十条 （公開買付開始公告の掲載事項）",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14-paragraph-1-item-1",
+        "source_ref": "opensearch:law-340CO0000000321-article-14-paragraph-1-item-1",
+        "content": "法第二十七条の十一第一項ただし書に規定する政令で定める事情は、次に掲げるものとする。ただし、第一号から第三号までに掲げるものにあつては、軽微なものとして内閣府令で定める基準に該当するものを除く。\n第1号　対象者又はその子会社（会社法第二条第三号に規定する子会社をいう。以下この条及び第十四条の八の二において同じ。）の業務執行を決定する機関が次に掲げる事項を行うことについての決定をしたこと（公開買付開始公告を行つた日以後に公表されたものに限る。）。株式交換株式移転株式交付会社の分割合併解散（合併による解散を除く。）破産手続開始、再生手続開始又は更生手続開始の申立て資本金の額の減少事業の全部又は一部の譲渡、譲受け、休止又は廃止金融商品取引所に対する株券等の上場の廃止に係る申請認可金融商品取引業協会に対する株券等の登録の取消しに係る申請預金保険法第七十四条第五項の規定による申出株式又は投資口の分割株式若しくは新株予約権の割当て（新たに払込みをさせないで行うものに限る。）又は新投資口予約権の割当て株式、新株予約権、新株予約権付社債又は投資口の発行（ワ及びカに掲げるものを除く。）自己株式（会社法第百十三条第四項に規定する自己株式をいう。）の処分（カに掲げるものを除く。）既に発行されている株式について、会社法第百八条第一項第八号又は第九号に掲げる事項について異なる定めをすること。重要な財産の処分又は譲渡多額の借財イからツまでに掲げる事項に準ずる事項で公開買付者が公開買付開始公告及び公開買付届出書（法第二十七条の三第二項に規定する公開買付届出書をいう。以下この条において同じ。）において指定したもの",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-14",
+          "sourceContentUnitId": "law-340CO0000000321-article-14-paragraph-1-item-1",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第十四条 （公開買付けの撤回等） 第1項第1号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-24-paragraph-2",
+        "source_ref": "opensearch:law-402M50000040038-article-24-paragraph-2",
+        "content": "２法第二十七条の九第一項に規定する内閣府令で定める事項は、次に掲げるものとする。当該公開買付けが法第二章の二第一節の規定の適用を受ける公開買付けである旨当該公開買付説明書が法第二十七条の九の規定による公開買付説明書である旨",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-24",
+          "sourceContentUnitId": "law-402M50000040038-article-24-paragraph-2",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十四条 （公開買付説明書の作成等） 第2項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14-paragraph-1-item-2",
+        "source_ref": "opensearch:law-340CO0000000321-article-14-paragraph-1-item-2",
+        "content": "法第二十七条の十一第一項ただし書に規定する政令で定める事情は、次に掲げるものとする。ただし、第一号から第三号までに掲げるものにあつては、軽微なものとして内閣府令で定める基準に該当するものを除く。\n第2号　対象者の業務執行を決定する機関が次に掲げる場合の区分に応じ、次に定める決定をしたこと（公開買付開始公告を行つた日以後に公表されたものに限る。）。公開買付開始公告をした日において、対象者の業務執行を決定する機関が当該公開買付けの後に当該公開買付者の株券等所有割合を内閣府令で定める割合以上減少させることとなる新株の発行その他の行為（当該公開買付けに係る買付け等の期間の末日後に行うものに限る。）を行うことがある旨の決定を既に行つており、かつ、当該決定の内容を公表している場合当該決定を維持する旨の決定公開買付開始公告をした日において、対象者又はその子会社が会社法第百八条第一項第八号又は第九号に掲げる事項について異なる定めをした内容の異なる二以上の種類の株式に係る株券等を発行している場合当該異なる定めを変更しない旨の決定",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-14",
+          "sourceContentUnitId": "law-340CO0000000321-article-14-paragraph-1-item-2",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第十四条 （公開買付けの撤回等） 第1項第2号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14-paragraph-1-item-3",
+        "source_ref": "opensearch:law-340CO0000000321-article-14-paragraph-1-item-3",
+        "content": "法第二十七条の十一第一項ただし書に規定する政令で定める事情は、次に掲げるものとする。ただし、第一号から第三号までに掲げるものにあつては、軽微なものとして内閣府令で定める基準に該当するものを除く。\n第3号　対象者に次に掲げる事実が発生したこと（公開買付開始公告を行つた日以後に発生したものに限る。）。ただし、イ、ハ、ホ及びトにあつては、公開買付者及びその特別関係者によつて行われた場合を除く。事業の差止めその他これに準ずる処分を求める仮処分命令の申立てがなされたこと。免許の取消し、事業の停止その他これらに準ずる行政庁による法令に基づく処分がなされたこと。当該対象者以外の者による破産手続開始、再生手続開始、更生手続開始、企業担保権の実行又は企業価値担保権の実行の申立て（以下「破産手続開始の申立て等」という。）がなされたこと。手形若しくは小切手の不渡り（支払資金の不足を事由とするものに限る。）又は手形交換所による取引停止処分（以下「不渡り等」という。）があつたこと。主要取引先（前事業年度における売上高又は仕入高が売上高の総額又は仕入高の総額の百分の十以上である取引先をいう。）から取引の停止を受けたこと。災害に起因する損害財産権上の請求に係る訴えが提起されたこと。株券の上場の廃止（当該株券を上場している全ての金融商品取引所において上場が廃止された場合に限る。）株券の登録の取消し（当該株券を登録している全ての認可金融商品取引業協会において登録が取り消された場合（当該株券が上場されたことによる場合を除く。）に限る。）イからリまでに掲げる事実に準ずる事実で公開買付者が公開買付開始公告及び公開買付届出書において指定したもの",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-14",
+          "sourceContentUnitId": "law-340CO0000000321-article-14-paragraph-1-item-3",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第十四条 （公開買付けの撤回等） 第1項第3号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14-paragraph-1-item-4",
+        "source_ref": "opensearch:law-340CO0000000321-article-14-paragraph-1-item-4",
+        "content": "法第二十七条の十一第一項ただし書に規定する政令で定める事情は、次に掲げるものとする。ただし、第一号から第三号までに掲げるものにあつては、軽微なものとして内閣府令で定める基準に該当するものを除く。\n第4号　株券等の取得につき他の法令に基づく行政庁の許可、認可、承認その他これらに類するもの（以下この号において「許可等」という。）を必要とする場合において、公開買付期間の末日の前日までに、当該許可等を得られなかつたこと。",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-14",
+          "sourceContentUnitId": "law-340CO0000000321-article-14-paragraph-1-item-4",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第十四条 （公開買付けの撤回等） 第1項第4号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14-paragraph-1-item-5",
+        "source_ref": "opensearch:law-340CO0000000321-article-14-paragraph-1-item-5",
+        "content": "法第二十七条の十一第一項ただし書に規定する政令で定める事情は、次に掲げるものとする。ただし、第一号から第三号までに掲げるものにあつては、軽微なものとして内閣府令で定める基準に該当するものを除く。\n第5号　その他前各号に準ずるものとして内閣府令で定めるもの",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-14",
+          "sourceContentUnitId": "law-340CO0000000321-article-14-paragraph-1-item-5",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第十四条 （公開買付けの撤回等） 第1項第5号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-340CO0000000321-article-14-paragraph-2",
+        "source_ref": "opensearch:law-340CO0000000321-article-14-paragraph-2",
+        "content": "２法第二十七条の十一第一項ただし書に規定する政令で定める重要な事情の変更は、次に掲げる事項とする。死亡後見開始の審判を受けたこと。解散破産手続開始の決定、再生手続開始の決定又は更生手続開始の決定を受けたこと。当該公開買付者及びその特別関係者以外の者による破産手続開始の申立て等がなされたこと。不渡り等があつたこと。",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-14",
+          "sourceContentUnitId": "law-340CO0000000321-article-14-paragraph-2",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第十四条 （公開買付けの撤回等） 第2項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_6-paragraph-2:4be569d0b7b855e4",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_6-paragraph-2",
+        "content": "[一致箇所1] 第二十七条の六 （公開買付けに係る買付条件等の変更） 第2項\n２公開買付者は、前項各号に規定するもの以外の買付条件等の変更を行うことができる。この場合において、当該変更を行おうとする公開買付者は、公開買付期間中に、政令で定めるところにより、買付条件等の変更の内容（第二十七条の十第三項の規定により買付け等の期間が延長された場合における当該買付け等の期間の延長を除く。）その他内閣府令で定める事項を公告しなければならない。\n\n[一致箇所2] 第二十七条の六 （公開買付けに係る買付条件等の変更） 第1項\n公開買付者は、次に掲げる買付条件等の変更を行うことができない。買付け等の価格の引下げ（公開買付開始公告及び公開買付届出書において公開買付期間中に対象者（第二十七条の十第一項に規定する対象者をいう。）が株式の分割その他の政令で定める行為を行つたときは内閣府令で定める基準に従い買付け等の価格の引下げを行うことがある旨の条件を付した場合に行うものを除く。）買付予定の株券等の数の減少買付け等の期間の短縮その他政令で定める買付条件等の変更\n\n[一致箇所3] 第二十七条の六 （公開買付けに係る買付条件等の変更） 第3項\n３前項の規定による公告を公開買付期間の末日までに行うことが困難である場合には、公開買付者は、当該末日までに同項に規定する内容及び事項を内閣府令で定めるところにより公表し、その後直ちに同項の規定の例により公告を行わなければならない。",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_6",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_6-paragraph-2",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十七条の六 （公開買付けに係る買付条件等の変更） 第2項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": 3,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_3-paragraph-2",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_3-paragraph-2",
+        "content": "２前項の規定による公告（以下この節において「公開買付開始公告」という。）を行つた者（以下この節において「公開買付者」という。）は、内閣府令で定めるところにより、当該公開買付開始公告を行つた日に、次に掲げる事項を記載した書類及び内閣府令で定める添付書類（以下この節並びに第百九十七条第一項第三号及び第百九十七条の二第一項第五号において「公開買付届出書」という。）を内閣総理大臣に提出をしなければならない。ただし、当該提出をしなければならない日（以下この項において「提出日」という。）が日曜日その他内閣府令で定める日（以下この項において「日曜日等」という。）に該当するときは、日曜日等以外の日であつて、当該提出日後に最初に到来する日に提出するものとする。買付け等の価格、買付予定の株券等の数、買付け等の期間（前項後段の規定により公告において明示した内容を含む。）、買付け等に係る受渡しその他の決済及び公開",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_3",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_3-paragraph-2",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十七条の三 （公開買付開始公告及び公開買付届出書の提出） 第2項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": true
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-5-paragraph-5",
+        "source_ref": "opensearch:law-402M50000040038-article-5-paragraph-5",
+        "content": "５公開買付者（公開買付けによる株券等の買付け等を行おうとする者を含む。）が第三項第三号に規定する承認を受けようとする場合には、次に掲げる事項を記載した承認申請書を関東財務局長に提出しなければならない。当該公開買付けの内容当該公開買付けに関して当該承認を受けようとする株券等の種類及びその内容当該公開買付けに関して当該承認を必要とする理由",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-5",
+          "sourceContentUnitId": "law-402M50000040038-article-5-paragraph-5",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第五条 （買付け等の通知書の記載事項等） 第5項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-22-paragraph-2",
+        "source_ref": "opensearch:law-402M50000040038-article-22-paragraph-2",
+        "content": "２公開買付者が前項第三号に規定する承認を受けようとする場合には、次に掲げる事項を記載した承認申請書を関東財務局長に提出しなければならない。当該公開買付けの内容当該訂正届出書の内容当該公開買付けに関して当該承認を必要とする理由",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-22",
+          "sourceContentUnitId": "law-402M50000040038-article-22-paragraph-2",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十二条 （買付け等の期間の延長を要しない訂正届出書等） 第2項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-26-paragraph-5",
+        "source_ref": "opensearch:law-402M50000040038-article-26-paragraph-5",
+        "content": "５公開買付者が前項第七号に規定する承認を受けようとする場合には、次に掲げる事項を記載した承認申請書を関東財務局長に提出しなければならない。当該公開買付けの内容当該公開買付けの撤回等を行う日及びその理由",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-26",
+          "sourceContentUnitId": "law-402M50000040038-article-26-paragraph-5",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十六条 （撤回条件から除外される場合） 第5項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      }
+    ],
+    "omitted_evidence_ids": [
+      "search-nav-law-340CO0000000321-article-12",
+      "search-nav-law-340CO0000000321-article-7-paragraph-1-item-13",
+      "search-nav-law-402M50000040038-article-19-paragraph-2",
+      "law-340CO0000000321-article-12",
+      "law-340CO0000000321-article-7-paragraph-1",
+      "law-340CO0000000321-article-7-paragraph-1-item-1",
+      "law-340CO0000000321-article-7-paragraph-1-item-2",
+      "law-340CO0000000321-article-7-paragraph-1-item-3",
+      "law-340CO0000000321-article-7-paragraph-1-item-4",
+      "law-340CO0000000321-article-7-paragraph-1-item-5",
+      "law-340CO0000000321-article-7-paragraph-1-item-6",
+      "law-340CO0000000321-article-7-paragraph-1-item-7",
+      "law-340CO0000000321-article-7-paragraph-1-item-8",
+      "law-340CO0000000321-article-7-paragraph-1-item-9",
+      "law-340CO0000000321-article-7-paragraph-1-item-10",
+      "law-340CO0000000321-article-7-paragraph-1-item-11",
+      "law-340CO0000000321-article-7-paragraph-1-item-12",
+      "law-340CO0000000321-article-7-paragraph-1-item-13",
+      "law-340CO0000000321-article-7-paragraph-1-item-14",
+      "law-340CO0000000321-article-7-paragraph-1-item-15",
+      "law-340CO0000000321-article-7-paragraph-1-item-16",
+      "law-340CO0000000321-article-7-paragraph-1-item-17",
+      "law-340CO0000000321-article-7-paragraph-2",
+      "law-340CO0000000321-article-7-paragraph-3",
+      "law-340CO0000000321-article-7-paragraph-4",
+      "law-340CO0000000321-article-7-paragraph-5",
+      "law-340CO0000000321-article-7-paragraph-6",
+      "law-402M50000040038-article-19-paragraph-1",
+      "law-402M50000040038-article-19-paragraph-2",
+      "law-402M50000040038-article-19-paragraph-3"
+    ],
+    "required_dependency_kind": "lower_norm",
+    "required_dependency_work_item_ids": [
+      "wi-procedure"
+    ],
+    "dependency_decisions": [
+      {
+        "dependency_kind": "lower_norm",
+        "work_item_id": "wi-procedure",
+        "status": "needs_action",
+        "reason": "公開買付けに関する手続きについて、政令で定める事項の確認が必要であるため。",
+        "basis_evidence_ids": [
+          "law-340CO0000000321-article-12",
+          "law-402M50000040038-article-19-paragraph-1"
+        ],
+        "action_request_id": "solver-tool-9907c1b2a49e40b4857cf179cc71cc17"
+      }
+    ],
+    "reviewer_findings": [],
+    "contract_feedback": null
+  },
+  "observedSolverDecision": {
+    "next": "continue",
+    "decision_reason": "公開買付けに関する手続きについて、政令で定める事項の確認が必要であるため。",
+    "start_next_cycle": true,
+    "update": {
+      "add_work_items": [],
+      "update_work_items": [],
+      "add_hypotheses": [],
+      "update_hypotheses": [
+        {
+          "hypothesis_id": "h-procedure",
+          "judgment": "unresolved",
+          "evidence_ids": [],
+          "gaps": [
+            "公開買付けに関する手続きについて、政令で定める事項を確認する必要がある。"
+          ]
+        }
+      ],
+      "impact_decisions": []
+    },
+    "next_focus_work_item_ids": [
+      "wi-procedure"
+    ],
+    "retain_evidence_ids": [
+      "law-340CO0000000321-article-14_3_2-paragraph-1",
+      "law-340CO0000000321-article-14_3_2-paragraph-2",
+      "law-340CO0000000321-article-14_3_2-paragraph-3",
+      "law-402M50000040038-article-30-paragraph-1",
+      "law-402M50000040038-article-30-paragraph-2",
+      "law-402M50000040038-article-19-paragraph-1",
+      "law-402M50000040038-article-19-paragraph-2",
+      "law-402M50000040038-article-19-paragraph-3",
+      "law-402M50000040038-article-30-paragraph-1",
+      "law-402M50000040038-article-30-paragraph-2",
+      "law-340CO0000000321-article-14_3_2-paragraph-1",
+      "law-340CO0000000321-article-14_3_2-paragraph-2"
+    ],
+    "review_finding_resolutions": [],
+    "dependency_decisions": [
+      {
+        "dependency_kind": "lower_norm",
+        "work_item_id": "wi-procedure",
+        "status": "needs_action",
+        "reason": "公開買付けに関する手続きについて、政令で定める事項の確認が必要であるため。",
+        "basis_evidence_ids": [
+          "law-340CO0000000321-article-14_3_2-paragraph-1",
+          "law-340CO0000000321-article-14_3_2-paragraph-2"
+        ],
+        "action_request_id": null
+      }
+    ],
+    "graph_candidate_review": null,
+    "search_candidate_review": null,
+    "frontier_re_adoptions": [],
+    "deferred_frontier_resolutions": [],
+    "unreviewed_graph_resolution": null,
+    "tool_requests": [],
+    "answer": null
+  },
+  "expectedViolation": "retained evidence IDs must be unique"
+}

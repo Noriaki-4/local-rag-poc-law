@@ -96,11 +96,10 @@ def test_solver_contract_glossary_is_generated_from_field_descriptions() -> None
 
     assert "`SolverContext.fetchable_article_ids`" in glossary
     assert "fetch_articlesに指定できるArticle ID" in glossary
-    assert "`ToolRequest.arguments`" in glossary
-    assert "正規Tool名、用途、入力Schema、戻り値説明" in glossary
-    assert "`Hypothesis.gaps`" in glossary
-    assert "`WorkItemImpactDecision.action`" in glossary
-    assert "`GraphFrontierDecision.action`" in glossary
+    assert "`SolverDecision.retain_evidence_ids`" in glossary
+    assert "同じIDは重複させず1回だけ指定" in glossary
+    assert "`ToolRequest.arguments`" not in glossary
+    assert "入れ子の出力項目はProvider schema" in glossary
 
 
 @pytest.mark.parametrize("model_type", [SolverContext, SolverDecision])
@@ -144,6 +143,21 @@ def test_provider_update_schema_uses_the_canonical_field_descriptions() -> None:
         WorkItemImpactDecision,
         "action",
     )
+
+
+def test_provider_schema_explains_retained_evidence_uniqueness() -> None:
+    context = build_solver_context(
+        CaseState(case_id="case-retained-evidence", question="質問"),
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+    )
+
+    retained = _solver_compact_transport_schema(context)["properties"][
+        "retain_evidence_ids"
+    ]
+
+    assert "同じIDは重複させず1回だけ指定" in retained["description"]
 
 
 @pytest.mark.parametrize(
@@ -305,6 +319,28 @@ class FakeStructuredLLM:
     def generate_structured_json(self, **kwargs: Any) -> StructuredJSONResult:
         self.calls.append(kwargs)
         decision = self.payloads.pop(0)
+        if "question_requirement_checklist" in kwargs["schema"]["properties"]:
+            work_items = decision.get("update", {}).get("add_work_items", [])
+            return StructuredJSONResult(
+                payload={
+                    "question_requirement_checklist": [
+                        item["question"] for item in work_items
+                    ],
+                    "next": decision["next"],
+                    "decision_reason": decision["decision_reason"],
+                    "start_next_cycle": False,
+                    "update": decision["update"],
+                    "next_focus_work_item_ids": decision.get(
+                        "next_focus_work_item_ids", []
+                    ),
+                    "tool_requests": decision.get("tool_requests", []),
+                },
+                provider="fake",
+                model=kwargs["model"],
+                latencyMs=1,
+                inputTokens=10,
+                outputTokens=10,
+            )
         if "next" not in kwargs["schema"]["properties"]:
             search_request_schema = kwargs["schema"]["properties"].get(
                 "search_request_ids"
@@ -448,15 +484,11 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert "decision_json" not in llm.calls[0]["schema"]["properties"]
     assert "next" in llm.calls[0]["schema"]["properties"]
     assert "decision_reason" in llm.calls[0]["schema"]["required"]
-    assert "dependency_decisions" in llm.calls[0]["schema"]["properties"]
+    assert "question_requirement_checklist" in (
+        llm.calls[0]["schema"]["properties"]
+    )
+    assert "dependency_decisions" not in llm.calls[0]["schema"]["properties"]
     assert "dependency_decisions_json" not in llm.calls[0]["schema"]["properties"]
-    initial_dependency_schema = llm.calls[0]["schema"]["properties"][
-        "dependency_decisions"
-    ]
-    assert initial_dependency_schema["type"] == "array"
-    assert initial_dependency_schema["minItems"] == 0
-    assert initial_dependency_schema["maxItems"] == 0
-    assert initial_dependency_schema["items"] == {"type": "string"}
     search_schema = llm.calls[1]["schema"]
     assert set(search_schema["properties"]) == {
         "search_request_ids",
@@ -494,7 +526,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "138"
+    assert diagnostic_records[0]["profileVersion"] == "145"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -502,7 +534,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "138"
+    assert transport_input["profileVersion"] == "145"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -855,7 +887,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "138"
+    assert profile.version == "145"
     mode_prompts = {
         "research": profile.solver_research.system_prompt,
         "integration": profile.solver_integration.system_prompt,
@@ -885,14 +917,35 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
         assert "## 出力前の完了確認" not in prompt
 
     research_prompt = mode_prompts["research"]
+    assert profile.solver_research.context_projection == "initial_research"
+    assert profile.solver_integration.context_projection == "full"
     assert "## Tool選択ルール" in research_prompt
-    assert "## Researchモード" in research_prompt
+    assert "## 現在の作業：Research" in research_prompt
+    assert research_prompt.index("## 現在の作業：Research") < (
+        research_prompt.index("## 共通ルール")
+    )
+    assert research_prompt.index("## 現在の作業：Research") < (
+        research_prompt.index("## Tool選択ルール")
+    )
     assert "案件開始時に、元の質問の回答範囲" in research_prompt
     assert "## 完了ルール" in research_prompt
     assert "1つの完了判定で閉じられる1つの確認事項" in research_prompt
-    assert "複数の回答対象を含む元の質問全体" in research_prompt
-    assert "主文で尋ねる対象" in research_prompt
-    assert "成立する条件を尋ねる問い" in research_prompt
+    assert "近くにある名詞ではなく、質問が求める答え" in research_prompt
+    assert "主文の問い" in research_prompt
+    assert "A、B、Cを一項目ずつ照合" in research_prompt
+    assert "列挙された問いを、近い意味の別の問いへ吸収しません" in (
+        research_prompt
+    )
+    assert "必要となる条件、対象行為、例外、届出方法の4項目" in (
+        research_prompt
+    )
+    assert "「根拠」を5番目のWorkItemにもしません" in research_prompt
+    assert "この例の項目名や件数は、別の質問へコピーしません" in (
+        research_prompt
+    )
+    assert "`question_requirement_checklist`へ" in research_prompt
+    assert "いつ・どのような場合に必要か" in research_prompt
+    assert "必要になった場合に何をするか" in research_prompt
     assert "作業分解の数を減らしません" in research_prompt
     assert "`legal_search`要求数の上限ではありません" in research_prompt
     assert "理由: <分解と最初の行動を選んだ理由>" in research_prompt
@@ -903,12 +956,15 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
         research_prompt
     )
     assert "同じ制度や近い手続に関する本文でも" in research_prompt
-    assert "## Integrationモード" not in research_prompt
-    assert "## Cycle Closeモード" not in research_prompt
+    assert "## 現在の作業：Integration" not in research_prompt
+    assert "## 現在の作業：Cycle Close" not in research_prompt
 
     integration_prompt = mode_prompts["integration"]
     assert "## Tool選択ルール" in integration_prompt
-    assert "## Integrationモード" in integration_prompt
+    assert "## 現在の作業：Integration" in integration_prompt
+    assert integration_prompt.index("## 現在の作業：Integration") < (
+        integration_prompt.index("## 共通ルール")
+    )
     assert "新しいTool結果と取得本文を現在の調査状態へ反映" in (
         integration_prompt
     )
@@ -916,8 +972,8 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     assert "### Tool選択ルール" in integration_prompt
     assert "`request_id`を`action_request_id`へそのままコピー" in integration_prompt
     assert "## 完了ルール" in integration_prompt
-    assert "## Cycle Closeモード" not in integration_prompt
-    assert "## Reviewer Revisionモード" not in integration_prompt
+    assert "## 現在の作業：Cycle Close" not in integration_prompt
+    assert "## 現在の作業：Reviewer Revision" not in integration_prompt
     assert "`search_candidates`があれば" in integration_prompt
     assert "候補で不足する確認事項を`decision_reason`" in integration_prompt
     assert "新しい`legal_search`を考える前に全候補" in integration_prompt
@@ -929,18 +985,22 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     )
 
     cycle_close_prompt = mode_prompts["cycle_close"]
-    assert "## Cycle Closeモード" in cycle_close_prompt
+    assert "## 現在の作業：Cycle Close" in cycle_close_prompt
+    assert cycle_close_prompt.index("## 現在の作業：Cycle Close") < (
+        cycle_close_prompt.index("## 共通ルール")
+    )
     assert "deferred_frontier_resolutions" in cycle_close_prompt
+    assert "同じIDを重複させず" in cycle_close_prompt
     assert "## Tool選択ルール" not in cycle_close_prompt
 
     finalization_prompt = mode_prompts["finalization"]
-    assert "## Finalizationモード" in finalization_prompt
+    assert "## 現在の作業：Finalization" in finalization_prompt
     assert "追加調査できない実行上限時" in finalization_prompt
     assert "finalize_only=true" in finalization_prompt
     assert "## Tool選択ルール" not in finalization_prompt
 
     reviewer_prompt = mode_prompts["reviewer_revision"]
-    assert "## Reviewer Revisionモード" in reviewer_prompt
+    assert "## 現在の作業：Reviewer Revision" in reviewer_prompt
     assert "Reviewerの指摘を受け取ったSolver" in reviewer_prompt
     assert "review_finding_resolutions" in reviewer_prompt
     assert "## Tool選択ルール" in reviewer_prompt
@@ -1069,7 +1129,7 @@ def test_real_research_failure_fixture_is_rebuilt_with_corrected_prompt() -> Non
     assert "対象となる株券等の範囲、主な例外、必要な手続" in (
         observed["workItems"][0]["question"]
     )
-    assert "複数の回答対象を含む元の質問全体" in prompt
+    assert "複数の問いを質問全文の写しへまとめたりしません" in prompt
     assert "総数が`add_work_items`の件数と一致" in prompt
     assert "必要条件、対象範囲、例外、手続" not in prompt
     assert prompt.rindex("## 出力前の完了確認") > prompt.rindex(
@@ -1100,9 +1160,9 @@ def test_research_missing_main_request_fixture_is_covered_by_prompt() -> None:
     assert observed["profileVersion"] == "127"
     assert len(observed["workItemQuestions"]) == 3
     assert observed["missingRequest"] not in observed["decisionReason"]
-    assert "主文で尋ねる対象" in prompt
-    assert "追加された対象だけをWorkItem" in prompt
-    assert "主文の問いを省略" in prompt
+    assert "主文の問い" in prompt
+    assert "追加された問いだけを扱ったり" in prompt
+    assert "列挙された各項目を省略" in prompt
 
 
 def test_search_review_duplicate_fixture_gets_ordered_id_checklist() -> None:
@@ -1210,8 +1270,8 @@ def test_research_missing_procedure_fixture_distinguishes_condition_and_action(
     assert observed["profileVersion"] == "128"
     assert len(observed["workItemQuestions"]) == 3
     assert observed["missingRequest"] not in observed["decisionReason"]
-    assert "成立する条件を尋ねる問い" in prompt
-    assert "成立後に行う内容を尋ねる問い" in prompt
+    assert "いつ・どのような場合に必要か" in prompt
+    assert "必要になった場合に何をするか" in prompt
     assert "いつ・どの条件で必要か" in prompt
 
 
@@ -2485,6 +2545,49 @@ def test_cycle_close_fixture_preserves_the_unresolved_boundary_state() -> None:
         item.work_item_id for item in context.work_tree
     }
     assert state.final_answer is None
+
+
+def test_real_model_cycle_close_fixture_reproduces_duplicate_retained_evidence(
+) -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_cycle2_close_duplicate_retained_evidence_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    state = CaseState.model_validate(fixture["caseState"])
+    context = SolverContext.model_validate(fixture["solverContext"])
+    decision = SolverDecision.model_validate(fixture["observedSolverDecision"])
+
+    with pytest.raises(ContractViolation) as error:
+        apply_solver_decision(
+            state,
+            decision,
+            limits=AgentLimits(),
+            known_tool_names={item.name for item in context.available_tools},
+            material_evidence_ids=context.grounding_evidence_ids,
+            finalize_only=context.finalize_only,
+            fetchable_article_ids=context.fetchable_article_ids,
+            required_dependency_kind=context.required_dependency_kind,
+            required_dependency_work_item_ids=(
+                context.required_dependency_work_item_ids
+            ),
+            require_dependency_decisions=bool(
+                context.required_dependency_work_item_ids
+            ),
+            required_graph_review_request_ids=(
+                context.required_graph_review_request_ids
+            ),
+            required_search_review_request_ids=(
+                context.required_search_review_request_ids
+            ),
+            remaining_fetch_capacity=context.remaining_fetch_capacity,
+            cycle_close_required=context.cycle_close_required,
+            can_start_next_cycle=context.can_start_next_cycle,
+        )
+
+    assert str(error.value) == fixture["expectedViolation"]
 
 
 def test_real_model_cycle_close_fixture_reproduces_unresolved_basis_failure(

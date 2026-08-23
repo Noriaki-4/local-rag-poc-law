@@ -145,6 +145,10 @@ class StructuredJSONModelAdapter:
                 )
             else:
                 try:
+                    if profile.context_projection == "initial_research":
+                        _validate_initial_research_transport_payload(
+                            result.payload
+                        )
                     normalized = _normalize_solver_payload(result.payload)
                     _assign_tool_request_ids(normalized, context)
                     _normalize_absent_context_branches(normalized, context)
@@ -457,15 +461,20 @@ def render_solver_model_call(
 ) -> RenderedModelCall:
     """Providerへ送るSolver呼出しとレビュー成果物を同時に作る。"""
 
-    compact_transport = provider in {"ollama", "openai"}
-    structured_tool_transport = provider == "anthropic"
+    initial_research = profile.context_projection == "initial_research"
+    compact_transport = initial_research or provider in {"ollama", "openai"}
+    structured_tool_transport = not initial_research and provider == "anthropic"
     output_schema = (
-        _solver_compact_transport_schema(context)
-        if compact_transport
+        _initial_research_transport_schema(context)
+        if initial_research
         else (
-            _solver_anthropic_transport_schema(context)
-            if structured_tool_transport
-            else _solver_transport_schema(context)
+            _solver_compact_transport_schema(context)
+            if compact_transport
+            else (
+                _solver_anthropic_transport_schema(context)
+                if structured_tool_transport
+                else _solver_transport_schema(context)
+            )
         )
     )
     return _render_solver_model_call(
@@ -475,6 +484,10 @@ def render_solver_model_call(
         compact_transport=compact_transport,
         structured_tool_transport=structured_tool_transport,
         output_schema=output_schema,
+        input_payload=_solver_context_payload(
+            context,
+            projection=profile.context_projection,
+        ),
         stage=stage,
     )
 
@@ -487,6 +500,7 @@ def _render_solver_model_call(
     compact_transport: bool = False,
     structured_tool_transport: bool = False,
     output_schema: dict[str, Any] | None = None,
+    input_payload: dict[str, Any] | None = None,
     stage: str = "solver",
 ) -> RenderedModelCall:
     if output_schema is None:
@@ -513,7 +527,10 @@ def _render_solver_model_call(
         f"{RUNTIME_INPUT_MARKER}"
         f"{_post_context_completion_check(completion_check_prompt)}"
     )
-    input_payload = context.model_dump(mode="json")
+    if input_payload is None:
+        input_payload = context.model_dump(mode="json")
+    else:
+        input_payload = deepcopy(input_payload)
     if structured_tool_transport:
         input_payload["transport_values"] = {
             "fetch_articles_aliases": _article_fetch_alias_map(context),
@@ -533,6 +550,116 @@ def _render_solver_model_call(
     )
     _ensure_solver_prompt_capacity(rendered.request, context.max_solver_input_chars)
     return rendered
+
+
+def _solver_context_payload(
+    context: SolverContext,
+    *,
+    projection: str,
+) -> dict[str, Any]:
+    """CaseStoreを変えず、用途に無関係な実行値をModel入力から除く。"""
+
+    payload = context.model_dump(mode="json")
+    if projection == "full":
+        return payload
+    if projection != "initial_research":
+        raise ValueError(f"unknown solver context projection: {projection}")
+    included_fields = (
+        "case_id",
+        "question",
+        "research_cycle_count",
+        "remaining_research_cycles",
+        "max_tool_requests_per_step",
+        "work_tree",
+        "hypotheses",
+        "available_tools",
+        "contract_feedback",
+    )
+    return {name: payload[name] for name in included_fields}
+
+
+def _initial_research_transport_schema(
+    context: SolverContext,
+) -> dict[str, Any]:
+    """初回分解で使う差分だけを返すProvider schema。"""
+
+    update_schema = _case_update_transport_schema()
+    update_properties = update_schema["properties"]
+    update_schema = _strict_object(
+        {
+            "add_work_items": update_properties["add_work_items"],
+            "add_hypotheses": update_properties["add_hypotheses"],
+        }
+    )
+    update_schema["properties"]["add_work_items"]["minItems"] = 1
+    update_schema["properties"]["add_hypotheses"]["minItems"] = 1
+    return _strict_object(
+        {
+            "question_requirement_checklist": {
+                "type": "array",
+                "items": {"type": "string", "minLength": 1},
+                "minItems": 1,
+                "description": (
+                    "元の質問の主文と明示的な列挙から読み取った実体的な回答要求。"
+                    "根拠・出典・引用・出力形式・詳しさの指定は含めない。"
+                    "省略や統合をせず、add_work_itemsと同じ順序・件数で短く書く。"
+                    "CaseStateには保存しない理解確認用の一時欄。"
+                ),
+            },
+            "next": _described(
+                {"type": "string", "enum": ["continue"]},
+                SolverDecision,
+                "next",
+            ),
+            "decision_reason": _described(
+                {"type": "string", "minLength": 1},
+                SolverDecision,
+                "decision_reason",
+            ),
+            "start_next_cycle": _described(
+                {"type": "boolean", "enum": [False]},
+                SolverDecision,
+                "start_next_cycle",
+            ),
+            "update": _described(
+                update_schema,
+                SolverDecision,
+                "update",
+            ),
+            "next_focus_work_item_ids": _described(
+                _string_array_schema(),
+                SolverDecision,
+                "next_focus_work_item_ids",
+            ),
+            "tool_requests": _described(
+                _tool_requests_transport_schema(context),
+                SolverDecision,
+                "tool_requests",
+            ),
+        }
+    )
+
+
+def _validate_initial_research_transport_payload(
+    payload: dict[str, Any],
+) -> None:
+    requirements = payload.get("question_requirement_checklist")
+    update = payload.get("update")
+    work_items = update.get("add_work_items") if isinstance(update, dict) else None
+    if not isinstance(requirements, list) or not all(
+        isinstance(item, str) and item.strip() for item in requirements
+    ):
+        raise ModelProtocolError(
+            "initial research requires question_requirement_checklist"
+        )
+    if len(requirements) != len(set(requirements)):
+        raise ModelProtocolError(
+            "question requirement checklist entries must be unique"
+        )
+    if not isinstance(work_items, list) or len(requirements) != len(work_items):
+        raise ModelProtocolError(
+            "question requirement checklist must match add_work_items count"
+        )
 
 
 def _solver_prompt(
@@ -2390,6 +2517,7 @@ def _normalize_solver_payload(payload: dict) -> dict:
         decoded = payload
 
     normalized = dict(decoded)
+    normalized.pop("question_requirement_checklist", None)
     if "update_json" in normalized:
         normalized["update"] = _decode_transport_json(
             normalized.pop("update_json"),

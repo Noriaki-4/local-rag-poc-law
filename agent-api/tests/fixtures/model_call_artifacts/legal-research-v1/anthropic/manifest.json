@@ -1,13 +1,13 @@
 {
-  "inputHash": "7ac669aa1ace16369cefff5e43542d4624f4c92fc7841d61d2a2395f98971b67",
-  "instructionsHash": "358352e1c2c187c4c6b45640a0f05688e6fd4a456a9a0e6fc11240d729c87a46",
+  "inputHash": "9b6c28d8bf6f45acc639f0772925bdc9b80db5eeb3c275ff3bdd6da0a8aefa41",
+  "instructionsHash": "e31f3cf928ce41f28442b82b9123dddedd56f00797d5265c4f66e131262b6524",
   "model": "gpt-4o-mini",
-  "normalizedSchemaHash": "bad8b40fa3ba2cc5ab16df7602338f94c975980bd75d7617c6e4fabbac605144",
-  "outputSchemaHash": "8a3ee59d501a77ae0b38d97610b64e467dbe3202efa89fcea4caaeddffe621cb",
+  "normalizedSchemaHash": "13648e17ef7b63ecc73af7050ed79ef1e6ffda3aa6379cee32c3211d13373360",
+  "outputSchemaHash": "532aef7ee04d7722650ed66ee5a6a2fb6221f7331960583ff517c69cedf9c15c",
   "profileName": "legal-default",
-  "profileVersion": "138",
+  "profileVersion": "145",
   "promptAssets": [],
   "provider": "anthropic",
-  "requestHash": "a9cd8412a63799b7c59fc9d22eb715d587fc7d0d9e17cde183091f852b290325",
+  "requestHash": "0458ef817871cf907299a4d4e507a81b6af018effc5db3894596f3f165acb739",
   "stage": "research"
 }

@@ -213,7 +213,10 @@ class SolverDecision(FrameworkModel):
     )
     retain_evidence_ids: tuple[str, ...] = Field(
         default=(),
-        description="後続Cycleにも本文提示が必要な既知Evidence ID。",
+        description=(
+            "後続Cycleにも本文提示が必要な既知Evidence ID。"
+            "同じIDは重複させず1回だけ指定する。"
+        ),
     )
     review_finding_resolutions: tuple[ReviewFindingResolution, ...] = Field(
         default=(),

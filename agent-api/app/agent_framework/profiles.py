@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import AliasChoices, Field, model_validator
 
@@ -17,6 +17,7 @@ class ModelCallProfile(FrameworkModel):
     followup_system_prompt: str | None = None
     completion_check_prompt: str | None = None
     followup_completion_check_prompt: str | None = None
+    context_projection: Literal["full", "initial_research"] = "full"
 
 
 class ReviewerProfile(ModelCallProfile):

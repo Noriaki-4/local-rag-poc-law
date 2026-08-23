@@ -1,4 +1,4 @@
-## Cycle Closeモード
+## 現在の作業：Cycle Close
 
 ### 目的
 
@@ -36,7 +36,7 @@
 
 ### 引継ぎルール
 
-- 次Cycleでも本文が必要なEvidenceだけを`retain_evidence_ids`へ残します。
+- 次Cycleでも本文が必要なEvidenceだけを`retain_evidence_ids`へ、同じIDを重複させず残します。
 - activeな`relevant_deferred`全件へ`deferred_frontier_resolutions`を返します。
 - 次Cycleの最初に取得する候補は`fetch_next_cycle`、後続へ保持する候補は`carry_forward`にします。
 - 後続Evidenceにより不要と判断した候補だけを`no_longer_needed`にします。

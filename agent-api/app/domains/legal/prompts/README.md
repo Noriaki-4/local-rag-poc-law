@@ -12,16 +12,16 @@ Programが法的関連性、根拠の十分性、候補の採否、次のToolを
 ### 合成関係
 
 ```text
-solver_common.md ───────────────┐
-                               │
-solver_tools.md ───────┐       │
-                       ├───────┼─→ 用途別のModelCallProfile.system_prompt
-solver_completion.md ──┤       │
-                       │       │
-用途別Prompt ──────────┴───────┘
+solver_identity.md
+       │
+       ▼
+用途別Prompt ──→ solver_common.md ──→ 必要時だけsolver_tools.md
+                                              │
+                                              ▼
+                                  solver_completion.md
                                │
                                ▼
-             型から生成した契約用語集・ToolDefinition
+             入出力の入口だけを説明する契約用語集
                                │
                                ▼
                   共通出力契約・輸送指示・SolverContext
@@ -33,7 +33,7 @@ solver_completion.md ──┤       │
                            LLM Provider
 ```
 
-用途別の完了確認は`*_check.md`に置きます。既存の入力を削減・選別せず、
+用途別の完了確認は`*_check.md`に置きます。完了確認自体は既存の入力を削減・選別せず、
 `SolverContext`または候補一覧の後ろへ短く追加します。長い本文を読んだ後でも、
 現在の処理が満たすべき条件を出力直前に確認できるようにするためです。
 完了確認は新しい意味判断をProgramへ移さず、同じSolverへDecisionの自己点検を要求します。
@@ -42,11 +42,11 @@ solver_completion.md ──┤       │
 
 | 呼出し用途 | 合成するPrompt | 役割 |
 |---|---|---|
-| `research` | common + tools + research + completion | 案件開始時に質問を分解し、WorkItem、Hypothesis、最初の探索を決める。 |
-| `integration` | common + tools + integration + completion | ToolResultを評価し、状態を逐次更新して次の行動または完了を決める。次Cycle開始後の再計画もこの用途で扱う。 |
-| `cycle_close` | common + cycle_close + completion | 現Cycleを評価して閉じ、未取得候補を処理し、完了または次Cycleへの引継ぎを決める。新しいToolは要求しない。 |
-| `finalization` | common + finalization + completion | 実行上限時に追加Toolなしで、確認済み範囲と未確認範囲を分けた回答を作る。 |
-| `reviewer_revision` | common + tools + reviewer_revision + completion | Reviewer Findingを全件処理し、回答修正または追加調査を決める。 |
+| `research` | identity + research + common + tools + completion | 案件開始時に質問を分解し、WorkItem、Hypothesis、最初の探索を決める。 |
+| `integration` | identity + integration + common + tools + completion | ToolResultを評価し、状態を逐次更新して次の行動または完了を決める。次Cycle開始後の再計画もこの用途で扱う。 |
+| `cycle_close` | identity + cycle_close + common + completion | 現Cycleを評価して閉じ、未取得候補を処理し、完了または次Cycleへの引継ぎを決める。新しいToolは要求しない。 |
+| `finalization` | identity + finalization + common + completion | 実行上限時に追加Toolなしで、確認済み範囲と未確認範囲を分けた回答を作る。 |
+| `reviewer_revision` | identity + reviewer_revision + common + tools + completion | Reviewer Findingを全件処理し、回答修正または追加調査を決める。 |
 | `search_selection` | search_review → search_reselection | OpenSearch候補を全件要約し、その短い一覧から今回本文取得する候補を決める。 |
 | `graph_selection` | graph_reviewのみ | 新しい1ホップGraph候補を差分評価し、本文取得する候補と保留・除外を決める。 |
 
@@ -61,6 +61,7 @@ solver_completion.md ──┤       │
 
 | ファイル | 内容 |
 |---|---|
+| `solver_identity.md` | Solver名と、冒頭の「現在の作業」に示す一つのモードだけを実行する指示。 |
 | `solver_common.md` | 判断主体、WorkItem・Hypothesis・Evidence、ID、Cycleに関する全モード共通の不変条件。 |
 | `solver_tools.md` | OpenSearch候補の`search_candidates`投影、本文取得、1ホップGraph探索、RelationAssertionの意味と方向。Toolを使えるモードだけに合成する。 |
 | `solver_completion.md` | grounding Evidence、citation、下位規範、通常完了と上限時限定回答の共通条件。 |
@@ -100,7 +101,7 @@ Search Reviewで保留した候補と、本文取得が未完了の選択候補�
 同じ処理モード、Provider輸送方式、契約versionでは、質問やEvidenceが変わっても固定指示のhashは変えません。
 固定指示には次を追加します。
 
-- Pydanticの`Field.description`から生成した`contract_glossary`
+- Pydanticの`Field.description`から生成した、`SolverContext`と`SolverDecision`の入口だけの`contract_glossary`
 - 実行時に利用できる`available_tools`と各Toolの用途・入力Schema・戻り値説明
 - `SolverDecision`の共通出力原則と状態契約
 - Provider別の構造化出力・輸送指示
@@ -110,10 +111,23 @@ Search Reviewで保留した候補と、本文取得が未完了の選択候補�
 `validation_error`を分離します。レビュー時は、生成された`instructions.md`と`output_schema.json`を対にして確認し、
 実行時入力は`input.json`、実送信内容は`request.txt`で確認します。
 
+CaseStoreと完全な`SolverContext`は正本として保持しますが、Providerへは用途別のread modelを渡せます。
+初回Researchは質問の分解と最初の探索だけを行うため、質問、Cycle番号、残りCycle、1 StepのTool要求上限、
+WorkItem、Hypothesis、利用可能Tool、契約修復情報だけを投影します。本文取得枠やGraph・Evidence状態等の
+初回Researchに無関係な実行値は渡しません。Integration等は現在の完全な`SolverContext`を使います。
+この投影は値の省略だけであり、WorkItem数や法的観点をProgramが決める処理ではありません。
+初回ResearchのProvider schemaも、`next`、理由、初期WorkItem・Hypothesis、focus、ToolRequestだけに絞ります。
+Adapterは省略項目を正規`SolverDecision`の既定値で補い、完全なPydantic契約で検証します。
+正規契約を用途別に複製せず、Researchに無関係な空配列・null欄をLLMへ生成させません。
+`question_requirement_checklist`は主文と列挙要求をLLM自身に明示させる輸送専用欄です。
+WorkItemと同じ件数・順序で返し、Programは非空・一意・件数一致だけを検証してから破棄します。
+要求の意味やWorkItemへの対応内容はProgramで補完しません。生値は診断時のProvider出力で確認できます。
+
 修復指示のassetは`app/agent_framework/prompts/`にあります。法令判断の手順はこのディレクトリ、
 Provider輸送と契約修復はFramework側へ分け、同じ規則を両方へ重複記載しません。
 Pydantic型とその`Field.description`が項目の形状と基本的な意味の正本です。
 `contract_rendering.py`が用語集とProvider schemaの基礎へ決定的に反映します。
+入れ子の出力項目はProvider schemaの`description`で説明し、同じ全項目一覧を用語集へ重複掲載しません。
 Domain Promptは同じ定義表を手書きせず、現在の処理での手順と判断ルールを説明します。
 LLMが返すToolRequestの`request_id`は同じDecision内の参照用です。AdapterがCase内で一意な
 永続化用IDへ置き換え、同じDecisionの`action_request_id`も機械的に追随させます。
@@ -143,7 +157,7 @@ Toolの種類、引数、対象WorkItem・Hypothesisは変更しません。
 - 例は契約項目の必須要素にしません。`description`とルールで解消できない誤解を
   fixtureで確認した場合だけ、契約と分けた例セクションに、固定件数を誘導しない複数例を追加します。
 - 出力前完了確認は対応する処理の`*_check.md`へ置き、長い入力の前にだけ記載しません。
-- 完了確認のためにSolverContextの項目や本文を削除しません。
+- 完了確認fragmentを理由に入力を削除しません。用途別入力投影はModel Profileで明示し、契約テストで固定します。
 - モード固有の例外を`solver_common.md`へ追加しません。
 - Promptだけでschema違反を隠さず、出力形状は型・schema・validatorで検証します。
 - Prompt assetを変更したらLegal Profile versionとPrompt契約テストを同じ変更で更新します。

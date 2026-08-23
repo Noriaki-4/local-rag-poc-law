@@ -1731,7 +1731,7 @@ Profileを切り替えても、CaseStateの意味とTool契約は変わらない
 
 | 内容 | 正本 | LLMへの渡し方 |
 |---|---|---|
-| 入出力項目の形状と基本的な意味 | Pydantic型の制約と`Field.description` | Provider schemaと`contract_glossary`へ生成 |
+| 入出力項目の形状と基本的な意味 | Pydantic型の制約と`Field.description` | 入れ子を含むProvider schemaと、`SolverContext`・`SolverDecision`の入口だけの`contract_glossary`へ生成 |
 | Toolの正規名、用途、引数、戻り値 | `ToolDefinition` | そのstepで利用可能な定義だけを`available_tools`へ投影 |
 | 処理モードの手順と判断ルール | `domains/<domain>/prompts/` | 構造的な現在モードに必要なfragmentだけを合成 |
 | Provider固有の構造化出力制約 | Provider adapter | 正規名と意味を変えず、輸送表現だけを変換 |
@@ -1745,6 +1745,10 @@ Provider schemaの`enum`や項目名だけで使い方を推測させない。�
 Domain Promptへ複製しない。例は契約の必須要素ではない。説明とルールで解消できない誤解を
 fixtureで確認したときだけ、契約定義と分けた`examples`セクションへ追加する。その際は特定の質問、
 件数、ID、法令名を一般ルールとして学習させないよう、複数の異なる例で境界を示す。
+
+合成Promptは、Solver名、現在の処理モードと手順、共通不変条件、必要なTool規則、完了条件の順にする。
+現在の作業より先に共通規則やTool一覧を置かない。入れ子の全契約項目はProvider schemaへ説明を持たせ、
+同じ一覧を`contract_glossary`へ重複掲載しない。
 
 修復Prompt本文をPythonの文字列へ埋め込まない。Markdown内の名前付きsectionを
 `prompt_assets.py`がUTF-8で読み込み、初回読込み後にcacheする。Pythonには固定section一覧だけを残し、
@@ -2133,6 +2137,16 @@ transaction等を初期Frameworkへ持ち込まないためである。`framewor
 Context Projectorは、全WorkTree案内、現Cycle、直前Step、Graph差分batch、評価済みfrontier ledger、
 focusへ接続するNode・Link、直近ToolResult、新規・保持EvidenceをCaseStoreから決定的に投影する。
 全Graph履歴をPromptへ重複表示せず、関連性・優先度・再採用はSolverに判断させる。
+CaseStoreの正本や完全な`SolverContext`を削らず、Provider入力は用途別read modelへさらに決定的に投影できる。
+初回Researchでは質問、Cycle情報、1 StepのTool要求上限、WorkItem、Hypothesis、利用可能Tool、契約修復情報だけを渡し、
+本文取得枠、Graph、Evidence等の未使用値は渡さない。本文取得枠の数値が質問分解数を暗黙に誘導しないためである。
+Integration等は完全な`SolverContext`を使う。用途別投影は項目の有無だけを決め、法的観点、関連性、WorkItem数は決めない。
+初回ResearchのProvider schemaは、継続、判断理由、初期WorkItem・Hypothesis、focus、ToolRequestだけを要求する。
+Graph review、Cycle引継ぎ、Reviewer、最終回答等の未使用欄はProvider schemaから省き、Adapterが既定値を補ってから
+共通`SolverDecision`で完全検証する。正規契約を用途別に複製せず、輸送表現だけを用途に合わせる。
+初回Researchには、主文と明示的な列挙から読み取った要求をWorkItemと同じ順序で返す
+`question_requirement_checklist`を輸送専用欄として置く。Programは非空・一意・WorkItemとの件数一致だけを検証し、
+意味内容を補正せずCaseStateにも保存しない。診断snapshotの生Provider出力に残し、Prompt理解の確認に使う。
 
 ## 12. 実装Phase
 

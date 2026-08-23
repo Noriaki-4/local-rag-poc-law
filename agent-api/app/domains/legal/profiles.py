@@ -1,6 +1,7 @@
 """法令Domainの用途別Profileを環境設定から解決する。"""
 
 from pathlib import Path
+from typing import Literal
 
 from app.agent_framework.profiles import (
     AgentLimits,
@@ -15,6 +16,7 @@ _PROMPT_DIR = Path(__file__).with_name("prompts")
 
 
 def legal_agent_profile() -> AgentProfile:
+    solver_identity_prompt = _read_prompt("solver_identity.md")
     common_solver_prompt = _read_prompt("solver_common.md")
     tool_prompt = _read_prompt("solver_tools.md")
     completion_prompt = _read_prompt("solver_completion.md")
@@ -23,16 +25,18 @@ def legal_agent_profile() -> AgentProfile:
     timeout_sec = settings.agent_framework_model_timeout_sec
     return AgentProfile(
         name="legal-default",
-        version="138",
+        version="145",
         provider=settings.llm_provider,
         solver_research=_model_profile(
             model=settings.agent_framework_research_model,
             max_tokens=settings.agent_framework_research_max_tokens,
             timeout_sec=timeout_sec,
+            context_projection="initial_research",
             prompts=(
+                solver_identity_prompt,
+                _read_prompt("solver_research.md"),
                 common_solver_prompt,
                 tool_prompt,
-                _read_prompt("solver_research.md"),
                 completion_prompt,
             ),
             completion_check_prompt=_read_prompt("solver_research_check.md"),
@@ -42,9 +46,10 @@ def legal_agent_profile() -> AgentProfile:
             max_tokens=integration_max_tokens,
             timeout_sec=timeout_sec,
             prompts=(
+                solver_identity_prompt,
+                _read_prompt("solver_integration.md"),
                 common_solver_prompt,
                 tool_prompt,
-                _read_prompt("solver_integration.md"),
                 completion_prompt,
             ),
             completion_check_prompt=_read_prompt("solver_integration_check.md"),
@@ -54,8 +59,9 @@ def legal_agent_profile() -> AgentProfile:
             max_tokens=integration_max_tokens,
             timeout_sec=timeout_sec,
             prompts=(
-                common_solver_prompt,
+                solver_identity_prompt,
                 _read_prompt("solver_cycle_close.md"),
+                common_solver_prompt,
                 completion_prompt,
             ),
             completion_check_prompt=_read_prompt("solver_cycle_close_check.md"),
@@ -65,8 +71,9 @@ def legal_agent_profile() -> AgentProfile:
             max_tokens=integration_max_tokens,
             timeout_sec=timeout_sec,
             prompts=(
-                common_solver_prompt,
+                solver_identity_prompt,
                 _read_prompt("solver_finalization.md"),
+                common_solver_prompt,
                 completion_prompt,
             ),
             completion_check_prompt=_read_prompt("solver_finalization_check.md"),
@@ -76,9 +83,10 @@ def legal_agent_profile() -> AgentProfile:
             max_tokens=integration_max_tokens,
             timeout_sec=timeout_sec,
             prompts=(
+                solver_identity_prompt,
+                _read_prompt("solver_reviewer_revision.md"),
                 common_solver_prompt,
                 tool_prompt,
-                _read_prompt("solver_reviewer_revision.md"),
                 completion_prompt,
             ),
             completion_check_prompt=_read_prompt(
@@ -185,6 +193,7 @@ def _model_profile(
     timeout_sec: float,
     prompts: tuple[str, ...],
     completion_check_prompt: str,
+    context_projection: Literal["full", "initial_research"] = "full",
 ) -> ModelCallProfile:
     return ModelCallProfile(
         model=model,
@@ -192,4 +201,5 @@ def _model_profile(
         timeout_sec=timeout_sec,
         system_prompt=_join_prompts(*prompts),
         completion_check_prompt=completion_check_prompt,
+        context_projection=context_projection,
     )

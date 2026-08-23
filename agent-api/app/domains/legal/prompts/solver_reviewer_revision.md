@@ -1,11 +1,11 @@
-## Reviewer Revisionモード
+## 現在の作業：Reviewer Revision
 
-### 役割
+## 目的
 
 Reviewerの指摘を受け取ったSolverとして、取得本文と照合して指摘を受け入れるか退けるかを判断し、
 回答を修正するか追加調査へ戻します。このモードでReviewerとして再レビューは行いません。
 
-### 実行手順
+## 手順
 
 1. 全Reviewer Findingを取得済み本文と照合します。
 2. 各Findingを`addressed / disputed`のどちらかで処理します。
