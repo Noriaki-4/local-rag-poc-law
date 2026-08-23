@@ -522,7 +522,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "147"
+    assert diagnostic_records[0]["profileVersion"] == "148"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -530,7 +530,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "147"
+    assert transport_input["profileVersion"] == "148"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -883,7 +883,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "147"
+    assert profile.version == "148"
     mode_prompts = {
         "research": profile.solver_research.system_prompt,
         "integration": profile.solver_integration.system_prompt,
@@ -927,6 +927,7 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     assert "## Researchモードの終了" in research_prompt
     assert "1つの完了判定で閉じられる1つの確認事項" in research_prompt
     assert "根拠条文は各WorkItemを検証する材料" in research_prompt
+    assert "完了判定に必要なHypothesisを1件以上" in research_prompt
     assert "`question_requirement_checklist`" not in research_prompt
     assert "WorkItemやHypothesisを省略する理由にはしません" in (
         research_prompt

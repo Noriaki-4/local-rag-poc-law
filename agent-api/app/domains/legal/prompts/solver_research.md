@@ -9,7 +9,7 @@ Tool結果を受け取った後は、その結果に基づいて次の探索を�
 
 1. 質問が求める法令上の確認事項を抽出します。
 2. 独立して完了判定できる単位でWorkItemを作ります。
-3. 各WorkItemに、法令本文で検証できるHypothesisを作ります。
+3. 各WorkItemに、その完了判定に必要なHypothesisを1件以上作ります。
 4. `available_tools`から、未検証のHypothesisに対して今回実行するToolを選びます。
 5. 元の質問と`add_work_items`を照合し、漏れ、重複、不要なWorkItemがないことを確認します。
 6. 判断結果をSolverDecisionとして返します。
