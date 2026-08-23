@@ -1934,10 +1934,10 @@ Graph Review差分処理やCycle境界処理を混入させず、IntegrationとG
 | Prompt / schema | 必須の内容 |
 |---|---|
 | `solver_common.md` | Solverの共通責務、意味判断の境界、Evidence・ID・Cycleの不変条件だけを定義する。実行手順、Tool一覧、処理モード固有statusは置かない。 |
-| `solver_tools.md` | Tool選択、既知ID、1ホップGraph selector、RelationAssertionの5 predicateと方向、`USES_DEFINITION`の確認方法を定義する。Research、Integration、Reviewer Revisionだけへ合成する。 |
+| `solver_tools.md` | ToolRequestの役割、Tool結果を受けた次step、既知ID、1ホップGraph selector、RelationAssertionの5 predicateと方向、`USES_DEFINITION`の確認方法を定義する。IntegrationとReviewer Revisionへ合成する。初回Researchは実行可能な`legal_search`の説明を`available_tools`から受け取る。 |
 | `solver_completion.md` | 直接Evidence、citation、下位規範、通常完了と上限時限定回答の共通完了条件を定義する。 |
 | `reviewer.md` | ReviewerViewの各状態、検査順序、`accept / revise`、Finding種別、既知IDの使い方を定義する。Reviewerは検索方法やToolRequestを決めない。 |
-| `solver_research.md` | 質問をWorkItemと検証可能なHypothesisへ分解し、最初の探索方法と法令検索表現を選ぶ。 |
+| `solver_research.md` | 質問を法令上の確認事項へ分解し、WorkItem、検証可能なHypothesis、今回の探索を決める。 |
 | `solver_integration.md` | 新しいToolResultを評価して状態を逐次更新し、未確認事項に対する次の行動を選ぶ。Graphの関係種別を説明できなければ全種別を要求せず、OpenSearchで根拠または起点を発見する。 |
 | `solver_cycle_close.md` | 現Cycleの状態更新、active Frontier全件の処理、`finalize / start_next_cycle`だけを扱う。次Cycleの詳細なTool計画は作らない。 |
 | `solver_finalization.md` | `finalize_only=true`で追加Toolを要求せず、確認済み範囲と未確認範囲を分けた回答を作る。 |
@@ -2138,7 +2138,8 @@ Context Projectorは、全WorkTree案内、現Cycle、直前Step、Graph差分ba
 focusへ接続するNode・Link、直近ToolResult、新規・保持EvidenceをCaseStoreから決定的に投影する。
 全Graph履歴をPromptへ重複表示せず、関連性・優先度・再採用はSolverに判断させる。
 CaseStoreの正本や完全な`SolverContext`を削らず、Provider入力は用途別read modelへさらに決定的に投影できる。
-初回Researchでは質問、Cycle情報、1 StepのTool要求上限、WorkItem、Hypothesis、利用可能Tool、契約修復情報だけを渡し、
+初回Researchでは質問、Cycle情報、1 StepのTool要求上限、WorkItem、Hypothesis、利用可能Tool、契約修復情報だけを渡す。
+利用可能Toolは、既知ArticleやEvidenceを必要としない`legal_search`だけに決定的に投影し、
 本文取得枠、Graph、Evidence等の未使用値は渡さない。本文取得枠の数値が質問分解数を暗黙に誘導しないためである。
 Integration等は完全な`SolverContext`を使う。用途別投影は項目の有無だけを決め、法的観点、関連性、WorkItem数は決めない。
 初回ResearchのProvider schemaは、継続、判断理由、初期WorkItem・Hypothesis、focus、ToolRequestだけを要求する。

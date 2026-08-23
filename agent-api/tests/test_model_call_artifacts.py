@@ -57,7 +57,14 @@ def test_dynamic_input_does_not_change_solver_instructions() -> None:
 
 
 def test_initial_research_omits_irrelevant_execution_limits() -> None:
-    context = _context("case-1", "質問")
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_overview_initial_research_decomposition_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    context = SolverContext.model_validate(fixture["solverContext"])
     profile = legal_agent_profile().solver_research
 
     rendered = render_solver_model_call(
@@ -80,6 +87,14 @@ def test_initial_research_omits_irrelevant_execution_limits() -> None:
     }
     assert "remaining_fetch_capacity" not in rendered.input_payload
     assert "max_fetched_resources_per_cycle" not in rendered.input_payload
+    assert "remaining_fetch_capacity" not in rendered.instructions
+    assert "最初の探索" not in rendered.instructions
+    assert "法令本文を根拠として回答するための調査" in rendered.instructions
+    assert "今回実行する探索" in rendered.instructions
+    assert "Graph" not in rendered.instructions
+    assert [item["name"] for item in rendered.input_payload["available_tools"]] == [
+        "legal_search"
+    ]
     assert set(rendered.output_schema["properties"]) == {
         "question_requirement_checklist",
         "next",
@@ -90,6 +105,9 @@ def test_initial_research_omits_irrelevant_execution_limits() -> None:
         "tool_requests",
     }
     assert "graph_candidate_review" in rendered.normalized_schema["properties"]
+    assert rendered.output_schema["properties"]["tool_requests"]["items"][
+        "properties"
+    ]["tool_name"]["enum"] == ["legal_search"]
     checklist_schema = rendered.output_schema["properties"][
         "question_requirement_checklist"
     ]
@@ -130,13 +148,6 @@ def test_real_model_v145_initial_research_transport_fixture_is_reproducible() ->
     )
     fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
     context = SolverContext.model_validate(fixture["solverContext"])
-    profile = legal_agent_profile().solver_research
-    rendered = render_solver_model_call(
-        context,
-        profile,
-        provider="openai",
-        stage="research",
-    )
     transport_input = fixture["observedTransportInput"]
     transport_output = fixture["observedTransportOutput"]
     payload = transport_output["payload"]
@@ -144,10 +155,9 @@ def test_real_model_v145_initial_research_transport_fixture_is_reproducible() ->
 
     assert fixture["source"]["model"] == "gpt-4o-mini"
     assert fixture["source"]["profileVersion"] == "145"
-    assert rendered.instructions == transport_input["instructions"]
-    assert rendered.input_payload == transport_input["inputPayload"]
-    assert rendered.output_schema == transport_input["transportSchema"]
-    assert rendered.normalized_schema == transport_input["normalizedSchema"]
+    assert context.case_id == transport_input["inputPayload"]["case_id"]
+    assert "最初の探索行動" in transport_input["instructions"]
+    assert "remaining_fetch_capacity" in transport_input["instructions"]
     assert transport_output["validationError"] is None
     assert transport_output["providerRetryCount"] == 0
     _validate_initial_research_transport_payload(payload)

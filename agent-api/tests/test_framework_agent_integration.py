@@ -526,7 +526,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "145"
+    assert diagnostic_records[0]["profileVersion"] == "146"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -534,7 +534,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "145"
+    assert transport_input["profileVersion"] == "146"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -887,7 +887,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "145"
+    assert profile.version == "146"
     mode_prompts = {
         "research": profile.solver_research.system_prompt,
         "integration": profile.solver_integration.system_prompt,
@@ -919,43 +919,31 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     research_prompt = mode_prompts["research"]
     assert profile.solver_research.context_projection == "initial_research"
     assert profile.solver_integration.context_projection == "full"
-    assert "## Tool選択ルール" in research_prompt
+    assert "## Tool選択ルール" not in research_prompt
     assert "## 現在の作業：Research" in research_prompt
     assert research_prompt.index("## 現在の作業：Research") < (
         research_prompt.index("## 共通ルール")
     )
-    assert research_prompt.index("## 現在の作業：Research") < (
-        research_prompt.index("## Tool選択ルール")
-    )
-    assert "案件開始時に、元の質問の回答範囲" in research_prompt
-    assert "## 完了ルール" in research_prompt
+    assert "法令本文を根拠として回答するための調査" in research_prompt
+    assert "質問が求める法令上の確認事項" in research_prompt
+    assert "今回実行する探索" in research_prompt
+    assert "次の探索を改めて判断" in research_prompt
+    assert "## Researchモードの終了" in research_prompt
     assert "1つの完了判定で閉じられる1つの確認事項" in research_prompt
-    assert "近くにある名詞ではなく、質問が求める答え" in research_prompt
-    assert "主文の問い" in research_prompt
-    assert "A、B、Cを一項目ずつ照合" in research_prompt
-    assert "列挙された問いを、近い意味の別の問いへ吸収しません" in (
+    assert "根拠条文は各WorkItemを検証する材料" in research_prompt
+    assert "`question_requirement_checklist`" in research_prompt
+    assert "WorkItemやHypothesisを省略する理由にはしません" in (
         research_prompt
     )
-    assert "必要となる条件、対象行為、例外、届出方法の4項目" in (
-        research_prompt
-    )
-    assert "「根拠」を5番目のWorkItemにもしません" in research_prompt
-    assert "この例の項目名や件数は、別の質問へコピーしません" in (
-        research_prompt
-    )
-    assert "`question_requirement_checklist`へ" in research_prompt
-    assert "いつ・どのような場合に必要か" in research_prompt
-    assert "必要になった場合に何をするか" in research_prompt
-    assert "作業分解の数を減らしません" in research_prompt
-    assert "`legal_search`要求数の上限ではありません" in research_prompt
-    assert "理由: <分解と最初の行動を選んだ理由>" in research_prompt
+    assert "理由: <今回の判断理由>" in research_prompt
+    assert "#### 最初の探索" not in research_prompt
+    assert "Graph" not in research_prompt
+    assert "remaining_fetch_capacity" not in research_prompt
+    assert "古物営業" not in research_prompt
     assert "3つの確認事項" not in research_prompt
     assert "質問の「必要な手続」" not in research_prompt
-    assert "機械的に分割" in research_prompt
-    assert "情報の種類を条件・範囲・行為等へ限定しません" in (
-        research_prompt
-    )
-    assert "同じ制度や近い手続に関する本文でも" in research_prompt
+    assert "複数の確認事項を1つにまとめず" in research_prompt
+    assert "同じ制度に関する本文でも" in research_prompt
     assert "## 現在の作業：Integration" not in research_prompt
     assert "## 現在の作業：Cycle Close" not in research_prompt
 
@@ -980,9 +968,10 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     assert "1つの`fetch_articles`で本文取得" in integration_prompt
     assert "次に取得するArticle IDではありません" in integration_prompt
     assert "項目の意味は`contract_glossary`を正本" in integration_prompt
-    assert "`basis_evidence_ids`、`metadata.articleId`から作りません" in (
+    assert "Evidence ID、`basis_evidence_ids`、`metadata.articleId`" in (
         integration_prompt
     )
+    assert "本文の条番号からArticle IDを作りません" in integration_prompt
 
     cycle_close_prompt = mode_prompts["cycle_close"]
     assert "## 現在の作業：Cycle Close" in cycle_close_prompt
@@ -1129,8 +1118,8 @@ def test_real_research_failure_fixture_is_rebuilt_with_corrected_prompt() -> Non
     assert "対象となる株券等の範囲、主な例外、必要な手続" in (
         observed["workItems"][0]["question"]
     )
-    assert "複数の問いを質問全文の写しへまとめたりしません" in prompt
-    assert "総数が`add_work_items`の件数と一致" in prompt
+    assert "複数の確認事項を1つにまとめず" in prompt
+    assert "件数と確認対象が`add_work_items`に一致" in prompt
     assert "必要条件、対象範囲、例外、手続" not in prompt
     assert prompt.rindex("## 出力前の完了確認") > prompt.rindex(
         "</solver_context>"
@@ -1160,9 +1149,9 @@ def test_research_missing_main_request_fixture_is_covered_by_prompt() -> None:
     assert observed["profileVersion"] == "127"
     assert len(observed["workItemQuestions"]) == 3
     assert observed["missingRequest"] not in observed["decisionReason"]
-    assert "主文の問い" in prompt
-    assert "追加された問いだけを扱ったり" in prompt
-    assert "列挙された各項目を省略" in prompt
+    assert "質問の主文と" in prompt
+    assert "漏れと重複がないこと" in prompt
+    assert "明示された確認事項をすべて照合" in prompt
 
 
 def test_search_review_duplicate_fixture_gets_ordered_id_checklist() -> None:
@@ -1270,9 +1259,8 @@ def test_research_missing_procedure_fixture_distinguishes_condition_and_action(
     assert observed["profileVersion"] == "128"
     assert len(observed["workItemQuestions"]) == 3
     assert observed["missingRequest"] not in observed["decisionReason"]
-    assert "いつ・どのような場合に必要か" in prompt
-    assert "必要になった場合に何をするか" in prompt
-    assert "いつ・どの条件で必要か" in prompt
+    assert "複数の確認事項を1つにまとめず" in prompt
+    assert "1つのWorkItemでは、1つの確認事項" in prompt
 
 
 def test_search_reselection_underselect_fixture_checks_remaining_hypotheses(
@@ -1396,9 +1384,9 @@ def test_research_capacity_fixture_does_not_limit_work_decomposition() -> None:
     assert observed["profileVersion"] == "129"
     assert observed["remainingFetchCapacity"] == observed["workItemCount"]
     assert observed["missingRequest"] not in observed["decisionReason"]
-    assert "作業分解の数を減らしません" in prompt
-    assert "今Stepで探索しないWorkItemもopen" in prompt
-    assert "取得枠やToolRequest上限に合わせて" in prompt
+    assert "実行上限は今回選ぶToolにだけ適用" in prompt
+    assert "今回探索しないWorkItemもopen" in prompt
+    assert "WorkItemやHypothesisを省略する理由にはしません" in prompt
 
 
 def test_integration_refetch_fixture_uses_only_fetchable_article_ids() -> None:
@@ -2172,13 +2160,11 @@ def test_real_model_initial_research_decomposition_fixture_is_reproducible() -> 
         "law-402M50000040038-article-2_5",
         "law-402M50000040038-article-10",
     } == set(failure["downstreamObservation"]["reselectionDroppedArticleIds"])
-    assert "1つの確認事項につき1つのWorkItem" in prompt
+    assert "独立して完了判定できる単位でWorkItem" in prompt
     assert "何らかの規定がある" in prompt
-    assert "条文に現れやすい法令表現へ言い換えます" in prompt
-    assert "WorkItem wi-condition" in prompt
-    assert "basis_hypothesis_ids: []" in prompt
+    assert "法令表現へ言い換えて使う" in prompt
+    assert "元の質問から直接作るopen WorkItem" in prompt
     assert "Hypothesis.work_item_id" in prompt
-    assert "ToolRequest tr-condition" in prompt
 
 
 def test_real_model_cycle2_repeated_search_fixture_is_reproducible() -> None:

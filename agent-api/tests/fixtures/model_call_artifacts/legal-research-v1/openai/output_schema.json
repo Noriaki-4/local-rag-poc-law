@@ -39,305 +39,77 @@
     "tool_requests": {
       "description": "未確認Hypothesisを検証するため、Solverが今回選ぶread-only Tool要求。",
       "items": {
-        "anyOf": [
-          {
+        "additionalProperties": false,
+        "properties": {
+          "arguments": {
             "additionalProperties": false,
+            "description": "選んだToolのinput_schemaに完全一致する引数object。",
             "properties": {
-              "arguments": {
-                "additionalProperties": false,
-                "description": "選んだToolのinput_schemaに完全一致する引数object。",
-                "properties": {
-                  "doc_types": {
-                    "description": "検索対象。法令本文はlaw、行政解釈やガイドはguideline。現在の検索に必要な値を配列で返す。",
-                    "items": {
-                      "type": "string"
-                    },
-                    "type": "array"
-                  },
-                  "document_ids": {
-                    "description": "検索対象文書を限定する既知documentId。限定しない場合は空配列。",
-                    "items": {
-                      "type": "string"
-                    },
-                    "maxItems": 12,
-                    "type": "array"
-                  },
-                  "query": {
-                    "description": "制度名と確認事項を法令に現れやすい表現へ言い換えた検索語。",
-                    "maxLength": 1000,
-                    "minLength": 1,
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "query",
-                  "doc_types",
-                  "document_ids"
-                ],
-                "type": "object"
-              },
-              "hypothesis_ids": {
-                "description": "このTool結果で検証する既知Hypothesis ID。",
+              "doc_types": {
+                "description": "検索対象。法令本文はlaw、行政解釈やガイドはguideline。現在の検索に必要な値を配列で返す。",
                 "items": {
                   "type": "string"
                 },
                 "type": "array"
               },
-              "purpose": {
-                "description": "何を確認するための要求かを示す短い説明。",
-                "type": "string"
+              "document_ids": {
+                "description": "検索対象文書を限定する既知documentId。限定しない場合は空配列。",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 12,
+                "type": "array"
               },
-              "request_id": {
-                "description": "同じSolverDecision内で一意な短い局所ID。",
-                "type": "string"
-              },
-              "tool_name": {
-                "description": "available_toolsにある正規Tool名。 Article IDがまだ分からないとき、OpenSearchで法令またはガイドの候補を探す。質問をそのまま繰り返さず、確認事項を法令表現へ言い換えて使う。返す検索抜粋は候補選択用であり、回答やHypothesisの根拠にはしない。",
-                "enum": [
-                  "legal_search"
-                ],
-                "type": "string"
-              },
-              "work_item_id": {
-                "description": "このTool結果を利用する主なopen WorkItem ID。",
+              "query": {
+                "description": "制度名と確認事項を法令に現れやすい表現へ言い換えた検索語。",
+                "maxLength": 1000,
+                "minLength": 1,
                 "type": "string"
               }
             },
             "required": [
-              "request_id",
-              "work_item_id",
-              "purpose",
-              "hypothesis_ids",
-              "tool_name",
-              "arguments"
+              "query",
+              "doc_types",
+              "document_ids"
             ],
             "type": "object"
           },
-          {
-            "additionalProperties": false,
-            "properties": {
-              "arguments": {
-                "additionalProperties": false,
-                "description": "選んだToolのinput_schemaに完全一致する引数object。",
-                "properties": {
-                  "article_ids": {
-                    "description": "本文を取得する既知Article ID。SolverContext.fetchable_article_idsの完全一致だけを指定する。",
-                    "items": {
-                      "type": "string"
-                    },
-                    "maxItems": 0,
-                    "minItems": 1,
-                    "type": "array"
-                  }
-                },
-                "required": [
-                  "article_ids"
-                ],
-                "type": "object"
-              },
-              "hypothesis_ids": {
-                "description": "このTool結果で検証する既知Hypothesis ID。",
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "purpose": {
-                "description": "何を確認するための要求かを示す短い説明。",
-                "type": "string"
-              },
-              "request_id": {
-                "description": "同じSolverDecision内で一意な短い局所ID。",
-                "type": "string"
-              },
-              "tool_name": {
-                "description": "available_toolsにある正規Tool名。 発見済みArticleの本文をOpenSearchから取得する。fetchable_article_idsにある既知IDから、質問とHypothesisに必要なものを選んで使う。検索やGraph展開は行わず、未知IDや取得済みEvidence IDは受け付けない。",
-                "enum": [
-                  "fetch_articles"
-                ],
-                "type": "string"
-              },
-              "work_item_id": {
-                "description": "このTool結果を利用する主なopen WorkItem ID。",
-                "type": "string"
-              }
+          "hypothesis_ids": {
+            "description": "このTool結果で検証する既知Hypothesis ID。",
+            "items": {
+              "type": "string"
             },
-            "required": [
-              "request_id",
-              "work_item_id",
-              "purpose",
-              "hypothesis_ids",
-              "tool_name",
-              "arguments"
-            ],
-            "type": "object"
+            "type": "array"
           },
-          {
-            "additionalProperties": false,
-            "properties": {
-              "arguments": {
-                "additionalProperties": false,
-                "description": "選んだToolのinput_schemaに完全一致する引数object。",
-                "properties": {
-                  "article_ids": {
-                    "description": "1ホップの起点にする既知Article ID。",
-                    "items": {
-                      "type": "string"
-                    },
-                    "maxItems": 4,
-                    "minItems": 1,
-                    "type": "array"
-                  },
-                  "direction": {
-                    "description": "起点Articleから見た関係の向き。",
-                    "enum": [
-                      "from_subject",
-                      "to_subject",
-                      "outgoing",
-                      "incoming"
-                    ],
-                    "type": "string"
-                  },
-                  "max_relations": {
-                    "description": "起点Articleごとに返すnavigation関係数の上限。",
-                    "maximum": 50,
-                    "minimum": 1,
-                    "type": "integer"
-                  },
-                  "mode": {
-                    "description": "物理参照または意味分類済み関係のどちらを探索するか。",
-                    "enum": [
-                      "semantic_assertion",
-                      "explicit_reference",
-                      "explains"
-                    ],
-                    "type": "string"
-                  },
-                  "predicate": {
-                    "anyOf": [
-                      {
-                        "description": "RelationAssertionが提示できる未確認の意味関係。",
-                        "enum": [
-                          "IMPLEMENTS",
-                          "INCORPORATES",
-                          "USES_DEFINITION",
-                          "EXCEPTION_TO",
-                          "OVERRIDES"
-                        ],
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "description": "semantic_assertionで探索する仮説に合う1つの意味関係。それ以外のmodeではnull。"
-                  }
-                },
-                "required": [
-                  "article_ids",
-                  "mode",
-                  "predicate",
-                  "direction",
-                  "max_relations"
-                ],
-                "type": "object"
-              },
-              "hypothesis_ids": {
-                "description": "このTool結果で検証する既知Hypothesis ID。",
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "purpose": {
-                "description": "何を確認するための要求かを示す短い説明。",
-                "type": "string"
-              },
-              "request_id": {
-                "description": "同じSolverDecision内で一意な短い局所ID。",
-                "type": "string"
-              },
-              "tool_name": {
-                "description": "available_toolsにある正規Tool名。 既知Articleを起点に、仮説に合う法令関係を1ホップだけ探索する。関係のmode、意味predicate、向きを説明できる場合に使う。返す候補は本文ではなくnavigation情報であり、関連性と次の取得対象はSolverが判断する。",
-                "enum": [
-                  "legal_graph_neighbors"
-                ],
-                "type": "string"
-              },
-              "work_item_id": {
-                "description": "このTool結果を利用する主なopen WorkItem ID。",
-                "type": "string"
-              }
-            },
-            "required": [
-              "request_id",
-              "work_item_id",
-              "purpose",
-              "hypothesis_ids",
-              "tool_name",
-              "arguments"
-            ],
-            "type": "object"
+          "purpose": {
+            "description": "何を確認するための要求かを示す短い説明。",
+            "type": "string"
           },
-          {
-            "additionalProperties": false,
-            "properties": {
-              "arguments": {
-                "additionalProperties": false,
-                "description": "選んだToolのinput_schemaに完全一致する引数object。",
-                "properties": {
-                  "evidence_ids": {
-                    "description": "今回再表示するomitted_evidence_idsの完全一致。",
-                    "items": {
-                      "type": "string"
-                    },
-                    "minItems": 1,
-                    "type": "array"
-                  }
-                },
-                "required": [
-                  "evidence_ids"
-                ],
-                "type": "object"
-              },
-              "hypothesis_ids": {
-                "description": "このTool結果で検証する既知Hypothesis ID。",
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "purpose": {
-                "description": "何を確認するための要求かを示す短い説明。",
-                "type": "string"
-              },
-              "request_id": {
-                "description": "同じSolverDecision内で一意な短い局所ID。",
-                "type": "string"
-              },
-              "tool_name": {
-                "description": "available_toolsにある正規Tool名。 Caseでは取得済みだが現在のPromptから省略されたEvidence本文を再表示する。omitted_evidence_idsにある既知IDだけを指定する。新しい検索、Article本文取得、Graph探索は行わない。",
-                "enum": [
-                  "load_evidence"
-                ],
-                "type": "string"
-              },
-              "work_item_id": {
-                "description": "このTool結果を利用する主なopen WorkItem ID。",
-                "type": "string"
-              }
-            },
-            "required": [
-              "request_id",
-              "work_item_id",
-              "purpose",
-              "hypothesis_ids",
-              "tool_name",
-              "arguments"
+          "request_id": {
+            "description": "同じSolverDecision内で一意な短い局所ID。",
+            "type": "string"
+          },
+          "tool_name": {
+            "description": "available_toolsにある正規Tool名。 Article IDがまだ分からないとき、OpenSearchで法令またはガイドの候補を探す。質問をそのまま繰り返さず、確認事項を法令表現へ言い換えて使う。返す検索抜粋は候補選択用であり、回答やHypothesisの根拠にはしない。",
+            "enum": [
+              "legal_search"
             ],
-            "type": "object"
+            "type": "string"
+          },
+          "work_item_id": {
+            "description": "このTool結果を利用する主なopen WorkItem ID。",
+            "type": "string"
           }
-        ]
+        },
+        "required": [
+          "request_id",
+          "work_item_id",
+          "purpose",
+          "hypothesis_ids",
+          "tool_name",
+          "arguments"
+        ],
+        "type": "object"
       },
       "maxItems": 5,
       "type": "array"

@@ -24,15 +24,28 @@ _LLM_VISIBLE_FIELDS: tuple[tuple[str, type[BaseModel], tuple[str, ...]], ...] = 
 )
 
 
-@lru_cache(maxsize=1)
-def render_solver_contract_glossary() -> str:
-    """現在の入出力の入口だけを、Field.descriptionから生成する。"""
+@lru_cache(maxsize=16)
+def render_solver_contract_glossary(
+    context_field_names: tuple[str, ...] | None = None,
+    decision_field_names: tuple[str, ...] | None = None,
+) -> str:
+    """今回のProvider入出力にある入口だけをField.descriptionから生成する。"""
 
     lines = [
         "<contract_glossary>",
         "以下は正規契約の入口となる項目名と意味です。入れ子の出力項目はProvider schemaのdescriptionを正本とします。",
     ]
-    for model_name, model_type, field_names in _LLM_VISIBLE_FIELDS:
+    requested_fields = {
+        "SolverContext": context_field_names,
+        "SolverDecision": decision_field_names,
+    }
+    for model_name, model_type, all_field_names in _LLM_VISIBLE_FIELDS:
+        requested = requested_fields[model_name]
+        field_names = (
+            all_field_names
+            if requested is None
+            else tuple(name for name in all_field_names if name in requested)
+        )
         lines.append(f"### {model_name}")
         for field_name in field_names:
             field = model_type.model_fields[field_name]

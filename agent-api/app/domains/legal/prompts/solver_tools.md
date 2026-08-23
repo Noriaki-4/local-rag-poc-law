@@ -4,13 +4,18 @@
 
 利用可能なTool名、引数、戻り値の意味は`available_tools`を正本とします。以下はToolを選ぶ条件です。
 
+ToolRequestは、Solverが次にProgramへ実行させるTool名と引数を返す出力です。
+Toolの実行結果は次のSolver呼び出しで提示され、Solverはその結果から次のToolを選びます。
+
 - `fetchable_article_ids`にあるArticle IDは、検索等で発見済みで本文取得に使える候補です。質問との関係を判断したうえで、本文未取得なら`fetch_articles`を使います。
 - `search_candidates`は、候補Article、発見元の検索要求・WorkItem・Hypothesis、検索抜粋Evidenceを対応付けた一覧です。発見元は来歴であり、意味上の採用先を限定しません。
 - Article IDが不明なら`legal_search`を使います。
 - manifestにだけある既知Evidence本文には`load_evidence`を使います。
 - ToolRequestは未確認のHypothesisとopen WorkItemへ結び付けます。
 - 同じDecisionの既知Articleは、上限内なら1つの`fetch_articles`へまとめます。上限は目標件数ではありません。
-- `fetch_articles.arguments.article_ids`は`fetchable_article_ids`から完全一致で選びます。本文の条番号からIDを作りません。
+- `fetch_articles.arguments.article_ids`は`fetchable_article_ids`から完全一致で選びます。
+  Evidence ID、`basis_evidence_ids`、`metadata.articleId`、本文の条番号からArticle IDを作りません。
+- 検索候補、Graph候補、近接する別Articleを回答根拠として代用しません。
 
 ### legal_search
 
@@ -21,7 +26,7 @@
 
 ### fetch_articles
 
-- 1要求の上限は`available_tools`の`input_schema`と`remaining_fetch_capacity`に従います。
+- 1要求の上限は`available_tools`の`input_schema`に従います。
 - `work_item_id`には主対象、`hypothesis_ids`には本文で検証する全Hypothesisを指定します。
 - `fetch_articles`だけではGraph探索を行いません。
 

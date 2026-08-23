@@ -18,6 +18,7 @@ class ModelCallProfile(FrameworkModel):
     completion_check_prompt: str | None = None
     followup_completion_check_prompt: str | None = None
     context_projection: Literal["full", "initial_research"] = "full"
+    available_tool_names: tuple[str, ...] | None = None
 
 
 class ReviewerProfile(ModelCallProfile):

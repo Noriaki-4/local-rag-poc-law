@@ -462,10 +462,14 @@ def render_solver_model_call(
     """Providerへ送るSolver呼出しとレビュー成果物を同時に作る。"""
 
     initial_research = profile.context_projection == "initial_research"
+    projected_context = _project_available_tools(
+        context,
+        profile.available_tool_names,
+    )
     compact_transport = initial_research or provider in {"ollama", "openai"}
     structured_tool_transport = not initial_research and provider == "anthropic"
     output_schema = (
-        _initial_research_transport_schema(context)
+        _initial_research_transport_schema(projected_context)
         if initial_research
         else (
             _solver_compact_transport_schema(context)
@@ -485,8 +489,13 @@ def render_solver_model_call(
         structured_tool_transport=structured_tool_transport,
         output_schema=output_schema,
         input_payload=_solver_context_payload(
-            context,
+            projected_context,
             projection=profile.context_projection,
+        ),
+        minimal_contract=(
+            _INITIAL_RESEARCH_SOLVER_CONTRACT
+            if initial_research
+            else _MINIMAL_SOLVER_CONTRACT
         ),
         stage=stage,
     )
@@ -501,6 +510,7 @@ def _render_solver_model_call(
     structured_tool_transport: bool = False,
     output_schema: dict[str, Any] | None = None,
     input_payload: dict[str, Any] | None = None,
+    minimal_contract: str = "",
     stage: str = "solver",
 ) -> RenderedModelCall:
     if output_schema is None:
@@ -518,15 +528,6 @@ def _render_solver_model_call(
         structured_tool_transport=structured_tool_transport,
     )
     repair_instructions = _contract_repair_catalog(context)
-    instructions = (
-        f"{system_prompt}\n\n"
-        f"{render_solver_contract_glossary()}\n\n"
-        f"{_MINIMAL_SOLVER_CONTRACT}\n\n"
-        f"{repair_instructions}"
-        f"{transport_instruction}"
-        f"{RUNTIME_INPUT_MARKER}"
-        f"{_post_context_completion_check(completion_check_prompt)}"
-    )
     if input_payload is None:
         input_payload = context.model_dump(mode="json")
     else:
@@ -535,6 +536,20 @@ def _render_solver_model_call(
         input_payload["transport_values"] = {
             "fetch_articles_aliases": _article_fetch_alias_map(context),
         }
+    decision_field_names = tuple(
+        name
+        for name in output_schema.get("properties", {})
+        if name in SolverDecision.model_fields
+    )
+    instructions = (
+        f"{system_prompt}\n\n"
+        f"{render_solver_contract_glossary(tuple(input_payload), decision_field_names)}\n\n"
+        f"{minimal_contract or _MINIMAL_SOLVER_CONTRACT}\n\n"
+        f"{repair_instructions}"
+        f"{transport_instruction}"
+        f"{RUNTIME_INPUT_MARKER}"
+        f"{_post_context_completion_check(completion_check_prompt)}"
+    )
     rendered = build_rendered_model_call(
         stage=(
             f"{stage}_contract_repair"
@@ -550,6 +565,27 @@ def _render_solver_model_call(
     )
     _ensure_solver_prompt_capacity(rendered.request, context.max_solver_input_chars)
     return rendered
+
+
+def _project_available_tools(
+    context: SolverContext,
+    available_tool_names: tuple[str, ...] | None,
+) -> SolverContext:
+    """Profileが指定したToolだけを、意味選別せずProviderへ投影する。"""
+
+    if available_tool_names is None:
+        return context
+    requested = set(available_tool_names)
+    available_tools = tuple(
+        definition
+        for definition in context.available_tools
+        if definition.name in requested
+    )
+    found = {definition.name for definition in available_tools}
+    missing = requested - found
+    if missing:
+        raise ValueError(f"profile references unavailable tools: {sorted(missing)}")
+    return context.model_copy(update={"available_tools": available_tools})
 
 
 def _solver_context_payload(
@@ -3044,6 +3080,25 @@ def _decode_transport_json(value: Any, *, expected_type: type, label: str) -> An
     if not isinstance(decoded, expected_type):
         raise ModelProtocolError(f"{label} has an invalid root type")
     return decoded
+
+
+_INITIAL_RESEARCH_SOLVER_CONTRACT = """
+出力原則:
+- Provider schemaに従い、CaseState全体ではなく今回の差分だけを返す。
+- continueを返し、answerやCycle終了判断は返さない。
+- updateには新しいWorkItemとHypothesisだけを返す。
+
+状態契約:
+- WorkItemはopen、resolutionはnullにする。
+- Hypothesisはunresolved、evidence_idsは空にする。
+- next_focus_work_item_idsには、今回優先するopen WorkItem IDを指定する。
+
+Tool契約:
+- tool_requestsは、Solverが次にProgramへ実行させるTool名と引数を返す出力である。
+- 各要求を、今回検証するopen WorkItemとHypothesisへ結び付ける。
+- Tool名とargumentsはavailable_toolsの名前とinput_schemaに一致させる。
+- request_idは同じDecision内で重複しない短い局所IDにする。
+""".strip()
 
 
 _MINIMAL_SOLVER_CONTRACT = """

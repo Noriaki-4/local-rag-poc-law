@@ -25,7 +25,7 @@ def legal_agent_profile() -> AgentProfile:
     timeout_sec = settings.agent_framework_model_timeout_sec
     return AgentProfile(
         name="legal-default",
-        version="145",
+        version="146",
         provider=settings.llm_provider,
         solver_research=_model_profile(
             model=settings.agent_framework_research_model,
@@ -36,10 +36,9 @@ def legal_agent_profile() -> AgentProfile:
                 solver_identity_prompt,
                 _read_prompt("solver_research.md"),
                 common_solver_prompt,
-                tool_prompt,
-                completion_prompt,
             ),
             completion_check_prompt=_read_prompt("solver_research_check.md"),
+            available_tool_names=("legal_search",),
         ),
         solver_integration=_model_profile(
             model=integration_model,
@@ -194,6 +193,7 @@ def _model_profile(
     prompts: tuple[str, ...],
     completion_check_prompt: str,
     context_projection: Literal["full", "initial_research"] = "full",
+    available_tool_names: tuple[str, ...] | None = None,
 ) -> ModelCallProfile:
     return ModelCallProfile(
         model=model,
@@ -202,4 +202,5 @@ def _model_profile(
         system_prompt=_join_prompts(*prompts),
         completion_check_prompt=completion_check_prompt,
         context_projection=context_projection,
+        available_tool_names=available_tool_names,
     )
