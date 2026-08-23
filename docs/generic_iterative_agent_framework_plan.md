@@ -1736,18 +1736,24 @@ Profileを切り替えても、CaseStateの意味とTool契約は変わらない
 | 処理モードの手順と判断ルール | `domains/<domain>/prompts/` | 構造的な現在モードに必要なfragmentだけを合成 |
 | Provider固有の構造化出力制約 | Provider adapter | 正規名と意味を変えず、輸送表現だけを変換 |
 
+固定指示と実行時入力を分離する。同じ処理モード、Provider輸送方式、契約versionでは、質問、検索結果、
+Evidence、許可IDまたは違反内容が変わっても固定指示のhashを変えない。これらの動的値は入力objectへ置き、
+Provider送信時だけ固定位置へ直列化する。契約修復と輸送修復も規則一覧を固定し、違反内容と直前出力を
+入力として渡す。
+
 Provider schemaの`enum`や項目名だけで使い方を推測させない。一方で、同じ基本定義やJSON例を
 Domain Promptへ複製しない。例は契約の必須要素ではない。説明とルールで解消できない誤解を
 fixtureで確認したときだけ、契約定義と分けた`examples`セクションへ追加する。その際は特定の質問、
 件数、ID、法令名を一般ルールとして学習させないよう、複数の異なる例で境界を示す。
 
 修復Prompt本文をPythonの文字列へ埋め込まない。Markdown内の名前付きsectionを
-`prompt_assets.py`がUTF-8で読み込み、初回読込み後にcacheする。Pythonには違反markerと適用する
-section名の対応だけを残し、実際の契約検証は引き続きValidatorを正本とする。契約テストは、registryが
-参照するsectionの欠落、参照されないsection、template変数の不足を失敗させる。これによりPrompt本文だけを
+`prompt_assets.py`がUTF-8で読み込み、初回読込み後にcacheする。Pythonには固定section一覧だけを残し、
+違反文字列との部分一致でPrompt片を選ばない。実際の契約検証は引き続きValidatorを正本とする。契約テストは、
+固定一覧が参照するsectionの欠落、参照されないsection、動的template変数の混入を失敗させる。これによりPrompt本文だけを
 人間またはAIへ渡してレビューできる状態と、実装との対応漏れ防止を両立する。
 
-診断時は、プログラムからLLMへの`transport_input`へ実送信Prompt・schemaのhash、Profile名・version、
+診断時は、プログラムからLLMへの`transport_input`へ固定指示、動的入力、実送信Prompt、Provider schema、
+正規化後schemaのhash、Profile名・version、
 Prompt builder、使用した外部Prompt asset・section・各hashを記録する。LLMからプログラムへの
 `transport_output`へ生payloadとhash、輸送検証結果を、`solver_output / contract_violation /
 decision_applied`へ正規化済みDecisionと同一hashを記録する。`snapshot`では実データ本文も保持し、
@@ -2030,7 +2036,8 @@ EventJournalやDB監査ログは導入しない。運用ログとAPI traceを同
 小さい実行要約だけをAPI traceへ返し、診断ファイルを作らない。`status`はWorkItem、Hypothesis、
 Graph review等の状態一覧と本文を含まない件数・契約違反を出力する。`snapshot`は再現対象の実行に限り、
 統合直前の`CaseState`、実際に投影した`SolverContext`、Model Profile、修復前後の`SolverDecision`を
-`eval-results/`配下へ保存する。Providerへ渡したPrompt・schemaとProvider内の輸送修復も同じRunへ記録し、
+`eval-results/`配下へ保存する。Providerへ渡した固定指示、動的入力、Prompt、schema、正規化後schemaは
+呼出し別の成果物にも分けて保存する。Provider内の輸送修復も同じRunへ記録し、
 Framework契約修復と区別する。modeは観測出力だけを変更し、LLMへ渡すstatus契約や本文量を変えない。
 
 SolverDecisionは各Stepの`continue / finalize`選択について、内部思考ではない短い
@@ -2054,6 +2061,7 @@ agent-api/app/
 │   ├── context.py                   # WorkTree・探索frontier・focus・Evidenceの機械的表示
 │   ├── validation.py                # 既知ID・権限・上限等の構造検証。状態遷移規則を重複定義しない
 │   ├── contract_rendering.py        # Provider schema基礎・LLM-visible status用語集の決定的生成
+│   ├── model_call_artifacts.py      # 固定指示・動的入力・両schema・実送信成果物
 │   ├── tool_contracts.py            # ToolDefinition・Provider非依存の入力Schema生成
 │   ├── profiles.py                  # Profile読込みと用途別model解決
 │   ├── store.py                     # 小さいCaseStore Protocol

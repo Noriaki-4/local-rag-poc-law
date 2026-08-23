@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-from collections.abc import Sequence
 from hashlib import sha256
 from pathlib import Path
 from threading import RLock
@@ -13,9 +12,9 @@ from typing import Any, Literal
 
 from .context import SolverContext
 from .contracts import SolverDecision
+from .model_call_artifacts import RenderedModelCall, write_model_call_artifacts
 from .ports.model import ReviewerView
 from .profiles import ModelCallProfile, ReviewerProfile
-from .prompt_assets import PromptAssetTrace
 from .state import CaseState, ReviewResult
 
 DiagnosticsMode = Literal["off", "status", "snapshot"]
@@ -39,6 +38,7 @@ class AgentDiagnostics:
             mode if mode in {"off", "status", "snapshot"} else "off"
         )
         self._path = output_dir / "agent-framework-diagnostics" / f"{case_id}.jsonl"
+        self._artifact_root = output_dir / "agent-model-calls" / case_id
         self._sequence = 0
         self._applied_decision_sequences: list[int] = []
         self._lock = RLock()
@@ -195,12 +195,19 @@ class AgentDiagnostics:
         *,
         view: ReviewerView,
         profile: ReviewerProfile,
-        prompt: str,
-        schema: dict[str, Any],
+        rendered: RenderedModelCall,
+        provider: str | None = None,
     ) -> None:
         if self.mode == "off":
             return
-        schema_json = json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
+        schema_json = json.dumps(
+            rendered.output_schema,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        artifact_dir = self._artifact_root / (
+            f"reviewer-{rendered.request_hash[:12]}"
+        )
         record: dict[str, Any] = {
             "event": "reviewer_input",
             "caseId": view.case_id,
@@ -209,25 +216,39 @@ class AgentDiagnostics:
             "hypothesisCount": len(view.hypotheses),
             "dependencyDecisionCount": len(view.dependency_decisions),
             "evidenceCount": len(view.evidence),
-            "promptChars": len(prompt),
+            "promptChars": len(rendered.request),
             "schemaChars": len(schema_json),
-            "promptHash": _text_sha256(prompt),
-            "schemaHash": _json_sha256(schema),
+            "promptHash": rendered.request_hash,
+            "schemaHash": rendered.output_schema_hash,
+            "instructionsHash": rendered.instructions_hash,
+            "inputHash": rendered.input_hash,
+            "normalizedSchemaHash": rendered.normalized_schema_hash,
             "systemPromptHash": _text_sha256(profile.system_prompt),
             "profileName": self._profile_name,
             "profileVersion": self._profile_version,
             "promptBuilder": "app.adapters.models.structured_json:_review_prompt",
+            "artifactPath": str(artifact_dir),
         }
         if self.mode == "snapshot":
             record.update(
                 {
                     "reviewerView": view.model_dump(mode="json"),
-                    "prompt": prompt,
-                    "transportSchema": schema,
+                    "instructions": rendered.instructions,
+                    "inputPayload": rendered.input_payload,
+                    "prompt": rendered.request,
+                    "transportSchema": rendered.output_schema,
+                    "normalizedSchema": rendered.normalized_schema,
                     "modelProfile": profile.model_dump(mode="json"),
                 }
             )
         self._write(record)
+        if self.mode == "snapshot":
+            self._write_model_call_artifacts(
+                rendered,
+                artifact_dir,
+                provider=provider,
+                profile=profile,
+            )
 
     def record_reviewer_output(
         self,
@@ -339,25 +360,35 @@ class AgentDiagnostics:
         *,
         context: SolverContext,
         profile: ModelCallProfile,
-        prompt: str,
-        schema: dict[str, Any],
+        rendered: RenderedModelCall,
         repair_index: int,
-        prompt_assets: Sequence[PromptAssetTrace] = (),
         transport_stage: str = "solver",
+        provider: str | None = None,
     ) -> None:
         if self.mode == "off":
             return
-        schema_json = json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
+        schema_json = json.dumps(
+            rendered.output_schema,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        artifact_dir = self._artifact_root / (
+            f"{transport_stage}-attempt-{repair_index + 1}-"
+            f"{rendered.request_hash[:12]}"
+        )
         record: dict[str, Any] = {
             "event": "transport_input",
             "caseId": context.case_id,
             "transportAttempt": repair_index + 1,
             "transportStage": transport_stage,
             "model": profile.model,
-            "promptChars": len(prompt),
+            "promptChars": len(rendered.request),
             "schemaChars": len(schema_json),
-            "promptHash": _text_sha256(prompt),
-            "schemaHash": _json_sha256(schema),
+            "promptHash": rendered.request_hash,
+            "schemaHash": rendered.output_schema_hash,
+            "instructionsHash": rendered.instructions_hash,
+            "inputHash": rendered.input_hash,
+            "normalizedSchemaHash": rendered.normalized_schema_hash,
             "systemPromptHash": _text_sha256(profile.system_prompt),
             "profileName": self._profile_name,
             "profileVersion": self._profile_version,
@@ -370,11 +401,51 @@ class AgentDiagnostics:
                     else "app.adapters.models.structured_json:_solver_prompt"
                 )
             ),
-            "promptAssets": list(prompt_assets),
+            "promptAssets": list(rendered.prompt_assets),
+            "artifactPath": str(artifact_dir),
         }
         if self.mode == "snapshot":
-            record.update({"prompt": prompt, "transportSchema": schema})
+            record.update(
+                {
+                    "instructions": rendered.instructions,
+                    "inputPayload": rendered.input_payload,
+                    "prompt": rendered.request,
+                    "transportSchema": rendered.output_schema,
+                    "normalizedSchema": rendered.normalized_schema,
+                }
+            )
         self._write(record)
+        if self.mode == "snapshot":
+            self._write_model_call_artifacts(
+                rendered,
+                artifact_dir,
+                provider=provider,
+                profile=profile,
+            )
+
+    def _write_model_call_artifacts(
+        self,
+        rendered: RenderedModelCall,
+        output_dir: Path,
+        *,
+        provider: str | None,
+        profile: ModelCallProfile,
+    ) -> None:
+        try:
+            write_model_call_artifacts(
+                rendered,
+                output_dir,
+                provider=provider or "unknown",
+                profile_name=self._profile_name or "unknown",
+                profile_version=self._profile_version or "unknown",
+                model=profile.model,
+            )
+        except OSError:
+            logger.warning(
+                "failed to write model call artifacts: %s",
+                output_dir,
+                exc_info=True,
+            )
 
     def record_transport_output(
         self,

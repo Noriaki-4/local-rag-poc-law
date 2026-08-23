@@ -1,0 +1,209 @@
+{
+  "affected_work_items": [],
+  "available_tools": [
+    {
+      "description": "Article IDがまだ分からないとき、OpenSearchで法令またはガイドの候補を探す。質問をそのまま繰り返さず、確認事項を法令表現へ言い換えて使う。返す検索抜粋は候補選択用であり、回答やHypothesisの根拠にはしない。",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "doc_types": {
+            "description": "検索対象。法令本文はlaw、行政解釈やガイドはguideline。現在の検索に必要な値を配列で返す。",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "document_ids": {
+            "description": "検索対象文書を限定する既知documentId。限定しない場合は空配列。",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 12,
+            "type": "array"
+          },
+          "query": {
+            "description": "制度名と確認事項を法令に現れやすい表現へ言い換えた検索語。",
+            "maxLength": 1000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "query",
+          "doc_types",
+          "document_ids"
+        ],
+        "type": "object"
+      },
+      "name": "legal_search",
+      "parallel_safe": true,
+      "read_only": true,
+      "result_description": "候補Articleの所在と短い検索抜粋をnavigation Evidenceとして返す。Article本文のgrounding Evidenceは返さない。"
+    },
+    {
+      "description": "発見済みArticleの本文をOpenSearchから取得する。fetchable_article_idsにある既知IDから、質問とHypothesisに必要なものを選んで使う。検索やGraph展開は行わず、未知IDや取得済みEvidence IDは受け付けない。",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "article_ids": {
+            "description": "本文を取得する既知Article ID。SolverContext.fetchable_article_idsの完全一致だけを指定する。",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 4,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "article_ids"
+        ],
+        "type": "object"
+      },
+      "name": "fetch_articles",
+      "parallel_safe": true,
+      "read_only": true,
+      "result_description": "指定Articleに属するArticle・Paragraph・Itemの本文をgrounding Evidenceとして返す。"
+    },
+    {
+      "description": "既知Articleを起点に、仮説に合う法令関係を1ホップだけ探索する。関係のmode、意味predicate、向きを説明できる場合に使う。返す候補は本文ではなくnavigation情報であり、関連性と次の取得対象はSolverが判断する。",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "article_ids": {
+            "description": "1ホップの起点にする既知Article ID。",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 4,
+            "minItems": 1,
+            "type": "array"
+          },
+          "direction": {
+            "description": "起点Articleから見た関係の向き。",
+            "enum": [
+              "from_subject",
+              "to_subject",
+              "outgoing",
+              "incoming"
+            ],
+            "type": "string"
+          },
+          "max_relations": {
+            "description": "起点Articleごとに返すnavigation関係数の上限。",
+            "maximum": 50,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "mode": {
+            "description": "物理参照または意味分類済み関係のどちらを探索するか。",
+            "enum": [
+              "semantic_assertion",
+              "explicit_reference",
+              "explains"
+            ],
+            "type": "string"
+          },
+          "predicate": {
+            "anyOf": [
+              {
+                "description": "RelationAssertionが提示できる未確認の意味関係。",
+                "enum": [
+                  "IMPLEMENTS",
+                  "INCORPORATES",
+                  "USES_DEFINITION",
+                  "EXCEPTION_TO",
+                  "OVERRIDES"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "semantic_assertionで探索する仮説に合う1つの意味関係。それ以外のmodeではnull。"
+          }
+        },
+        "required": [
+          "article_ids",
+          "mode",
+          "predicate",
+          "direction",
+          "max_relations"
+        ],
+        "type": "object"
+      },
+      "name": "legal_graph_neighbors",
+      "parallel_safe": true,
+      "read_only": true,
+      "result_description": "起点と隣接Articleの関係、向き、根拠所在をGraph navigation Evidenceとして返す。隣接Articleの本文は返さない。"
+    },
+    {
+      "description": "Caseでは取得済みだが現在のPromptから省略されたEvidence本文を再表示する。omitted_evidence_idsにある既知IDだけを指定する。新しい検索、Article本文取得、Graph探索は行わない。",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_ids": {
+            "description": "今回再表示するomitted_evidence_idsの完全一致。",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "evidence_ids"
+        ],
+        "type": "object"
+      },
+      "name": "load_evidence",
+      "parallel_safe": true,
+      "read_only": true,
+      "result_description": "指定した既知Evidenceの本文をmaterial_evidenceへ再投影する。"
+    }
+  ],
+  "can_start_next_cycle": true,
+  "case_id": "fixture-tob-overview-initial-research-decomposition-v1",
+  "contract_feedback": null,
+  "cycle_budget_reached": false,
+  "cycle_close_required": false,
+  "cycle_step_timeout": false,
+  "dependency_decisions": [],
+  "evidence_manifest": [],
+  "fetchable_article_ids": [],
+  "fetched_resource_ids_this_cycle": [],
+  "finalize_only": false,
+  "focus_work_items": [],
+  "graph_review_batch": {
+    "candidates": [],
+    "remaining_unreviewed_count": 0
+  },
+  "graph_review_ledger": [],
+  "grounding_evidence_ids": [],
+  "hypotheses": [],
+  "material_evidence": [],
+  "max_fetched_resources_per_cycle": 3,
+  "max_material_evidence_chars": 50000,
+  "max_retained_evidence": 12,
+  "max_selected_frontier_per_step": 3,
+  "max_solver_input_chars": 240000,
+  "max_tool_requests_per_step": 5,
+  "min_next_cycle_budget_sec": 25.0,
+  "navigation_evidence_ids": [],
+  "omitted_evidence_ids": [],
+  "question": "上場会社の株式を、市場を通さずに多数の株主から買い集めたいのですが、公開買付けの手続が必要になるのはどのような場合ですか。対象となる株券等の範囲、主な例外、必要な手続も含めて、根拠となる条文とともに説明してください。",
+  "recent_tool_requests": [],
+  "recent_tool_results": [],
+  "remaining_fetch_capacity": 3,
+  "remaining_research_cycles": 4,
+  "remaining_wall_time_sec": 239.9999870419997,
+  "required_dependency_kind": null,
+  "required_dependency_work_item_ids": [],
+  "required_graph_review_request_ids": [],
+  "required_search_review_request_ids": [],
+  "research_cycle_count": 0,
+  "reviewer_findings": [],
+  "search_candidates": [],
+  "work_tree": []
+}

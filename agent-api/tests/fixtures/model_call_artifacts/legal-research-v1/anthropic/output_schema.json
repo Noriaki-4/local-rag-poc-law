@@ -1,0 +1,413 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "answer": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "citation_ids": {
+              "description": "回答で実際に使用したgrounding Evidence ID。",
+              "items": {
+                "type": "null"
+              },
+              "maxItems": 0,
+              "type": "array"
+            },
+            "limitations": {
+              "description": "上限等により確認できなかった事項と回答上の制約。",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "text": {
+              "description": "質問へ返す根拠付き回答本文。",
+              "type": "string"
+            },
+            "unresolved_hypothesis_ids": {
+              "description": "限定回答で未解決のまま残すHypothesis ID。",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "unresolved_work_item_ids": {
+              "description": "限定回答で未解決のまま残すWorkItem ID。",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "text",
+            "citation_ids",
+            "limitations",
+            "unresolved_work_item_ids",
+            "unresolved_hypothesis_ids"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "next=finalizeの場合だけ返す根拠付き回答。"
+    },
+    "decision_reason": {
+      "description": "提示された根拠、未確認事項、上限に結び付けた今回の判断理由。隠れた思考過程ではなく短い監査説明。",
+      "type": "string"
+    },
+    "deferred_frontier_resolutions": {
+      "description": "保留中Graph候補を継続・不要・上限未解決のいずれかへ更新する判断。",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "description": "fetch_next_cycleは次Cycle冒頭で取得、carry_forwardは後続へ保留、no_longer_neededは不要、unresolved_at_limitは上限で未解決。",
+            "enum": [
+              "fetch_next_cycle",
+              "carry_forward",
+              "no_longer_needed",
+              "unresolved_at_limit"
+            ],
+            "type": "string"
+          },
+          "article_id": {
+            "description": "保留Frontierが示す既知Article ID。",
+            "type": "string"
+          },
+          "frontier_item_id": {
+            "description": "以前relevant_deferredにしたFrontierの完全一致ID。",
+            "type": "string"
+          },
+          "hypothesis_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "保留Frontierが対応するHypothesis ID。特定されていなければnull。"
+          },
+          "reason": {
+            "description": "保留Frontierの次の扱いを選んだ理由。",
+            "type": "string"
+          },
+          "work_item_id": {
+            "description": "保留Frontierが属するopen WorkItem ID。",
+            "type": "string"
+          }
+        },
+        "required": [
+          "frontier_item_id",
+          "article_id",
+          "work_item_id",
+          "hypothesis_id",
+          "action",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "maxItems": 0,
+      "type": "array"
+    },
+    "dependency_article_bindings": {
+      "description": "Anthropic輸送専用。DependencyDecisionの判断根拠Articleを既知IDから指定する。",
+      "type": "null"
+    },
+    "dependency_decisions": {
+      "additionalProperties": false,
+      "description": "各対象WorkItemについて下位規範確認が必要かを示すSolver判断。",
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "fetch_articles": {
+      "description": "Anthropic輸送専用のfetch_articles ToolRequest。候補がない場合はnull。",
+      "type": "null"
+    },
+    "frontier_re_adoptions": {
+      "description": "既存Graph候補を別のopen WorkItem・Hypothesisへ再採用する判断。",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "article_id": {
+            "description": "評価済みGraph台帳から再採用する既知Article ID。",
+            "type": "string"
+          },
+          "hypothesis_id": {
+            "description": "再採用したArticleで検証する既知Hypothesis ID。",
+            "type": "string"
+          },
+          "reason": {
+            "description": "既存候補をこのWorkItem・Hypothesisへ再採用する理由。",
+            "type": "string"
+          },
+          "work_item_id": {
+            "description": "再採用先のopen WorkItem ID。",
+            "type": "string"
+          }
+        },
+        "required": [
+          "article_id",
+          "work_item_id",
+          "hypothesis_id",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "maxItems": 0,
+      "type": "array"
+    },
+    "graph_candidate_review": {
+      "description": "現在のGraph候補差分に対するselect・defer・reject判断。",
+      "type": "null"
+    },
+    "hypothesis_evidence_bindings": {
+      "description": "Anthropic輸送専用。Hypothesis更新JSONと既知Evidenceの対応を指定する。",
+      "type": "null"
+    },
+    "next": {
+      "description": "追加のaction-observation stepまたは次Cycleが必要ならcontinue、根拠付き回答を返せるならfinalize。Solverが決める。",
+      "enum": [
+        "continue",
+        "finalize"
+      ],
+      "type": "string"
+    },
+    "next_focus_work_item_ids": {
+      "description": "次のstepで優先する、更新適用後もopenの既知WorkItem ID。",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "retain_evidence_ids": {
+      "description": "後続Cycleにも本文提示が必要な既知Evidence ID。",
+      "items": {
+        "type": "null"
+      },
+      "maxItems": 0,
+      "type": "array"
+    },
+    "review_finding_resolutions": {
+      "description": "Reviewerの各指摘を反映したか、本文に基づき採用しないかの回答。",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 0,
+      "minItems": 0,
+      "type": "array"
+    },
+    "search_candidate_review": {
+      "description": "現在のOpenSearch候補から本文取得対象を選ぶ判断。",
+      "type": "null"
+    },
+    "start_next_cycle": {
+      "description": "現在Cycleを評価して閉じ、別の仮説・方針で次Cycleを開始する場合だけtrue。",
+      "type": "boolean"
+    },
+    "tool_requests": {
+      "additionalProperties": false,
+      "description": "未確認Hypothesisを検証するため、Solverが今回選ぶread-only Tool要求。",
+      "properties": {
+        "tool_request_1_json": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "request_json": {
+                  "description": "tool_nameを除く1件のToolRequest JSON object。",
+                  "type": "string"
+                },
+                "tool_name": {
+                  "description": "request_jsonを復元するときの正規Tool名。",
+                  "enum": [
+                    "legal_search",
+                    "legal_graph_neighbors",
+                    "load_evidence"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tool_name",
+                "request_json"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Anthropic輸送専用のToolRequest slot。使わない場合はnull。"
+        },
+        "tool_request_2_json": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "request_json": {
+                  "description": "tool_nameを除く1件のToolRequest JSON object。",
+                  "type": "string"
+                },
+                "tool_name": {
+                  "description": "request_jsonを復元するときの正規Tool名。",
+                  "enum": [
+                    "legal_search",
+                    "legal_graph_neighbors",
+                    "load_evidence"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tool_name",
+                "request_json"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Anthropic輸送専用のToolRequest slot。使わない場合はnull。"
+        },
+        "tool_request_3_json": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "request_json": {
+                  "description": "tool_nameを除く1件のToolRequest JSON object。",
+                  "type": "string"
+                },
+                "tool_name": {
+                  "description": "request_jsonを復元するときの正規Tool名。",
+                  "enum": [
+                    "legal_search",
+                    "legal_graph_neighbors",
+                    "load_evidence"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tool_name",
+                "request_json"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Anthropic輸送専用のToolRequest slot。使わない場合はnull。"
+        },
+        "tool_request_4_json": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "request_json": {
+                  "description": "tool_nameを除く1件のToolRequest JSON object。",
+                  "type": "string"
+                },
+                "tool_name": {
+                  "description": "request_jsonを復元するときの正規Tool名。",
+                  "enum": [
+                    "legal_search",
+                    "legal_graph_neighbors",
+                    "load_evidence"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tool_name",
+                "request_json"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Anthropic輸送専用のToolRequest slot。使わない場合はnull。"
+        },
+        "tool_request_5_json": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "request_json": {
+                  "description": "tool_nameを除く1件のToolRequest JSON object。",
+                  "type": "string"
+                },
+                "tool_name": {
+                  "description": "request_jsonを復元するときの正規Tool名。",
+                  "enum": [
+                    "legal_search",
+                    "legal_graph_neighbors",
+                    "load_evidence"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tool_name",
+                "request_json"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Anthropic輸送専用のToolRequest slot。使わない場合はnull。"
+        }
+      },
+      "required": [
+        "tool_request_1_json",
+        "tool_request_2_json",
+        "tool_request_3_json",
+        "tool_request_4_json",
+        "tool_request_5_json"
+      ],
+      "type": "object"
+    },
+    "unreviewed_graph_resolution": {
+      "description": "未評価Graph候補が実行上限時に残る場合の扱い。",
+      "type": "null"
+    },
+    "update_json": {
+      "description": "CaseUpdate encoded as one JSON object string",
+      "type": "string"
+    }
+  },
+  "required": [
+    "next",
+    "decision_reason",
+    "start_next_cycle",
+    "update_json",
+    "next_focus_work_item_ids",
+    "retain_evidence_ids",
+    "review_finding_resolutions",
+    "tool_requests",
+    "dependency_decisions",
+    "graph_candidate_review",
+    "search_candidate_review",
+    "frontier_re_adoptions",
+    "deferred_frontier_resolutions",
+    "unreviewed_graph_resolution",
+    "answer",
+    "hypothesis_evidence_bindings",
+    "dependency_article_bindings",
+    "fetch_articles"
+  ],
+  "type": "object"
+}

@@ -1,11 +1,6 @@
 <!-- prompt-section:contract_feedback_rule -->
 contract_feedbackがある場合、直前Decisionは状態へ適用されていません。適合している意味判断は保ち、violationと矛盾する制御値・参照だけを修正してください。
 
-<!-- prompt-section:base -->
-直前Decisionは未適用です。適合する意味判断を保ち、次の違反だけを修正します。
-${focused_instructions}
-violation: ${violation}
-
 <!-- prompt-section:unknown_evidence -->
 Evidence IDを生成せず、正規契約のHypothesis.evidence_idsにはgrounding_evidence_idsの完全一致だけを選びます。Provider輸送上の対応欄はschemaの指示に従います。未取得本文ならHypothesisをunresolvedにします。
 

@@ -1,0 +1,13 @@
+{
+  "inputHash": "7ac669aa1ace16369cefff5e43542d4624f4c92fc7841d61d2a2395f98971b67",
+  "instructionsHash": "358352e1c2c187c4c6b45640a0f05688e6fd4a456a9a0e6fc11240d729c87a46",
+  "model": "gpt-4o-mini",
+  "normalizedSchemaHash": "bad8b40fa3ba2cc5ab16df7602338f94c975980bd75d7617c6e4fabbac605144",
+  "outputSchemaHash": "8a3ee59d501a77ae0b38d97610b64e467dbe3202efa89fcea4caaeddffe621cb",
+  "profileName": "legal-default",
+  "profileVersion": "138",
+  "promptAssets": [],
+  "provider": "anthropic",
+  "requestHash": "a9cd8412a63799b7c59fc9d22eb715d587fc7d0d9e17cde183091f852b290325",
+  "stage": "research"
+}

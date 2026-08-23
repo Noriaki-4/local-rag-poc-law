@@ -1126,9 +1126,13 @@ curl -s http://localhost:8000/answer/framework \
 |---|---|---|
 | `off` | 実行・model・Toolの要約 | 出力しない |
 | `status` | 上記にWorkItem、Hypothesis、Graph review等の状態一覧を追加 | 本文を含まない状態・件数・契約違反をJSONLで出力 |
-| `snapshot` | `status`と同じ | 統合直前の`CaseState`、実際の`SolverContext`、Model Profile、Providerへ渡したPrompt・schema、Decision、契約違反を含む |
+| `snapshot` | `status`と同じ | 統合直前の`CaseState`、固定指示、実行時入力、Providerへ渡したPrompt・schema、正規化後schema、Decision、契約違反を含む |
 
 診断ファイルは`EVAL_RESULTS_DIR/agent-framework-diagnostics/<case_id>.jsonl`へ保存する。
+各Model呼出しのレビュー用成果物は
+`EVAL_RESULTS_DIR/agent-model-calls/<case_id>/<stage>-<attempt>-<hash>/`へ保存する。
+`instructions.md`は固定指示、`input.json`は動的入力、`output_schema.json`はProvider出力契約、
+`normalized_schema.json`は正規化後のPydantic契約、`request.txt`は実送信内容である。
 `eval-results/`はGit管理外である。診断出力に失敗しても回答処理は失敗させない。modeは出力・保存だけを
 切り替え、SolverのPromptや`SolverContext`を増減しないため、`status`や`snapshot`を有効にしても
 LLMへの入力tokenは増えない。通常は`off`を維持し、再現対象の1実行だけ`status`または`snapshot`にする。
@@ -1139,6 +1143,27 @@ LLMへの入力tokenは増えない。通常は`off`を維持し、再現対象�
 `payloadHash`、輸送検証エラーを持ち、`solver_output`以降は正規化済み`SolverDecision`と
 `solverDecisionHash`を持つ。同じhashにより、生応答、正規化後、契約違反、CaseState適用の境界を区別する。
 Prompt assetの本文を変更した場合はProfile versionも更新し、実行時の来歴と設定上の契約versionを一致させる。
+
+APIを呼ばず、固定fixtureから同じ成果物を生成・差分確認できる。Providerを変更すると輸送指示と
+`output_schema.json`だけでなく実送信内容も変わるため、対象Providerを明示する。
+
+```bash
+agent-api/.venv/bin/python scripts/export_agent_model_call_artifacts.py \
+  --fixture agent-api/tests/fixtures/framework/tob_overview_initial_research_decomposition_v1.json \
+  --provider openai \
+  --stage research \
+  --output eval-results/model-call-review/legal-research-openai
+
+agent-api/.venv/bin/python scripts/export_agent_model_call_artifacts.py \
+  --fixture agent-api/tests/fixtures/framework/tob_overview_initial_research_decomposition_v1.json \
+  --provider openai \
+  --stage research \
+  --output eval-results/model-call-review/legal-research-openai \
+  --check
+```
+
+通常の整合レビューは`instructions.md`と`output_schema.json`を対にして行う。Provider輸送から
+共通契約への変換を疑う場合だけ`normalized_schema.json`、実際の直列化を疑う場合だけ`request.txt`を追加確認する。
 
 Solverへ渡る項目の基本的な意味はPydanticの`Field.description`から`contract_glossary`へ生成する。
 Toolの正規名、用途、入力Schema、戻り値は実行時の`available_tools`へ投影する。

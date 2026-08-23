@@ -1,10 +1,5 @@
-<!-- prompt-section:base -->
-${base_prompt}
-
-直前の出力は輸送またはschema検証だけに失敗しました。意味上の判断を変えず、契約に適合するSolverDecisionへ修復してください。
-${focused_instruction}
-<validation_error>${validation_error}</validation_error>
-<previous_solver_decision>${previous_solver_decision}</previous_solver_decision>
+<!-- prompt-section:stable -->
+transport_repairがある場合、直前出力は状態へ適用されていません。元の意味判断を保ち、validation_errorに該当する規則だけを使って、出力契約へ適合する応答を返してください。
 
 <!-- prompt-section:continue_requires_action -->
 next=continueを維持するなら、追加調査に必要なlegal_search、legal_graph_neighbors、load_evidenceまたはfetch_articlesを少なくとも1件返します。調査が不要と判断するなら、未完了WorkItemを根拠に基づいて閉じ、next=finalizeとanswerを返します。どちらかを意味判断して選びます。

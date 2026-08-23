@@ -15,7 +15,6 @@ from app.adapters.models import StructuredJSONModelAdapter
 from app.adapters.models.structured_json import (
     _assign_tool_request_ids,
     _case_update_transport_schema,
-    _focused_contract_repair_instruction,
     _normalize_absent_context_branches,
     _normalize_solver_payload,
     _search_reselection_prompt,
@@ -26,9 +25,11 @@ from app.adapters.models.structured_json import (
     _solver_anthropic_transport_schema,
     _solver_compact_transport_schema,
     _solver_prompt,
-    _solver_repair_prompt,
     _solver_transport_schema,
     _validate_search_assessment_payload,
+    render_search_assessment_model_call,
+    render_solver_model_call,
+    render_solver_transport_repair_model_call,
 )
 from app.adapters.persistence.simple_in_memory import InMemoryCaseStore
 from app.adapters.tools.legal_search import (
@@ -493,7 +494,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "137"
+    assert diagnostic_records[0]["profileVersion"] == "138"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -501,14 +502,12 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "137"
+    assert transport_input["profileVersion"] == "138"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
-    assert transport_input["promptAssets"][0]["asset"] == (
-        "agent_framework/prompts/solver_contract_repair.md"
-    )
-    assert [
-        item["name"] for item in transport_input["promptAssets"][0]["sections"]
-    ] == ["contract_feedback_rule"]
+    assert transport_input["promptAssets"] == []
+    assert len(transport_input["instructionsHash"]) == 64
+    assert len(transport_input["inputHash"]) == 64
+    assert len(transport_input["normalizedSchemaHash"]) == 64
     transport_output = next(
         item for item in diagnostic_records if item["event"] == "transport_output"
     )
@@ -856,7 +855,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "137"
+    assert profile.version == "138"
     mode_prompts = {
         "research": profile.solver_research.system_prompt,
         "integration": profile.solver_integration.system_prompt,
@@ -1145,16 +1144,9 @@ def test_search_review_duplicate_fixture_gets_ordered_id_checklist() -> None:
     profile = legal_profiles.legal_agent_profile().solver_search_review
     assert profile is not None
     assert profile.completion_check_prompt is not None
-    prompt = _search_review_prompt(
-        context,
-        profile.system_prompt,
-        completion_check_prompt=profile.completion_check_prompt,
-    )
-    checklist_start = prompt.index("<search_candidate_checklist>") + len(
-        "<search_candidate_checklist>"
-    )
-    checklist_end = prompt.index("</search_candidate_checklist>")
-    checklist = json.loads(prompt[checklist_start:checklist_end])
+    rendered = render_search_assessment_model_call(context, profile)
+    prompt = rendered.request
+    checklist = rendered.input_payload["candidate_checklist"]
     observed_payload = {
         "search_request_ids": fixture["requiredSearchRequestIds"],
         "assessments": [
@@ -1172,11 +1164,8 @@ def test_search_review_duplicate_fixture_gets_ordered_id_checklist() -> None:
         "candidate_count": len(candidate_ids),
         "article_ids_in_input_order": candidate_ids,
     }
-    assert prompt.index("<search_candidate_checklist>") > prompt.index(
-        "</solver_context>"
-    )
     assert prompt.index("## 出力前の完了確認") > prompt.index(
-        "</search_candidate_checklist>"
+        "</solver_context>"
     )
     with pytest.raises(ModelProtocolError, match=fixture["expectedViolation"]):
         _validate_search_assessment_payload(observed_payload, context)
@@ -1393,7 +1382,12 @@ def test_integration_refetch_fixture_uses_only_fetchable_article_ids() -> None:
             )
         }
     )
-    repair = _focused_contract_repair_instruction(repair_context)
+    repair = render_solver_model_call(
+        repair_context,
+        profile,
+        provider="openai",
+        stage="integration",
+    ).instructions
 
     assert not set(fixture["observedFetchArticleIds"]) <= set(
         fixture["fetchableArticleIds"]
@@ -1975,27 +1969,6 @@ def test_compact_transport_structures_update_and_tool_arguments() -> None:
     assert normalized_dependencies[0]["basis_evidence_ids"] == ["upper", "lower"]
     assert normalized_dependencies[1]["action_request_id"] is None
     assert normalized_dependencies[1]["basis_evidence_ids"] == ["body"]
-
-
-def test_diagnostic_fixture_reproduces_openai_tool_request_transport_gap() -> None:
-    fixture_path = (
-        Path(__file__).parent
-        / "fixtures"
-        / "framework"
-        / "tob_overview_openai_missing_tool_fields.json"
-    )
-    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
-
-    normalized = _normalize_solver_payload(fixture["payload"])
-
-    with pytest.raises(ValidationError) as captured:
-        SolverDecision.model_validate(normalized)
-
-    locations = {
-        ".".join(str(part) for part in error["loc"])
-        for error in captured.value.errors()
-    }
-    assert set(fixture["expectedMissingFields"]) <= locations
 
 
 def test_diagnostic_integration_fixture_rebuilds_the_same_solver_context() -> None:
@@ -2583,9 +2556,12 @@ def test_real_model_cycle_close_fixture_reproduces_unresolved_basis_failure(
         "</solver_context>"
     )
     assert "can_start_next_cycle=true" in cycle_close_prompt.completion_check_prompt
-    assert "WorkItemだけをresolvedにしません" in (
-        _focused_contract_repair_instruction(context)
-    )
+    assert "WorkItemだけをresolvedにしません" in render_solver_model_call(
+        context,
+        cycle_close_prompt,
+        provider="openai",
+        stage="cycle_close",
+    ).instructions
     assert "minItems" not in hypothesis_updates
 
     corrected_payload = json.loads(json.dumps(fixture["solverDecision"]))
@@ -3107,11 +3083,21 @@ def test_anthropic_null_evidence_sidecar_clears_update_json_ids() -> None:
 
 
 def test_transport_repair_explains_continue_requires_an_actual_action() -> None:
-    prompt = _solver_repair_prompt(
-        "base",
-        {"next": "continue"},
-        ModelProtocolError("continue decision requires a tool request"),
+    context = build_solver_context(
+        CaseState(case_id="case-1", question="質問"),
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
     )
+    profile = ModelCallProfile(model="test-model", system_prompt="base")
+    base_call = render_solver_model_call(context, profile, provider="openai")
+    rendered = render_solver_transport_repair_model_call(
+        context,
+        base_call=base_call,
+        payload={"next": "continue"},
+        error=ModelProtocolError("continue decision requires a tool request"),
+    )
+    prompt = rendered.request
 
     assert "next=continueを維持するなら" in prompt
     assert "fetch_articlesを少なくとも1件" in prompt
@@ -3119,11 +3105,21 @@ def test_transport_repair_explains_continue_requires_an_actual_action() -> None:
 
 
 def test_transport_repair_explains_finalize_requires_an_answer() -> None:
-    prompt = _solver_repair_prompt(
-        "base",
-        {"next": "finalize", "answer": None},
-        ModelProtocolError("finalize decision requires an answer"),
+    context = build_solver_context(
+        CaseState(case_id="case-1", question="質問"),
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
     )
+    profile = ModelCallProfile(model="test-model", system_prompt="base")
+    base_call = render_solver_model_call(context, profile, provider="openai")
+    rendered = render_solver_transport_repair_model_call(
+        context,
+        base_call=base_call,
+        payload={"next": "finalize", "answer": None},
+        error=ModelProtocolError("finalize decision requires an answer"),
+    )
+    prompt = rendered.request
 
     assert "next=finalizeを維持するなら" in prompt
     assert "確認済みEvidenceに基づくanswer" in prompt
@@ -3775,10 +3771,7 @@ def test_contract_repair_prompt_handles_unknown_article_ids() -> None:
     assert "既存のWorkItem、Hypothesis、Evidence、Articleを参照するID" in prompt
     assert "`fetch_articles`には`fetchable_article_ids`の完全一致だけ" in prompt
     assert "Paragraph・ItemのEvidence IDをArticle IDとして使いません" in prompt
-    assert "violation: tool request references unknown Article IDs" in prompt
-    assert "navigation-only evidence" not in prompt
-    assert "resolved dependency requires" not in prompt
-    assert "final answer citations omit" not in prompt
+    assert '"violation":"tool request references unknown Article IDs' in prompt
 
 
 def test_contract_repair_prompt_handles_duplicate_tool_request_ids() -> None:
@@ -3800,7 +3793,7 @@ def test_contract_repair_prompt_handles_duplicate_tool_request_ids() -> None:
 
     assert "同じDecision内で相互に異なる短い局所ID" in prompt
     assert "action_request_idにも同じ局所IDをコピー" in prompt
-    assert "violation: duplicate tool request ID" in prompt
+    assert '"violation":"duplicate tool request ID' in prompt
 
 
 def test_contract_repair_prompt_aligns_resolved_work_item_and_hypotheses() -> None:
@@ -3880,8 +3873,8 @@ def test_minimal_solver_contract_defines_state_field_invariants() -> None:
     assert "IDはSolverContextまたは直前Decisionに表示された値だけ" not in prompt
 
 
-def test_contract_repair_prompt_distinguishes_retained_evidence_limit() -> None:
-    context = build_solver_context(
+def test_contract_repair_instructions_are_stable_across_violations() -> None:
+    first_context = build_solver_context(
         CaseState(case_id="case-1", question="質問"),
         AgentLimits(),
         remaining_wall_time_sec=60,
@@ -3892,10 +3885,27 @@ def test_contract_repair_prompt_distinguishes_retained_evidence_limit() -> None:
         ),
     )
 
-    prompt = _solver_prompt(context, "system")
+    second_context = build_solver_context(
+        CaseState(case_id="case-2", question="別の質問"),
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+        contract_feedback=SolverContractFeedback(
+            violation="duplicate tool request ID: request-1",
+            previous_decision=SolverDecision(
+                next="finalize",
+                answer={"text": "回答"},
+            ),
+        ),
+    )
+    profile = ModelCallProfile(model="test-model", system_prompt="system")
 
-    assert "後続Cycleにも本文が必要なEvidenceをLLMが選びます" in prompt
-    assert "今回必要な要求をLLMが選び" not in prompt
+    first = render_solver_model_call(first_context, profile, provider="openai")
+    second = render_solver_model_call(second_context, profile, provider="openai")
+
+    assert "後続Cycleにも本文が必要なEvidenceをLLMが選びます" in first.instructions
+    assert first.instructions_hash == second.instructions_hash
+    assert first.input_hash != second.input_hash
 
 
 def test_validated_copy_reports_the_invalid_state_field() -> None:
@@ -3940,7 +3950,7 @@ def test_contract_repair_prompt_does_not_close_work_only_to_pass_finalize() -> N
 
     assert "追加調査できるならopenのままcontinue" in prompt
     assert "不能時だけlimitationsと既知の未解決IDを対応" in prompt
-    assert "violation: finalize must account for every open WorkItem" in prompt
+    assert '"violation":"finalize must account for every open WorkItem"' in prompt
 
 
 def test_solver_prompt_fails_instead_of_dropping_context() -> None:
@@ -4077,15 +4087,16 @@ def test_model_adapter_repairs_transport_json_once(tmp_path) -> None:
         item for item in records if item["event"] == "transport_input"
     ]
     assert len(transport_inputs) == 2
-    assert [
+    assert transport_inputs[0]["promptAssets"] == []
+    repair_sections = [
         item["name"]
-        for item in transport_inputs[0]["promptAssets"][0]["sections"]
-    ] == ["contract_feedback_rule"]
-    assert [
-        item["name"]
-        for item in transport_inputs[1]["promptAssets"][1]["sections"]
-    ] == ["base", "finalize_requires_answer"]
+        for item in transport_inputs[1]["promptAssets"][0]["sections"]
+    ]
+    assert repair_sections[0] == "stable"
+    assert "finalize_requires_answer" in repair_sections
     assert transport_inputs[0]["promptHash"] != transport_inputs[1]["promptHash"]
+    assert Path(transport_inputs[0]["artifactPath"], "instructions.md").is_file()
+    assert Path(transport_inputs[1]["artifactPath"], "output_schema.json").is_file()
 
 
 def test_model_adapter_repairs_semantic_judgment_without_evidence_once() -> None:

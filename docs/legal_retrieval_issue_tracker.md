@@ -71,7 +71,7 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-009` | P1 | 対応中 | Tool数、本文取得数、Cycle数の用語と設定を一致させる | 現行既定は最大4 Cycle、1 step最大5 Tool要求、1 Cycle本文3 Article。過去の「4 Article」記述が一部資料に残る | 正本、Profile、Prompt、fixture、データセット説明の値と意味を照合する |
 | `LR-010` | P2 | 停止中 | 全件Relation分類を安全に再開する | 全件Runは1,615 checkpointで参照scopeと改正法構造の問題が見つかり停止中 | shadow差分監査、影響候補特定、再開条件合格後に同じsnapshot・checkpointから再開する |
 | `LR-011` | P2 | 要設計 | 自治体の条例・規則・要綱を使う小規模データセットを決める | 自治体向け利用像はあるが、データセットは未決定 | 上位法令改正→条例→規則→要綱の逆引きを検証できる最小集合を利用者と決める |
-| `LR-012` | P0 | 未着手 | LLMの固定指示、実行時入力、最終契約を分離し、レビュー可能な成果物として出力する | `snapshot`診断では実送信PromptとProvider schemaを同じJSONLへ保存できるが、指示と動的入力が連結され、実行前の生成・比較フローがない | 実送信処理と共通のレンダリング結果から成果物を生成し、代表fixtureでPrompt・契約・実送信内容の一致を確認する |
+| `LR-012` | P0 | 完了 | LLMの固定指示、実行時入力、最終契約を分離し、レビュー可能な成果物として出力する | API送信・診断・成果物出力が同じ`RenderedModelCall`を使用し、snapshotでは呼出し別ファイルを出力する。代表research fixtureはOpenAI・Anthropic・Ollamaの基準成果物を持つ | 固定指示hash、動的入力hash、両schema、実送信hashの回帰テストと全887テストに合格 |
 
 ## 4. 最優先分析: 複合問題の統合
 
@@ -105,7 +105,8 @@ Cycle引継ぎ、完了判断または構造化出力契約の失敗を含む。
 - Reviewerは既定無効であり、この失敗経路には関与しない。
 - 全Cycle、通常呼出し、輸送修復、Framework契約修復は、1回の実行に設定された同じwall timeを消費する。
 - 2026-08-22の`snapshot`実行では、OpenAI用輸送schemaがToolRequest内部の必須項目を拘束していない
-  不具合を検出し、構造化ToolRequestへ変更した。この輸送不具合は固定fixtureで再現する。
+  不具合を検出し、構造化ToolRequestへ変更した。旧欠落payloadのfixtureは現行輸送を表さないため削除し、
+  現在の`output_schema.json`基準成果物と必須項目テストで回帰を検出する。
 - 同修正後の再実行では、最初の4件の`legal_search`から9 Article IDを発見したが、Solverは
   `fetch_articles`を選ばず検索を反復した。最初の統合入力を
   `tob_overview_cycle1_after_search_v1.json`へ固定した。この時点では13件すべてが
@@ -356,8 +357,9 @@ LR-010  必要性と費用を再評価して全件分類を再開
 
 | 日付 | 対象 | 結果 | 証跡 |
 |---|---|---|---|
-| 2026-08-21 | 公開買付けミニGraph | 17候補を承認し、24 RelationAssertionをpublish。固定selectorで代表3経路へ到達 | [第二期開発備忘録](second_phase_development_memo.md#21-第二期step-1公開買付け3階層ミニデータセット) |
-| 2026-08-21 | Haiku・例外問題 | 必要Article 3/3、回答観点3/3 | [第二期開発備忘録](second_phase_development_memo.md#21-第二期step-1公開買付け3階層ミニデータセット) |
-| 2026-08-21 | Haiku・公告問題 | 必要Article 2/2、回答観点4/4 | [第二期開発備忘録](second_phase_development_memo.md#21-第二期step-1公開買付け3階層ミニデータセット) |
-| 2026-08-21 | Haiku・総合問題 | 240秒で停止し、必要Article 2/6。第二期Step 1は未合格 | [第二期開発備忘録](second_phase_development_memo.md#21-第二期step-1公開買付け3階層ミニデータセット) |
+| 2026-08-21 | 公開買付けミニGraph | 17候補を承認し、24 RelationAssertionをpublish。固定selectorで代表3経路へ到達 | [第二期開発備忘録](second_phase_development_memo.md#22-第二期step-1公開買付け3階層ミニデータセット) |
+| 2026-08-21 | Haiku・例外問題 | 必要Article 3/3、回答観点3/3 | [第二期開発備忘録](second_phase_development_memo.md#22-第二期step-1公開買付け3階層ミニデータセット) |
+| 2026-08-21 | Haiku・公告問題 | 必要Article 2/2、回答観点4/4 | [第二期開発備忘録](second_phase_development_memo.md#22-第二期step-1公開買付け3階層ミニデータセット) |
+| 2026-08-21 | Haiku・総合問題 | 240秒で停止し、必要Article 2/6。第二期Step 1は未合格 | [第二期開発備忘録](second_phase_development_memo.md#22-第二期step-1公開買付け3階層ミニデータセット) |
 | 2026-08-22 | OpenAI Provider | `gpt-4o-mini`への切替とStructured Outputs接続を実装。法令E2Eは未実施 | [RUNBOOK](../RUNBOOK.md) |
+| 2026-08-23 | LR-012 Prompt・契約成果物 | 固定指示、動的入力、Provider schema、正規化後schema、実送信内容を分離。3 Provider基準成果物と全887テストに合格 | [RUNBOOK](../RUNBOOK.md) |

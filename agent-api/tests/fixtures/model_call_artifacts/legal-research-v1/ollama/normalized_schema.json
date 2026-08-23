@@ -1,0 +1,1120 @@
+{
+  "$defs": {
+    "CaseUpdate": {
+      "additionalProperties": false,
+      "properties": {
+        "add_hypotheses": {
+          "default": [],
+          "description": "新しいWorkItem等へ置く、本文で独立検証可能な命題。",
+          "items": {
+            "$ref": "#/$defs/Hypothesis"
+          },
+          "title": "Add Hypotheses",
+          "type": "array"
+        },
+        "add_work_items": {
+          "default": [],
+          "description": "今回新しく作る、重複しない確認事項。",
+          "items": {
+            "$ref": "#/$defs/WorkItem"
+          },
+          "title": "Add Work Items",
+          "type": "array"
+        },
+        "impact_decisions": {
+          "default": [],
+          "description": "前提Hypothesisが否定されたときの子WorkItemの維持・置換・破棄。",
+          "items": {
+            "$ref": "#/$defs/WorkItemImpactDecision"
+          },
+          "title": "Impact Decisions",
+          "type": "array"
+        },
+        "update_hypotheses": {
+          "default": [],
+          "description": "既存Hypothesisに対する今回の判定差分。",
+          "items": {
+            "$ref": "#/$defs/HypothesisUpdate"
+          },
+          "title": "Update Hypotheses",
+          "type": "array"
+        },
+        "update_work_items": {
+          "default": [],
+          "description": "既存WorkItemに対する今回の状態差分。",
+          "items": {
+            "$ref": "#/$defs/WorkItemUpdate"
+          },
+          "title": "Update Work Items",
+          "type": "array"
+        }
+      },
+      "title": "CaseUpdate",
+      "type": "object"
+    },
+    "DeferredFrontierResolution": {
+      "additionalProperties": false,
+      "description": "Solverが以前のdefer判断をCycle境界でどう扱うかを明示する。",
+      "properties": {
+        "action": {
+          "description": "fetch_next_cycleは次Cycle冒頭で取得、carry_forwardは後続へ保留、no_longer_neededは不要、unresolved_at_limitは上限で未解決。",
+          "enum": [
+            "fetch_next_cycle",
+            "carry_forward",
+            "no_longer_needed",
+            "unresolved_at_limit"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "article_id": {
+          "description": "保留Frontierが示す既知Article ID。",
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Article Id",
+          "type": "string"
+        },
+        "decided_cycle": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Programが記録する判断Cycle番号。新しい判断ではnull。",
+          "title": "Decided Cycle"
+        },
+        "frontier_item_id": {
+          "description": "以前relevant_deferredにしたFrontierの完全一致ID。",
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Frontier Item Id",
+          "type": "string"
+        },
+        "hypothesis_id": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "保留Frontierが対応するHypothesis ID。特定されていなければnull。",
+          "title": "Hypothesis Id"
+        },
+        "reason": {
+          "description": "保留Frontierの次の扱いを選んだ理由。",
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "work_item_id": {
+          "description": "保留Frontierが属するopen WorkItem ID。",
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Work Item Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "frontier_item_id",
+        "article_id",
+        "work_item_id",
+        "action",
+        "reason"
+      ],
+      "title": "DeferredFrontierResolution",
+      "type": "object"
+    },
+    "DependencyDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "action_request_id": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "needs_actionを現在stepで実行するToolRequest ID。次Cycleへ送る場合はnull。",
+          "title": "Action Request Id"
+        },
+        "basis_evidence_ids": {
+          "default": [],
+          "description": "この状態判断に使用した取得済みgrounding Evidence ID。",
+          "items": {
+            "type": "string"
+          },
+          "title": "Basis Evidence Ids",
+          "type": "array"
+        },
+        "dependency_kind": {
+          "description": "確認対象となる下位規範依存の種類。",
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Dependency Kind",
+          "type": "string"
+        },
+        "reason": {
+          "description": "statusを選んだ本文に基づく短い理由。",
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "status": {
+          "description": "not_requiredは下位規範確認不要、needs_actionは追加探索必要、resolvedは委任元と末端の本文確認済み。",
+          "enum": [
+            "not_required",
+            "needs_action",
+            "resolved"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "work_item_id": {
+          "description": "この依存判断が属する既知WorkItem ID。",
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Work Item Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "dependency_kind",
+        "work_item_id",
+        "status",
+        "reason"
+      ],
+      "title": "DependencyDecision",
+      "type": "object"
+    },
+    "FinalAnswer": {
+      "additionalProperties": false,
+      "properties": {
+        "citation_ids": {
+          "default": [],
+          "description": "回答で実際に使用したgrounding Evidence ID。",
+          "items": {
+            "type": "string"
+          },
+          "title": "Citation Ids",
+          "type": "array"
+        },
+        "limitations": {
+          "default": [],
+          "description": "上限等により確認できなかった事項と回答上の制約。",
+          "items": {
+            "type": "string"
+          },
+          "title": "Limitations",
+          "type": "array"
+        },
+        "text": {
+          "description": "質問へ返す根拠付き回答本文。",
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "unresolved_hypothesis_ids": {
+          "default": [],
+          "description": "限定回答で未解決のまま残すHypothesis ID。",
+          "items": {
+            "type": "string"
+          },
+          "title": "Unresolved Hypothesis Ids",
+          "type": "array"
+        },
+        "unresolved_work_item_ids": {
+          "default": [],
+          "description": "限定回答で未解決のまま残すWorkItem ID。",
+          "items": {
+            "type": "string"
+          },
+          "title": "Unresolved Work Item Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "FinalAnswer",
+      "type": "object"
+    },
+    "FrontierReAdoption": {
+      "additionalProperties": false,
+      "properties": {
+        "article_id": {
+          "description": "評価済みGraph台帳から再採用する既知Article ID。",
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Article Id",
+          "type": "string"
+        },
+        "hypothesis_id": {
+          "description": "再採用したArticleで検証する既知Hypothesis ID。",
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Hypothesis Id",
+          "type": "string"
+        },
+        "reason": {
+          "description": "既存候補をこのWorkItem・Hypothesisへ再採用する理由。",
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "work_item_id": {
+          "description": "再採用先のopen WorkItem ID。",
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Work Item Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "article_id",
+        "work_item_id",
+        "hypothesis_id",
+        "reason"
+      ],
+      "title": "FrontierReAdoption",
+      "type": "object"
+    },
+    "GraphCandidateReview": {
+      "additionalProperties": false,
+      "description": "今回の差分batchに対するSolver自身の意味判断。",
+      "properties": {
+        "frontier_decisions": {
+          "description": "各Frontierに対するselect・defer・reject判断。",
+          "items": {
+            "$ref": "#/$defs/GraphFrontierDecision"
+          },
+          "title": "Frontier Decisions",
+          "type": "array"
+        },
+        "graph_request_ids": {
+          "description": "今回のGraph Reviewが処理したGraph ToolRequest IDの全件。",
+          "items": {
+            "type": "string"
+          },
+          "title": "Graph Request Ids",
+          "type": "array"
+        },
+        "reason": {
+          "description": "Graph候補batch全体の評価理由。",
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "reviewed_cycle": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Programが記録する評価Cycle番号。新しい判断ではnull。",
+          "title": "Reviewed Cycle"
+        },
+        "reviewed_link_ids": {
+          "description": "今回提示されたGraph Link IDの全件。",
+          "items": {
+            "type": "string"
+          },
+          "title": "Reviewed Link Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "graph_request_ids",
+        "reviewed_link_ids",
+        "frontier_decisions",
+        "reason"
+      ],
+      "title": "GraphCandidateReview",
+      "type": "object"
+    },
+    "GraphFrontierDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "description": "selectは関連すると判断して本文取得対象、deferは関連するが後続へ保留、rejectは現在のWorkItem・Hypothesisには不要。",
+          "enum": [
+            "select",
+            "defer",
+            "reject"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "article_id": {
+          "description": "このFrontierが示すGraph候補Article ID。",
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Article Id",
+          "type": "string"
+        },
+        "frontier_item_id": {
+          "description": "今回のgraph_review_batchにある評価単位の完全一致ID。",
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Frontier Item Id",
+          "type": "string"
+        },
+        "hypothesis_id": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "この候補で検証する既知Hypothesis ID。特定されていなければnull。",
+          "title": "Hypothesis Id"
+        },
+        "reason": {
+          "description": "Relationの種類・方向とHypothesisに基づくactionの理由。",
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "work_item_id": {
+          "description": "この候補の関連性を評価するopen WorkItem ID。",
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Work Item Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "frontier_item_id",
+        "article_id",
+        "work_item_id",
+        "action",
+        "reason"
+      ],
+      "title": "GraphFrontierDecision",
+      "type": "object"
+    },
+    "Hypothesis": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence_ids": {
+          "default": [],
+          "description": "supportedまたはcontradictedの直接根拠となるgrounding Evidence ID。",
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "gaps": {
+          "default": [],
+          "description": "命題を判定するために、本文でまだ確認すべき具体的情報。",
+          "items": {
+            "type": "string"
+          },
+          "title": "Gaps",
+          "type": "array"
+        },
+        "hypothesis_id": {
+          "description": "Hypothesisを参照するためのCase内一意ID。",
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Hypothesis Id",
+          "type": "string"
+        },
+        "judgment": {
+          "default": "unresolved",
+          "description": "unresolvedは未確認、supportedは本文が支持、contradictedは本文が否定。",
+          "enum": [
+            "supported",
+            "contradicted",
+            "unresolved"
+          ],
+          "title": "Judgment",
+          "type": "string"
+        },
+        "statement": {
+          "description": "取得本文で独立に支持または否定を判定できる1つの命題。",
+          "maxLength": 1200,
+          "minLength": 1,
+          "title": "Statement",
+          "type": "string"
+        },
+        "work_item_id": {
+          "description": "このHypothesisが検証するWorkItem ID。",
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Work Item Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "hypothesis_id",
+        "work_item_id",
+        "statement"
+      ],
+      "title": "Hypothesis",
+      "type": "object"
+    },
+    "HypothesisUpdate": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence_ids": {
+          "default": [],
+          "description": "判定を直接支える取得済みgrounding Evidence ID。",
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "gaps": {
+          "default": [],
+          "description": "この命題を判定するために、本文でまだ確認すべき具体的情報。",
+          "items": {
+            "type": "string"
+          },
+          "title": "Gaps",
+          "type": "array"
+        },
+        "hypothesis_id": {
+          "description": "更新する既存Hypothesisの完全一致ID。",
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Hypothesis Id",
+          "type": "string"
+        },
+        "judgment": {
+          "description": "本文評価後の判定。",
+          "enum": [
+            "supported",
+            "contradicted",
+            "unresolved"
+          ],
+          "title": "Judgment",
+          "type": "string"
+        }
+      },
+      "required": [
+        "hypothesis_id",
+        "judgment"
+      ],
+      "title": "HypothesisUpdate",
+      "type": "object"
+    },
+    "ReviewFindingResolution": {
+      "additionalProperties": false,
+      "properties": {
+        "basis_evidence_ids": {
+          "default": [],
+          "description": "disputed判断に使用した既知grounding Evidence ID。",
+          "items": {
+            "type": "string"
+          },
+          "title": "Basis Evidence Ids",
+          "type": "array"
+        },
+        "finding_id": {
+          "description": "今回処理する既知Reviewer Finding ID。",
+          "maxLength": 160,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+          "title": "Finding Id",
+          "type": "string"
+        },
+        "outcome": {
+          "description": "addressedは修正済み、disputedは本文根拠により採用しない。",
+          "enum": [
+            "addressed",
+            "disputed"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "reason": {
+          "description": "指摘への対応または不採用の理由。",
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "finding_id",
+        "outcome",
+        "reason"
+      ],
+      "title": "ReviewFindingResolution",
+      "type": "object"
+    },
+    "SearchCandidateReview": {
+      "additionalProperties": false,
+      "description": "OpenSearch候補に対するSolver自身の意味判断。",
+      "properties": {
+        "deferred_article_ids": {
+          "description": "関連する可能性はあるが現在の取得枠では選ばなかった候補Article ID。",
+          "items": {
+            "type": "string"
+          },
+          "title": "Deferred Article Ids",
+          "type": "array"
+        },
+        "reason": {
+          "description": "検索候補全体を選択・保留に分けた理由。",
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "reviewed_cycle": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Programが記録する評価Cycle番号。新しい判断ではnull。",
+          "title": "Reviewed Cycle"
+        },
+        "search_request_ids": {
+          "description": "今回のSearch Reviewが処理したlegal_search Request IDの全件。",
+          "items": {
+            "type": "string"
+          },
+          "title": "Search Request Ids",
+          "type": "array"
+        },
+        "selections": {
+          "description": "本文取得対象として選んだ候補と理由。",
+          "items": {
+            "$ref": "#/$defs/SearchCandidateSelection"
+          },
+          "title": "Selections",
+          "type": "array"
+        }
+      },
+      "required": [
+        "search_request_ids",
+        "selections",
+        "deferred_article_ids",
+        "reason"
+      ],
+      "title": "SearchCandidateReview",
+      "type": "object"
+    },
+    "SearchCandidateSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "article_id": {
+          "description": "本文取得対象として選ぶ検索候補Article ID。",
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Article Id",
+          "type": "string"
+        },
+        "reason": {
+          "description": "この候補がWorkItem・Hypothesisを直接検証できる理由。",
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "article_id",
+        "reason"
+      ],
+      "title": "SearchCandidateSelection",
+      "type": "object"
+    },
+    "ToolRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "arguments": {
+          "description": "選んだToolのinput_schemaに完全一致する引数object。",
+          "title": "Arguments",
+          "type": "object"
+        },
+        "hypothesis_ids": {
+          "default": [],
+          "description": "このTool結果で検証する既知Hypothesis ID。",
+          "items": {
+            "type": "string"
+          },
+          "title": "Hypothesis Ids",
+          "type": "array"
+        },
+        "purpose": {
+          "description": "何を確認するための要求かを示す短い説明。",
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Purpose",
+          "type": "string"
+        },
+        "request_id": {
+          "description": "同じSolverDecision内で一意な短い局所ID。",
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "tool_name": {
+          "description": "available_toolsにある正規Tool名。",
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Tool Name",
+          "type": "string"
+        },
+        "work_item_id": {
+          "description": "このTool結果を利用する主なopen WorkItem ID。",
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Work Item Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "work_item_id",
+        "tool_name",
+        "purpose"
+      ],
+      "title": "ToolRequest",
+      "type": "object"
+    },
+    "UnreviewedGraphResolution": {
+      "additionalProperties": false,
+      "description": "SolverがCycle境界で未評価Graph候補群をどう扱うかを明示する。",
+      "properties": {
+        "action": {
+          "description": "review_next_cycleは次Cycleで評価、no_longer_neededは全候補不要、unresolved_at_limitは上限で未評価のまま残す。",
+          "enum": [
+            "review_next_cycle",
+            "no_longer_needed",
+            "unresolved_at_limit"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "candidate_count": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Programが記録する対象候補数。新しい判断ではnull。",
+          "title": "Candidate Count"
+        },
+        "decided_cycle": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Programが記録する判断Cycle番号。新しい判断ではnull。",
+          "title": "Decided Cycle"
+        },
+        "reason": {
+          "description": "未評価Graph候補群の扱いを選んだ理由。",
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "reason"
+      ],
+      "title": "UnreviewedGraphResolution",
+      "type": "object"
+    },
+    "WorkItem": {
+      "additionalProperties": false,
+      "properties": {
+        "basis_hypothesis_ids": {
+          "default": [],
+          "description": "openではWorkItemの作成・継続を前提づけるHypothesis ID、resolvedではresolutionを支える判定済みHypothesis ID。Hypothesis.work_item_idは所属先を表す別項目であり、単なる逆参照には使わない。元の質問から直接作るopen WorkItemでは通常は空。",
+          "items": {
+            "type": "string"
+          },
+          "title": "Basis Hypothesis Ids",
+          "type": "array"
+        },
+        "parent_work_item_id": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "階層分解した場合の親WorkItem ID。最上位ではnull。",
+          "title": "Parent Work Item Id"
+        },
+        "question": {
+          "description": "1つの完了判定で閉じられる1つの確認事項。",
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Question",
+          "type": "string"
+        },
+        "replaces_work_item_id": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "作業分解を修正した場合に、このWorkItemが置き換える旧WorkItem ID。",
+          "title": "Replaces Work Item Id"
+        },
+        "resolution": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "WorkItemをresolvedまたはdroppedへ閉じた理由・結論。",
+          "title": "Resolution"
+        },
+        "state": {
+          "default": "open",
+          "description": "openは未完了、resolvedは回答済み、droppedは不要と判断済み。",
+          "enum": [
+            "open",
+            "resolved",
+            "dropped"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "work_item_id": {
+          "description": "WorkItemを参照するためのCase内一意ID。",
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Work Item Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "work_item_id",
+        "question"
+      ],
+      "title": "WorkItem",
+      "type": "object"
+    },
+    "WorkItemImpactDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "description": "retainは問いを維持して前提だけ更新、replaceは別の問いへ置換、dropは質問への回答に不要として終了。",
+          "enum": [
+            "retain",
+            "replace",
+            "drop"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "drop_subtree": {
+          "default": false,
+          "description": "action=dropで子孫WorkItemも一緒に破棄する場合だけtrue。",
+          "title": "Drop Subtree",
+          "type": "boolean"
+        },
+        "new_basis_hypothesis_ids": {
+          "default": [],
+          "description": "retainまたはreplace後のWorkItem判断が依存する既知Hypothesis ID。",
+          "items": {
+            "type": "string"
+          },
+          "title": "New Basis Hypothesis Ids",
+          "type": "array"
+        },
+        "reason": {
+          "description": "反証後もWorkItemを維持・置換・破棄する理由。",
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "replacement_work_item_id": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "action=replaceで同じDecisionに追加する置換先WorkItem ID。それ以外はnull。",
+          "title": "Replacement Work Item Id"
+        },
+        "work_item_id": {
+          "description": "今回contradictedになった前提の影響を受ける既知WorkItem ID。",
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Work Item Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "work_item_id",
+        "action",
+        "reason"
+      ],
+      "title": "WorkItemImpactDecision",
+      "type": "object"
+    },
+    "WorkItemUpdate": {
+      "additionalProperties": false,
+      "properties": {
+        "basis_hypothesis_ids": {
+          "default": [],
+          "description": "更新後のbasis。openでは作成・継続の前提Hypothesis ID、resolvedではresolutionを支える判定済みHypothesis ID。Hypothesis.work_item_idは所属先を表す別項目。",
+          "items": {
+            "type": "string"
+          },
+          "title": "Basis Hypothesis Ids",
+          "type": "array"
+        },
+        "resolution": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "resolvedまたはdroppedにする理由・結論。openではnull。",
+          "title": "Resolution"
+        },
+        "state": {
+          "description": "更新後のWorkItem状態。",
+          "enum": [
+            "open",
+            "resolved",
+            "dropped"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "work_item_id": {
+          "description": "更新する既存WorkItemの完全一致ID。",
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Work Item Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "work_item_id",
+        "state"
+      ],
+      "title": "WorkItemUpdate",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "answer": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FinalAnswer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "next=finalizeの場合だけ返す根拠付き回答。"
+    },
+    "decision_reason": {
+      "default": "",
+      "description": "提示された根拠、未確認事項、上限に結び付けた今回の判断理由。隠れた思考過程ではなく短い監査説明。",
+      "maxLength": 1200,
+      "title": "Decision Reason",
+      "type": "string"
+    },
+    "deferred_frontier_resolutions": {
+      "default": [],
+      "description": "保留中Graph候補を継続・不要・上限未解決のいずれかへ更新する判断。",
+      "items": {
+        "$ref": "#/$defs/DeferredFrontierResolution"
+      },
+      "title": "Deferred Frontier Resolutions",
+      "type": "array"
+    },
+    "dependency_decisions": {
+      "default": [],
+      "description": "各対象WorkItemについて下位規範確認が必要かを示すSolver判断。",
+      "items": {
+        "$ref": "#/$defs/DependencyDecision"
+      },
+      "title": "Dependency Decisions",
+      "type": "array"
+    },
+    "frontier_re_adoptions": {
+      "default": [],
+      "description": "既存Graph候補を別のopen WorkItem・Hypothesisへ再採用する判断。",
+      "items": {
+        "$ref": "#/$defs/FrontierReAdoption"
+      },
+      "title": "Frontier Re Adoptions",
+      "type": "array"
+    },
+    "graph_candidate_review": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/GraphCandidateReview"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "現在のGraph候補差分に対するselect・defer・reject判断。"
+    },
+    "next": {
+      "description": "追加のaction-observation stepまたは次Cycleが必要ならcontinue、根拠付き回答を返せるならfinalize。Solverが決める。",
+      "enum": [
+        "continue",
+        "finalize"
+      ],
+      "title": "Next",
+      "type": "string"
+    },
+    "next_focus_work_item_ids": {
+      "default": [],
+      "description": "次のstepで優先する、更新適用後もopenの既知WorkItem ID。",
+      "items": {
+        "type": "string"
+      },
+      "title": "Next Focus Work Item Ids",
+      "type": "array"
+    },
+    "retain_evidence_ids": {
+      "default": [],
+      "description": "後続Cycleにも本文提示が必要な既知Evidence ID。",
+      "items": {
+        "type": "string"
+      },
+      "title": "Retain Evidence Ids",
+      "type": "array"
+    },
+    "review_finding_resolutions": {
+      "default": [],
+      "description": "Reviewerの各指摘を反映したか、本文に基づき採用しないかの回答。",
+      "items": {
+        "$ref": "#/$defs/ReviewFindingResolution"
+      },
+      "title": "Review Finding Resolutions",
+      "type": "array"
+    },
+    "search_candidate_review": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SearchCandidateReview"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "現在のOpenSearch候補から本文取得対象を選ぶ判断。"
+    },
+    "start_next_cycle": {
+      "default": false,
+      "description": "現在Cycleを評価して閉じ、別の仮説・方針で次Cycleを開始する場合だけtrue。",
+      "title": "Start Next Cycle",
+      "type": "boolean"
+    },
+    "tool_requests": {
+      "default": [],
+      "description": "未確認Hypothesisを検証するため、Solverが今回選ぶread-only Tool要求。",
+      "items": {
+        "$ref": "#/$defs/ToolRequest"
+      },
+      "title": "Tool Requests",
+      "type": "array"
+    },
+    "unreviewed_graph_resolution": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UnreviewedGraphResolution"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "未評価Graph候補が実行上限時に残る場合の扱い。"
+    },
+    "update": {
+      "$ref": "#/$defs/CaseUpdate",
+      "description": "CaseState全体ではなく、今回適用する意味上の差分。"
+    }
+  },
+  "required": [
+    "next"
+  ],
+  "title": "SolverDecision",
+  "type": "object"
+}

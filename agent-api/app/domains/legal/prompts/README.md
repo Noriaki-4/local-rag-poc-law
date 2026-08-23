@@ -96,14 +96,19 @@ Search Reviewで保留した候補と、本文取得が未完了の選択候補�
 ### 出力契約と修復Prompt
 
 このディレクトリのPromptだけがProvider入力の全体ではありません。
-`StructuredJSONModelAdapter`が、用途別Promptへ次を追加します。
+`StructuredJSONModelAdapter`は固定指示と実行時入力を分離し、呼出し時に実送信内容へ組み立てます。
+同じ処理モード、Provider輸送方式、契約versionでは、質問やEvidenceが変わっても固定指示のhashは変えません。
+固定指示には次を追加します。
 
 - Pydanticの`Field.description`から生成した`contract_glossary`
 - 実行時に利用できる`available_tools`と各Toolの用途・入力Schema・戻り値説明
 - `SolverDecision`の共通出力原則と状態契約
 - Provider別の構造化出力・輸送指示
-- 現在の`SolverContext`
-- 契約違反があった場合だけ、該当違反に対応する修復指示
+- 契約修復モードでは、違反種別に依存しない修復規則一覧
+
+現在の`SolverContext`、候補別名、契約違反、直前出力は実行時入力です。輸送修復も固定規則と
+`validation_error`を分離します。レビュー時は、生成された`instructions.md`と`output_schema.json`を対にして確認し、
+実行時入力は`input.json`、実送信内容は`request.txt`で確認します。
 
 修復指示のassetは`app/agent_framework/prompts/`にあります。法令判断の手順はこのディレクトリ、
 Provider輸送と契約修復はFramework側へ分け、同じ規則を両方へ重複記載しません。

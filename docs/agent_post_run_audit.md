@@ -20,7 +20,8 @@ Agent処理の終了後に、「なぜその判断をしたか」を保存済み
 
 - そのStepで`continue`または`finalize`を選んだ短い理由
 - Solverが実際に参照した`SolverContext`
-- プログラムからLLMへ送ったPrompt・schemaと、それぞれのhash
+- プログラムからLLMへ送った固定指示、実行時入力、Prompt・schemaと、それぞれのhash
+- Provider出力の正規化後に適用するPydantic schema
 - Promptを構成した外部ファイル、使用section、Profile version
 - LLMからプログラムへ返った生payload、輸送検証結果、payload hash
 - 構造検証を通過した`SolverDecision`
@@ -33,7 +34,7 @@ Agent処理の終了後に、「なぜその判断をしたか」を保存済み
 双方向の境界は次の順で記録する。
 
 ```text
-Program -> LLM: transport_input   (Prompt / schema / asset来歴)
+Program -> LLM: transport_input   (固定指示 / 動的入力 / Prompt / schema / asset来歴)
 LLM -> Program: transport_output  (生payload / 輸送検証)
 正規化後:        solver_output     (SolverDecision)
 構造検証失敗:    contract_violation
@@ -46,8 +47,12 @@ ReviewResult適用:   reviewer_result_applied
 ```
 
 `promptHash / schemaHash / payloadHash / solverDecisionHash`は本文を保存しない`status`でも記録する。
+`instructionsHash / inputHash / normalizedSchemaHash`により、指示変更、入力変更、共通契約変更を区別する。
 完全な内容を比較する場合は`snapshot`を使う。同じhashは同じ記録内容を示すが、法的妥当性や契約合格を
 意味しない。合否は`validationError`、`contract_violation`、`decision_applied`で判断する。
+
+`snapshot`では同じ内容を`eval-results/agent-model-calls/<case_id>/`にも読みやすいファイルへ分けて出力する。
+通常のPrompt・契約レビューは`instructions.md`と`output_schema.json`を使い、実送信内容は`request.txt`で照合する。
 
 ## 有効化
 

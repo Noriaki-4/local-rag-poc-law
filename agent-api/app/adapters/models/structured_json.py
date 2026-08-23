@@ -27,6 +27,11 @@ from app.agent_framework.contracts import (
     WorkItemUpdate,
 )
 from app.agent_framework.diagnostics import AgentDiagnostics
+from app.agent_framework.model_call_artifacts import (
+    RUNTIME_INPUT_MARKER,
+    RenderedModelCall,
+    build_rendered_model_call,
+)
 from app.agent_framework.ports.model import (
     ModelProtocolError,
     ReviewCallResult,
@@ -78,28 +83,9 @@ class StructuredJSONModelAdapter:
             and not context.finalize_only
         ):
             return self._solve_search_review(context, profile)
-        # OpenAI Structured OutputsでもToolRequestをobjectとして拘束する。
-        # JSON文字列へ落とすと内側の必須fieldをprovider schemaで検証できない。
-        compact_transport = provider in {"ollama", "openai"}
-        structured_tool_transport = provider == "anthropic"
-        base_prompt = _solver_prompt(
-            context,
-            profile.system_prompt,
-            completion_check_prompt=profile.completion_check_prompt,
-            compact_transport=compact_transport,
-            structured_tool_transport=structured_tool_transport,
-        )
-        transport_schema = (
-            _solver_compact_transport_schema(context)
-            if compact_transport
-            else (
-                _solver_anthropic_transport_schema(context)
-                if structured_tool_transport
-                else _solver_transport_schema(context)
-            )
-        )
-        prompt = base_prompt
-        prompt_assets = _solver_prompt_assets(context)
+        rendered = render_solver_model_call(context, profile, provider=provider)
+        transport_schema = rendered.output_schema
+        prompt = rendered.request
         input_tokens = 0
         output_tokens = 0
         input_tokens_known = True
@@ -122,11 +108,10 @@ class StructuredJSONModelAdapter:
                 self._diagnostics.record_transport_input(
                     context=context,
                     profile=profile,
-                    prompt=prompt,
-                    schema=transport_schema,
+                    rendered=rendered,
                     repair_index=repair_index,
-                    prompt_assets=prompt_assets,
                     transport_stage="solver",
+                    provider=provider,
                 )
             try:
                 result = self._client.generate_structured_json(
@@ -202,21 +187,13 @@ class StructuredJSONModelAdapter:
                 )
 
             if repair_index == 0:
-                transport_repair_sections = _transport_repair_section_names(
-                    last_error
+                rendered = render_solver_transport_repair_model_call(
+                    context,
+                    base_call=rendered,
+                    payload=result.payload,
+                    error=last_error,
                 )
-                prompt = _solver_repair_prompt(
-                    base_prompt,
-                    result.payload,
-                    last_error,
-                )
-                prompt_assets = (
-                    *_solver_prompt_assets(context),
-                    prompt_asset_trace(
-                        "solver_transport_repair.md",
-                        ("base", *transport_repair_sections),
-                    ),
-                )
+                prompt = rendered.request
                 _ensure_solver_prompt_capacity(prompt, context.max_solver_input_chars)
 
         if isinstance(last_error, ValidationError):
@@ -241,20 +218,17 @@ class StructuredJSONModelAdapter:
     ) -> SolverCallResult:
         """候補理解と比較選択を別コンテキストで順に実行する。"""
 
-        assessment_prompt = _search_review_prompt(
-            context,
-            profile.system_prompt,
-            completion_check_prompt=profile.completion_check_prompt,
-        )
-        assessment_schema = _search_review_transport_schema(context)
+        assessment_call = render_search_assessment_model_call(context, profile)
+        assessment_prompt = assessment_call.request
+        assessment_schema = assessment_call.output_schema
         if self._diagnostics is not None:
             self._diagnostics.record_transport_input(
                 context=context,
                 profile=profile,
-                prompt=assessment_prompt,
-                schema=assessment_schema,
+                rendered=assessment_call,
                 repair_index=0,
                 transport_stage="search_assessment",
+                provider=getattr(self._client, "provider", None),
             )
         started_at = monotonic()
         try:
@@ -297,26 +271,21 @@ class StructuredJSONModelAdapter:
             context,
         )
 
-        followup_prompt = profile.followup_system_prompt
-        if followup_prompt is None:
-            raise ModelProtocolError("search reselection prompt is unavailable")
-        selection_prompt = _search_reselection_prompt(
+        selection_call = render_search_reselection_model_call(
             context,
             assessment_result.payload,
-            followup_prompt,
-            completion_check_prompt=(
-                profile.followup_completion_check_prompt
-            ),
+            profile,
         )
-        selection_schema = _search_reselection_transport_schema(context)
+        selection_prompt = selection_call.request
+        selection_schema = selection_call.output_schema
         if self._diagnostics is not None:
             self._diagnostics.record_transport_input(
                 context=context,
                 profile=profile,
-                prompt=selection_prompt,
-                schema=selection_schema,
+                rendered=selection_call,
                 repair_index=0,
                 transport_stage="search_reselection",
+                provider=getattr(self._client, "provider", None),
             )
         remaining_timeout = profile.timeout_sec - (monotonic() - started_at)
         if remaining_timeout <= 1:
@@ -408,14 +377,15 @@ class StructuredJSONModelAdapter:
         context: ReviewerView,
         profile: ReviewerProfile,
     ) -> ReviewCallResult:
-        prompt = _review_prompt(context, profile.system_prompt)
-        schema = ReviewResult.model_json_schema()
+        rendered = render_reviewer_model_call(context, profile)
+        prompt = rendered.request
+        schema = rendered.output_schema
         if self._diagnostics is not None:
             self._diagnostics.record_reviewer_input(
                 view=context,
                 profile=profile,
-                prompt=prompt,
-                schema=schema,
+                rendered=rendered,
+                provider=getattr(self._client, "provider", None),
             )
         try:
             result = self._client.generate_structured_json(
@@ -478,6 +448,93 @@ class StructuredJSONModelAdapter:
         )
 
 
+def render_solver_model_call(
+    context: SolverContext,
+    profile: ModelCallProfile,
+    *,
+    provider: str | None,
+    stage: str = "solver",
+) -> RenderedModelCall:
+    """Providerへ送るSolver呼出しとレビュー成果物を同時に作る。"""
+
+    compact_transport = provider in {"ollama", "openai"}
+    structured_tool_transport = provider == "anthropic"
+    output_schema = (
+        _solver_compact_transport_schema(context)
+        if compact_transport
+        else (
+            _solver_anthropic_transport_schema(context)
+            if structured_tool_transport
+            else _solver_transport_schema(context)
+        )
+    )
+    return _render_solver_model_call(
+        context,
+        profile.system_prompt,
+        completion_check_prompt=profile.completion_check_prompt,
+        compact_transport=compact_transport,
+        structured_tool_transport=structured_tool_transport,
+        output_schema=output_schema,
+        stage=stage,
+    )
+
+
+def _render_solver_model_call(
+    context: SolverContext,
+    system_prompt: str,
+    *,
+    completion_check_prompt: str | None = None,
+    compact_transport: bool = False,
+    structured_tool_transport: bool = False,
+    output_schema: dict[str, Any] | None = None,
+    stage: str = "solver",
+) -> RenderedModelCall:
+    if output_schema is None:
+        output_schema = (
+            _solver_compact_transport_schema(context)
+            if compact_transport
+            else (
+                _solver_anthropic_transport_schema(context)
+                if structured_tool_transport
+                else _solver_transport_schema(context)
+            )
+        )
+    transport_instruction = _solver_transport_instruction(
+        compact_transport=compact_transport,
+        structured_tool_transport=structured_tool_transport,
+    )
+    repair_instructions = _contract_repair_catalog(context)
+    instructions = (
+        f"{system_prompt}\n\n"
+        f"{render_solver_contract_glossary()}\n\n"
+        f"{_MINIMAL_SOLVER_CONTRACT}\n\n"
+        f"{repair_instructions}"
+        f"{transport_instruction}"
+        f"{RUNTIME_INPUT_MARKER}"
+        f"{_post_context_completion_check(completion_check_prompt)}"
+    )
+    input_payload = context.model_dump(mode="json")
+    if structured_tool_transport:
+        input_payload["transport_values"] = {
+            "fetch_articles_aliases": _article_fetch_alias_map(context),
+        }
+    rendered = build_rendered_model_call(
+        stage=(
+            f"{stage}_contract_repair"
+            if context.contract_feedback is not None
+            else stage
+        ),
+        instructions=instructions,
+        input_tag="solver_context",
+        input_payload=input_payload,
+        output_schema=output_schema,
+        normalized_schema=SolverDecision.model_json_schema(),
+        prompt_assets=_solver_prompt_assets(context),
+    )
+    _ensure_solver_prompt_capacity(rendered.request, context.max_solver_input_chars)
+    return rendered
+
+
 def _solver_prompt(
     context: SolverContext,
     system_prompt: str,
@@ -486,22 +543,23 @@ def _solver_prompt(
     compact_transport: bool = False,
     structured_tool_transport: bool = False,
 ) -> str:
-    payload = json.dumps(
-        context.model_dump(mode="json"),
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
-    contract_repair_instruction = _focused_contract_repair_instruction(context)
-    fetch_articles_aliases = _article_fetch_alias_map(context)
-    fetch_articles_alias_instruction = (
-        "専用fetch_articles欄のarticle_ref_NにはArticle ID本体でなく、次の既知候補別名を指定します。"
-        "Adapterが対応するArticle IDへ機械変換します。"
-        f"<fetch_articles_aliases>{json.dumps(fetch_articles_aliases, ensure_ascii=False, separators=(',', ':'))}"
-        "</fetch_articles_aliases>"
-        if fetch_articles_aliases
-        else ""
-    )
-    transport_instruction = (
+    """既存呼出し向け。新規コードはRenderedModelCallを使う。"""
+
+    return _render_solver_model_call(
+        context,
+        system_prompt,
+        completion_check_prompt=completion_check_prompt,
+        compact_transport=compact_transport,
+        structured_tool_transport=structured_tool_transport,
+    ).request
+
+
+def _solver_transport_instruction(
+    *,
+    compact_transport: bool,
+    structured_tool_transport: bool,
+) -> str:
+    return (
         "以下は現在のSolverContextです。コンパクト輸送schemaに従い、"
         "復元後SolverDecisionのうちupdateを構造化object、tool_requestsを"
         "構造化配列として直接返してください。各ToolRequestのargumentsは、"
@@ -534,6 +592,7 @@ def _solver_prompt(
             "160文字以内の短いASCII識別子にし、説明文はpurposeへ入れます。"
             "fetch_articlesだけはtool_requestsへ入れず、"
             "専用fetch_articles欄へ1件だけ返し、article_ref_1から順に上記の既知候補別名を指定してください。"
+            "既知候補別名とArticle IDの対応はSolverContext.transport_values.fetch_articles_aliasesにあります。"
             "専用fetch_articles欄は正規のfetch_articles ToolRequestの輸送表現であり、追加情報ではありません。"
             "専用fetch_articles欄を返す場合も返さない場合も、tool_requestsの各slotへ"
             "tool_name=fetch_articlesを決して再掲しません。"
@@ -541,7 +600,7 @@ def _solver_prompt(
             "各ToolRequest内のargumentsはJSON objectのまま格納し、arguments_jsonと"
             "tool_requests_jsonは返しません。"
             "Adapterがupdate_json、Evidence対応、各ToolRequest文字列、専用fetch_articles欄を復元し、SolverDecisionとして"
-            f"上記契約で完全検証します。{fetch_articles_alias_instruction}\n"
+            "上記契約で完全検証します。\n"
             if structured_tool_transport
             else (
                 "以下は現在のSolverContextです。Provider輸送schemaに従い、"
@@ -555,22 +614,45 @@ def _solver_prompt(
             )
         )
     )
-    contract_feedback_rule = render_prompt_section(
-        "solver_contract_repair.md",
-        "contract_feedback_rule",
+
+
+def _contract_repair_catalog(context: SolverContext) -> str:
+    if context.contract_feedback is None:
+        return ""
+    section_names = _CONTRACT_REPAIR_SECTIONS
+    rules = "\n".join(
+        f"### {section_name}\n"
+        f"{render_prompt_section('solver_contract_repair.md', section_name)}"
+        for section_name in section_names
     )
-    prompt = (
-        f"{system_prompt}\n\n"
-        f"{render_solver_contract_glossary()}\n\n"
-        f"{_MINIMAL_SOLVER_CONTRACT}\n\n"
-        f"{contract_feedback_rule}\n"
-        f"{contract_repair_instruction}"
-        f"{transport_instruction}"
-        f"<solver_context>{payload}</solver_context>"
-        f"{_post_context_completion_check(completion_check_prompt)}"
+    return (
+        f"{render_prompt_section('solver_contract_repair.md', 'contract_feedback_rule')}\n"
+        "contract_feedback.violationに該当する規則だけを適用してください。\n"
+        f"<contract_repair_rules>\n{rules}\n</contract_repair_rules>\n"
     )
-    _ensure_solver_prompt_capacity(prompt, context.max_solver_input_chars)
-    return prompt
+
+
+def render_search_assessment_model_call(
+    context: SolverContext,
+    profile: ModelCallProfile,
+) -> RenderedModelCall:
+    input_payload = _search_review_context_payload(context)
+    input_payload["candidate_checklist"] = _search_candidate_checklist(context)
+    instructions = (
+        f"{profile.system_prompt}\n\n"
+        f"{RUNTIME_INPUT_MARKER}"
+        f"{_post_context_completion_check(profile.completion_check_prompt)}"
+    )
+    rendered = build_rendered_model_call(
+        stage="search_assessment",
+        instructions=instructions,
+        input_tag="solver_context",
+        input_payload=input_payload,
+        output_schema=_search_review_transport_schema(context),
+        normalized_schema=SearchAssessmentDecision.model_json_schema(),
+    )
+    _ensure_solver_prompt_capacity(rendered.request, context.max_solver_input_chars)
+    return rendered
 
 
 def _search_review_prompt(
@@ -579,36 +661,23 @@ def _search_review_prompt(
     *,
     completion_check_prompt: str | None = None,
 ) -> str:
-    """Search Reviewへ固有手順と現在Contextだけを渡す。"""
-
-    payload = json.dumps(
-        _search_review_context_payload(context),
-        ensure_ascii=False,
-        separators=(",", ":"),
+    profile = ModelCallProfile(
+        model="artifact-render-only",
+        system_prompt=system_prompt,
+        completion_check_prompt=completion_check_prompt,
     )
-    prompt = (
-        f"{system_prompt}\n\n<solver_context>{payload}</solver_context>"
-        f"{_search_candidate_checklist(context)}"
-        f"{_post_context_completion_check(completion_check_prompt)}"
-    )
-    _ensure_solver_prompt_capacity(prompt, context.max_solver_input_chars)
-    return prompt
+    return render_search_assessment_model_call(context, profile).request
 
 
-def _search_candidate_checklist(context: SolverContext) -> str:
+def _search_candidate_checklist(context: SolverContext) -> dict[str, Any]:
     """Search Assessmentが照合する候補IDを入力順に再掲する。"""
 
-    checklist = {
+    return {
         "candidate_count": len(context.search_candidates),
         "article_ids_in_input_order": [
             item.article_id for item in context.search_candidates
         ],
     }
-    return (
-        "\n\n<search_candidate_checklist>"
-        f"{json.dumps(checklist, ensure_ascii=False, separators=(',', ':'))}"
-        "</search_candidate_checklist>"
-    )
 
 
 def _search_review_context_payload(
@@ -657,14 +726,14 @@ def _search_review_context_payload(
     }
 
 
-def _search_reselection_prompt(
+def render_search_reselection_model_call(
     context: SolverContext,
     assessment_payload: dict[str, Any],
-    system_prompt: str,
-    *,
-    completion_check_prompt: str | None = None,
-) -> str:
-    payload = {
+    profile: ModelCallProfile,
+) -> RenderedModelCall:
+    if profile.followup_system_prompt is None:
+        raise ModelProtocolError("search reselection prompt is unavailable")
+    input_payload = {
         "question": context.question,
         "hypotheses": [
             item.model_dump(mode="json") for item in context.hypotheses
@@ -672,14 +741,41 @@ def _search_reselection_prompt(
         "remaining_fetch_capacity": context.remaining_fetch_capacity,
         "assessments": assessment_payload.get("assessments") or [],
     }
-    prompt = (
-        f"{system_prompt}\n\n<search_review_summary>"
-        f"{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}"
-        "</search_review_summary>"
-        f"{_post_context_completion_check(completion_check_prompt)}"
+    instructions = (
+        f"{profile.followup_system_prompt}\n\n"
+        f"{RUNTIME_INPUT_MARKER}"
+        f"{_post_context_completion_check(profile.followup_completion_check_prompt)}"
     )
-    _ensure_solver_prompt_capacity(prompt, context.max_solver_input_chars)
-    return prompt
+    rendered = build_rendered_model_call(
+        stage="search_reselection",
+        instructions=instructions,
+        input_tag="search_review_summary",
+        input_payload=input_payload,
+        output_schema=_search_reselection_transport_schema(context),
+        normalized_schema=SearchReselectionDecision.model_json_schema(),
+    )
+    _ensure_solver_prompt_capacity(rendered.request, context.max_solver_input_chars)
+    return rendered
+
+
+def _search_reselection_prompt(
+    context: SolverContext,
+    assessment_payload: dict[str, Any],
+    system_prompt: str,
+    *,
+    completion_check_prompt: str | None = None,
+) -> str:
+    profile = ModelCallProfile(
+        model="artifact-render-only",
+        system_prompt="search-assessment-unused",
+        followup_system_prompt=system_prompt,
+        followup_completion_check_prompt=completion_check_prompt,
+    )
+    return render_search_reselection_model_call(
+        context,
+        assessment_payload,
+        profile,
+    ).request
 
 
 def _post_context_completion_check(prompt: str | None) -> str:
@@ -698,106 +794,106 @@ def _ensure_solver_prompt_capacity(prompt: str, max_input_chars: int) -> None:
         )
 
 
-def _review_prompt(context: ReviewerView, system_prompt: str) -> str:
-    payload = json.dumps(
-        context.model_dump(mode="json"),
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
-    return (
-        f"{system_prompt}\n\n"
+def render_reviewer_model_call(
+    context: ReviewerView,
+    profile: ReviewerProfile,
+) -> RenderedModelCall:
+    instructions = (
+        f"{profile.system_prompt}\n\n"
         "以下のReviewerViewだけを確認し、"
         "ReviewResultだけを返してください。\n"
-        f"<reviewer_view>{payload}</reviewer_view>"
+        f"{RUNTIME_INPUT_MARKER}"
+    )
+    return build_rendered_model_call(
+        stage="reviewer",
+        instructions=instructions,
+        input_tag="reviewer_view",
+        input_payload=context.model_dump(mode="json"),
+        output_schema=ReviewResult.model_json_schema(),
+        normalized_schema=ReviewResult.model_json_schema(),
     )
 
 
-_TRANSPORT_REPAIR_RULES = (
-    (
-        "finalize decision requires an answer",
-        "finalize_requires_answer",
-    ),
-    (
-        "continue decision requires a tool request",
-        "continue_requires_action",
-    ),
-    (
-        "all fetch_articles requests combined must contain at most",
-        "article_fetch_limit",
-    ),
-    (
-        "supported or contradicted hypothesis requires evidence",
-        "hypothesis_requires_evidence",
-    ),
+def _review_prompt(context: ReviewerView, system_prompt: str) -> str:
+    profile = ReviewerProfile(
+        model="artifact-render-only",
+        system_prompt=system_prompt,
+    )
+    return render_reviewer_model_call(context, profile).request
+
+
+_TRANSPORT_REPAIR_SECTIONS = (
+    "finalize_requires_answer",
+    "continue_requires_action",
+    "article_fetch_limit",
+    "hypothesis_requires_evidence",
 )
 
-_CONTRACT_REPAIR_RULES = (
-    (("review finding resolutions",), "review_finding_resolution"),
-    (("unknown evidence", "hypothesis has unknown evidence"), "unknown_evidence"),
-    (
-        ("supported or contradicted hypothesis requires evidence",),
-        "hypothesis_requires_evidence",
-    ),
-    (("navigation-only evidence",), "navigation_only_evidence"),
-    (("unknown Article ID",), "unknown_article_id"),
-    (("open WorkItem", "unresolved answer scope"), "open_work_item"),
-    (
-        ("resolved work item retains unresolved basis hypotheses",),
-        "work_item_hypothesis_alignment",
-    ),
-    (("Cycle boundary", "remaining Cycle capacity"), "cycle_boundary"),
-    (("resolved dependency requires",), "resolved_dependency"),
-    (
-        (
-            "dependency decision",
-            "dependency action",
-            "decisions do not match required work items",
-        ),
-        "dependency_decision",
-    ),
-    (("retained evidence count exceeds",), "retained_evidence_limit"),
-    (
-        ("tool request count", "fetch_articles.article_ids exceeds"),
-        "tool_request_limit",
-    ),
-    (("duplicate tool request ID",), "unique_tool_request_ids"),
-    (
-        ("successful legal_search scope was already completed",),
-        "repeated_successful_search",
-    ),
-    (("Article body fetch", "fetch_articles"), "article_fetch_contract"),
-    (
-        ("focus", "ToolRequest", "tool request references"),
-        "known_references",
-    ),
-    (("Graph", "graph review", "Frontier"), "graph_review"),
-    (("citations omit",), "citation_coverage"),
+_CONTRACT_REPAIR_SECTIONS = (
+    "review_finding_resolution",
+    "unknown_evidence",
+    "hypothesis_requires_evidence",
+    "navigation_only_evidence",
+    "unknown_article_id",
+    "open_work_item",
+    "work_item_hypothesis_alignment",
+    "cycle_boundary",
+    "resolved_dependency",
+    "dependency_decision",
+    "retained_evidence_limit",
+    "tool_request_limit",
+    "unique_tool_request_ids",
+    "repeated_successful_search",
+    "article_fetch_contract",
+    "known_references",
+    "graph_review",
+    "citation_coverage",
 )
 
 
-def _solver_repair_prompt(
-    base_prompt: str,
-    payload: dict | None,
+def render_solver_transport_repair_model_call(
+    context: SolverContext,
+    *,
+    base_call: RenderedModelCall,
+    payload: dict[str, Any] | None,
     error: ModelProtocolError | ValidationError,
-) -> str:
-    previous = ""
-    if isinstance(payload, dict):
-        previous = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-    error_detail = _transport_error_detail(error)
-    focused_instruction = "".join(
-        render_prompt_section("solver_transport_repair.md", section_name)
-        for section_name in _transport_repair_section_names(error_detail)
+) -> RenderedModelCall:
+    """輸送修復も固定指示と動的な違反情報へ分離する。"""
+
+    section_names = _TRANSPORT_REPAIR_SECTIONS
+    rules = "\n".join(
+        f"### {section_name}\n"
+        f"{render_prompt_section('solver_transport_repair.md', section_name)}"
+        for section_name in section_names
     )
-    return render_prompt_section(
-        "solver_transport_repair.md",
-        "base",
-        {
-            "base_prompt": base_prompt,
-            "focused_instruction": focused_instruction,
-            "validation_error": error_detail,
-            "previous_solver_decision": previous,
-        },
+    fixed_repair_instructions = (
+        f"{render_prompt_section('solver_transport_repair.md', 'stable')}\n"
+        f"<transport_repair_rules>\n{rules}\n</transport_repair_rules>"
     )
+    instructions = f"{base_call.instructions}\n\n{fixed_repair_instructions}"
+    input_payload = dict(base_call.input_payload)
+    input_payload["transport_repair"] = {
+        "validation_error": _transport_error_detail(error),
+        "previous_solver_decision": payload,
+    }
+    prompt_assets = (
+        *base_call.prompt_assets,
+        prompt_asset_trace(
+            "solver_transport_repair.md",
+            ("stable", *section_names),
+        ),
+    )
+    rendered = build_rendered_model_call(
+        stage="solver_transport_repair",
+        instructions=instructions,
+        input_tag=base_call.input_tag,
+        input_payload=input_payload,
+        output_schema=base_call.output_schema,
+        normalized_schema=base_call.normalized_schema,
+        prompt_assets=prompt_assets,
+    )
+    _ensure_solver_prompt_capacity(rendered.request, context.max_solver_input_chars)
+    return rendered
 
 
 def _validate_hypothesis_update_evidence(decision: SolverDecision) -> None:
@@ -810,30 +906,6 @@ def _validate_hypothesis_update_evidence(decision: SolverDecision) -> None:
         raise ModelProtocolError(
             "supported or contradicted hypothesis requires evidence"
         )
-
-
-def _focused_contract_repair_instruction(context: SolverContext) -> str:
-    feedback = context.contract_feedback
-    if feedback is None:
-        return ""
-    violation = feedback.violation
-    instructions: list[str] = []
-    for markers, section_name in _CONTRACT_REPAIR_RULES:
-        if any(marker in violation for marker in markers):
-            instructions.append(
-                render_prompt_section(
-                    "solver_contract_repair.md",
-                    section_name,
-                )
-            )
-    return "\n" + render_prompt_section(
-        "solver_contract_repair.md",
-        "base",
-        {
-            "focused_instructions": "\n".join(instructions),
-            "violation": violation,
-        },
-    ) + "\n"
 
 
 def _transport_error_detail(
@@ -849,29 +921,11 @@ def _transport_error_detail(
     return str(error)
 
 
-def _transport_repair_section_names(
-    error: ModelProtocolError | ValidationError | str,
-) -> tuple[str, ...]:
-    error_detail = (
-        error if isinstance(error, str) else _transport_error_detail(error)
-    )
-    return tuple(
-        section_name
-        for marker, section_name in _TRANSPORT_REPAIR_RULES
-        if marker in error_detail
-    )[:1]
-
-
 def _solver_prompt_assets(context: SolverContext) -> tuple[PromptAssetTrace, ...]:
+    if context.contract_feedback is None:
+        return ()
     section_names = ["contract_feedback_rule"]
-    feedback = context.contract_feedback
-    if feedback is not None:
-        section_names.append("base")
-        section_names.extend(
-            section_name
-            for markers, section_name in _CONTRACT_REPAIR_RULES
-            if any(marker in feedback.violation for marker in markers)
-        )
+    section_names.extend(_CONTRACT_REPAIR_SECTIONS)
     return (
         prompt_asset_trace(
             "solver_contract_repair.md",
