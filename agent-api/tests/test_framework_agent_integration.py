@@ -17,12 +17,15 @@ from app.adapters.models.structured_json import (
     _focused_contract_repair_instruction,
     _normalize_absent_context_branches,
     _normalize_solver_payload,
+    _search_reselection_prompt,
+    _search_review_prompt,
     _search_review_context_payload,
     _solver_anthropic_transport_schema,
     _solver_compact_transport_schema,
     _solver_prompt,
     _solver_repair_prompt,
     _solver_transport_schema,
+    _validate_search_assessment_payload,
 )
 from app.adapters.persistence.simple_in_memory import InMemoryCaseStore
 from app.agent_framework.context import (
@@ -31,6 +34,7 @@ from app.agent_framework.context import (
     GraphCandidateCatalog,
     GraphCandidateLink,
     GraphReviewBatch,
+    SearchCandidateArticle,
     SolverContext,
     SolverContractFeedback,
     _graph_review_projection,
@@ -351,7 +355,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "124"
+    assert diagnostic_records[0]["profileVersion"] == "134"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -359,7 +363,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "124"
+    assert transport_input["profileVersion"] == "134"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"][0]["asset"] == (
         "agent_framework/prompts/solver_contract_repair.md"
@@ -711,7 +715,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "124"
+    assert profile.version == "134"
     mode_prompts = {
         "research": profile.solver_research.system_prompt,
         "integration": profile.solver_integration.system_prompt,
@@ -720,6 +724,16 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
         "reviewer_revision": profile.solver_reviewer_revision.system_prompt,
     }
     assert all(prompt is not None for prompt in mode_prompts.values())
+    completion_checks = {
+        "research": profile.solver_research.completion_check_prompt,
+        "integration": profile.solver_integration.completion_check_prompt,
+        "cycle_close": profile.solver_cycle_close.completion_check_prompt,
+        "finalization": profile.solver_finalization.completion_check_prompt,
+        "reviewer_revision": (
+            profile.solver_reviewer_revision.completion_check_prompt
+        ),
+    }
+    assert all(check is not None for check in completion_checks.values())
     for prompt in mode_prompts.values():
         assert [line for line in prompt.splitlines() if line.startswith("# ")] == [
             "# 法令調査Solver"
@@ -728,13 +742,25 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
         assert "現在のCycleを閉じて次Cycleへ移る場合だけ`true`" in prompt
         assert "初回ToolでCycle 1" not in prompt
         assert "action-observation step" not in prompt
+        assert "## 出力前の完了確認" not in prompt
 
     research_prompt = mode_prompts["research"]
     assert "## Tool選択ルール" in research_prompt
     assert "## Researchモード" in research_prompt
     assert "## 完了ルール" in research_prompt
-    assert "各観点を別WorkItem" in research_prompt
-    assert "「特定の条件がある」「法令に定められている」「例外がある」" in research_prompt
+    assert "1つの完了判定で閉じられる1つの確認事項" in research_prompt
+    assert "複数の回答対象を含む元の質問全体" in research_prompt
+    assert "主文で尋ねる対象" in research_prompt
+    assert "成立する条件を尋ねる問い" in research_prompt
+    assert "作業分解の数を減らしません" in research_prompt
+    assert "`legal_search`要求数の上限ではありません" in research_prompt
+    assert "理由: <分解と最初の行動を選んだ理由>" in research_prompt
+    assert "3つの確認事項" not in research_prompt
+    assert "質問の「必要な手続」" not in research_prompt
+    assert "機械的に分割" in research_prompt
+    assert "情報の種類を条件・範囲・行為等へ限定しません" in (
+        research_prompt
+    )
     assert "同じ制度や近い手続に関する本文でも" in research_prompt
     assert "## Integrationモード" not in research_prompt
     assert "## Cycle Closeモード" not in research_prompt
@@ -752,6 +778,13 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     assert "候補で不足する確認事項を`decision_reason`" in integration_prompt
     assert "新しい`legal_search`を考える前に全候補" in integration_prompt
     assert "1つの`fetch_articles`で本文取得" in integration_prompt
+    assert "次に取得するArticle IDではありません" in integration_prompt
+    assert "`fetch_articles.arguments.article_ids`に指定できる唯一のID" in (
+        integration_prompt
+    )
+    assert "`basis_evidence_ids`、`metadata.articleId`から作りません" in (
+        integration_prompt
+    )
 
     cycle_close_prompt = mode_prompts["cycle_close"]
     assert "## Cycle Closeモード" in cycle_close_prompt
@@ -778,6 +811,523 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     assert len(profile.tool_list_argument_limits) == 2
     assert profile.graph_review_fetch_tool_name == "fetch_articles"
     assert profile.required_dependency_kind == "lower_norm"
+
+
+def test_research_single_completion_unit_fixture_applies_without_grouping() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_research_single_completion_unit_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    profile = legal_profiles.legal_agent_profile()
+    initial = CaseState(
+        case_id="fixture-tob-research-single-completion-unit-v1",
+        question=fixture["question"],
+    )
+    context = build_solver_context(
+        initial,
+        profile.limits,
+        remaining_wall_time_sec=120,
+        finalize_only=False,
+    )
+    research = profile.solver_research
+    assert research is not None
+    assert research.completion_check_prompt is not None
+
+    prompt = _solver_prompt(
+        context,
+        research.system_prompt,
+        completion_check_prompt=research.completion_check_prompt,
+        compact_transport=True,
+    )
+    decision = SolverDecision.model_validate(fixture["solverDecision"])
+    updated = apply_solver_decision(
+        initial,
+        decision,
+        limits=profile.limits,
+        known_tool_names={"legal_search"},
+        material_evidence_ids=(),
+        finalize_only=False,
+    )
+
+    expected = fixture["expectedCompletionUnits"]
+    assert fixture["profileVersion"] == profile.version
+    assert prompt.rindex("## 出力前の完了確認") > prompt.rindex(
+        "</solver_context>"
+    )
+    assert [item.work_item_id for item in updated.work_items] == [
+        item["workItemId"] for item in expected
+    ]
+    assert [item.question for item in updated.work_items] == [
+        item["question"] for item in expected
+    ]
+    assert len(updated.work_items) == len(updated.hypotheses) == 4
+    assert {
+        item.work_item_id: item.hypothesis_id for item in updated.hypotheses
+    } == {
+        "wi-condition": "h-condition",
+        "wi-scope": "h-scope",
+        "wi-exception": "h-exception",
+        "wi-procedure": "h-procedure",
+    }
+    assert {item.work_item_id for item in updated.tool_requests} == {
+        item.work_item_id for item in updated.work_items
+    }
+    assert all(len(item.hypothesis_ids) == 1 for item in updated.tool_requests)
+
+
+def test_real_research_failure_fixture_is_rebuilt_with_corrected_prompt() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_research_grouped_work_item_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    state = CaseState.model_validate(fixture["caseState"])
+    saved = SolverContext.model_validate(fixture["solverContext"])
+    limits = AgentLimits(
+        max_research_cycles=(
+            saved.research_cycle_count + saved.remaining_research_cycles
+        ),
+        max_tool_requests_per_step=saved.max_tool_requests_per_step,
+        max_fetched_resources_per_cycle=saved.max_fetched_resources_per_cycle,
+        max_selected_frontier_per_step=saved.max_selected_frontier_per_step,
+        max_retained_evidence=saved.max_retained_evidence,
+        max_material_evidence_chars=saved.max_material_evidence_chars,
+        max_solver_input_chars=saved.max_solver_input_chars,
+        min_next_cycle_budget_sec=saved.min_next_cycle_budget_sec,
+        max_wall_time_sec=240,
+    )
+    rebuilt = build_solver_context(
+        state,
+        limits,
+        remaining_wall_time_sec=saved.remaining_wall_time_sec,
+        finalize_only=saved.finalize_only,
+    )
+    profile = legal_profiles.legal_agent_profile().solver_research
+    assert profile is not None
+    assert profile.completion_check_prompt is not None
+    prompt = _solver_prompt(
+        rebuilt,
+        profile.system_prompt,
+        completion_check_prompt=profile.completion_check_prompt,
+        compact_transport=True,
+    )
+    observed = fixture["observedFailure"]
+
+    assert rebuilt.model_dump(mode="json") == saved.model_dump(mode="json")
+    assert observed["profileVersion"] == "126"
+    assert len(observed["workItems"]) == 1
+    assert "対象となる株券等の範囲、主な例外、必要な手続" in (
+        observed["workItems"][0]["question"]
+    )
+    assert "複数の回答対象を含む元の質問全体" in prompt
+    assert "総数が`add_work_items`の件数と一致" in prompt
+    assert "必要条件、対象範囲、例外、手続" not in prompt
+    assert prompt.rindex("## 出力前の完了確認") > prompt.rindex(
+        "</solver_context>"
+    )
+
+
+def test_research_missing_main_request_fixture_is_covered_by_prompt() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_research_missing_main_request_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    saved = SolverContext.model_validate(fixture["solverContext"])
+    profile = legal_profiles.legal_agent_profile().solver_research
+    assert profile is not None
+    assert profile.completion_check_prompt is not None
+    prompt = _solver_prompt(
+        saved,
+        profile.system_prompt,
+        completion_check_prompt=profile.completion_check_prompt,
+        compact_transport=True,
+    )
+    observed = fixture["observedFailure"]
+
+    assert observed["profileVersion"] == "127"
+    assert len(observed["workItemQuestions"]) == 3
+    assert observed["missingRequest"] not in observed["decisionReason"]
+    assert "主文で尋ねる対象" in prompt
+    assert "追加された対象だけをWorkItem" in prompt
+    assert "主文の問いを省略" in prompt
+
+
+def test_search_review_duplicate_fixture_gets_ordered_id_checklist() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_search_review_duplicate_assessment_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    candidate_ids = fixture["candidateArticleIds"]
+    context = build_solver_context(
+        CaseState(case_id="case-search-checklist", question="質問"),
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+    ).model_copy(
+        update={
+            "required_search_review_request_ids": tuple(
+                fixture["requiredSearchRequestIds"]
+            ),
+            "search_candidates": tuple(
+                SearchCandidateArticle(
+                    article_id=article_id,
+                    document_id=None,
+                    title=None,
+                    headings=(),
+                    discovery_work_item_ids=(),
+                    discovery_hypothesis_ids=(),
+                    search_request_ids=tuple(
+                        fixture["requiredSearchRequestIds"]
+                    ),
+                    navigation_evidence_ids=(),
+                )
+                for article_id in candidate_ids
+            ),
+        }
+    )
+    profile = legal_profiles.legal_agent_profile().solver_search_review
+    assert profile is not None
+    assert profile.completion_check_prompt is not None
+    prompt = _search_review_prompt(
+        context,
+        profile.system_prompt,
+        completion_check_prompt=profile.completion_check_prompt,
+    )
+    checklist_start = prompt.index("<search_candidate_checklist>") + len(
+        "<search_candidate_checklist>"
+    )
+    checklist_end = prompt.index("</search_candidate_checklist>")
+    checklist = json.loads(prompt[checklist_start:checklist_end])
+    observed_payload = {
+        "assessments": [
+            {
+                "article_id": article_id,
+                "legal_function": "scope",
+                "summary": "要約",
+            }
+            for article_id in fixture["observedAssessmentArticleIds"]
+        ]
+    }
+
+    assert checklist == {
+        "candidate_count": len(candidate_ids),
+        "article_ids_in_input_order": candidate_ids,
+    }
+    assert prompt.index("<search_candidate_checklist>") > prompt.index(
+        "</solver_context>"
+    )
+    assert prompt.index("## 出力前の完了確認") > prompt.index(
+        "</search_candidate_checklist>"
+    )
+    with pytest.raises(ModelProtocolError, match=fixture["expectedViolation"]):
+        _validate_search_assessment_payload(observed_payload, context)
+    _validate_search_assessment_payload(
+        {
+            "assessments": [
+                {
+                    "article_id": article_id,
+                    "legal_function": "scope",
+                    "summary": "要約",
+                }
+                for article_id in candidate_ids
+            ]
+        },
+        context,
+    )
+
+
+def test_research_missing_procedure_fixture_distinguishes_condition_and_action(
+) -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_research_missing_procedure_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    saved = SolverContext.model_validate(fixture["solverContext"])
+    profile = legal_profiles.legal_agent_profile().solver_research
+    assert profile is not None
+    assert profile.completion_check_prompt is not None
+    prompt = _solver_prompt(
+        saved,
+        profile.system_prompt,
+        completion_check_prompt=profile.completion_check_prompt,
+        compact_transport=True,
+    )
+    observed = fixture["observedFailure"]
+
+    assert observed["profileVersion"] == "128"
+    assert len(observed["workItemQuestions"]) == 3
+    assert observed["missingRequest"] not in observed["decisionReason"]
+    assert "成立する条件を尋ねる問い" in prompt
+    assert "成立後に行う内容を尋ねる問い" in prompt
+    assert "いつ・どの条件で必要か" in prompt
+
+
+def test_search_reselection_underselect_fixture_checks_remaining_hypotheses(
+) -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_search_reselection_underselect_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    work_items = tuple(
+        WorkItem(
+            work_item_id=item["hypothesisId"].replace("h-", "w-"),
+            question=item["statement"],
+        )
+        for item in fixture["hypotheses"]
+    )
+    hypotheses = tuple(
+        Hypothesis(
+            hypothesis_id=item["hypothesisId"],
+            work_item_id=item["hypothesisId"].replace("h-", "w-"),
+            statement=item["statement"],
+        )
+        for item in fixture["hypotheses"]
+    )
+    context = build_solver_context(
+        CaseState(
+            case_id="case-reselection-underselect",
+            question="質問",
+            work_items=work_items,
+            hypotheses=hypotheses,
+        ),
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+    ).model_copy(
+        update={"remaining_fetch_capacity": fixture["remainingFetchCapacity"]}
+    )
+    profile = legal_profiles.legal_agent_profile().solver_search_review
+    assert profile is not None
+    assert profile.followup_system_prompt is not None
+    assert profile.followup_completion_check_prompt is not None
+    prompt = _search_reselection_prompt(
+        context,
+        {
+            "assessments": [
+                {
+                    "article_id": item["articleId"],
+                    "legal_function": item["legalFunction"],
+                    "summary": item["summary"],
+                }
+                for item in fixture["assessments"]
+            ]
+        },
+        profile.followup_system_prompt,
+        completion_check_prompt=profile.followup_completion_check_prompt,
+    )
+
+    assert len(fixture["observedSelections"]) < fixture["expectedSelectionCount"]
+    assert "中心命題の1件だけで選択を止めません" in prompt
+    assert "直接検証できる候補がある未確認Hypothesis" in prompt
+
+
+def test_integration_repeated_search_fixture_prefers_fetchable_candidates() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_integration_repeated_search_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    profile = legal_profiles.legal_agent_profile().solver_integration
+    assert profile is not None
+    assert profile.completion_check_prompt is not None
+    context = build_solver_context(
+        CaseState(case_id="case-repeated-search", question="質問"),
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+    ).model_copy(
+        update={
+            "fetchable_article_ids": tuple(fixture["fetchableArticleIds"]),
+        }
+    )
+    prompt = _solver_prompt(
+        context,
+        profile.system_prompt,
+        completion_check_prompt=profile.completion_check_prompt,
+        compact_transport=True,
+    )
+
+    assert fixture["successfulSearch"] == fixture["observedNextSearch"]
+    assert fixture["expectedViolation"] == (
+        "successful legal_search scope was already completed"
+    )
+    assert "成功済みの同じ`legal_search`を繰り返さず" in prompt
+    assert "成功済み検索と異なる検索表現" in prompt
+
+
+def test_research_capacity_fixture_does_not_limit_work_decomposition() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_research_limited_by_action_capacity_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    saved = SolverContext.model_validate(fixture["solverContext"])
+    observed = fixture["observedFailure"]
+    profile = legal_profiles.legal_agent_profile().solver_research
+    assert profile is not None
+    assert profile.completion_check_prompt is not None
+    prompt = _solver_prompt(
+        saved,
+        profile.system_prompt,
+        completion_check_prompt=profile.completion_check_prompt,
+        compact_transport=True,
+    )
+
+    assert observed["profileVersion"] == "129"
+    assert observed["remainingFetchCapacity"] == observed["workItemCount"]
+    assert observed["missingRequest"] not in observed["decisionReason"]
+    assert "作業分解の数を減らしません" in prompt
+    assert "今Stepで探索しないWorkItemもopen" in prompt
+    assert "取得枠やToolRequest上限に合わせて" in prompt
+
+
+def test_integration_refetch_fixture_uses_only_fetchable_article_ids() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_integration_refetches_evidence_ids_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    profile = legal_profiles.legal_agent_profile().solver_integration
+    assert profile is not None
+    assert profile.completion_check_prompt is not None
+    context = build_solver_context(
+        CaseState(case_id="case-refetch", question="質問"),
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+    ).model_copy(
+        update={
+            "fetchable_article_ids": tuple(fixture["fetchableArticleIds"]),
+            "grounding_evidence_ids": tuple(
+                item["evidenceId"] for item in fixture["groundingEvidence"]
+            ),
+        }
+    )
+    prompt = _solver_prompt(
+        context,
+        profile.system_prompt,
+        completion_check_prompt=profile.completion_check_prompt,
+        compact_transport=True,
+    )
+    repair_context = context.model_copy(
+        update={
+            "contract_feedback": SolverContractFeedback(
+                violation=fixture["expectedViolations"][0],
+                previous_decision=SolverDecision(
+                    next="continue",
+                    start_next_cycle=True,
+                ),
+            )
+        }
+    )
+    repair = _focused_contract_repair_instruction(repair_context)
+
+    assert not set(fixture["observedFetchArticleIds"]) <= set(
+        fixture["fetchableArticleIds"]
+    )
+    assert "`fetchable_article_ids`の完全一致だけ" in prompt
+    assert "Paragraph・ItemのEvidence ID" in prompt
+    assert "本文取得済みなので、再取得要求を削除" in repair
+    assert "Paragraph・ItemのEvidence IDをArticle IDとして使いません" in (
+        repair
+    )
+
+
+def test_solver_completion_check_follows_the_complete_context() -> None:
+    profile = legal_profiles.legal_agent_profile().solver_cycle_close
+    assert profile is not None
+    assert profile.completion_check_prompt is not None
+    context = build_solver_context(
+        CaseState(case_id="case-completion-check", question="質問"),
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+    )
+
+    prompt = _solver_prompt(
+        context,
+        profile.system_prompt,
+        completion_check_prompt=profile.completion_check_prompt,
+    )
+    context_start = prompt.index("<solver_context>") + len("<solver_context>")
+    context_end = prompt.index("</solver_context>")
+    check_start = prompt.index("## 出力前の完了確認")
+
+    assert check_start > context_end
+    assert json.loads(prompt[context_start:context_end]) == context.model_dump(
+        mode="json"
+    )
+    assert prompt.endswith(profile.completion_check_prompt)
+    assert "unresolved Hypothesisを今回確認済みに更新しない限り" in prompt[
+        check_start:
+    ]
+
+
+def test_candidate_selection_profiles_have_post_context_checks() -> None:
+    profile = legal_profiles.legal_agent_profile()
+    search = profile.solver_search_review
+    graph = profile.solver_graph_review
+
+    assert search is not None
+    assert search.completion_check_prompt is not None
+    assert search.followup_completion_check_prompt is not None
+    assert "重複も欠落もない" in search.completion_check_prompt
+    assert "selected / deferred" in search.followup_completion_check_prompt
+    assert graph is not None
+    assert graph.completion_check_prompt is not None
+    assert "全Graph候補とLinkを一度ずつ評価" in (
+        graph.completion_check_prompt
+    )
+
+    context = build_solver_context(
+        CaseState(case_id="case-selection-check", question="質問"),
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+    )
+    assessment_prompt = _search_review_prompt(
+        context,
+        search.system_prompt,
+        completion_check_prompt=search.completion_check_prompt,
+    )
+    reselection_prompt = _search_reselection_prompt(
+        context,
+        {"assessments": []},
+        search.followup_system_prompt,
+        completion_check_prompt=search.followup_completion_check_prompt,
+    )
+
+    assert assessment_prompt.endswith(search.completion_check_prompt)
+    assert assessment_prompt.rindex("## 出力前の完了確認") > (
+        assessment_prompt.rindex("</solver_context>")
+    )
+    assert reselection_prompt.endswith(search.followup_completion_check_prompt)
+    assert reselection_prompt.rindex("## 出力前の完了確認") > (
+        reselection_prompt.rindex("</search_review_summary>")
+    )
 
 
 def test_solver_profile_selection_uses_only_structural_context_flags() -> None:
@@ -1724,9 +2274,20 @@ def test_real_model_cycle_close_fixture_reproduces_unresolved_basis_failure(
     cycle_close_prompt = legal_profiles.legal_agent_profile().solver_cycle_close
 
     assert cycle_close_prompt is not None
+    assert cycle_close_prompt.completion_check_prompt is not None
     assert "unresolved HypothesisをbasisにしたWorkItemを`resolved`にしません" in (
         cycle_close_prompt.system_prompt
     )
+    rendered_prompt = _solver_prompt(
+        context,
+        cycle_close_prompt.system_prompt,
+        completion_check_prompt=cycle_close_prompt.completion_check_prompt,
+        compact_transport=True,
+    )
+    assert rendered_prompt.rindex("## 出力前の完了確認") > rendered_prompt.rindex(
+        "</solver_context>"
+    )
+    assert "can_start_next_cycle=true" in cycle_close_prompt.completion_check_prompt
     assert "WorkItemだけをresolvedにしません" in (
         _focused_contract_repair_instruction(context)
     )
@@ -2906,7 +3467,8 @@ def test_contract_repair_prompt_handles_unknown_article_ids() -> None:
     prompt = _solver_prompt(context, "system")
 
     assert "既存のWorkItem、Hypothesis、Evidence、Articleを参照するID" in prompt
-    assert "fetchable_article_idsの完全一致だけを使い" in prompt
+    assert "`fetch_articles`には`fetchable_article_ids`の完全一致だけ" in prompt
+    assert "Paragraph・ItemのEvidence IDをArticle IDとして使いません" in prompt
     assert "violation: tool request references unknown Article IDs" in prompt
     assert "navigation-only evidence" not in prompt
     assert "resolved dependency requires" not in prompt

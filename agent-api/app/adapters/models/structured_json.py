@@ -57,6 +57,7 @@ class StructuredJSONModelAdapter:
         base_prompt = _solver_prompt(
             context,
             profile.system_prompt,
+            completion_check_prompt=profile.completion_check_prompt,
             compact_transport=compact_transport,
             structured_tool_transport=structured_tool_transport,
         )
@@ -215,6 +216,7 @@ class StructuredJSONModelAdapter:
         assessment_prompt = _search_review_prompt(
             context,
             profile.system_prompt,
+            completion_check_prompt=profile.completion_check_prompt,
         )
         assessment_schema = _search_review_transport_schema(context)
         if self._diagnostics is not None:
@@ -274,6 +276,9 @@ class StructuredJSONModelAdapter:
             context,
             assessment_result.payload,
             followup_prompt,
+            completion_check_prompt=(
+                profile.followup_completion_check_prompt
+            ),
         )
         selection_schema = _search_reselection_transport_schema(context)
         if self._diagnostics is not None:
@@ -442,6 +447,7 @@ def _solver_prompt(
     context: SolverContext,
     system_prompt: str,
     *,
+    completion_check_prompt: str | None = None,
     compact_transport: bool = False,
     structured_tool_transport: bool = False,
 ) -> str:
@@ -528,6 +534,7 @@ def _solver_prompt(
         f"{contract_repair_instruction}"
         f"{transport_instruction}"
         f"<solver_context>{payload}</solver_context>"
+        f"{_post_context_completion_check(completion_check_prompt)}"
     )
     _ensure_solver_prompt_capacity(prompt, context.max_solver_input_chars)
     return prompt
@@ -536,6 +543,8 @@ def _solver_prompt(
 def _search_review_prompt(
     context: SolverContext,
     system_prompt: str,
+    *,
+    completion_check_prompt: str | None = None,
 ) -> str:
     """Search Reviewへ固有手順と現在Contextだけを渡す。"""
 
@@ -544,9 +553,29 @@ def _search_review_prompt(
         ensure_ascii=False,
         separators=(",", ":"),
     )
-    prompt = f"{system_prompt}\n\n<solver_context>{payload}</solver_context>"
+    prompt = (
+        f"{system_prompt}\n\n<solver_context>{payload}</solver_context>"
+        f"{_search_candidate_checklist(context)}"
+        f"{_post_context_completion_check(completion_check_prompt)}"
+    )
     _ensure_solver_prompt_capacity(prompt, context.max_solver_input_chars)
     return prompt
+
+
+def _search_candidate_checklist(context: SolverContext) -> str:
+    """Search Assessmentが照合する候補IDを入力順に再掲する。"""
+
+    checklist = {
+        "candidate_count": len(context.search_candidates),
+        "article_ids_in_input_order": [
+            item.article_id for item in context.search_candidates
+        ],
+    }
+    return (
+        "\n\n<search_candidate_checklist>"
+        f"{json.dumps(checklist, ensure_ascii=False, separators=(',', ':'))}"
+        "</search_candidate_checklist>"
+    )
 
 
 def _search_review_context_payload(
@@ -599,6 +628,8 @@ def _search_reselection_prompt(
     context: SolverContext,
     assessment_payload: dict[str, Any],
     system_prompt: str,
+    *,
+    completion_check_prompt: str | None = None,
 ) -> str:
     payload = {
         "question": context.question,
@@ -612,9 +643,18 @@ def _search_reselection_prompt(
         f"{system_prompt}\n\n<search_review_summary>"
         f"{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}"
         "</search_review_summary>"
+        f"{_post_context_completion_check(completion_check_prompt)}"
     )
     _ensure_solver_prompt_capacity(prompt, context.max_solver_input_chars)
     return prompt
+
+
+def _post_context_completion_check(prompt: str | None) -> str:
+    """長い入力の後で、現在処理の完了条件だけを再提示する。"""
+
+    if prompt is None or not prompt.strip():
+        return ""
+    return f"\n\n{prompt.strip()}"
 
 
 def _ensure_solver_prompt_capacity(prompt: str, max_input_chars: int) -> None:

@@ -1,0 +1,31 @@
+{
+  "fixtureId": "tob-integration-refetches-evidence-ids-v1",
+  "source": {
+    "diagnosticCaseId": "legal-3d65d2f1738d4e3fbb9d23e007589918",
+    "sequence": 35,
+    "profileVersion": "129",
+    "model": "gpt-4o-mini"
+  },
+  "fetchableArticleIds": [
+    "law-340CO0000000321-article-7",
+    "law-402M50000040038-article-10"
+  ],
+  "groundingEvidence": [
+    {
+      "evidenceId": "law-340CO0000000321-article-12",
+      "articleId": "law-340CO0000000321-article-12"
+    },
+    {
+      "evidenceId": "law-323AC0000000025-article-27_2-paragraph-1",
+      "articleId": "law-323AC0000000025-article-27_2"
+    }
+  ],
+  "observedFetchArticleIds": [
+    "law-340CO0000000321-article-12",
+    "law-323AC0000000025-article-27_2-paragraph-1"
+  ],
+  "expectedViolations": [
+    "tool request references unknown Article IDs: ['law-340CO0000000321-article-12']",
+    "tool request references unknown Article IDs: ['law-323AC0000000025-article-27_2-paragraph-1']"
+  ]
+}

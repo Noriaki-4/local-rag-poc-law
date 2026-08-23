@@ -15,6 +15,8 @@ class ModelCallProfile(FrameworkModel):
     timeout_sec: float = Field(default=30.0, gt=0)
     system_prompt: str = Field(min_length=1)
     followup_system_prompt: str | None = None
+    completion_check_prompt: str | None = None
+    followup_completion_check_prompt: str | None = None
 
 
 class ReviewerProfile(ModelCallProfile):

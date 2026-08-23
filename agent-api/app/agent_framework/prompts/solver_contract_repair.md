@@ -19,7 +19,10 @@ grounding_evidence_idsが空ならHypothesisをunresolved、evidence_ids=[]へ�
 search_navigationは根拠にせず、必要なArticle本文を取得するか未解決のままにします。
 
 <!-- prompt-section:unknown_article_id -->
-fetchable_article_idsの完全一致だけを使い、未知ならlegal_searchで発見し直します。
+`fetch_articles`には`fetchable_article_ids`の完全一致だけを使います。IDが`grounding_evidence_ids`または
+`material_evidence`にある場合は本文取得済みなので、再取得要求を削除して提示本文を評価します。
+Paragraph・ItemのEvidence IDをArticle IDとして使いません。必要なArticleが未発見の場合だけ
+Graphまたは異なる`legal_search`で発見します。`needs_action`のbasis Evidenceを再取得しません。
 
 <!-- prompt-section:open_work_item -->
 追加調査できるならopenのままcontinueします。不能時だけlimitationsと既知の未解決IDを対応させます。

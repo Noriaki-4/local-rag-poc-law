@@ -29,6 +29,8 @@
 
 - 質問に関係する範囲、要件、例外、手続について、取得本文中の委任を確認します。
 - 「政令で定める」「府令で定める」等の委任が残る場合は、対応WorkItemをopen、Hypothesisをunresolvedにします。
+- `needs_action`は委任元の本文を再取得する指示ではありません。委任元本文が提示済みなら、委任先Articleを
+  既知候補から取得するか、委任元Articleを起点にGraphをたどるか、委任先を別の検索表現で探します。
 - 同じ法令の別Articleや一般条項を、委任事項を具体化するArticleの代用にしません。
 - 委任先Articleが既知なら`fetch_articles`、不明ならHypothesisに合うGraph selectorまたは`legal_search`を使います。
 - Graphで得た委任先がさらに委任している場合は、そのArticleを新しい起点にできます。
@@ -38,7 +40,7 @@
 ### 次の行動を決める手順
 
 1. open WorkItemとunresolved Hypothesisから、今回確認するgapを決めます。
-2. 既知Articleを取得するか、Graphをたどるか、OpenSearchで発見するかを選びます。
+2. 本文が`material_evidence`にあれば評価し、`fetchable_article_ids`にArticle IDがあれば本文取得し、どちらにもなければGraphまたはOpenSearchで発見します。
 3. ToolRequestへ、同じDecision内で重複しない短い`request_id`を付けます。
 4. `needs_action`を返す場合は、同じToolRequestの`request_id`を`action_request_id`へそのままコピーします。
 

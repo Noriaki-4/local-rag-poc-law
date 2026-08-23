@@ -1,0 +1,57 @@
+{
+  "fixtureId": "tob-search-review-duplicate-assessment-v1",
+  "questionId": "tob-overview",
+  "source": {
+    "diagnosticCaseId": "legal-5a77d0041dee492588bd2f8b6a5643a6",
+    "sequence": 6,
+    "purpose": "search_selection",
+    "model": "gpt-4o-mini",
+    "profileVersion": "127"
+  },
+  "requiredSearchRequestIds": [
+    "search-scope",
+    "search-exception",
+    "search-procedure"
+  ],
+  "candidateArticleIds": [
+    "law-323AC0000000025-article-27_2",
+    "law-340CO0000000321-article-7",
+    "law-340CO0000000321-article-31",
+    "law-402M50000040038-article-10",
+    "law-402M50000040038-article-2_2_2",
+    "law-323AC0000000025-article-27_22_2",
+    "law-340CO0000000321-article-14_3_11",
+    "law-419M60000002059-article-63",
+    "law-340CO0000000321-article-12",
+    "law-323AC0000000025-article-27_5",
+    "law-323AC0000000025-article-27_3",
+    "law-323AC0000000025-article-27_22_3",
+    "law-323AC0000000025-article-27_6",
+    "law-323AC0000000025-article-27_11",
+    "law-323AC0000000025-article-27_30_11",
+    "law-340CO0000000321-article-14",
+    "law-340CO0000000321-article-14_3_3"
+  ],
+  "observedAssessmentArticleIds": [
+    "law-323AC0000000025-article-27_2",
+    "law-340CO0000000321-article-7",
+    "law-340CO0000000321-article-31",
+    "law-402M50000040038-article-10",
+    "law-402M50000040038-article-2_2_2",
+    "law-323AC0000000025-article-27_22_2",
+    "law-340CO0000000321-article-14_3_11",
+    "law-340CO0000000321-article-12",
+    "law-323AC0000000025-article-27_5",
+    "law-323AC0000000025-article-27_3",
+    "law-323AC0000000025-article-27_22_3",
+    "law-323AC0000000025-article-27_6",
+    "law-323AC0000000025-article-27_11",
+    "law-323AC0000000025-article-27_30_11",
+    "law-340CO0000000321-article-14",
+    "law-340CO0000000321-article-14_3_3",
+    "law-340CO0000000321-article-14_3_3"
+  ],
+  "expectedViolation": "search assessments must be unique",
+  "missingArticleId": "law-419M60000002059-article-63",
+  "duplicatedArticleId": "law-340CO0000000321-article-14_3_3"
+}

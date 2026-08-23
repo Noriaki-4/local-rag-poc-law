@@ -24,8 +24,16 @@ solver_completion.md ──┤       │
                   共通出力契約・輸送指示・SolverContext
                                │
                                ▼
+                    用途別の出力前完了確認
+                               │
+                               ▼
                            LLM Provider
 ```
+
+用途別の完了確認は`*_check.md`に置きます。既存の入力を削減・選別せず、
+`SolverContext`または候補一覧の後ろへ短く追加します。長い本文を読んだ後でも、
+現在の処理が満たすべき条件を出力直前に確認できるようにするためです。
+完了確認は新しい意味判断をProgramへ移さず、同じSolverへDecisionの自己点検を要求します。
 
 実際の組み合わせは次のとおりです。
 
@@ -57,6 +65,7 @@ solver_completion.md ──┤       │
 | `solver_search_review.md` | OpenSearch候補を候補別の検索抜粋から全件要約する。この一時結果では候補を選ばない。 |
 | `solver_search_reselection.md` | 検索抜粋を再掲せず、前段の短い自己要約一覧から本文取得候補を選ぶ。 |
 | `solver_graph_review.md` | Graph差分候補の`select / defer / reject`と本文取得順。 |
+| `solver_*_check.md` | 対応する処理の入力後に置く、短い出力前完了確認。処理本体の手順や新しい出力項目は定義しない。 |
 
 Search Reviewで保留した候補と、本文取得が未完了の選択候補は、次のStep / Cycleでも
 `search_candidates`へ再投影されます。新規未評価候補があるときは新規候補だけをSearch Reviewへ渡し、
@@ -113,6 +122,10 @@ Toolの種類、引数、対象WorkItem・Hypothesisは変更しません。
 
 - 共通Promptには、すべてのモードで必要な不変条件だけを置きます。
 - 手順は用途別Prompt、共有する判断ルールは必要最小限のfragmentへ置きます。
+- 指示と出力書式を同じ箇条書きへ混在させません。出力書式には固定された実データ例を置かず、
+  プレースホルダーと実際の値を区別します。
+- 出力前完了確認は対応する処理の`*_check.md`へ置き、長い入力の前にだけ記載しません。
+- 完了確認のためにSolverContextの項目や本文を削除しません。
 - モード固有の例外を`solver_common.md`へ追加しません。
 - Promptだけでschema違反を隠さず、出力形状は型・schema・validatorで検証します。
 - Prompt assetを変更したらLegal Profile versionとPrompt契約テストを同じ変更で更新します。

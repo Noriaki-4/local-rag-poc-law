@@ -1,0 +1,151 @@
+{
+  "fixtureId": "tob-research-single-completion-unit-v1",
+  "questionId": "tob-overview",
+  "profileVersion": "134",
+  "purpose": "research",
+  "question": "上場会社の株式を、市場を通さずに多数の株主から買い集めたいのですが、公開買付けの手続が必要になるのはどのような場合ですか。対象となる株券等の範囲、主な例外、必要な手続も含めて、根拠となる条文とともに説明してください。",
+  "expectedCompletionUnits": [
+    {
+      "workItemId": "wi-condition",
+      "question": "公開買付けの手続が必要になる条件は何か？"
+    },
+    {
+      "workItemId": "wi-scope",
+      "question": "公開買付けの対象となる株券等の範囲は何か？"
+    },
+    {
+      "workItemId": "wi-exception",
+      "question": "公開買付けの主な例外は何か？"
+    },
+    {
+      "workItemId": "wi-procedure",
+      "question": "公開買付けに必要な手続は何か？"
+    }
+  ],
+  "solverDecision": {
+    "next": "continue",
+    "decision_reason": "質問の4つの独立した確認事項について、それぞれ本文根拠を探索する。",
+    "update": {
+      "add_work_items": [
+        {
+          "work_item_id": "wi-condition",
+          "question": "公開買付けの手続が必要になる条件は何か？"
+        },
+        {
+          "work_item_id": "wi-scope",
+          "question": "公開買付けの対象となる株券等の範囲は何か？"
+        },
+        {
+          "work_item_id": "wi-exception",
+          "question": "公開買付けの主な例外は何か？"
+        },
+        {
+          "work_item_id": "wi-procedure",
+          "question": "公開買付けに必要な手続は何か？"
+        }
+      ],
+      "add_hypotheses": [
+        {
+          "hypothesis_id": "h-condition",
+          "work_item_id": "wi-condition",
+          "statement": "市場外で多数の株主から株券等を買い集める行為には、公開買付けが必要となる条件がある。",
+          "gaps": [
+            "必要となる取引方法、人数その他の条件"
+          ]
+        },
+        {
+          "hypothesis_id": "h-scope",
+          "work_item_id": "wi-scope",
+          "statement": "公開買付けの対象となる株券等には、法令上の範囲がある。",
+          "gaps": [
+            "対象となる株券等の具体的範囲"
+          ]
+        },
+        {
+          "hypothesis_id": "h-exception",
+          "work_item_id": "wi-exception",
+          "statement": "公開買付けによらなくてもよい場合が法令上定められている。",
+          "gaps": [
+            "主な例外の具体的条件"
+          ]
+        },
+        {
+          "hypothesis_id": "h-procedure",
+          "work_item_id": "wi-procedure",
+          "statement": "公開買付けを行う場合に履行すべき法定手続がある。",
+          "gaps": [
+            "必要な公告、届出その他の手続"
+          ]
+        }
+      ]
+    },
+    "next_focus_work_item_ids": [
+      "wi-condition",
+      "wi-scope",
+      "wi-exception",
+      "wi-procedure"
+    ],
+    "tool_requests": [
+      {
+        "request_id": "search-condition",
+        "work_item_id": "wi-condition",
+        "tool_name": "legal_search",
+        "arguments": {
+          "query": "公開買付け 買付け等 必要 条件",
+          "doc_types": [
+            "law"
+          ]
+        },
+        "purpose": "公開買付けが必要となる条件を定める条文を探す",
+        "hypothesis_ids": [
+          "h-condition"
+        ]
+      },
+      {
+        "request_id": "search-scope",
+        "work_item_id": "wi-scope",
+        "tool_name": "legal_search",
+        "arguments": {
+          "query": "公開買付け 対象 株券等 範囲",
+          "doc_types": [
+            "law"
+          ]
+        },
+        "purpose": "対象となる株券等の範囲を定める条文を探す",
+        "hypothesis_ids": [
+          "h-scope"
+        ]
+      },
+      {
+        "request_id": "search-exception",
+        "work_item_id": "wi-exception",
+        "tool_name": "legal_search",
+        "arguments": {
+          "query": "公開買付け 適用除外 公開買付けによらない",
+          "doc_types": [
+            "law"
+          ]
+        },
+        "purpose": "公開買付けによらなくてもよい例外を定める条文を探す",
+        "hypothesis_ids": [
+          "h-exception"
+        ]
+      },
+      {
+        "request_id": "search-procedure",
+        "work_item_id": "wi-procedure",
+        "tool_name": "legal_search",
+        "arguments": {
+          "query": "公開買付開始 公告 届出 手続",
+          "doc_types": [
+            "law"
+          ]
+        },
+        "purpose": "公開買付けに必要な法定手続を定める条文を探す",
+        "hypothesis_ids": [
+          "h-procedure"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "fixtureId": "tob-search-reselection-underselect-v1",
+  "source": {
+    "diagnosticCaseId": "legal-5fec1e358a52496fa6bd92a11eabf064",
+    "sequence": 9,
+    "profileVersion": "128",
+    "model": "gpt-4o-mini"
+  },
+  "remainingFetchCapacity": 3,
+  "hypotheses": [
+    {"hypothesisId": "h-condition", "statement": "必要となる条件を確認する"},
+    {"hypothesisId": "h-scope", "statement": "対象範囲を確認する"},
+    {"hypothesisId": "h-exception", "statement": "例外を確認する"}
+  ],
+  "assessments": [
+    {"articleId": "article-condition", "legalFunction": "applicability", "summary": "必要となる条件を定める"},
+    {"articleId": "article-scope", "legalFunction": "scope", "summary": "対象範囲を定める"},
+    {"articleId": "article-exception", "legalFunction": "exception", "summary": "例外を定める"}
+  ],
+  "observedSelections": ["article-scope"],
+  "expectedSelectionCount": 3
+}

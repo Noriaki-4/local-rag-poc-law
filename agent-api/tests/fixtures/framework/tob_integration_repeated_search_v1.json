@@ -1,0 +1,25 @@
+{
+  "fixtureId": "tob-integration-repeated-search-v1",
+  "source": {
+    "diagnosticCaseId": "legal-5fec1e358a52496fa6bd92a11eabf064",
+    "sequence": 13,
+    "profileVersion": "128",
+    "model": "gpt-4o-mini"
+  },
+  "fetchableArticleIds": [
+    "article-condition",
+    "article-scope",
+    "article-exception"
+  ],
+  "successfulSearch": {
+    "query": "公開買付け 手続 必要 条件",
+    "workItemId": "workitem-1",
+    "hypothesisId": "hypothesis-1"
+  },
+  "observedNextSearch": {
+    "query": "公開買付け 手続 必要 条件",
+    "workItemId": "workitem-1",
+    "hypothesisId": "hypothesis-1"
+  },
+  "expectedViolation": "successful legal_search scope was already completed"
+}

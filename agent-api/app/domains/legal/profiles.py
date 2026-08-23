@@ -23,7 +23,7 @@ def legal_agent_profile() -> AgentProfile:
     timeout_sec = settings.agent_framework_model_timeout_sec
     return AgentProfile(
         name="legal-default",
-        version="124",
+        version="134",
         provider=settings.llm_provider,
         solver_research=_model_profile(
             model=settings.agent_framework_research_model,
@@ -35,6 +35,7 @@ def legal_agent_profile() -> AgentProfile:
                 _read_prompt("solver_research.md"),
                 completion_prompt,
             ),
+            completion_check_prompt=_read_prompt("solver_research_check.md"),
         ),
         solver_integration=_model_profile(
             model=integration_model,
@@ -46,6 +47,7 @@ def legal_agent_profile() -> AgentProfile:
                 _read_prompt("solver_integration.md"),
                 completion_prompt,
             ),
+            completion_check_prompt=_read_prompt("solver_integration_check.md"),
         ),
         solver_cycle_close=_model_profile(
             model=integration_model,
@@ -56,6 +58,7 @@ def legal_agent_profile() -> AgentProfile:
                 _read_prompt("solver_cycle_close.md"),
                 completion_prompt,
             ),
+            completion_check_prompt=_read_prompt("solver_cycle_close_check.md"),
         ),
         solver_finalization=_model_profile(
             model=integration_model,
@@ -66,6 +69,7 @@ def legal_agent_profile() -> AgentProfile:
                 _read_prompt("solver_finalization.md"),
                 completion_prompt,
             ),
+            completion_check_prompt=_read_prompt("solver_finalization_check.md"),
         ),
         solver_reviewer_revision=_model_profile(
             model=integration_model,
@@ -77,6 +81,9 @@ def legal_agent_profile() -> AgentProfile:
                 _read_prompt("solver_reviewer_revision.md"),
                 completion_prompt,
             ),
+            completion_check_prompt=_read_prompt(
+                "solver_reviewer_revision_check.md"
+            ),
         ),
         solver_search_review=ModelCallProfile(
             model=integration_model,
@@ -85,6 +92,12 @@ def legal_agent_profile() -> AgentProfile:
             system_prompt=_read_prompt("solver_search_review.md"),
             followup_system_prompt=_read_prompt(
                 "solver_search_reselection.md"
+            ),
+            completion_check_prompt=_read_prompt(
+                "solver_search_review_check.md"
+            ),
+            followup_completion_check_prompt=_read_prompt(
+                "solver_search_reselection_check.md"
             ),
         ),
         solver_graph_review=ModelCallProfile(
@@ -95,6 +108,9 @@ def legal_agent_profile() -> AgentProfile:
             ),
             timeout_sec=timeout_sec,
             system_prompt=_read_prompt("solver_graph_review.md"),
+            completion_check_prompt=_read_prompt(
+                "solver_graph_review_check.md"
+            ),
         ),
         reviewer=ReviewerProfile(
             enabled=settings.agent_framework_reviewer_enabled,
@@ -168,10 +184,12 @@ def _model_profile(
     max_tokens: int,
     timeout_sec: float,
     prompts: tuple[str, ...],
+    completion_check_prompt: str,
 ) -> ModelCallProfile:
     return ModelCallProfile(
         model=model,
         max_output_tokens=max_tokens,
         timeout_sec=timeout_sec,
         system_prompt=_join_prompts(*prompts),
+        completion_check_prompt=completion_check_prompt,
     )
