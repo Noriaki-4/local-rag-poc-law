@@ -1,0 +1,45 @@
+{
+  "fixtureId": "tob-actor-relation-selection-regression-v197",
+  "sourceFixture": "tob_actor_relation_search_v191.json",
+  "profileVersion": "197",
+  "provider": "openai",
+  "model": "gpt-4o-mini-2024-07-18",
+  "expected": {
+    "selectedArticleId": "law-323AC0000000025-article-27_2",
+    "excludedArticleId": "law-323AC0000000025-article-27_22_2"
+  },
+  "realModelRuns": [
+    {
+      "run": 1,
+      "attemptCount": 3,
+      "selectedArticleIds": [
+        "law-323AC0000000025-article-27_2",
+        "law-340CO0000000321-article-12"
+      ],
+      "deferredArticleIds": [
+        "law-340CO0000000321-article-14_3_7",
+        "law-323AC0000000025-article-27_22_2",
+        "law-340CO0000000321-article-14_3_2",
+        "law-419M60000002059-article-63",
+        "law-419M60000002059-article-23",
+        "law-323AC0000000025-article-27_13"
+      ]
+    },
+    {
+      "run": 2,
+      "attemptCount": 3,
+      "selectedArticleIds": [
+        "law-340CO0000000321-article-12",
+        "law-323AC0000000025-article-27_2"
+      ],
+      "deferredArticleIds": [
+        "law-340CO0000000321-article-14_3_7",
+        "law-323AC0000000025-article-27_22_2",
+        "law-340CO0000000321-article-14_3_2",
+        "law-419M60000002059-article-63",
+        "law-419M60000002059-article-23",
+        "law-323AC0000000025-article-27_13"
+      ]
+    }
+  ]
+}

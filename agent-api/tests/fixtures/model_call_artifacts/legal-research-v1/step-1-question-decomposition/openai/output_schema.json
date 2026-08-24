@@ -15,15 +15,32 @@
       "items": {
         "additionalProperties": false,
         "properties": {
+          "actor_relation": {
+            "description": "行為者と行為対象に結び付く主体の関係。sameは同一、differentは別、unknownは質問から確定できない。",
+            "enum": [
+              "same",
+              "different",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "actor_scope": {
+            "description": "確認事項の行為者と、行為対象に結び付く所有者・発行者・所属先等との関係。別主体、同一主体、不明のいずれかが分かる形で具体的に書く。",
+            "maxLength": 1200,
+            "minLength": 1,
+            "type": "string"
+          },
           "question": {
-            "description": "独立して法的結論を出し、完了判定できる1つの確認事項。元の質問の行為者、行為、対象、限定条件を省略しない。",
+            "description": "独立して法的結論を出し、完了判定できる1つの確認事項。元の質問の省略主語を補い、行為者、行為、対象、限定条件を区別する。",
             "maxLength": 1000,
             "minLength": 1,
             "type": "string"
           }
         },
         "required": [
-          "question"
+          "question",
+          "actor_scope",
+          "actor_relation"
         ],
         "type": "object"
       },

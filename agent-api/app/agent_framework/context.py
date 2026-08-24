@@ -11,6 +11,7 @@ from pydantic import Field
 from .contracts import SolverDecision
 from .profiles import AgentLimits
 from .state import (
+    ActorRelation,
     CaseState,
     DeferredFrontierResolutionAction,
     DependencyDecision,
@@ -33,6 +34,14 @@ class WorkTreeItem(FrameworkModel):
         description="階層分解上の親WorkItem ID。最上位ではnull。"
     )
     question: str = Field(description="1つの完了判定で閉じる確認事項。")
+    actor_scope: str | None = Field(
+        default=None,
+        description="確認事項の行為者と、対象に結び付く主体との関係。未指定ならnull。"
+    )
+    actor_relation: ActorRelation = Field(
+        default="unknown",
+        description="sameは同一主体、differentは別主体、unknownは未確定。",
+    )
     state: str = Field(
         description="openは未完了、resolvedは回答済み、droppedは不要と判断済み。"
     )
@@ -258,12 +267,28 @@ class SearchCandidateArticle(FrameworkModel):
 class ResearchStepWorkItem(FrameworkModel):
     work_item_id: str = Field(description="Programが付与した既知WorkItem ID。")
     question: str = Field(description="このWorkItemで確認する1つの法的事項。")
+    actor_scope: str | None = Field(
+        default=None,
+        description="確認事項の行為者と、対象に結び付く主体との関係。未指定ならnull。"
+    )
+    actor_relation: ActorRelation = Field(
+        default="unknown",
+        description="sameは同一主体、differentは別主体、unknownは未確定。",
+    )
 
 
 class ResearchStepHypothesis(FrameworkModel):
     hypothesis_id: str = Field(description="Programが付与した既知Hypothesis ID。")
     work_item_id: str = Field(description="このHypothesisが属する既知WorkItem ID。")
     statement: str = Field(description="法令本文で検証する未確認の法的命題。")
+    actor_scope: str | None = Field(
+        default=None,
+        description="命題の行為者と、対象に結び付く主体との関係。未指定ならnull。"
+    )
+    actor_relation: ActorRelation = Field(
+        default="unknown",
+        description="sameは同一主体、differentは別主体、unknownは未確定。",
+    )
     gaps: tuple[str, ...] = Field(
         description="命題のうち法令本文でまだ確認すべき具体的な法的内容。"
     )
@@ -528,6 +553,8 @@ def build_solver_context(
             work_item_id=item.work_item_id,
             parent_work_item_id=item.parent_work_item_id,
             question=item.question,
+            actor_scope=item.actor_scope,
+            actor_relation=item.actor_relation,
             state=item.state,
             resolution=item.resolution,
             basis_hypothesis_ids=item.basis_hypothesis_ids,

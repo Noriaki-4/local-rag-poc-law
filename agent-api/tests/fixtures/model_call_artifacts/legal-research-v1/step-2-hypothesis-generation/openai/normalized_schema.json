@@ -438,6 +438,31 @@
     "Hypothesis": {
       "additionalProperties": false,
       "properties": {
+        "actor_relation": {
+          "default": "unknown",
+          "description": "行為者と行為対象に結び付く主体の関係。sameは同一主体、differentは別主体、unknownは未確定。",
+          "enum": [
+            "same",
+            "different",
+            "unknown"
+          ],
+          "title": "Actor Relation",
+          "type": "string"
+        },
+        "actor_scope": {
+          "anyOf": [
+            {
+              "maxLength": 1200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "この命題で規律対象として想定する行為者と、行為対象に結び付く所有者・発行者・所属先等との関係。法的立場が不明なら不明と明記する。",
+          "title": "Actor Scope"
+        },
         "evidence_ids": {
           "default": [],
           "description": "現在のjudgmentとgapsの判断に使ったgrounding Evidence ID。supportedまたはcontradictedでは直接根拠を必須とし、unresolvedでは確認済み部分に使った本文がある場合だけ保持する。",
@@ -475,7 +500,7 @@
           "type": "string"
         },
         "statement": {
-          "description": "本文取得前の未確認で誤り得る暫定回答。確認対象となる要件、例外構造または手続行為の具体的候補を含み、取得本文で独立に支持または否定できる1つの命題。規定の存在や質問の言い換えだけを述べない。",
+          "description": "本文取得前の未確認で誤り得る暫定回答。確認対象となる要件、例外構造または手続行為の具体的候補を含み、取得本文で独立に支持または否定できる1つの命題。行為者を名詞で明記し、行為対象と区別する。規定の存在や質問の言い換えだけを述べない。",
           "maxLength": 1200,
           "minLength": 1,
           "title": "Statement",
@@ -796,6 +821,31 @@
     "WorkItem": {
       "additionalProperties": false,
       "properties": {
+        "actor_relation": {
+          "default": "unknown",
+          "description": "行為者と行為対象に結び付く主体の関係。sameは同一主体、differentは別主体、unknownは質問から確定できない。",
+          "enum": [
+            "same",
+            "different",
+            "unknown"
+          ],
+          "title": "Actor Relation",
+          "type": "string"
+        },
+        "actor_scope": {
+          "anyOf": [
+            {
+              "maxLength": 1200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "この確認事項の行為者と、行為対象に結び付く所有者・発行者・所属先等との関係。法的立場が不明なら不明と明記する。",
+          "title": "Actor Scope"
+        },
         "basis_hypothesis_ids": {
           "default": [],
           "description": "openではWorkItemの作成・継続を前提づけるHypothesis ID、resolvedではresolutionを支える判定済みHypothesis ID。Hypothesis.work_item_idは所属先を表す別項目であり、単なる逆参照には使わない。元の質問から直接作るopen WorkItemでは通常は空。",
@@ -820,7 +870,7 @@
           "title": "Parent Work Item Id"
         },
         "question": {
-          "description": "1つの完了判定で閉じられる1つの確認事項。",
+          "description": "1つの完了判定で閉じられる1つの確認事項。質問の行為者、行為、対象を区別し、省略主語は補う。",
           "maxLength": 1000,
           "minLength": 1,
           "title": "Question",

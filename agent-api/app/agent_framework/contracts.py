@@ -131,13 +131,42 @@ class SearchCandidateAssessment(FrameworkModel):
     summary: str = Field(
         min_length=1,
         max_length=2000,
-        description="検索抜粋から読み取れる候補内容の短い自己要約。回答根拠ではない。",
+        description=(
+            "見出しと検索抜粋から読み取れる候補内容の短い自己要約。"
+            "規律主体、行為、対象、条件、効果を明記する。回答根拠ではない。"
+        ),
+    )
+    actor_match_reason: str = Field(
+        default="旧記録では未記録",
+        min_length=1,
+        max_length=1200,
+        description=(
+            "候補が規律する行為者とHypothesisの行為者を比較した結果。"
+            "一致するIDを挙げた場合は共通する行為者を、不一致で空にした場合は"
+            "異なる二つの行為者を明記する。"
+        ),
+    )
+    regulated_actor_role: Literal[
+        "hypothesis_actor",
+        "target_associated_actor",
+        "other",
+        "unknown",
+    ] = Field(
+        default="unknown",
+        description=(
+            "候補が規律する行為者の質問内での役割。hypothesis_actorは命題の"
+            "行為者、target_associated_actorは対象の所有者・発行者・所属先等、"
+            "otherはそれ以外、unknownは候補から確定できない。AのBをCする質問で"
+            "A自身によるCを規律する候補はtarget_associated_actor、A以外の者による"
+            "Cを規律する候補はhypothesis_actor。"
+        ),
     )
     matched_hypothesis_ids: tuple[str, ...] = Field(
         default=(),
         description=(
-            "主体、行為、対象、条件が一致し、この候補が直接検証できる未確認"
-            "Hypothesis ID。該当しなければ空。"
+            "主体、行為、対象が一致し、候補の条件または効果が命題かgapsの"
+            "未確認部分を直接検証できるHypothesis ID。主体が不明または異なる"
+            "場合は空。"
         ),
     )
 

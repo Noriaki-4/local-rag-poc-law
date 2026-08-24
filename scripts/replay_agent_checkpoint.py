@@ -14,6 +14,7 @@ sys.path.insert(0, str(REPO_ROOT / "agent-api"))
 
 from app.adapters.models.structured_json import StructuredJSONModelAdapter  # noqa: E402
 from app.agent_framework.context import SolverContext  # noqa: E402
+from app.agent_framework.diagnostics import AgentDiagnostics  # noqa: E402
 from app.agent_framework.profiles import ModelCallProfile  # noqa: E402
 from app.domains.legal.profiles import legal_agent_profile  # noqa: E402
 from app.llm import LLMClient  # noqa: E402
@@ -43,6 +44,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--model", required=True)
     parser.add_argument("--stage", choices=tuple(_PROFILE_ATTRIBUTES))
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--diagnostics-output",
+        type=Path,
+        help="指定時だけ中間LLM入出力をsnapshotで保存するディレクトリ。",
+    )
     return parser.parse_args()
 
 
@@ -83,12 +89,26 @@ def replay_checkpoint(
     provider: str,
     model: str,
     stage: str,
+    diagnostics_output: Path | None = None,
 ) -> dict[str, Any]:
     context = SolverContext.model_validate(fixture["solverContext"])
     profile = _resolve_profile(stage, model)
-    result = StructuredJSONModelAdapter(
-        LLMClient(provider=provider)
-    ).solve(context, profile)
+    diagnostics = None
+    if diagnostics_output is not None:
+        diagnostics = AgentDiagnostics(
+            mode="snapshot",
+            output_dir=diagnostics_output,
+            case_id=context.case_id,
+            profile_name=legal_agent_profile().name,
+            profile_version=legal_agent_profile().version,
+        )
+    client = LLMClient(provider=provider)
+    adapter = (
+        StructuredJSONModelAdapter(client)
+        if diagnostics is None
+        else StructuredJSONModelAdapter(client, diagnostics=diagnostics)
+    )
+    result = adapter.solve(context, profile)
     return {
         "fixtureId": fixture.get("fixtureId"),
         "stage": stage,
@@ -110,6 +130,7 @@ def main() -> None:
         provider=args.provider,
         model=args.model,
         stage=stage,
+        diagnostics_output=args.diagnostics_output,
     )
     rendered = json.dumps(output, ensure_ascii=False, indent=2) + "\n"
     if args.output is None:

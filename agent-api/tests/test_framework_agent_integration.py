@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from app import main
 from app.adapters.models import StructuredJSONModelAdapter
 from app.adapters.models.structured_json import (
+    _apply_search_actor_classification,
     _assign_tool_request_ids,
     _align_observation_with_dependency_decisions,
     _case_update_transport_schema,
@@ -38,6 +39,7 @@ from app.adapters.models.structured_json import (
     render_dependency_assessment_model_call,
     render_observation_integration_model_call,
     render_search_assessment_model_call,
+    render_search_actor_classification_model_call,
     render_solver_model_call,
     render_solver_transport_repair_model_call,
 )
@@ -290,6 +292,16 @@ class FakeStructuredLLM:
                 "reason": "検索候補1件を評価した",
             },
             {
+                "roles": {
+                    "law-test-article-2": {
+                        "regulated_actor": "検証法の適用対象者",
+                        "regulated_actor_role": "hypothesis_actor",
+                        "matched_hypothesis_ids": ["h-1"],
+                        "reason": "仮説が確認する適用対象者を規律する",
+                    }
+                }
+            },
+            {
                 "selections": [
                     {
                         "article_id": "law-test-article-2",
@@ -376,6 +388,15 @@ class FakeStructuredLLM:
                 payload[name] = decision.get(name, defaults.get(name))
             return StructuredJSONResult(
                 payload=payload,
+                provider="fake",
+                model=kwargs["model"],
+                latencyMs=1,
+                inputTokens=10,
+                outputTokens=10,
+            )
+        if "roles" in schema_properties:
+            return StructuredJSONResult(
+                payload=decision,
                 provider="fake",
                 model=kwargs["model"],
                 latencyMs=1,
@@ -524,7 +545,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
         "legal_search",
         "fetch_articles",
     ]
-    assert len(llm.calls) == 6
+    assert len(llm.calls) == 7
     assert "decision_json" not in llm.calls[0]["schema"]["properties"]
     assert set(llm.calls[0]["schema"]["properties"]) == {
         "work_items",
@@ -549,11 +570,12 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert assessment_schema["required"] == list(
         assessment_schema["properties"]
     )
-    assert set(llm.calls[4]["schema"]["properties"]) == {
+    assert set(llm.calls[4]["schema"]["properties"]) == {"roles"}
+    assert set(llm.calls[5]["schema"]["properties"]) == {
         "selections",
         "reason",
     }
-    final_dependency_schema = llm.calls[5]["schema"]["properties"][
+    final_dependency_schema = llm.calls[6]["schema"]["properties"][
         "dependency_decisions"
     ]
     assert final_dependency_schema["minItems"] == 1
@@ -579,7 +601,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "183"
+    assert diagnostic_records[0]["profileVersion"] == "197"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -587,7 +609,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "183"
+    assert transport_input["profileVersion"] == "197"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -603,6 +625,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
         if item["event"] == "transport_input"
     ]
     assert "search_assessment" in transport_stages
+    assert "search_actor_classification" in transport_stages
     assert "search_reselection" in transport_stages
     solver_output = next(
         item for item in diagnostic_records if item["event"] == "solver_output"
@@ -940,7 +963,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "183"
+    assert profile.version == "197"
     mode_prompts = {
         "research": profile.solver_research.system_prompt,
         "integration": profile.solver_integration.system_prompt,
@@ -991,14 +1014,19 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     assert "説明要求として`non_work_item_requirements`へ重複" in (
         research_prompt
     )
-    assert "一人称の行為者も省略しません" in research_prompt
-    assert "行為の対象・客体を行為者へ読み替えません" in (
+    assert "省略された行為者は「質問者」のように補い" in research_prompt
+    assert "「AのBを〜したい」" in research_prompt
+    assert "対象の発行者、所有者、所属先等を別の語句で示す場合" in (
         research_prompt
     )
     assert "仮説、検索語、Tool要求は作りません" in research_prompt
     assert "# 法的仮説の立案" in hypothesis_prompt
     assert "法令検索の対象を選べる暫定的な法的命題" in hypothesis_prompt
-    assert "行為者と、行為の対象・客体" in hypothesis_prompt
+    assert "行為者を名詞で明記" in hypothesis_prompt
+    assert "Aとは別の質問者がAのBを〜する" in hypothesis_prompt
+    assert "別の役割として示された行為者と、対象の所有者、発行者、所属先等" in (
+        hypothesis_prompt
+    )
     assert "立場ごとのHypothesis" in hypothesis_prompt
     assert "# 検索要求の作成" in search_prompt
     assert "legal_search" in search_prompt
@@ -1191,7 +1219,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "183"
+    assert profile.version == "197"
     assert prompt.rindex("## 出力前の確認") > prompt.rindex(
         "</solver_context>"
     )
@@ -1242,7 +1270,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "183"
+    assert profile.version == "197"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -1670,7 +1698,14 @@ def test_real_search_actor_mismatch_is_preserved_as_fixture() -> None:
         "search_candidate_assessment"
     ]
     assert "matched_hypothesis_ids" in assessment_item["properties"]
-    assert "主体、行為、対象、条件" in rendered.instructions
+    assert "規律主体の照合や候補選択をしません" in rendered.instructions
+    assert "見出しが規律主体や対象範囲を限定" in rendered.instructions
+    assert "Hypothesisの`statement`か`gaps`" in rendered.instructions
+    assert "規律主体をいったん除き" in assessment_item[
+        "properties"
+    ]["matched_hypothesis_ids"]["description"]
+    assert "regulated_actor_role" not in assessment_item["properties"]
+    assert "actor_match_reason" not in assessment_item["properties"]
 
     with pytest.raises(
         ModelProtocolError,
@@ -1683,6 +1718,92 @@ def test_real_search_actor_mismatch_is_preserved_as_fixture() -> None:
             },
             fixture["observedTransportOutput"]["payload"],
         )
+
+
+def test_search_actor_classification_intersects_content_and_actor_matches() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_actor_relation_search_v191.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    context = SolverContext.model_validate(fixture["solverContext"])
+    profile = legal_profiles.legal_agent_profile().solver_search_review
+    assert profile is not None
+    article_ids = [item.article_id for item in context.search_candidates]
+    issuer_article_id = "law-323AC0000000025-article-27_22_2"
+    buyer_article_id = "law-323AC0000000025-article-27_2"
+    assessment_payload = {
+        "search_request_ids": list(context.required_search_review_request_ids),
+        "assessments": [
+            {
+                "article_id": article_id,
+                "legal_function": "applicability",
+                "summary": "公開買付けに関する候補",
+                "matched_hypothesis_ids": ["h-1"],
+            }
+            for article_id in article_ids
+        ],
+        "reason": "内容面では全候補を評価した",
+    }
+    actor_payload = {
+        "roles": {
+            article_id: {
+                "regulated_actor": (
+                    "発行者" if article_id == issuer_article_id else "買付者"
+                ),
+                "regulated_actor_role": (
+                    "target_associated_actor"
+                    if article_id == issuer_article_id
+                    else "hypothesis_actor"
+                ),
+                "matched_hypothesis_ids": ["h-1"],
+                "reason": "主体だけを照合した",
+            }
+            for article_id in article_ids
+        }
+    }
+
+    rendered = render_search_actor_classification_model_call(
+        context,
+        assessment_payload,
+        profile,
+    )
+    combined = _apply_search_actor_classification(
+        assessment_payload,
+        actor_payload,
+        context,
+    )
+    combined_by_id = {
+        item["article_id"]: item for item in combined["assessments"]
+    }
+
+    assert "法的機能、条件、効果、候補の採否は判断しません" in (
+        rendered.instructions
+    )
+    assert combined_by_id[issuer_article_id]["matched_hypothesis_ids"] == []
+    assert combined_by_id[buyer_article_id]["matched_hypothesis_ids"] == [
+        "h-1"
+    ]
+    _validate_search_assessment_payload(combined, context)
+
+
+def test_lr_017_real_model_replays_select_buyer_rule_consistently() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_actor_relation_selection_regression_v197.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    expected = fixture["expected"]
+
+    assert len(fixture["realModelRuns"]) == 2
+    for run in fixture["realModelRuns"]:
+        assert expected["selectedArticleId"] in run["selectedArticleIds"]
+        assert expected["excludedArticleId"] not in run["selectedArticleIds"]
+        assert expected["excludedArticleId"] in run["deferredArticleIds"]
 
 
 def test_integration_repeated_search_fixture_prefers_fetchable_candidates() -> None:
@@ -1974,8 +2095,12 @@ def test_search_review_prompt_defines_evidence_join_and_limited_role() -> None:
     assert "`search_excerpts`" in prompt
     assert "法的結論、Hypothesisの支持・反証" in prompt
     assert "自分の言葉" in prompt
-    assert "この段階では候補を選びません" in prompt
-    assert "規律される行為者とは限りません" in prompt
+    assert "規律主体の照合や候補選択をしません" in prompt
+    assert "規律主体はいったん除き" in prompt
+    assert search_prompt.actor_classification_system_prompt is not None
+    assert "候補の規律主体分類" in (
+        search_prompt.actor_classification_system_prompt
+    )
     assert search_prompt.followup_system_prompt is not None
     assert "提示された`assessments`だけを比較" in (
         search_prompt.followup_system_prompt

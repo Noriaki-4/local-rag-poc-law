@@ -13,6 +13,7 @@
 - WorkItemやHypothesisの内容は変更しません。
 - 1つの検索要求は、同じWorkItemに属する1件以上のHypothesisを対象にします。
 - 検索語は質問文をそのまま繰り返さず、制度名、行為または法的効果、判定軸を法令本文に現れやすい語で組み合わせます。
+- Hypothesisが行為者と対象に結び付く主体を別の役割としている場合、その区別が消える検索語にしません。
 - 根拠条文やArticle IDを推測しません。
 - 上限内で今回検索しないHypothesisが残っても削除しません。Tool結果の評価後に次の検索を判断します。
 
@@ -22,10 +23,14 @@
 - `work_items`: 今回の質問から作成済みのWorkItem。各要素は既知IDと1つの確認事項を持つ。
   - `work_items[].work_item_id`: Programが付与した既知WorkItem ID。
   - `work_items[].question`: このWorkItemで確認する1つの法的事項。
+  - `work_items[].actor_scope`: 確認事項の行為者と、対象に結び付く主体との関係。未指定ならnull。
+  - `work_items[].actor_relation`: sameは同一主体、differentは別主体、unknownは未確定。
 - `hypotheses`: 作成済みの未確認Hypothesis。各要素は所属WorkItem、命題、gapsを持つ。
   - `hypotheses[].hypothesis_id`: Programが付与した既知Hypothesis ID。
   - `hypotheses[].work_item_id`: このHypothesisが属する既知WorkItem ID。
   - `hypotheses[].statement`: 法令本文で検証する未確認の法的命題。
+  - `hypotheses[].actor_scope`: 命題の行為者と、対象に結び付く主体との関係。未指定ならnull。
+  - `hypotheses[].actor_relation`: sameは同一主体、differentは別主体、unknownは未確定。
   - `hypotheses[].gaps`: 命題のうち法令本文でまだ確認すべき具体的な法的内容。
 - `available_tools`: 現在のStepで要求できるTool一覧。
   - `available_tools[].name`: SolverDecision.tool_requestsで使う正規のTool名。

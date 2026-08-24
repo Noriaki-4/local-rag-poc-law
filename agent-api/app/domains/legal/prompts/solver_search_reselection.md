@@ -7,8 +7,8 @@
 
 ## 手順
 
-1. `matched_hypothesis_ids`が空の候補は選びません。
-2. 各未確認Hypothesisについて、対応する候補の主体、行為、対象、条件を`assessment.summary`で比較します。
+1. 提示された`assessments`は、前段で`matched_hypothesis_ids`が付いた候補だけです。この中から選びます。
+2. 各未確認Hypothesisについて、`assessment.regulated_actor_role`とHypothesisの`actor_relation`、`assessment.actor_match_reason`で主体一致を確認してから、行為、対象、条件を`assessment.summary`で比較します。主体不一致を示す候補は選びません。
 3. 同じ制度や法的機能でも、規律する主体または行為が異なる候補は代用しません。
 4. 質問の中心命題を直接検証する候補があれば、まず1件を選びます。特定の法的機能が常に中心だとは仮定しません。
 5. 取得枠が残る間、まだ候補を選んでいない未確認Hypothesisを一つずつ確認し、直接検証できる候補を1件ずつ選びます。

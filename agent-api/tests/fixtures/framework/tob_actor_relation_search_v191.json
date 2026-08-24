@@ -1,0 +1,1506 @@
+{
+  "fixtureId": "tob-actor-relation-search-v191",
+  "questionId": "tob-actor-relation",
+  "source": {
+    "diagnosticsMode": "snapshot",
+    "diagnosticCaseId": "legal-9240f258e5e84a1cab4fb129e000d42a",
+    "sequence": 16,
+    "purpose": "search_selection",
+    "model": "gpt-4o-mini-2024-07-18",
+    "profileName": "legal-default",
+    "profileVersion": "191",
+    "transportInputSequence": 17,
+    "transportStage": "search_assessment",
+    "transportAttempt": 1,
+    "promptHash": "a61cc26358b3a8d88b6f14ed2cdf1f3c14bb389337171cfa3175d05c369fc1a2",
+    "schemaHash": "ef36a0b52fb5c66545a966b560751fcff9fee66caf9f4e15e67981ae92a20bcc",
+    "instructionsHash": "6bd9b01532091f2e631a91d802074a0bae29c387102cce3e61105080fc434ef3",
+    "inputHash": "c4015a991d662c6ded9855e835010af0c580e74b4d548ae9742943c9de113fe9",
+    "normalizedSchemaHash": "aa27f0f99ef8791315f6fb31a82e1c1c842cdce1103722bbc53b3c2e844d25e7",
+    "transportOutputSequence": 18,
+    "payloadHash": "40ae47652c8354598108607678be39593d010b9eea0dd71f2217e80a0a717474"
+  },
+  "checkpoint": {
+    "resumeFrom": "search_selection",
+    "approved": true,
+    "approvedBy": "diagnostic-regression",
+    "sourceProvider": "openai",
+    "sourceModel": "gpt-4o-mini-2024-07-18"
+  },
+  "expectations": {
+    "researchCycleCount": 1,
+    "remainingFetchCapacity": 3,
+    "workItemCount": 1,
+    "hypothesisCount": 1,
+    "materialEvidenceCount": 8,
+    "recentToolResultCount": 1,
+    "fetchableArticleCount": 8,
+    "fetchedResourceCount": 0,
+    "evidenceRoleCounts": {
+      "search_navigation": 8
+    }
+  },
+  "caseState": {
+    "case_id": "fixture-tob-actor-relation-search-v191",
+    "question": "上場会社の株式を、市場を通さずに多数の株主から買い集めたい場合、公開買付けの手続が必要になる条件を根拠条文とともに説明してください。",
+    "non_work_item_requirements": [
+      "公開買付けの手続が必要になる条件を根拠条文とともに説明すること。"
+    ],
+    "run_status": "running",
+    "research_cycle_count": 1,
+    "work_items": [
+      {
+        "work_item_id": "wi-1",
+        "parent_work_item_id": null,
+        "question": "上場会社の株式を、市場を通さずに多数の株主から買い集めたい場合、公開買付けの手続が必要になる条件を根拠条文とともに説明してください。",
+        "actor_scope": "質問者は上場会社の株式を買い集める行為者",
+        "actor_relation": "different",
+        "state": "open",
+        "resolution": null,
+        "basis_hypothesis_ids": [],
+        "replaces_work_item_id": null
+      }
+    ],
+    "hypotheses": [
+      {
+        "hypothesis_id": "h-1",
+        "work_item_id": "wi-1",
+        "statement": "質問者は上場会社の株式を市場を通さずに多数の株主から買い集める行為を行う場合、公開買付けの手続が必要になる条件を満たす必要がある。",
+        "actor_scope": "質問者は上場会社の株式を買い集める行為者であり、株主はその対象である。",
+        "actor_relation": "different",
+        "judgment": "unresolved",
+        "evidence_ids": [],
+        "gaps": [
+          "公開買付けの手続が必要になる具体的な条件の詳細。",
+          "公開買付けに関する法令の具体的な条文。"
+        ]
+      }
+    ],
+    "tool_requests": [
+      {
+        "request_id": "solver-tool-55e57035de664466988cb06b4c184345",
+        "work_item_id": "wi-1",
+        "tool_name": "legal_search",
+        "arguments": {
+          "query": "上場会社の株式を市場を通さずに多数の株主から買い集める場合の公開買付けの手続に関する条件",
+          "doc_types": [
+            "law"
+          ],
+          "document_ids": []
+        },
+        "purpose": "公開買付けの手続が必要になる具体的な条件の詳細と法令の条文を確認するため。",
+        "hypothesis_ids": [
+          "h-1"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-12",
+        "source_ref": "opensearch:law-340CO0000000321-article-12",
+        "content": "（公開買付けによらないで買付け等ができる場合）\n第十二条\n法第二十七条の五第三号（法第二十七条の八第十項において準用する場合を含む。）に規定する政令で定める場合は、次に掲げる場合とする。第十条各号に掲げる者が公開買付者及びその特別関係者（法第二十七条の二第七項に規定する特別関係者をいい、法第二十七条の五第二号の規定による申出を金融庁長官に行つた者を除く。以下この節において同じ。）以外の者の委託を受けて買付け等をする場合第十条各号に掲げる者が金融商品取引所又は認可金融商品取引業協会の定める規則において有価証券の流通の円滑化を図るため認められている買付け等をする場合新株予約権を有する者が当該新株予約権を行使することにより買付け等をする場合第七条第一項第二号から第六号までに掲げる買付け等をする場合第十条各号に掲げる者が、その有する株券等の売買に係るオプションを行使し、又はその付与していた株券等の",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-12",
+          "sourceContentUnitId": "law-340CO0000000321-article-12",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第十二条 （公開買付けによらないで買付け等ができる場合）",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": true
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-14_3_7",
+        "source_ref": "opensearch:law-340CO0000000321-article-14_3_7",
+        "content": "（公開買付けによらないで買付け等ができる場合）\n第十四条の三の七\n法第二十七条の二十二の二第二項及び第五項並びに法第二十七条の二十二の三第五項において読み替えて準用する法第二十七条の五に規定する政令で定める場合は、次に掲げる場合とする。会社法第百十六条第一項、第百八十二条の四第一項、第四百六十九条第一項、第七百八十五条第一項、第七百九十七条第一項、第八百六条第一項若しくは第八百十六条の六第一項の規定による株式の買取りの請求若しくは投資信託及び投資法人に関する法律第百四十一条第一項、第百四十九条の三第一項、第百四十九条の八第一項若しくは第百四十九条の十三第一項の規定による投資口の買取りの請求又は法令上の義務に基づき株券等に係る買付け等をする場合その株券等が上場されている外国の金融商品取引所が所在する外国において、当該外国の法令の規定に基づき海外公開買付けにより買付け等をする場合第十四条の三の",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-14_3_7",
+          "sourceContentUnitId": "law-340CO0000000321-article-14_3_7",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第十四条の三の七 （公開買付けによらないで買付け等ができる場合）",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": true
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_22_2-paragraph-1",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_22_2-paragraph-1",
+        "content": "上場株券等の当該上場株券等の発行者による取引所金融商品市場外における買付け等（買付けその他の有償の譲受けをいう。以下この条及び次条において同じ。）のうち、次に掲げるものに該当するものについては、公開買付けによらなければならない。ただし、取引所金融商品市場における有価証券の売買等に準ずるものとして政令で定める取引による買付け等については、この限りでない。会社法第百五十六条第一項（同法第百六十五条第三項の規定により読み替えて適用する場合を含む。以下この号において同じ。）の規定又は他の法令の規定で同法第百五十六条第一項の規定に相当するものとして政令で定めるものによる買付け等（同法第百六十条第一項に規定する同法第百五十八条第一項の規定による通知を行う場合を除く。）上場株券等の発行者が外国会社である買付け等のうち、多数の者が当該買付け等に関する事項を知り得る状態に置かれる方法により行われる買付け等と",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_22_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_22_2-paragraph-1",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十七条の二十二の二 （発行者による上場株券等の公開買付け） 第1項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": true
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_2-paragraph-6",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-6",
+        "content": "６この条において「公開買付け」とは、不特定かつ多数の者に対し、公告により株券等の買付け等の申込み又は売付け等（売付けその他の有償の譲渡をいう。以下この章において同じ。）の申込みの勧誘を行い、取引所金融商品市場外で株券等の買付け等を行うことをいう。",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_2-paragraph-6",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第6項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-14_3_2-paragraph-3",
+        "source_ref": "opensearch:law-340CO0000000321-article-14_3_2-paragraph-3",
+        "content": "３法第二十七条の二十二の二第一項第二号に規定する多数の者が買付け等（同項に規定する買付け等をいう。以下この節において同じ。）に関する事項を知り得る状態に置かれる方法により行われる買付け等として政令で定めるものは、当該買付け等に関する事項（当該買付け等に係る上場株券等（法第二十四条の六第一項に規定する上場株券等をいう。以下この節において同じ。）の買付け等の申込み又は売付け等の申込みの勧誘を行う旨の文言が含まれるものに限る。）を新聞若しくは雑誌に掲載し、又は文書、放送、映画その他の方法を用いることにより多数の者に知らせて行う買付け等とする。",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-14_3_2",
+          "sourceContentUnitId": "law-340CO0000000321-article-14_3_2-paragraph-3",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第十四条の三の二 （公開買付けの適用範囲） 第3項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-419M60000002059-article-63-paragraph-1-item-8",
+        "source_ref": "opensearch:law-419M60000002059-article-63-paragraph-1-item-8",
+        "content": "法第百六十七条第五項第十四号に規定する公開買付者等の公開買付け等事実を知る前に締結された当該公開買付け等に係る株券等に係る買付け等若しくは売付け等に関する契約の履行又は公開買付者等の公開買付け等事実を知る前に決定された当該公開買付け等に係る株券等に係る買付け等若しくは売付け等の計画の実行として買付け等又は売付け等をする場合のうち内閣府令で定める場合は、次に掲げる場合とする。\n第8号　公開買付け等に係る上場等株券等又は上場株券等の発行者である会社の取引関係者（当該会社の指定する当該会社と取引関係にある者（法人その他の団体にあってはその役員を含み、個人にあってはその事業に関して当該会社と取引関係にある場合に限る。）をいう。以下この号において同じ。）が当該会社の他の取引関係者と共同して当該会社の株券の買付けを金融商品取引業者に委託等をして行う場合であって、当該買付けが一定の計画に従い、個別の投資",
+        "title": "有価証券の取引等の規制に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-419M60000002059-article-63",
+          "sourceContentUnitId": "law-419M60000002059-article-63-paragraph-1-item-8",
+          "documentId": "law-419M60000002059",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第六十三条 （公開買付け等に係る規制の適用除外） 第1項第8号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/419M60000002059",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": true
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-419M60000002059-article-23-paragraph-1-item-2",
+        "source_ref": "opensearch:law-419M60000002059-article-23-paragraph-1-item-2",
+        "content": "上場等株券等の発行者が次に掲げる方法により、会社法第百五十六条第一項（同法第百六十三条及び第百六十五条第三項の規定により読み替えて適用する場合を含む。）の規定、投資信託及び投資法人に関する法律第八十条の五第二項の規定により読み替えて適用する同法第八十条の二第一項の規定又はこれらに相当する外国の法令の規定に基づく上場等株券等の買付け等を行う場合には、第十七条から第二十条までの規定は適用しない。\n第2号　取引所金融商品市場におけるマーケットメイク銘柄に係る上場等株券等の買付け等のうち、次に掲げる要件を満たすものとして、金融商品取引所が適当と認める方法当該金融商品取引所において公表された当該上場等株券等の当該金融商品取引所の規則の定めるところによる当該金融商品取引所の開設する取引所金融商品市場における売買立会の終了すべき時刻における直近の売り気配の最安値と買い気配の最高値を平均して算出した価格（",
+        "title": "有価証券の取引等の規制に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-419M60000002059-article-23",
+          "sourceContentUnitId": "law-419M60000002059-article-23-paragraph-1-item-2",
+          "documentId": "law-419M60000002059",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十三条 （取引の公正の確保のため適当と認められる方法） 第1項第2号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/419M60000002059",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": true
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_13-paragraph-5",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_13-paragraph-5",
+        "content": "５公開買付者は、前項第二号に掲げる条件を付した場合において、応募株券等の数の合計が買付予定の株券等の数を超えるときは、応募株主等から内閣府令で定めるあん分比例の方式（以下この節において「あん分比例方式」という。）により株券等の買付け等に係る受渡しその他の決済を行わなければならない。",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_13",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_13-paragraph-5",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十七条の十三 （公開買付けに係る応募株券等の数等の公告等及び公開買付報告書等の提出） 第5項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      }
+    ],
+    "dependency_decisions": [],
+    "graph_candidate_reviews": [],
+    "search_candidate_reviews": [],
+    "frontier_re_adoptions": [],
+    "deferred_frontier_resolutions": [],
+    "unreviewed_graph_resolutions": [],
+    "tool_results": [
+      {
+        "request_id": "solver-tool-55e57035de664466988cb06b4c184345",
+        "status": "succeeded",
+        "evidence_ids": [
+          "search-nav-law-340CO0000000321-article-12",
+          "search-nav-law-340CO0000000321-article-14_3_7",
+          "search-nav-law-323AC0000000025-article-27_22_2-paragraph-1",
+          "search-nav-law-323AC0000000025-article-27_2-paragraph-6",
+          "search-nav-law-340CO0000000321-article-14_3_2-paragraph-3",
+          "search-nav-law-419M60000002059-article-63-paragraph-1-item-8",
+          "search-nav-law-419M60000002059-article-23-paragraph-1-item-2",
+          "search-nav-law-323AC0000000025-article-27_13-paragraph-5"
+        ],
+        "error_code": null,
+        "elapsed_ms": 752,
+        "cycle_no": 1
+      }
+    ],
+    "focus_work_item_ids": [
+      "wi-1"
+    ],
+    "retained_evidence_ids": [],
+    "final_answer": null,
+    "review": null,
+    "review_finding_resolutions": [],
+    "stop_reason": null,
+    "cycle_step_timeout": false,
+    "created_at": "2026-08-24T13:35:00.438345Z",
+    "updated_at": "2026-08-24T13:35:08.253540Z"
+  },
+  "solverContext": {
+    "case_id": "fixture-tob-actor-relation-search-v191",
+    "question": "上場会社の株式を、市場を通さずに多数の株主から買い集めたい場合、公開買付けの手続が必要になる条件を根拠条文とともに説明してください。",
+    "non_work_item_requirements": [
+      "公開買付けの手続が必要になる条件を根拠条文とともに説明すること。"
+    ],
+    "research_cycle_count": 1,
+    "remaining_research_cycles": 3,
+    "remaining_wall_time_sec": 232.1848456209991,
+    "min_next_cycle_budget_sec": 25.0,
+    "can_start_next_cycle": true,
+    "max_tool_requests_per_step": 5,
+    "max_fetched_resources_per_cycle": 3,
+    "fetched_resource_ids_this_cycle": [],
+    "remaining_fetch_capacity": 3,
+    "max_selected_frontier_per_step": 3,
+    "cycle_budget_reached": false,
+    "cycle_close_required": false,
+    "cycle_step_timeout": false,
+    "max_retained_evidence": 12,
+    "max_material_evidence_chars": 50000,
+    "max_solver_input_chars": 240000,
+    "finalize_only": false,
+    "available_tools": [
+      {
+        "name": "legal_search",
+        "description": "Article IDがまだ分からないとき、OpenSearchで法令またはガイドの候補を探す。質問をそのまま繰り返さず、確認事項を法令表現へ言い換えて使う。返す検索抜粋は候補選択用であり、回答やHypothesisの根拠にはしない。",
+        "input_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "description": "制度名と確認事項を法令に現れやすい表現へ言い換えた検索語。",
+              "maxLength": 1000,
+              "minLength": 1,
+              "type": "string"
+            },
+            "doc_types": {
+              "description": "検索対象。法令本文はlaw、行政解釈やガイドはguideline。現在の検索に必要な値を配列で返す。",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "document_ids": {
+              "description": "検索対象文書を限定する既知documentId。限定しない場合は空配列。",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 12,
+              "type": "array"
+            }
+          },
+          "required": [
+            "query",
+            "doc_types",
+            "document_ids"
+          ],
+          "type": "object"
+        },
+        "result_description": "候補Articleの所在と短い検索抜粋をnavigation Evidenceとして返す。Article本文のgrounding Evidenceは返さない。",
+        "read_only": true,
+        "parallel_safe": true
+      },
+      {
+        "name": "fetch_articles",
+        "description": "発見済みArticleの本文をOpenSearchから取得する。fetchable_article_idsにある既知IDから、質問とHypothesisに必要なものを選んで使う。検索やGraph展開は行わず、未知IDや取得済みEvidence IDは受け付けない。",
+        "input_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "article_ids": {
+              "description": "本文を取得する既知Article ID。SolverContext.fetchable_article_idsの完全一致だけを指定する。",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 4,
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "article_ids"
+          ],
+          "type": "object"
+        },
+        "result_description": "指定Articleに属するArticle・Paragraph・Itemの本文をgrounding Evidenceとして返す。",
+        "read_only": true,
+        "parallel_safe": true
+      },
+      {
+        "name": "legal_graph_neighbors",
+        "description": "既知Articleを起点に、仮説に合う法令関係を1ホップだけ探索する。関係のmode、意味predicate、向きを説明できる場合に使う。返す候補は本文ではなくnavigation情報であり、関連性と次の取得対象はSolverが判断する。",
+        "input_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "article_ids": {
+              "description": "1ホップの起点にする既知Article ID。",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 4,
+              "minItems": 1,
+              "type": "array"
+            },
+            "mode": {
+              "description": "物理参照または意味分類済み関係のどちらを探索するか。",
+              "enum": [
+                "semantic_assertion",
+                "explicit_reference",
+                "explains"
+              ],
+              "type": "string"
+            },
+            "predicate": {
+              "anyOf": [
+                {
+                  "description": "RelationAssertionが提示できる未確認の意味関係。",
+                  "enum": [
+                    "IMPLEMENTS",
+                    "INCORPORATES",
+                    "USES_DEFINITION",
+                    "EXCEPTION_TO",
+                    "OVERRIDES"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "semantic_assertionで探索する仮説に合う1つの意味関係。それ以外のmodeではnull。"
+            },
+            "direction": {
+              "description": "起点Articleから見た関係の向き。",
+              "enum": [
+                "from_subject",
+                "to_subject",
+                "outgoing",
+                "incoming"
+              ],
+              "type": "string"
+            },
+            "max_relations": {
+              "description": "起点Articleごとに返すnavigation関係数の上限。",
+              "maximum": 50,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "article_ids",
+            "mode",
+            "predicate",
+            "direction",
+            "max_relations"
+          ],
+          "type": "object"
+        },
+        "result_description": "起点と隣接Articleの関係、向き、根拠所在をGraph navigation Evidenceとして返す。隣接Articleの本文は返さない。",
+        "read_only": true,
+        "parallel_safe": true
+      },
+      {
+        "name": "load_evidence",
+        "description": "Caseでは取得済みだが現在のPromptから省略されたEvidence本文を再表示する。omitted_evidence_idsにある既知IDだけを指定する。新しい検索、Article本文取得、Graph探索は行わない。",
+        "input_schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "evidence_ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "description": "今回再表示するomitted_evidence_idsの完全一致。"
+            }
+          },
+          "required": [
+            "evidence_ids"
+          ]
+        },
+        "result_description": "指定した既知Evidenceの本文をmaterial_evidenceへ再投影する。",
+        "read_only": true,
+        "parallel_safe": true
+      }
+    ],
+    "grounding_evidence_ids": [],
+    "navigation_evidence_ids": [
+      "search-nav-law-340CO0000000321-article-12",
+      "search-nav-law-340CO0000000321-article-14_3_7",
+      "search-nav-law-323AC0000000025-article-27_22_2-paragraph-1",
+      "search-nav-law-323AC0000000025-article-27_2-paragraph-6",
+      "search-nav-law-340CO0000000321-article-14_3_2-paragraph-3",
+      "search-nav-law-419M60000002059-article-63-paragraph-1-item-8",
+      "search-nav-law-419M60000002059-article-23-paragraph-1-item-2",
+      "search-nav-law-323AC0000000025-article-27_13-paragraph-5"
+    ],
+    "fetchable_article_ids": [
+      "law-340CO0000000321-article-12",
+      "law-340CO0000000321-article-14_3_7",
+      "law-323AC0000000025-article-27_22_2",
+      "law-323AC0000000025-article-27_2",
+      "law-340CO0000000321-article-14_3_2",
+      "law-419M60000002059-article-63",
+      "law-419M60000002059-article-23",
+      "law-323AC0000000025-article-27_13"
+    ],
+    "search_candidates": [
+      {
+        "article_id": "law-340CO0000000321-article-12",
+        "document_id": "law-340CO0000000321",
+        "title": "金融商品取引法施行令",
+        "headings": [
+          "第十二条 （公開買付けによらないで買付け等ができる場合）"
+        ],
+        "discovery_work_item_ids": [
+          "wi-1"
+        ],
+        "discovery_hypothesis_ids": [
+          "h-1"
+        ],
+        "search_request_ids": [
+          "solver-tool-55e57035de664466988cb06b4c184345"
+        ],
+        "navigation_evidence_ids": [
+          "search-nav-law-340CO0000000321-article-12"
+        ]
+      },
+      {
+        "article_id": "law-340CO0000000321-article-14_3_7",
+        "document_id": "law-340CO0000000321",
+        "title": "金融商品取引法施行令",
+        "headings": [
+          "第十四条の三の七 （公開買付けによらないで買付け等ができる場合）"
+        ],
+        "discovery_work_item_ids": [
+          "wi-1"
+        ],
+        "discovery_hypothesis_ids": [
+          "h-1"
+        ],
+        "search_request_ids": [
+          "solver-tool-55e57035de664466988cb06b4c184345"
+        ],
+        "navigation_evidence_ids": [
+          "search-nav-law-340CO0000000321-article-14_3_7"
+        ]
+      },
+      {
+        "article_id": "law-323AC0000000025-article-27_22_2",
+        "document_id": "law-323AC0000000025",
+        "title": "金融商品取引法",
+        "headings": [
+          "第二十七条の二十二の二 （発行者による上場株券等の公開買付け） 第1項"
+        ],
+        "discovery_work_item_ids": [
+          "wi-1"
+        ],
+        "discovery_hypothesis_ids": [
+          "h-1"
+        ],
+        "search_request_ids": [
+          "solver-tool-55e57035de664466988cb06b4c184345"
+        ],
+        "navigation_evidence_ids": [
+          "search-nav-law-323AC0000000025-article-27_22_2-paragraph-1"
+        ]
+      },
+      {
+        "article_id": "law-323AC0000000025-article-27_2",
+        "document_id": "law-323AC0000000025",
+        "title": "金融商品取引法",
+        "headings": [
+          "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第6項"
+        ],
+        "discovery_work_item_ids": [
+          "wi-1"
+        ],
+        "discovery_hypothesis_ids": [
+          "h-1"
+        ],
+        "search_request_ids": [
+          "solver-tool-55e57035de664466988cb06b4c184345"
+        ],
+        "navigation_evidence_ids": [
+          "search-nav-law-323AC0000000025-article-27_2-paragraph-6"
+        ]
+      },
+      {
+        "article_id": "law-340CO0000000321-article-14_3_2",
+        "document_id": "law-340CO0000000321",
+        "title": "金融商品取引法施行令",
+        "headings": [
+          "第十四条の三の二 （公開買付けの適用範囲） 第3項"
+        ],
+        "discovery_work_item_ids": [
+          "wi-1"
+        ],
+        "discovery_hypothesis_ids": [
+          "h-1"
+        ],
+        "search_request_ids": [
+          "solver-tool-55e57035de664466988cb06b4c184345"
+        ],
+        "navigation_evidence_ids": [
+          "search-nav-law-340CO0000000321-article-14_3_2-paragraph-3"
+        ]
+      },
+      {
+        "article_id": "law-419M60000002059-article-63",
+        "document_id": "law-419M60000002059",
+        "title": "有価証券の取引等の規制に関する内閣府令",
+        "headings": [
+          "第六十三条 （公開買付け等に係る規制の適用除外） 第1項第8号"
+        ],
+        "discovery_work_item_ids": [
+          "wi-1"
+        ],
+        "discovery_hypothesis_ids": [
+          "h-1"
+        ],
+        "search_request_ids": [
+          "solver-tool-55e57035de664466988cb06b4c184345"
+        ],
+        "navigation_evidence_ids": [
+          "search-nav-law-419M60000002059-article-63-paragraph-1-item-8"
+        ]
+      },
+      {
+        "article_id": "law-419M60000002059-article-23",
+        "document_id": "law-419M60000002059",
+        "title": "有価証券の取引等の規制に関する内閣府令",
+        "headings": [
+          "第二十三条 （取引の公正の確保のため適当と認められる方法） 第1項第2号"
+        ],
+        "discovery_work_item_ids": [
+          "wi-1"
+        ],
+        "discovery_hypothesis_ids": [
+          "h-1"
+        ],
+        "search_request_ids": [
+          "solver-tool-55e57035de664466988cb06b4c184345"
+        ],
+        "navigation_evidence_ids": [
+          "search-nav-law-419M60000002059-article-23-paragraph-1-item-2"
+        ]
+      },
+      {
+        "article_id": "law-323AC0000000025-article-27_13",
+        "document_id": "law-323AC0000000025",
+        "title": "金融商品取引法",
+        "headings": [
+          "第二十七条の十三 （公開買付けに係る応募株券等の数等の公告等及び公開買付報告書等の提出） 第5項"
+        ],
+        "discovery_work_item_ids": [
+          "wi-1"
+        ],
+        "discovery_hypothesis_ids": [
+          "h-1"
+        ],
+        "search_request_ids": [
+          "solver-tool-55e57035de664466988cb06b4c184345"
+        ],
+        "navigation_evidence_ids": [
+          "search-nav-law-323AC0000000025-article-27_13-paragraph-5"
+        ]
+      }
+    ],
+    "work_tree": [
+      {
+        "work_item_id": "wi-1",
+        "parent_work_item_id": null,
+        "question": "上場会社の株式を、市場を通さずに多数の株主から買い集めたい場合、公開買付けの手続が必要になる条件を根拠条文とともに説明してください。",
+        "actor_scope": "質問者は上場会社の株式を買い集める行為者",
+        "actor_relation": "different",
+        "state": "open",
+        "resolution": null,
+        "basis_hypothesis_ids": [],
+        "replaces_work_item_id": null,
+        "hypothesis_ids": [
+          "h-1"
+        ],
+        "evidence_count": 0
+      }
+    ],
+    "hypotheses": [
+      {
+        "hypothesis_id": "h-1",
+        "work_item_id": "wi-1",
+        "statement": "質問者は上場会社の株式を市場を通さずに多数の株主から買い集める行為を行う場合、公開買付けの手続が必要になる条件を満たす必要がある。",
+        "actor_scope": "質問者は上場会社の株式を買い集める行為者であり、株主はその対象である。",
+        "actor_relation": "different",
+        "judgment": "unresolved",
+        "evidence_ids": [],
+        "gaps": [
+          "公開買付けの手続が必要になる具体的な条件の詳細。",
+          "公開買付けに関する法令の具体的な条文。"
+        ]
+      }
+    ],
+    "evidence_hypothesis_candidates": [],
+    "focus_work_items": [
+      {
+        "work_item_id": "wi-1",
+        "parent_work_item_id": null,
+        "question": "上場会社の株式を、市場を通さずに多数の株主から買い集めたい場合、公開買付けの手続が必要になる条件を根拠条文とともに説明してください。",
+        "actor_scope": "質問者は上場会社の株式を買い集める行為者",
+        "actor_relation": "different",
+        "state": "open",
+        "resolution": null,
+        "basis_hypothesis_ids": [],
+        "replaces_work_item_id": null
+      }
+    ],
+    "affected_work_items": [],
+    "recent_tool_requests": [
+      {
+        "request_id": "solver-tool-55e57035de664466988cb06b4c184345",
+        "work_item_id": "wi-1",
+        "tool_name": "legal_search",
+        "arguments": {
+          "query": "上場会社の株式を市場を通さずに多数の株主から買い集める場合の公開買付けの手続に関する条件",
+          "doc_types": [
+            "law"
+          ],
+          "document_ids": []
+        },
+        "purpose": "公開買付けの手続が必要になる具体的な条件の詳細と法令の条文を確認するため。",
+        "hypothesis_ids": [
+          "h-1"
+        ]
+      }
+    ],
+    "recent_tool_results": [
+      {
+        "request_id": "solver-tool-55e57035de664466988cb06b4c184345",
+        "status": "succeeded",
+        "evidence_ids": [
+          "search-nav-law-340CO0000000321-article-12",
+          "search-nav-law-340CO0000000321-article-14_3_7",
+          "search-nav-law-323AC0000000025-article-27_22_2-paragraph-1",
+          "search-nav-law-323AC0000000025-article-27_2-paragraph-6",
+          "search-nav-law-340CO0000000321-article-14_3_2-paragraph-3",
+          "search-nav-law-419M60000002059-article-63-paragraph-1-item-8",
+          "search-nav-law-419M60000002059-article-23-paragraph-1-item-2",
+          "search-nav-law-323AC0000000025-article-27_13-paragraph-5"
+        ],
+        "evidence_count": 8,
+        "graph_projection_updated": false,
+        "error_code": null,
+        "elapsed_ms": 752,
+        "cycle_no": 1
+      }
+    ],
+    "completed_legal_searches": [
+      {
+        "work_item_id": "wi-1",
+        "hypothesis_ids": [
+          "h-1"
+        ],
+        "arguments": {
+          "query": "上場会社の株式を市場を通さずに多数の株主から買い集める場合の公開買付けの手続に関する条件",
+          "doc_types": [
+            "law"
+          ],
+          "document_ids": []
+        }
+      }
+    ],
+    "evidence_manifest": [
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-12",
+        "source_ref": "opensearch:law-340CO0000000321-article-12",
+        "title": "金融商品取引法施行令",
+        "content_chars": 400,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-14_3_7",
+        "source_ref": "opensearch:law-340CO0000000321-article-14_3_7",
+        "title": "金融商品取引法施行令",
+        "content_chars": 400,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_22_2-paragraph-1",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_22_2-paragraph-1",
+        "title": "金融商品取引法",
+        "content_chars": 400,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_2-paragraph-6",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-6",
+        "title": "金融商品取引法",
+        "content_chars": 123,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-14_3_2-paragraph-3",
+        "source_ref": "opensearch:law-340CO0000000321-article-14_3_2-paragraph-3",
+        "title": "金融商品取引法施行令",
+        "content_chars": 271,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-419M60000002059-article-63-paragraph-1-item-8",
+        "source_ref": "opensearch:law-419M60000002059-article-63-paragraph-1-item-8",
+        "title": "有価証券の取引等の規制に関する内閣府令",
+        "content_chars": 400,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-419M60000002059-article-23-paragraph-1-item-2",
+        "source_ref": "opensearch:law-419M60000002059-article-23-paragraph-1-item-2",
+        "title": "有価証券の取引等の規制に関する内閣府令",
+        "content_chars": 400,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_13-paragraph-5",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_13-paragraph-5",
+        "title": "金融商品取引法",
+        "content_chars": 141,
+        "created_cycle": 1,
+        "material_included": true
+      }
+    ],
+    "graph_review_batch": {
+      "candidates": [],
+      "remaining_unreviewed_count": 0
+    },
+    "graph_review_ledger": [],
+    "required_graph_review_request_ids": [],
+    "required_search_review_request_ids": [
+      "solver-tool-55e57035de664466988cb06b4c184345"
+    ],
+    "material_evidence": [
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-12",
+        "source_ref": "opensearch:law-340CO0000000321-article-12",
+        "content": "（公開買付けによらないで買付け等ができる場合）\n第十二条\n法第二十七条の五第三号（法第二十七条の八第十項において準用する場合を含む。）に規定する政令で定める場合は、次に掲げる場合とする。第十条各号に掲げる者が公開買付者及びその特別関係者（法第二十七条の二第七項に規定する特別関係者をいい、法第二十七条の五第二号の規定による申出を金融庁長官に行つた者を除く。以下この節において同じ。）以外の者の委託を受けて買付け等をする場合第十条各号に掲げる者が金融商品取引所又は認可金融商品取引業協会の定める規則において有価証券の流通の円滑化を図るため認められている買付け等をする場合新株予約権を有する者が当該新株予約権を行使することにより買付け等をする場合第七条第一項第二号から第六号までに掲げる買付け等をする場合第十条各号に掲げる者が、その有する株券等の売買に係るオプションを行使し、又はその付与していた株券等の",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-12",
+          "sourceContentUnitId": "law-340CO0000000321-article-12",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第十二条 （公開買付けによらないで買付け等ができる場合）",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": true
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-14_3_7",
+        "source_ref": "opensearch:law-340CO0000000321-article-14_3_7",
+        "content": "（公開買付けによらないで買付け等ができる場合）\n第十四条の三の七\n法第二十七条の二十二の二第二項及び第五項並びに法第二十七条の二十二の三第五項において読み替えて準用する法第二十七条の五に規定する政令で定める場合は、次に掲げる場合とする。会社法第百十六条第一項、第百八十二条の四第一項、第四百六十九条第一項、第七百八十五条第一項、第七百九十七条第一項、第八百六条第一項若しくは第八百十六条の六第一項の規定による株式の買取りの請求若しくは投資信託及び投資法人に関する法律第百四十一条第一項、第百四十九条の三第一項、第百四十九条の八第一項若しくは第百四十九条の十三第一項の規定による投資口の買取りの請求又は法令上の義務に基づき株券等に係る買付け等をする場合その株券等が上場されている外国の金融商品取引所が所在する外国において、当該外国の法令の規定に基づき海外公開買付けにより買付け等をする場合第十四条の三の",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-14_3_7",
+          "sourceContentUnitId": "law-340CO0000000321-article-14_3_7",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第十四条の三の七 （公開買付けによらないで買付け等ができる場合）",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": true
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_22_2-paragraph-1",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_22_2-paragraph-1",
+        "content": "上場株券等の当該上場株券等の発行者による取引所金融商品市場外における買付け等（買付けその他の有償の譲受けをいう。以下この条及び次条において同じ。）のうち、次に掲げるものに該当するものについては、公開買付けによらなければならない。ただし、取引所金融商品市場における有価証券の売買等に準ずるものとして政令で定める取引による買付け等については、この限りでない。会社法第百五十六条第一項（同法第百六十五条第三項の規定により読み替えて適用する場合を含む。以下この号において同じ。）の規定又は他の法令の規定で同法第百五十六条第一項の規定に相当するものとして政令で定めるものによる買付け等（同法第百六十条第一項に規定する同法第百五十八条第一項の規定による通知を行う場合を除く。）上場株券等の発行者が外国会社である買付け等のうち、多数の者が当該買付け等に関する事項を知り得る状態に置かれる方法により行われる買付け等と",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_22_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_22_2-paragraph-1",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十七条の二十二の二 （発行者による上場株券等の公開買付け） 第1項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": true
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_2-paragraph-6",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-6",
+        "content": "６この条において「公開買付け」とは、不特定かつ多数の者に対し、公告により株券等の買付け等の申込み又は売付け等（売付けその他の有償の譲渡をいう。以下この章において同じ。）の申込みの勧誘を行い、取引所金融商品市場外で株券等の買付け等を行うことをいう。",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_2-paragraph-6",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第6項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-14_3_2-paragraph-3",
+        "source_ref": "opensearch:law-340CO0000000321-article-14_3_2-paragraph-3",
+        "content": "３法第二十七条の二十二の二第一項第二号に規定する多数の者が買付け等（同項に規定する買付け等をいう。以下この節において同じ。）に関する事項を知り得る状態に置かれる方法により行われる買付け等として政令で定めるものは、当該買付け等に関する事項（当該買付け等に係る上場株券等（法第二十四条の六第一項に規定する上場株券等をいう。以下この節において同じ。）の買付け等の申込み又は売付け等の申込みの勧誘を行う旨の文言が含まれるものに限る。）を新聞若しくは雑誌に掲載し、又は文書、放送、映画その他の方法を用いることにより多数の者に知らせて行う買付け等とする。",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-14_3_2",
+          "sourceContentUnitId": "law-340CO0000000321-article-14_3_2-paragraph-3",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第十四条の三の二 （公開買付けの適用範囲） 第3項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-419M60000002059-article-63-paragraph-1-item-8",
+        "source_ref": "opensearch:law-419M60000002059-article-63-paragraph-1-item-8",
+        "content": "法第百六十七条第五項第十四号に規定する公開買付者等の公開買付け等事実を知る前に締結された当該公開買付け等に係る株券等に係る買付け等若しくは売付け等に関する契約の履行又は公開買付者等の公開買付け等事実を知る前に決定された当該公開買付け等に係る株券等に係る買付け等若しくは売付け等の計画の実行として買付け等又は売付け等をする場合のうち内閣府令で定める場合は、次に掲げる場合とする。\n第8号　公開買付け等に係る上場等株券等又は上場株券等の発行者である会社の取引関係者（当該会社の指定する当該会社と取引関係にある者（法人その他の団体にあってはその役員を含み、個人にあってはその事業に関して当該会社と取引関係にある場合に限る。）をいう。以下この号において同じ。）が当該会社の他の取引関係者と共同して当該会社の株券の買付けを金融商品取引業者に委託等をして行う場合であって、当該買付けが一定の計画に従い、個別の投資",
+        "title": "有価証券の取引等の規制に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-419M60000002059-article-63",
+          "sourceContentUnitId": "law-419M60000002059-article-63-paragraph-1-item-8",
+          "documentId": "law-419M60000002059",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第六十三条 （公開買付け等に係る規制の適用除外） 第1項第8号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/419M60000002059",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": true
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-419M60000002059-article-23-paragraph-1-item-2",
+        "source_ref": "opensearch:law-419M60000002059-article-23-paragraph-1-item-2",
+        "content": "上場等株券等の発行者が次に掲げる方法により、会社法第百五十六条第一項（同法第百六十三条及び第百六十五条第三項の規定により読み替えて適用する場合を含む。）の規定、投資信託及び投資法人に関する法律第八十条の五第二項の規定により読み替えて適用する同法第八十条の二第一項の規定又はこれらに相当する外国の法令の規定に基づく上場等株券等の買付け等を行う場合には、第十七条から第二十条までの規定は適用しない。\n第2号　取引所金融商品市場におけるマーケットメイク銘柄に係る上場等株券等の買付け等のうち、次に掲げる要件を満たすものとして、金融商品取引所が適当と認める方法当該金融商品取引所において公表された当該上場等株券等の当該金融商品取引所の規則の定めるところによる当該金融商品取引所の開設する取引所金融商品市場における売買立会の終了すべき時刻における直近の売り気配の最安値と買い気配の最高値を平均して算出した価格（",
+        "title": "有価証券の取引等の規制に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-419M60000002059-article-23",
+          "sourceContentUnitId": "law-419M60000002059-article-23-paragraph-1-item-2",
+          "documentId": "law-419M60000002059",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十三条 （取引の公正の確保のため適当と認められる方法） 第1項第2号",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/419M60000002059",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": true
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_13-paragraph-5",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_13-paragraph-5",
+        "content": "５公開買付者は、前項第二号に掲げる条件を付した場合において、応募株券等の数の合計が買付予定の株券等の数を超えるときは、応募株主等から内閣府令で定めるあん分比例の方式（以下この節において「あん分比例方式」という。）により株券等の買付け等に係る受渡しその他の決済を行わなければならない。",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_13",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_13-paragraph-5",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十七条の十三 （公開買付けに係る応募株券等の数等の公告等及び公開買付報告書等の提出） 第5項",
+          "sourceObjectUri": "https://laws.e-gov.go.jp/api/1/lawdata/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      }
+    ],
+    "omitted_evidence_ids": [],
+    "required_dependency_kind": null,
+    "required_dependency_work_item_ids": [],
+    "dependency_decisions": [],
+    "reviewer_findings": [],
+    "contract_feedback": null
+  },
+  "observedTransportInput": {
+    "instructions": "# 法令調査Solver：Search Assessmentモード\n\n## 役割\n\nOpenSearchで見つかった全候補を読み、各候補が定める条件と効果を自分の言葉で要約します。\nこの段階では候補を選びません。法的結論、Hypothesisの支持・反証、状態更新、ToolRequestも行いません。\n\n## 入力\n\n- `question`: 利用者の質問。\n- `work_tree`: 現在の作業。\n- `hypotheses`: 検証する命題。\n- `search_candidates`: 候補Article。各候補の`search_excerpts`に検索抜粋がまとまっています。\n- `candidate_count`: 比較する候補Articleの総数。\n\n`discovery_work_item_ids`と`discovery_hypothesis_ids`は発見元の来歴であり、候補の意味を限定しません。\n各Hypothesisの`actor_scope`と`actor_relation`を主体比較の正本として使います。`actor_scope`がnullの場合だけ元質問と`statement`から補います。\n`headings`と`search_excerpts.content`を合わせて読み、見出しや発見元だけで分類しません。見出しが規律主体や対象範囲を限定し、抜粋が項・定義等だけを示す場合、その限定を要約から落としません。検索抜粋は候補選択用であり、回答根拠ではありません。\n対象の所有者、発行者、所属先等は、規律される行為者とは限りません。質問と候補本文から、主体、行為、対象をそれぞれ確認します。\n主体は名称の文字一致ではなく、元の質問における役割で比較します。「AのBをCしたい」で主語が省略されている場合、Cを行う主体は質問者、AはBに関係する主体です。質問が同一主体だと明示しない限り、「A以外の者によるC」を規律する候補は一致し、「A自身によるC」だけを規律する候補は一致しません。\n\n## 手順\n\n1. 全候補を入力順に読みます。\n2. 各候補について、規定の主体、行為、対象、成立条件、効果を一文にまとめます。\n3. 各未確認Hypothesisについて、候補が規律する行為者とHypothesisの行為者を先に比較し、その結果を`actor_match_reason`へ書きます。\n4. 行為者が一致するものだけについて行為、対象、条件を照合し、全てが積極的に一致して直接検証できるものだけを`matched_hypothesis_ids`へ入れます。\n5. 条件ではなく主な効果を基準に、法的機能を次の4値から一つ選びます。\n6. 要約、主体比較、対応Hypothesis、法的機能が矛盾していないか確認します。\n\n## 法的機能\n\n- `applicability`: 義務や規律が適用される条件。\n- `exception`: 適用除外、免除、例外、特則。例外成立の条件を列挙する規定もこれに含みます。\n- `procedure`: 公告、届出、申請、期限、方法、様式、記載事項。\n- `scope`: 対象となる物・行為・者の定義または列挙。\n\n原則として必要な行為を一定の場合に不要とする効果は`exception`です。\n規律の対象を定義または列挙する効果は`scope`です。\n義務を定める上位規定と、その方法・記載事項を定める詳細規定は、どちらも`procedure`です。\n\n## 出力\n\n- `search_request_ids`: `required_search_review_request_ids`をそのまま返します。\n- `assessments`: 各`search_candidates[].article_id`をキーにし、その候補の`legal_function`、主体・行為・対象・条件・効果をまとめた`summary`、主体を比較した`actor_match_reason`、直接検証できる`matched_hypothesis_ids`を値にします。\n\n候補が特定の主体だけを規律する場合、Hypothesisがその主体を明記していなければ一致扱いにしません。\nHypothesisが行為者と対象に結び付く主体を別の役割としている場合、後者自身の行為だけを規律する候補は一致扱いにしません。\n同じ制度を扱うことや、主体不一致が明示されていないことだけでは一致になりません。\n- `reason`: 全候補を何件評価し、どの法的機能が含まれていたかを一文でまとめます。\n\nこの3項目だけを返します。\n\n{{runtime_input}}\n\n## 出力前の完了確認\n\n1. `assessments`のキーが全`search_candidates[].article_id`と一致し、余分なキーや欠落がないか確認します。\n2. 各キーの値が、そのArticleの評価になっているか確認します。\n3. 各評価を、対応するWorkItem・Hypothesis・検索抜粋に基づいて記述したか確認します。\n4. この処理では候補を選ばず、評価だけを返しているか確認します。\n5. 各`summary`が見出しにある主体・対象範囲を落としていないか確認します。\n6. 各`matched_hypothesis_ids`で、主体、行為、対象、条件が全て積極的に一致しているか確認します。対象の所有者、発行者、所属先等を行為者と誤認していないか確認します。\n7. 主体が不明または異なる候補を、「矛盾しない」という理由だけで一致扱いにしていないか確認します。\n8. Hypothesisの行為者ではなく、対象に結び付く主体自身の行為を規律する候補を一致扱いにしていないか確認します。\n9. `actor_match_reason`で異なる行為者を挙げたHypothesis IDを、`matched_hypothesis_ids`へ入れていないか確認します。\n10. 元質問が示す行為者と対象側の主体の関係を、名称の文字一致だけで判定していないか確認します。",
+    "inputPayload": {
+      "question": "上場会社の株式を、市場を通さずに多数の株主から買い集めたい場合、公開買付けの手続が必要になる条件を根拠条文とともに説明してください。",
+      "work_tree": [
+        {
+          "work_item_id": "wi-1",
+          "parent_work_item_id": null,
+          "question": "上場会社の株式を、市場を通さずに多数の株主から買い集めたい場合、公開買付けの手続が必要になる条件を根拠条文とともに説明してください。",
+          "actor_scope": "質問者は上場会社の株式を買い集める行為者",
+          "actor_relation": "different",
+          "state": "open",
+          "resolution": null,
+          "basis_hypothesis_ids": [],
+          "replaces_work_item_id": null,
+          "hypothesis_ids": [
+            "h-1"
+          ],
+          "evidence_count": 0
+        }
+      ],
+      "hypotheses": [
+        {
+          "hypothesis_id": "h-1",
+          "work_item_id": "wi-1",
+          "statement": "質問者は上場会社の株式を市場を通さずに多数の株主から買い集める行為を行う場合、公開買付けの手続が必要になる条件を満たす必要がある。",
+          "actor_scope": "質問者は上場会社の株式を買い集める行為者であり、株主はその対象である。",
+          "actor_relation": "different",
+          "judgment": "unresolved",
+          "evidence_ids": [],
+          "gaps": [
+            "公開買付けの手続が必要になる具体的な条件の詳細。",
+            "公開買付けに関する法令の具体的な条文。"
+          ]
+        }
+      ],
+      "remaining_fetch_capacity": 3,
+      "required_search_review_request_ids": [
+        "solver-tool-55e57035de664466988cb06b4c184345"
+      ],
+      "candidate_count": 8,
+      "search_candidates": [
+        {
+          "article_id": "law-340CO0000000321-article-12",
+          "document_id": "law-340CO0000000321",
+          "title": "金融商品取引法施行令",
+          "headings": [
+            "第十二条 （公開買付けによらないで買付け等ができる場合）"
+          ],
+          "discovery_work_item_ids": [
+            "wi-1"
+          ],
+          "discovery_hypothesis_ids": [
+            "h-1"
+          ],
+          "search_request_ids": [
+            "solver-tool-55e57035de664466988cb06b4c184345"
+          ],
+          "search_excerpts": [
+            {
+              "evidence_id": "search-nav-law-340CO0000000321-article-12",
+              "content": "（公開買付けによらないで買付け等ができる場合）\n第十二条\n法第二十七条の五第三号（法第二十七条の八第十項において準用する場合を含む。）に規定する政令で定める場合は、次に掲げる場合とする。第十条各号に掲げる者が公開買付者及びその特別関係者（法第二十七条の二第七項に規定する特別関係者をいい、法第二十七条の五第二号の規定による申出を金融庁長官に行つた者を除く。以下この節において同じ。）以外の者の委託を受けて買付け等をする場合第十条各号に掲げる者が金融商品取引所又は認可金融商品取引業協会の定める規則において有価証券の流通の円滑化を図るため認められている買付け等をする場合新株予約権を有する者が当該新株予約権を行使することにより買付け等をする場合第七条第一項第二号から第六号までに掲げる買付け等をする場合第十条各号に掲げる者が、その有する株券等の売買に係るオプションを行使し、又はその付与していた株券等の"
+            }
+          ]
+        },
+        {
+          "article_id": "law-340CO0000000321-article-14_3_7",
+          "document_id": "law-340CO0000000321",
+          "title": "金融商品取引法施行令",
+          "headings": [
+            "第十四条の三の七 （公開買付けによらないで買付け等ができる場合）"
+          ],
+          "discovery_work_item_ids": [
+            "wi-1"
+          ],
+          "discovery_hypothesis_ids": [
+            "h-1"
+          ],
+          "search_request_ids": [
+            "solver-tool-55e57035de664466988cb06b4c184345"
+          ],
+          "search_excerpts": [
+            {
+              "evidence_id": "search-nav-law-340CO0000000321-article-14_3_7",
+              "content": "（公開買付けによらないで買付け等ができる場合）\n第十四条の三の七\n法第二十七条の二十二の二第二項及び第五項並びに法第二十七条の二十二の三第五項において読み替えて準用する法第二十七条の五に規定する政令で定める場合は、次に掲げる場合とする。会社法第百十六条第一項、第百八十二条の四第一項、第四百六十九条第一項、第七百八十五条第一項、第七百九十七条第一項、第八百六条第一項若しくは第八百十六条の六第一項の規定による株式の買取りの請求若しくは投資信託及び投資法人に関する法律第百四十一条第一項、第百四十九条の三第一項、第百四十九条の八第一項若しくは第百四十九条の十三第一項の規定による投資口の買取りの請求又は法令上の義務に基づき株券等に係る買付け等をする場合その株券等が上場されている外国の金融商品取引所が所在する外国において、当該外国の法令の規定に基づき海外公開買付けにより買付け等をする場合第十四条の三の"
+            }
+          ]
+        },
+        {
+          "article_id": "law-323AC0000000025-article-27_22_2",
+          "document_id": "law-323AC0000000025",
+          "title": "金融商品取引法",
+          "headings": [
+            "第二十七条の二十二の二 （発行者による上場株券等の公開買付け） 第1項"
+          ],
+          "discovery_work_item_ids": [
+            "wi-1"
+          ],
+          "discovery_hypothesis_ids": [
+            "h-1"
+          ],
+          "search_request_ids": [
+            "solver-tool-55e57035de664466988cb06b4c184345"
+          ],
+          "search_excerpts": [
+            {
+              "evidence_id": "search-nav-law-323AC0000000025-article-27_22_2-paragraph-1",
+              "content": "上場株券等の当該上場株券等の発行者による取引所金融商品市場外における買付け等（買付けその他の有償の譲受けをいう。以下この条及び次条において同じ。）のうち、次に掲げるものに該当するものについては、公開買付けによらなければならない。ただし、取引所金融商品市場における有価証券の売買等に準ずるものとして政令で定める取引による買付け等については、この限りでない。会社法第百五十六条第一項（同法第百六十五条第三項の規定により読み替えて適用する場合を含む。以下この号において同じ。）の規定又は他の法令の規定で同法第百五十六条第一項の規定に相当するものとして政令で定めるものによる買付け等（同法第百六十条第一項に規定する同法第百五十八条第一項の規定による通知を行う場合を除く。）上場株券等の発行者が外国会社である買付け等のうち、多数の者が当該買付け等に関する事項を知り得る状態に置かれる方法により行われる買付け等と"
+            }
+          ]
+        },
+        {
+          "article_id": "law-323AC0000000025-article-27_2",
+          "document_id": "law-323AC0000000025",
+          "title": "金融商品取引法",
+          "headings": [
+            "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第6項"
+          ],
+          "discovery_work_item_ids": [
+            "wi-1"
+          ],
+          "discovery_hypothesis_ids": [
+            "h-1"
+          ],
+          "search_request_ids": [
+            "solver-tool-55e57035de664466988cb06b4c184345"
+          ],
+          "search_excerpts": [
+            {
+              "evidence_id": "search-nav-law-323AC0000000025-article-27_2-paragraph-6",
+              "content": "６この条において「公開買付け」とは、不特定かつ多数の者に対し、公告により株券等の買付け等の申込み又は売付け等（売付けその他の有償の譲渡をいう。以下この章において同じ。）の申込みの勧誘を行い、取引所金融商品市場外で株券等の買付け等を行うことをいう。"
+            }
+          ]
+        },
+        {
+          "article_id": "law-340CO0000000321-article-14_3_2",
+          "document_id": "law-340CO0000000321",
+          "title": "金融商品取引法施行令",
+          "headings": [
+            "第十四条の三の二 （公開買付けの適用範囲） 第3項"
+          ],
+          "discovery_work_item_ids": [
+            "wi-1"
+          ],
+          "discovery_hypothesis_ids": [
+            "h-1"
+          ],
+          "search_request_ids": [
+            "solver-tool-55e57035de664466988cb06b4c184345"
+          ],
+          "search_excerpts": [
+            {
+              "evidence_id": "search-nav-law-340CO0000000321-article-14_3_2-paragraph-3",
+              "content": "３法第二十七条の二十二の二第一項第二号に規定する多数の者が買付け等（同項に規定する買付け等をいう。以下この節において同じ。）に関する事項を知り得る状態に置かれる方法により行われる買付け等として政令で定めるものは、当該買付け等に関する事項（当該買付け等に係る上場株券等（法第二十四条の六第一項に規定する上場株券等をいう。以下この節において同じ。）の買付け等の申込み又は売付け等の申込みの勧誘を行う旨の文言が含まれるものに限る。）を新聞若しくは雑誌に掲載し、又は文書、放送、映画その他の方法を用いることにより多数の者に知らせて行う買付け等とする。"
+            }
+          ]
+        },
+        {
+          "article_id": "law-419M60000002059-article-63",
+          "document_id": "law-419M60000002059",
+          "title": "有価証券の取引等の規制に関する内閣府令",
+          "headings": [
+            "第六十三条 （公開買付け等に係る規制の適用除外） 第1項第8号"
+          ],
+          "discovery_work_item_ids": [
+            "wi-1"
+          ],
+          "discovery_hypothesis_ids": [
+            "h-1"
+          ],
+          "search_request_ids": [
+            "solver-tool-55e57035de664466988cb06b4c184345"
+          ],
+          "search_excerpts": [
+            {
+              "evidence_id": "search-nav-law-419M60000002059-article-63-paragraph-1-item-8",
+              "content": "法第百六十七条第五項第十四号に規定する公開買付者等の公開買付け等事実を知る前に締結された当該公開買付け等に係る株券等に係る買付け等若しくは売付け等に関する契約の履行又は公開買付者等の公開買付け等事実を知る前に決定された当該公開買付け等に係る株券等に係る買付け等若しくは売付け等の計画の実行として買付け等又は売付け等をする場合のうち内閣府令で定める場合は、次に掲げる場合とする。\n第8号　公開買付け等に係る上場等株券等又は上場株券等の発行者である会社の取引関係者（当該会社の指定する当該会社と取引関係にある者（法人その他の団体にあってはその役員を含み、個人にあってはその事業に関して当該会社と取引関係にある場合に限る。）をいう。以下この号において同じ。）が当該会社の他の取引関係者と共同して当該会社の株券の買付けを金融商品取引業者に委託等をして行う場合であって、当該買付けが一定の計画に従い、個別の投資"
+            }
+          ]
+        },
+        {
+          "article_id": "law-419M60000002059-article-23",
+          "document_id": "law-419M60000002059",
+          "title": "有価証券の取引等の規制に関する内閣府令",
+          "headings": [
+            "第二十三条 （取引の公正の確保のため適当と認められる方法） 第1項第2号"
+          ],
+          "discovery_work_item_ids": [
+            "wi-1"
+          ],
+          "discovery_hypothesis_ids": [
+            "h-1"
+          ],
+          "search_request_ids": [
+            "solver-tool-55e57035de664466988cb06b4c184345"
+          ],
+          "search_excerpts": [
+            {
+              "evidence_id": "search-nav-law-419M60000002059-article-23-paragraph-1-item-2",
+              "content": "上場等株券等の発行者が次に掲げる方法により、会社法第百五十六条第一項（同法第百六十三条及び第百六十五条第三項の規定により読み替えて適用する場合を含む。）の規定、投資信託及び投資法人に関する法律第八十条の五第二項の規定により読み替えて適用する同法第八十条の二第一項の規定又はこれらに相当する外国の法令の規定に基づく上場等株券等の買付け等を行う場合には、第十七条から第二十条までの規定は適用しない。\n第2号　取引所金融商品市場におけるマーケットメイク銘柄に係る上場等株券等の買付け等のうち、次に掲げる要件を満たすものとして、金融商品取引所が適当と認める方法当該金融商品取引所において公表された当該上場等株券等の当該金融商品取引所の規則の定めるところによる当該金融商品取引所の開設する取引所金融商品市場における売買立会の終了すべき時刻における直近の売り気配の最安値と買い気配の最高値を平均して算出した価格（"
+            }
+          ]
+        },
+        {
+          "article_id": "law-323AC0000000025-article-27_13",
+          "document_id": "law-323AC0000000025",
+          "title": "金融商品取引法",
+          "headings": [
+            "第二十七条の十三 （公開買付けに係る応募株券等の数等の公告等及び公開買付報告書等の提出） 第5項"
+          ],
+          "discovery_work_item_ids": [
+            "wi-1"
+          ],
+          "discovery_hypothesis_ids": [
+            "h-1"
+          ],
+          "search_request_ids": [
+            "solver-tool-55e57035de664466988cb06b4c184345"
+          ],
+          "search_excerpts": [
+            {
+              "evidence_id": "search-nav-law-323AC0000000025-article-27_13-paragraph-5",
+              "content": "５公開買付者は、前項第二号に掲げる条件を付した場合において、応募株券等の数の合計が買付予定の株券等の数を超えるときは、応募株主等から内閣府令で定めるあん分比例の方式（以下この節において「あん分比例方式」という。）により株券等の買付け等に係る受渡しその他の決済を行わなければならない。"
+            }
+          ]
+        }
+      ]
+    },
+    "transportSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "search_request_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "solver-tool-55e57035de664466988cb06b4c184345"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 1,
+          "description": "今回評価するlegal_search Request IDの全件。"
+        },
+        "assessments": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "law-340CO0000000321-article-12": {
+              "$ref": "#/$defs/search_candidate_assessment"
+            },
+            "law-340CO0000000321-article-14_3_7": {
+              "$ref": "#/$defs/search_candidate_assessment"
+            },
+            "law-323AC0000000025-article-27_22_2": {
+              "$ref": "#/$defs/search_candidate_assessment"
+            },
+            "law-323AC0000000025-article-27_2": {
+              "$ref": "#/$defs/search_candidate_assessment"
+            },
+            "law-340CO0000000321-article-14_3_2": {
+              "$ref": "#/$defs/search_candidate_assessment"
+            },
+            "law-419M60000002059-article-63": {
+              "$ref": "#/$defs/search_candidate_assessment"
+            },
+            "law-419M60000002059-article-23": {
+              "$ref": "#/$defs/search_candidate_assessment"
+            },
+            "law-323AC0000000025-article-27_13": {
+              "$ref": "#/$defs/search_candidate_assessment"
+            }
+          },
+          "required": [
+            "law-340CO0000000321-article-12",
+            "law-340CO0000000321-article-14_3_7",
+            "law-323AC0000000025-article-27_22_2",
+            "law-323AC0000000025-article-27_2",
+            "law-340CO0000000321-article-14_3_2",
+            "law-419M60000002059-article-63",
+            "law-419M60000002059-article-23",
+            "law-323AC0000000025-article-27_13"
+          ],
+          "description": "提示順を保ち、全検索候補を一度ずつ評価した一覧。"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "候補全体をどの確認事項・法的機能から評価したかの短い説明。"
+        }
+      },
+      "required": [
+        "search_request_ids",
+        "assessments",
+        "reason"
+      ],
+      "$defs": {
+        "search_candidate_assessment": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "legal_function": {
+              "type": "string",
+              "enum": [
+                "applicability",
+                "exception",
+                "procedure",
+                "scope"
+              ],
+              "description": "applicabilityは適用条件、exceptionは例外、procedureは手続、scopeは対象範囲として、この候補が直接検証できる主な機能。"
+            },
+            "summary": {
+              "type": "string",
+              "minLength": 1,
+              "description": "見出しと検索抜粋から読み取れる候補内容の短い自己要約。規律主体、行為、対象、条件、効果を明記する。回答根拠ではない。"
+            },
+            "actor_match_reason": {
+              "type": "string",
+              "minLength": 1,
+              "description": "候補が規律する行為者とHypothesisの行為者を比較した結果。一致するIDを挙げた場合は共通する行為者を、不一致で空にした場合は異なる二つの行為者を明記する。"
+            },
+            "matched_hypothesis_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "h-1"
+                ]
+              },
+              "maxItems": 1,
+              "description": "主体、行為、対象、条件が全て積極的に一致し、この候補が直接検証できる未確認Hypothesis ID。主体が不明または異なる場合は空。"
+            }
+          },
+          "required": [
+            "legal_function",
+            "summary",
+            "actor_match_reason",
+            "matched_hypothesis_ids"
+          ]
+        }
+      }
+    },
+    "normalizedSchema": {
+      "$defs": {
+        "SearchCandidateAssessment": {
+          "additionalProperties": false,
+          "properties": {
+            "article_id": {
+              "description": "今回提示されたOpenSearch候補Article ID。",
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Article Id",
+              "type": "string"
+            },
+            "legal_function": {
+              "description": "applicabilityは適用条件、exceptionは例外、procedureは手続、scopeは対象範囲として、この候補が直接検証できる主な機能。",
+              "enum": [
+                "applicability",
+                "exception",
+                "procedure",
+                "scope"
+              ],
+              "title": "Legal Function",
+              "type": "string"
+            },
+            "summary": {
+              "description": "見出しと検索抜粋から読み取れる候補内容の短い自己要約。規律主体、行為、対象、条件、効果を明記する。回答根拠ではない。",
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Summary",
+              "type": "string"
+            },
+            "actor_match_reason": {
+              "default": "旧記録では未記録",
+              "description": "候補が規律する行為者とHypothesisの行為者を比較した結果。一致するIDを挙げた場合は共通する行為者を、不一致で空にした場合は異なる二つの行為者を明記する。",
+              "maxLength": 1200,
+              "minLength": 1,
+              "title": "Actor Match Reason",
+              "type": "string"
+            },
+            "matched_hypothesis_ids": {
+              "default": [],
+              "description": "主体、行為、対象、条件が全て積極的に一致し、この候補が直接検証できる未確認Hypothesis ID。主体が不明または異なる場合は空。",
+              "items": {
+                "type": "string"
+              },
+              "title": "Matched Hypothesis Ids",
+              "type": "array"
+            }
+          },
+          "required": [
+            "article_id",
+            "legal_function",
+            "summary"
+          ],
+          "title": "SearchCandidateAssessment",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "search_request_ids": {
+          "description": "今回評価するlegal_search Request IDの全件。",
+          "items": {
+            "type": "string"
+          },
+          "title": "Search Request Ids",
+          "type": "array"
+        },
+        "assessments": {
+          "description": "提示順を保ち、全検索候補を一度ずつ評価した一覧。",
+          "items": {
+            "$ref": "#/$defs/SearchCandidateAssessment"
+          },
+          "title": "Assessments",
+          "type": "array"
+        },
+        "reason": {
+          "description": "候補全体をどの確認事項・法的機能から評価したかの短い説明。",
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "search_request_ids",
+        "assessments",
+        "reason"
+      ],
+      "title": "SearchAssessmentDecision",
+      "type": "object"
+    }
+  },
+  "observedTransportOutput": {
+    "payload": {
+      "search_request_ids": [
+        "solver-tool-55e57035de664466988cb06b4c184345"
+      ],
+      "assessments": {
+        "law-340CO0000000321-article-12": {
+          "legal_function": "exception",
+          "summary": "公開買付けによらないで買付け等ができる場合として、特定の者が委託を受けて行う場合や、金融商品取引所の規則に基づく場合などが規定されている。",
+          "actor_match_reason": "質問者は上場会社の株式を買い集める行為者であり、公開買付けを行わない場合の条件を満たす必要がある。",
+          "matched_hypothesis_ids": []
+        },
+        "law-340CO0000000321-article-14_3_7": {
+          "legal_function": "exception",
+          "summary": "公開買付けによらないで買付け等ができる場合として、会社法に基づく株式の買取り請求や、外国の金融商品取引所での買付け等が挙げられる。",
+          "actor_match_reason": "質問者は上場会社の株式を買い集める行為者であり、公開買付けを行わない場合の条件を満たす必要がある。",
+          "matched_hypothesis_ids": []
+        },
+        "law-323AC0000000025-article-27_22_2": {
+          "legal_function": "applicability",
+          "summary": "上場株券等の発行者による取引所金融商品市場外での買付け等は、公開買付けによらなければならない場合があるが、特定の取引については例外が認められる。",
+          "actor_match_reason": "質問者は上場会社の株式を買い集める行為者であり、公開買付けを行う必要がある場合がある。",
+          "matched_hypothesis_ids": []
+        },
+        "law-323AC0000000025-article-27_2": {
+          "legal_function": "scope",
+          "summary": "公開買付けとは、不特定かつ多数の者に対し、公告により株券等の買付け等の申込みを勧誘し、取引所金融商品市場外で行うことを指す。",
+          "actor_match_reason": "質問者は上場会社の株式を買い集める行為者であり、公開買付けの定義に該当する行為を行う必要がある。",
+          "matched_hypothesis_ids": []
+        },
+        "law-340CO0000000321-article-14_3_2": {
+          "legal_function": "applicability",
+          "summary": "多数の者が買付け等に関する事項を知り得る状態に置かれる方法で行われる買付け等は、公開買付けに該当する。",
+          "actor_match_reason": "質問者は上場会社の株式を買い集める行為者であり、公開買付けの条件を満たす必要がある。",
+          "matched_hypothesis_ids": []
+        },
+        "law-419M60000002059-article-63": {
+          "legal_function": "exception",
+          "summary": "公開買付け等に係る規制の適用除外として、特定の条件下での契約の履行や計画の実行が認められる場合がある。",
+          "actor_match_reason": "質問者は上場会社の株式を買い集める行為者であり、公開買付けの規制の適用除外を考慮する必要がある。",
+          "matched_hypothesis_ids": []
+        },
+        "law-419M60000002059-article-23": {
+          "legal_function": "exception",
+          "summary": "上場等株券等の発行者が特定の方法で買付け等を行う場合、公開買付けの規定が適用されないことがある。",
+          "actor_match_reason": "質問者は上場会社の株式を買い集める行為者であり、公開買付けの適用除外を考慮する必要がある。",
+          "matched_hypothesis_ids": []
+        },
+        "law-323AC0000000025-article-27_13": {
+          "legal_function": "procedure",
+          "summary": "公開買付者は、応募株券等の数が買付予定の株券等の数を超える場合、あん分比例方式により株券等の買付け等を行う必要がある。",
+          "actor_match_reason": "質問者は上場会社の株式を買い集める行為者であり、公開買付けの手続きに従う必要がある。",
+          "matched_hypothesis_ids": []
+        }
+      },
+      "reason": "全8件の候補を評価し、exception、applicability、scope、procedureの法的機能が含まれていた。"
+    },
+    "validationError": null,
+    "inputTokens": 6632,
+    "outputTokens": 1053,
+    "providerRetryCount": 0
+  }
+}

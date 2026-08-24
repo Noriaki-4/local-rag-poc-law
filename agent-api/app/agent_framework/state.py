@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 RunStatus = Literal["running", "completed", "failed", "cancelled"]
 WorkItemState = Literal["open", "resolved", "dropped"]
+ActorRelation = Literal["same", "different", "unknown"]
 HypothesisJudgment = Literal["supported", "contradicted", "unresolved"]
 ToolStatus = Literal["succeeded", "failed", "timeout"]
 ReviewVerdict = Literal["accept", "revise"]
@@ -68,7 +69,25 @@ class WorkItem(FrameworkModel):
     question: str = Field(
         min_length=1,
         max_length=1000,
-        description="1つの完了判定で閉じられる1つの確認事項。",
+        description=(
+            "1つの完了判定で閉じられる1つの確認事項。"
+            "質問の行為者、行為、対象を区別し、省略主語は補う。"
+        ),
+    )
+    actor_scope: str | None = Field(
+        default=None,
+        max_length=1200,
+        description=(
+            "この確認事項の行為者と、行為対象に結び付く所有者・発行者・"
+            "所属先等との関係。法的立場が不明なら不明と明記する。"
+        ),
+    )
+    actor_relation: ActorRelation = Field(
+        default="unknown",
+        description=(
+            "行為者と行為対象に結び付く主体の関係。sameは同一主体、"
+            "differentは別主体、unknownは質問から確定できない。"
+        ),
     )
     state: WorkItemState = Field(
         default="open",
@@ -127,7 +146,23 @@ class Hypothesis(FrameworkModel):
             "本文取得前の未確認で誤り得る暫定回答。確認対象となる要件、例外構造"
             "または手続行為の具体的候補を含み、取得本文で独立に支持または否定"
             "できる1つの命題。"
+            "行為者を名詞で明記し、行為対象と区別する。"
             "規定の存在や質問の言い換えだけを述べない。"
+        ),
+    )
+    actor_scope: str | None = Field(
+        default=None,
+        max_length=1200,
+        description=(
+            "この命題で規律対象として想定する行為者と、行為対象に結び付く"
+            "所有者・発行者・所属先等との関係。法的立場が不明なら不明と明記する。"
+        ),
+    )
+    actor_relation: ActorRelation = Field(
+        default="unknown",
+        description=(
+            "行為者と行為対象に結び付く主体の関係。sameは同一主体、"
+            "differentは別主体、unknownは未確定。"
         ),
     )
     judgment: HypothesisJudgment = Field(

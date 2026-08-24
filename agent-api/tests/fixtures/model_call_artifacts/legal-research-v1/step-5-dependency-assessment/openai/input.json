@@ -603,6 +603,8 @@
   ],
   "hypotheses": [
     {
+      "actor_relation": "unknown",
+      "actor_scope": null,
       "evidence_ids": [],
       "gaps": [
         "株主の数の具体的な基準",
@@ -614,6 +616,8 @@
       "work_item_id": "wi-1"
     },
     {
+      "actor_relation": "unknown",
+      "actor_scope": null,
       "evidence_ids": [],
       "gaps": [
         "対象となる株券等の具体的な種類",
@@ -629,6 +633,8 @@
   "required_dependency_kind": "lower_norm",
   "work_items": [
     {
+      "actor_relation": "unknown",
+      "actor_scope": null,
       "basis_hypothesis_ids": [],
       "evidence_count": 0,
       "hypothesis_ids": [
@@ -642,6 +648,8 @@
       "work_item_id": "wi-1"
     },
     {
+      "actor_relation": "unknown",
+      "actor_scope": null,
       "basis_hypothesis_ids": [],
       "evidence_count": 0,
       "hypothesis_ids": [

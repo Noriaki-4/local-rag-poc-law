@@ -577,6 +577,64 @@ class StructuredJSONModelAdapter:
             assessment_result.payload,
             context,
         )
+
+        actor_call = render_search_actor_classification_model_call(
+            context,
+            assessment_payload,
+            profile,
+        )
+        if self._diagnostics is not None:
+            self._diagnostics.record_transport_input(
+                context=context,
+                profile=profile,
+                rendered=actor_call,
+                repair_index=0,
+                transport_stage="search_actor_classification",
+                provider=getattr(self._client, "provider", None),
+            )
+        remaining_timeout = profile.timeout_sec - (monotonic() - started_at)
+        if remaining_timeout <= 1:
+            raise TimeoutError("search actor classification time exhausted")
+        try:
+            actor_result = self._client.generate_structured_json(
+                prompt=actor_call.request,
+                schema=actor_call.output_schema,
+                model=profile.model,
+                max_tokens=profile.max_output_tokens,
+                timeout_sec=max(1, round(remaining_timeout)),
+            )
+        except requests.Timeout as exc:
+            if self._diagnostics is not None:
+                self._diagnostics.record_transport_timeout(
+                    context=context,
+                    repair_index=0,
+                    reason="search actor classification timed out",
+                    transport_stage="search_actor_classification",
+                )
+            raise TimeoutError("search actor classification timed out") from exc
+        actor_error = actor_result.validationError
+        if actor_result.payload is None and actor_error is None:
+            actor_error = "empty"
+        if self._diagnostics is not None:
+            self._diagnostics.record_transport_output(
+                context=context,
+                repair_index=0,
+                payload=actor_result.payload,
+                validation_error=actor_error,
+                input_tokens=actor_result.inputTokens,
+                output_tokens=actor_result.outputTokens,
+                provider_retry_count=actor_result.retryCount,
+                transport_stage="search_actor_classification",
+            )
+        if actor_error is not None or actor_result.payload is None:
+            raise ModelProtocolError(
+                f"search actor classification invalid: {actor_error}"
+            )
+        assessment_payload = _apply_search_actor_classification(
+            assessment_payload,
+            actor_result.payload,
+            context,
+        )
         _validate_search_assessment_payload(assessment_payload, context)
 
         selection_call = render_search_reselection_model_call(
@@ -661,25 +719,24 @@ class StructuredJSONModelAdapter:
                 f"{location or '<root>'}: {detail.get('msg')}"
             ) from exc
 
-        input_tokens = (
-            assessment_result.inputTokens + selection_result.inputTokens
-            if assessment_result.inputTokens is not None
-            and selection_result.inputTokens is not None
-            else None
+        input_tokens = _sum_optional_tokens(
+            assessment_result.inputTokens,
+            actor_result.inputTokens,
+            selection_result.inputTokens,
         )
-        output_tokens = (
-            assessment_result.outputTokens + selection_result.outputTokens
-            if assessment_result.outputTokens is not None
-            and selection_result.outputTokens is not None
-            else None
+        output_tokens = _sum_optional_tokens(
+            assessment_result.outputTokens,
+            actor_result.outputTokens,
+            selection_result.outputTokens,
         )
         return SolverCallResult(
             decision=decision,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             attempt_count=(
-                2
+                3
                 + assessment_result.retryCount
+                + actor_result.retryCount
                 + selection_result.retryCount
             ),
         )
@@ -990,6 +1047,8 @@ def _solver_context_payload(
             ResearchStepWorkItem(
                 work_item_id=item.work_item_id,
                 question=item.question,
+                actor_scope=item.actor_scope,
+                actor_relation=item.actor_relation,
             )
             for item in context.work_tree
         ),
@@ -999,6 +1058,8 @@ def _solver_context_payload(
                 hypothesis_id=item.hypothesis_id,
                 work_item_id=item.work_item_id,
                 statement=item.statement,
+                actor_scope=item.actor_scope,
+                actor_relation=item.actor_relation,
                 gaps=item.gaps,
             )
             for item in context.hypotheses
@@ -1060,9 +1121,28 @@ def _staged_research_transport_schema(
                     "maxLength": 1000,
                     "description": (
                         "独立して法的結論を出し、完了判定できる1つの確認事項。"
-                        "元の質問の行為者、行為、対象、限定条件を省略しない。"
+                        "元の質問の省略主語を補い、行為者、行為、対象、"
+                        "限定条件を区別する。"
                     ),
-                }
+                },
+                "actor_scope": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1200,
+                    "description": (
+                        "確認事項の行為者と、行為対象に結び付く所有者・発行者・"
+                        "所属先等との関係。別主体、同一主体、不明のいずれかが"
+                        "分かる形で具体的に書く。"
+                    ),
+                },
+                "actor_relation": {
+                    "type": "string",
+                    "enum": ["same", "different", "unknown"],
+                    "description": (
+                        "行為者と行為対象に結び付く主体の関係。sameは同一、"
+                        "differentは別、unknownは質問から確定できない。"
+                    ),
+                },
             }
         )
         return _strict_object(
@@ -1098,7 +1178,25 @@ def _staged_research_transport_schema(
                     "description": (
                         "検索前の未確認で誤り得る暫定的な法的命題。"
                         "WorkItemの言い換えではなく、検索対象を選べる具体性を持つ。"
-                        "行為者を省略せず、行為対象と区別する。"
+                        "行為者を名詞で明記し、行為対象と区別する。"
+                    ),
+                },
+                "actor_scope": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1200,
+                    "description": (
+                        "命題の行為者と、行為対象に結び付く所有者・発行者・"
+                        "所属先等との関係。別主体、同一主体、不明のいずれかが"
+                        "分かる形で具体的に書く。"
+                    ),
+                },
+                "actor_relation": {
+                    "type": "string",
+                    "enum": ["same", "different", "unknown"],
+                    "description": (
+                        "WorkItemの主体関係を保つ。sameは同一、differentは別、"
+                        "unknownは未確定。"
                     ),
                 },
                 "gaps": {
@@ -2146,13 +2244,23 @@ def render_search_reselection_model_call(
 ) -> RenderedModelCall:
     if profile.followup_system_prompt is None:
         raise ModelProtocolError("search reselection prompt is unavailable")
+    eligible_assessments = [
+        item
+        for item in assessment_payload.get("assessments") or []
+        if isinstance(item, dict) and item.get("matched_hypothesis_ids")
+    ]
+    eligible_article_ids = tuple(
+        item["article_id"]
+        for item in eligible_assessments
+        if isinstance(item.get("article_id"), str)
+    )
     input_payload = {
         "question": context.question,
         "hypotheses": [
             item.model_dump(mode="json") for item in context.hypotheses
         ],
         "remaining_fetch_capacity": context.remaining_fetch_capacity,
-        "assessments": assessment_payload.get("assessments") or [],
+        "assessments": eligible_assessments,
     }
     instructions = (
         f"{profile.followup_system_prompt}\n\n"
@@ -2164,11 +2272,99 @@ def render_search_reselection_model_call(
         instructions=instructions,
         input_tag="search_review_summary",
         input_payload=input_payload,
-        output_schema=_search_reselection_transport_schema(context),
+        output_schema=_search_reselection_transport_schema(
+            context,
+            candidate_ids=eligible_article_ids,
+        ),
         normalized_schema=SearchReselectionDecision.model_json_schema(),
     )
     _ensure_solver_prompt_capacity(rendered.request, context.max_solver_input_chars)
     return rendered
+
+
+def render_search_actor_classification_model_call(
+    context: SolverContext,
+    assessment_payload: dict[str, Any],
+    profile: ModelCallProfile,
+) -> RenderedModelCall:
+    prompt = profile.actor_classification_system_prompt
+    if prompt is None:
+        raise ModelProtocolError("search actor classification prompt is unavailable")
+    assessments = assessment_payload.get("assessments") or []
+    candidate_by_id = {
+        item.article_id: item for item in context.search_candidates
+    }
+    candidate_ids = tuple(
+        item["article_id"]
+        for item in assessments
+        if isinstance(item, dict) and isinstance(item.get("article_id"), str)
+    )
+    hypothesis_ids = tuple(item.hypothesis_id for item in context.hypotheses)
+    role_item = _strict_object(
+        {
+            "regulated_actor": {"type": "string", "minLength": 1},
+            "regulated_actor_role": {
+                "type": "string",
+                "enum": [
+                    "hypothesis_actor",
+                    "target_associated_actor",
+                    "other",
+                    "unknown",
+                ],
+            },
+            "matched_hypothesis_ids": _bounded_enum_array(hypothesis_ids),
+            "reason": {"type": "string", "minLength": 1},
+        }
+    )
+    schema = _strict_object(
+        {
+            "roles": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    article_id: {"$ref": "#/$defs/actor_role"}
+                    for article_id in candidate_ids
+                },
+                "required": list(candidate_ids),
+            }
+        }
+    )
+    schema["$defs"] = {"actor_role": role_item}
+    input_payload = {
+        "question": context.question,
+        "hypotheses": [
+            {
+                "hypothesis_id": item.hypothesis_id,
+                "actor_scope": item.actor_scope,
+                "actor_relation": item.actor_relation,
+            }
+            for item in context.hypotheses
+        ],
+        "candidates": [
+            {
+                "article_id": item["article_id"],
+                "headings": list(
+                    candidate_by_id[item["article_id"]].headings
+                ),
+                "summary": item["summary"],
+            }
+            for item in assessments
+            if isinstance(item, dict)
+            and item.get("article_id") in candidate_by_id
+        ],
+    }
+    instructions = (
+        f"{prompt}\n\n{RUNTIME_INPUT_MARKER}"
+        f"{_post_context_completion_check(profile.actor_classification_completion_check_prompt)}"
+    )
+    return build_rendered_model_call(
+        stage="search_actor_classification",
+        instructions=instructions,
+        input_tag="search_actor_context",
+        input_payload=input_payload,
+        output_schema=schema,
+        normalized_schema=schema,
+    )
 
 
 def _search_reselection_prompt(
@@ -3035,11 +3231,14 @@ def _search_review_transport_schema(context: SolverContext) -> dict[str, Any]:
                 SearchCandidateAssessment,
                 "summary",
             ),
-            "matched_hypothesis_ids": _described(
-                _bounded_enum_array(hypothesis_ids),
-                SearchCandidateAssessment,
-                "matched_hypothesis_ids",
-            ),
+            "matched_hypothesis_ids": {
+                **_bounded_enum_array(hypothesis_ids),
+                "description": (
+                    "規律主体をいったん除き、候補の行為、対象、条件または効果が"
+                    "statementかgapsを直接検証できるHypothesis ID。主体照合は"
+                    "次の独立処理で行う。"
+                ),
+            },
         }
     )
     schema = _strict_object(
@@ -3088,8 +3287,11 @@ def _search_review_transport_schema(context: SolverContext) -> dict[str, Any]:
 
 def _search_reselection_transport_schema(
     context: SolverContext,
+    *,
+    candidate_ids: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
-    candidate_ids = tuple(item.article_id for item in context.search_candidates)
+    if candidate_ids is None:
+        candidate_ids = tuple(item.article_id for item in context.search_candidates)
     return _strict_object(
         {
             "selections": _described(
@@ -4197,8 +4399,13 @@ def _normalize_staged_research_payload(
             WorkItem(
                 work_item_id=f"wi-{index}",
                 question=question,
+                actor_scope=item.get("actor_scope"),
+                actor_relation=item.get("actor_relation", "unknown"),
             ).model_dump(mode="json")
-            for index, question in enumerate(questions, start=1)
+            for index, (item, question) in enumerate(
+                zip(raw_items, questions, strict=True),
+                start=1,
+            )
         ]
         return {
             "next": "continue",
@@ -4236,6 +4443,8 @@ def _normalize_staged_research_payload(
                 hypothesis_id=f"h-{index}",
                 work_item_id=item["work_item_id"],
                 statement=item["statement"],
+                actor_scope=item.get("actor_scope"),
+                actor_relation=item.get("actor_relation", "unknown"),
                 gaps=tuple(item.get("gaps") or ()),
             ).model_dump(mode="json")
             for index, item in enumerate(raw_hypotheses, start=1)
@@ -4435,6 +4644,54 @@ def _normalize_search_assessment_transport_payload(
     return normalized
 
 
+def _apply_search_actor_classification(
+    assessment_payload: dict[str, Any],
+    actor_payload: dict[str, Any],
+    context: SolverContext,
+) -> dict[str, Any]:
+    """独立した主体照合結果をArticle IDで機械的に合成する。"""
+
+    roles = actor_payload.get("roles")
+    if not isinstance(roles, dict):
+        raise ModelProtocolError("search actor classification requires roles")
+    expected_ids = {item.article_id for item in context.search_candidates}
+    actor_relation_by_hypothesis = {
+        item.hypothesis_id: item.actor_relation for item in context.hypotheses
+    }
+    if set(roles) != expected_ids:
+        raise ModelProtocolError(
+            "search actor classification must cover every candidate"
+        )
+    normalized = deepcopy(assessment_payload)
+    for assessment in normalized.get("assessments") or []:
+        if not isinstance(assessment, dict):
+            continue
+        role = roles.get(assessment.get("article_id"))
+        if not isinstance(role, dict):
+            raise ModelProtocolError("search actor classification item invalid")
+        assessment["regulated_actor_role"] = role.get(
+            "regulated_actor_role",
+            "unknown",
+        )
+        assessment["actor_match_reason"] = role.get("reason") or "主体照合結果"
+        regulated_actor_role = role.get("regulated_actor_role", "unknown")
+        actor_matched_ids = {
+            hypothesis_id
+            for hypothesis_id in role.get("matched_hypothesis_ids") or ()
+            if regulated_actor_role == "hypothesis_actor"
+            or (
+                regulated_actor_role == "target_associated_actor"
+                and actor_relation_by_hypothesis.get(hypothesis_id) == "same"
+            )
+        }
+        assessment["matched_hypothesis_ids"] = [
+            hypothesis_id
+            for hypothesis_id in assessment.get("matched_hypothesis_ids") or ()
+            if hypothesis_id in actor_matched_ids
+        ]
+    return normalized
+
+
 def _validate_search_assessment_payload(
     payload: dict[str, Any],
     context: SolverContext,
@@ -4452,6 +4709,9 @@ def _validate_search_assessment_payload(
     known_hypothesis_ids = {
         item.hypothesis_id for item in context.hypotheses
     }
+    hypothesis_actor_relations = {
+        item.hypothesis_id: item.actor_relation for item in context.hypotheses
+    }
     for assessment in payload.get("assessments") or []:
         matched_ids = assessment.get("matched_hypothesis_ids") or []
         if len(matched_ids) != len(set(matched_ids)):
@@ -4461,6 +4721,18 @@ def _validate_search_assessment_payload(
         if not set(matched_ids).issubset(known_hypothesis_ids):
             raise ModelProtocolError(
                 "search assessment references unknown hypothesis IDs"
+            )
+        candidate_actor_role = assessment.get("regulated_actor_role", "unknown")
+        contradictory_ids = [
+            hypothesis_id
+            for hypothesis_id in matched_ids
+            if candidate_actor_role == "target_associated_actor"
+            and hypothesis_actor_relations.get(hypothesis_id) == "different"
+        ]
+        if contradictory_ids:
+            raise ModelProtocolError(
+                "search assessment actor relations contradict matched hypotheses: "
+                f"{sorted(contradictory_ids)}"
             )
     try:
         SearchAssessmentDecision.model_validate(payload)

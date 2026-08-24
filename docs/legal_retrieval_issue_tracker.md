@@ -64,7 +64,7 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-002` | P0 | 対応中 | 法令検索表現を作り、同一Cycle内でOpenSearchを適切に再検索する | 同一scopeの成功済み検索は契約で検出できる。Profile v181では、その修復呼出しに限り`legal_search`を出力候補から外し、既知候補の本文取得またはGraph探索をLLMへ選ばせる | 本文観察後に、既知候補では不足すると判断した場合だけ検索表現を変える実モデルtraceを確認する |
 | `LR-003` | P0 | 検証待ち | Graph由来Articleを起点に連続1ホップ探索する | 固定selectorでは法律→施行令→府令へ到達でき、Graph由来Articleの再起点化も実装済み | OpenSearchだけでは末端Articleを発見できない条件で、実モデルが2回の1ホップを選ぶE2E試験を通す |
 | `LR-004` | P0 | 対応中 | 複合問題の統合Decisionを成立させ、次の探索または完了へ進む | v157のHaiku実データE2Eは最初のTool観察後にAnthropicが共通strict schemaを大きすぎるとして400で拒否した。GPT-4o miniでは3 Article取得後のCycle Closeまで到達した | `LR-016`で観察統合とCycle Closeを単一責務化し、同じfixtureから両Providerの完成Prompt・schemaを確認する |
-| `LR-005` | P0 | 対応中 | `gpt-4o-mini`で新検索経路を実モデル評価する | Profile v183の実モデル評価で、未解決WorkItemしかない限定Finalizationは法的結論を断定せず引用も返さなかった。別実行ではArticle→Hypothesis対応から4 Hypothesisすべてへ本文Evidenceを保存できた。一方、主体不一致の27条の22の2を主根拠にしたため法的回答は不合格 | `LR-017`の主体不一致を解消後、公開買付け総合問題を再評価する。Graph未使用は別途`LR-003`で確認する |
+| `LR-005` | P0 | 対応中 | `gpt-4o-mini`で新検索経路を実モデル評価する | Profile v183の実モデル評価で、未解決WorkItemしかない限定Finalizationは法的結論を断定せず引用も返さなかった。別実行ではArticle→Hypothesis対応から4 Hypothesisすべてへ本文Evidenceを保存できた。一方、主体不一致の27条の22の2を主根拠にしたため法的回答は不合格 | 完了した`LR-017`を反映して公開買付け総合問題を再評価する。Graphを要求しない問題は`LR-018`、要求後の連続探索は`LR-003`で確認する |
 | `LR-006` | P1 | 要設計 | 意味分類coverage不足時にも逆引き検索爆発と取りこぼしを両立させる | publish済み意味関係ならselectorで絞れるが、未分類範囲でraw `REFERENCES/to_subject`を使うと高fan-inになる | 限定fallbackの発動条件、scope上限、coverage不足の表示、限定回答条件を決める |
 | `LR-007` | P1 | 未着手 | CycleとStepを再開可能な状態として保存する | WorkItem、Hypothesis、Evidence、Graph review履歴はあるが、目標の`CycleRecord / StepRecord / ExplorationState`は未実装 | Tool観察後の中断から同じStepを再開し、別Cycleとして数えないfixtureを通す |
 | `LR-008` | P1 | 対応中 | status、Provider schema、Prompt、遷移検証の修正漏れを防ぐ | 主要Solver項目の`Field.description`から共通用語集を生成した。初回3 Stepは`ResearchStepInput`の実投影項目と入れ子要素から`input_contract`を生成し、基準Providerの完成成果物を本番生成結果と比較する。他Providerとの意味契約一致は重複ファイルを持たずテストする。Toolの用途・入力Schema・戻り値は`ToolDefinition`から`available_tools`へ投影する | 全statusのowner・遷移・永続化versionを説明付き正本へ集約し、未定義statusで契約テストが失敗するようにする |
@@ -76,7 +76,8 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-014` | P1 | 検証待ち | Haikuで承認した中間状態から安価なモデルで後続処理を再生する | checkpointの明示承認をpromotion時に記録し、指定Provider・modelで1回のSolver処理を再生する`replay_agent_checkpoint.py`を実装した。APIを使わない単体テストは合格した | Haikuの正常中間状態を承認済みfixtureへ昇格し、`gpt-4o-mini`、同じcheckpointのHaikuの順に実モデル再生する |
 | `LR-015` | P0 | 検証待ち | 初回Researchを単一責務のStepへ分け、要求をWorkItemとそれ以外へ欠落なく分解する | Profile v156で同一Cycle内の要求分解、仮説立案、検索要求作成を実装した。各完成Promptは単独で読めるH1を持ち、処理順のStep番号を含めない。一時的な段階比較コードを整理した後の全900テストに合格した | 別分野fixtureと公開買付けE2Eを`gpt-4o-mini`で確認し、最終的にHaikuで品質確認する |
 | `LR-016` | P0 | 検証待ち | Tool観察の意味統合とCycle Closeを単一責務のStepへ分ける | v183でArticle→Hypothesis対応をObservationへ渡し、GPT-4o mini実モデルで4 Hypothesisへの本文Evidence保存を確認した。後続Stepの時間切れで成功済みObservationを失わないcheckpoint保存を追加した。対象WorkItemがない依存判定は呼び出さず、OpenAI schemaへ`null` enumを出す経路も除去した | 同じcheckpointをHaikuで再生し、本文の部分確認、意味更新、Cycle判断を確認する |
-| `LR-017` | P0 | 対応中 | 検索候補の規律主体と行為対象を安定して区別する | ある実モデル実行では27条の2を選べたが、次の実行では発行者以外の買付けを調べる質問に対して27条の22の2を選んだ。LLMが主体不一致の候補へも`matched_hypothesis_ids`を付与しており、完全修正ではない。前段Hypothesisで買付主体が省略され、候補照合の入力が弱い場合もある | 公開買付け固有の条文番号やProgramの意味分岐を追加せず、主体を保持したHypothesisと候補評価のfixtureを別分野でも通す。同一checkpointの複数回実モデル再生で、主体不一致候補を一貫して選ばないことを確認する |
+| `LR-017` | P0 | 完了 | 検索候補の規律主体と行為対象を安定して区別する | Profile v197でWorkItem・Hypothesisに主体関係を保持し、内容評価と主体分類を別の単一タスクに分けた。両判断の共通Hypothesisだけを候補選択へ渡す | 公開買付けcheckpointを`gpt-4o-mini`の独立した2実行で再生し、両方で27条の2を選択、27条の22の2をdeferredとした。別分野fixtureを含む回帰テストにも合格 |
+| `LR-018` | P0 | 要設計 | Graph探索が必要な未解決事項があってもSolverがGraph検索を要求しない | 原因はGraph ToolやPromptの欠落ではない。次Cycle開始時に、Programが前Cycleの保留OpenSearch候補を自動でSearch Selectionへ戻し、Integrationより先に実行する。本文取得枠を使い切るとCycle Closeへ進むため、SolverがGraph・既知候補・再検索を比較して次の行動を選ぶ機会がない | Cycle Closeは現Cycleだけを閉じ、次Cycleの最初にIntegrationで再計画する。保留候補は選択肢として提示するが、専用Search Selectionを自動開始しないfixtureと回帰テストを先に用意する。ProgramにはGraph要否を判断させない |
 
 ### 3.1 LR-016 Tool観察とCycle Closeの単一責務化
 
@@ -149,17 +150,22 @@ ID付与、既知ID・件数・参照整合の検証だけを担当する。要�
 検証候補として代用できない。公開買付け総合問題では、27条の2と27条の22の2がどちらも
 `applicability`候補になり得るが、前者は発行者以外の者による買付け、後者は発行者自身による買付けを扱う。
 
-候補評価へ`matched_hypothesis_ids`を追加し、主体、行為、対象、条件が一致するHypothesisだけをLLMに
-指定させた。Programは既知ID、重複、対応有無だけを検証し、条文の意味や正しい主体を判定しない。
-この変更後に27条の2を選んだ実行はあるが、次の実モデル実行ではLLMが27条の22の2にも誤って
-`matched_hypothesis_ids`を付け、誤選択が再発した。したがってstatusは`対応中`とし、単発成功を完了証跡にしない。
+一括した候補評価へ`matched_hypothesis_ids`を追加しただけでは、候補要約で主体を正しく記述しても、
+同じ出力内の主体対応で取り違えることがあった。Profile v197では処理を、候補の内容評価、候補見出しと
+要約を使う主体分類、両結果を使う候補選択の3段階へ分けた。Programは内容面と主体面でLLMが指定した
+Hypothesis IDの共通部分を計算し、既知ID、重複、enum間の矛盾だけを検証する。条文の意味や正しい主体は
+Programで判定しない。
 
 再発時点の状態は
 [主体不一致候補fixture](../agent-api/tests/fixtures/framework/tob_overview_search_actor_mismatch_v1.json)へ保存した。
 公開買付け固有のPromptへ寄せない回帰確認として、土地所有者と開発行為者を区別する
 [別分野fixture](../agent-api/tests/fixtures/framework/cross_domain_actor_object_selection_v1.json)も使用する。
-完了条件は、前段のWorkItem・Hypothesisが質問の行為者を保持し、候補評価が主体不一致候補を空の
-`matched_hypothesis_ids`として扱い、複数回の実モデル再生でも誤候補を選ばないことである。
+前段のWorkItem・Hypothesisは`actor_scope`と`actor_relation`で質問の行為者と対象側主体の関係を保持する。
+[主体関係checkpoint](../agent-api/tests/fixtures/framework/tob_actor_relation_search_v191.json)を
+`gpt-4o-mini-2024-07-18`の新規呼出しで2回再生し、両方で27条の2を選択し、27条の22の2を
+deferredとした。結果要約は
+[v197実モデル回帰fixture](../agent-api/tests/fixtures/framework/tob_actor_relation_selection_regression_v197.json)
+へ固定した。これにより本項の完了条件を満たした。
 
 ## 4. 最優先分析: 複合問題の統合
 
@@ -402,6 +408,28 @@ Programは既知ID、型、件数、参照整合、予算を検証する。Evide
 - 必要Article到達数と回答観点を、過去のHaiku結果と同じ指標で比較する。
 - 失敗時は、モデル判断、Prompt、共通契約、Provider輸送、Tool、データのどこで失敗したかをtraceで分離する。
 - Provider疎通やmockテストだけを法令検索の合格としない。
+
+### LR-018 Graph探索の開始判断
+
+- Profile v185の公開買付け実モデルtraceでは、初回検索の19候補に対し、Cycle 1、2、3で
+  `Search Selection -> 3 Article取得 -> Cycle Close`を繰り返し、候補数は19、16、13、10と推移した。
+  Cycle 4は上限到達によりFinalizationへ進み、IntegrationとGraph要求は一度も実行されなかった。
+- Cycle 2、3のDependency Assessmentは下位規範未確認を`needs_action`として認識していた。
+  したがって、主因はLLMが下位規範の必要性を理解しなかったことではなく、次の行動を選ぶ
+  Integrationがスケジュールされなかったことである。
+- `build_solver_context`が、直近Tool結果がなく取得枠が回復した次Cycle開始時に保留候補を
+  `required_search_review_request_ids`へ自動設定する。LoopはSearch SelectionをIntegrationより
+  優先するため、候補が残る限り再計画が後回しになる。既存のCycle 2回帰テストもこの動作を
+  期待値として固定している。
+- この実行ではOpenSearchが府令第二条の五等も候補として発見していたため、個別Articleの発見に
+  Graphが必須だったとは断定しない。ただし、Graphを使うか、既知候補を取得するか、検索を
+  変更するかをSolverが比較する機会がなかった点は、検索経路に依存しない構造的不具合である。
+- OpenSearchで得たArticle本文から下位規範または関連規定の確認が必要だとSolverが判断した場合、
+  対応するHypothesis、起点Article、関係の種類、方向を指定した`legal_graph_neighbors`を要求できる。
+- Graphが必要な状態のfixtureで、実際にLLMへ渡した完成Prompt、Tool説明、未解決Hypothesis、起点候補を確認できる。
+- Graphを使わない場合も、Solverが未解決事項に対する別の探索方法または不要と判断した理由を示す。
+- ProgramはGraph探索を一律に強制せず、既知ID、selectorの型、件数、重複scopeだけを検証する。
+- Graph要求が作られた後の複数1ホップ探索は`LR-003`の完了条件で検証する。
 
 ### LR-012 Prompt・契約の最終成果物
 

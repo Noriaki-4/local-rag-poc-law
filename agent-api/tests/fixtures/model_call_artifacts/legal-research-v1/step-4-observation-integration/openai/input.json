@@ -604,6 +604,8 @@
   ],
   "hypotheses": [
     {
+      "actor_relation": "unknown",
+      "actor_scope": null,
       "evidence_ids": [],
       "gaps": [
         "株主の数の具体的な基準",
@@ -615,6 +617,8 @@
       "work_item_id": "wi-1"
     },
     {
+      "actor_relation": "unknown",
+      "actor_scope": null,
       "evidence_ids": [],
       "gaps": [
         "対象となる株券等の具体的な種類",
@@ -626,6 +630,8 @@
       "work_item_id": "wi-2"
     },
     {
+      "actor_relation": "unknown",
+      "actor_scope": null,
       "evidence_ids": [],
       "gaps": [
         "具体的な例外の条件",
@@ -637,6 +643,8 @@
       "work_item_id": "wi-3"
     },
     {
+      "actor_relation": "unknown",
+      "actor_scope": null,
       "evidence_ids": [],
       "gaps": [
         "手続の具体的なステップ",
@@ -648,6 +656,8 @@
       "work_item_id": "wi-4"
     },
     {
+      "actor_relation": "unknown",
+      "actor_scope": null,
       "evidence_ids": [],
       "gaps": [
         "具体的な条文の番号",
@@ -665,6 +675,8 @@
   "question": "上場会社の株式を、市場を通さずに多数の株主から買い集めたいのですが、公開買付けの手続が必要になるのはどのような場合ですか。対象となる株券等の範囲、主な例外、必要な手続も含めて、根拠となる条文とともに説明してください。",
   "work_items": [
     {
+      "actor_relation": "unknown",
+      "actor_scope": null,
       "basis_hypothesis_ids": [],
       "evidence_count": 0,
       "hypothesis_ids": [
@@ -678,6 +690,8 @@
       "work_item_id": "wi-1"
     },
     {
+      "actor_relation": "unknown",
+      "actor_scope": null,
       "basis_hypothesis_ids": [],
       "evidence_count": 0,
       "hypothesis_ids": [
@@ -691,6 +705,8 @@
       "work_item_id": "wi-2"
     },
     {
+      "actor_relation": "unknown",
+      "actor_scope": null,
       "basis_hypothesis_ids": [],
       "evidence_count": 0,
       "hypothesis_ids": [
@@ -704,6 +720,8 @@
       "work_item_id": "wi-3"
     },
     {
+      "actor_relation": "unknown",
+      "actor_scope": null,
       "basis_hypothesis_ids": [],
       "evidence_count": 0,
       "hypothesis_ids": [
@@ -717,6 +735,8 @@
       "work_item_id": "wi-4"
     },
     {
+      "actor_relation": "unknown",
+      "actor_scope": null,
       "basis_hypothesis_ids": [],
       "evidence_count": 0,
       "hypothesis_ids": [

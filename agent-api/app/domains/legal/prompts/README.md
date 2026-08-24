@@ -51,7 +51,7 @@ Cycle境界：取得本文の評価 ──→ Cycleの終了判断
 | `cycle_close` | cycle_closeのみ | 直前の本文評価を前提に、完了または次Cycleへの引継ぎだけを決める。 |
 | `finalization` | identity + finalization + common + completion | 実行上限時に追加Toolなしで、確認済み範囲と未確認範囲を分けた回答を作る。 |
 | `reviewer_revision` | identity + reviewer_revision + common + tools + completion | Reviewer Findingを全件処理し、回答修正または追加調査を決める。 |
-| `search_selection` | search_review → search_reselection | OpenSearch候補を全件要約し、その短い一覧から今回本文取得する候補を決める。 |
+| `search_selection` | search_review → search_actor_classification → search_reselection | OpenSearch候補を全件要約し、独立した主体照合を経て、今回本文取得する候補を決める。 |
 | `graph_selection` | graph_reviewのみ | 新しい1ホップGraph候補を差分評価し、本文取得する候補と保留・除外を決める。 |
 
 `search_selection`と`graph_selection`は同じSolverの処理モードです。任意実行のReviewer Agentではありません。
@@ -78,7 +78,8 @@ Cycle境界：取得本文の評価 ──→ Cycleの終了判断
 | `solver_cycle_close.md` | Cycle終了と次Cycleへの構造化引継ぎ。 |
 | `solver_finalization.md` | `finalize_only=true`時の限定最終化。 |
 | `solver_reviewer_revision.md` | Reviewer Findingの受領、反映、反論、再調査。 |
-| `solver_search_review.md` | OpenSearch候補を候補別の検索抜粋から全件要約する。この一時結果では候補を選ばない。 |
+| `solver_search_review.md` | OpenSearch候補を候補別の検索抜粋から全件要約し、主体以外の内容面をHypothesisと照合する。この一時結果では候補を選ばない。 |
+| `solver_search_actor_classification.md` | 前段の候補要約について規律主体だけをHypothesisと照合する。内容面の対応を追加せず、後段で両照合結果の共通部分だけを使う。 |
 | `solver_search_reselection.md` | 検索抜粋を再掲せず、前段の短い自己要約一覧から本文取得候補を選ぶ。 |
 | `solver_graph_review.md` | Graph差分候補の`select / defer / reject`と本文取得順。 |
 | `solver_*_check.md` | 対応する処理の入力後に置く、短い出力前完了確認。処理本体の手順や新しい出力項目は定義しない。 |
