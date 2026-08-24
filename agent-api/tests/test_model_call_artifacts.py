@@ -5,11 +5,18 @@ from pathlib import Path
 
 import pytest
 
-from app.adapters.models.structured_json import render_solver_model_call
+from app.adapters.models.structured_json import (
+    render_cycle_close_model_call,
+    render_observation_integration_model_call,
+    render_solver_model_call,
+)
 from app.adapters.tools.legal_search import LegalSearchTool
 from app.agent_framework.context import build_solver_context
 from app.agent_framework.context import SolverContext
-from app.agent_framework.contracts import SolverDecision
+from app.agent_framework.contracts import (
+    ObservationIntegrationDecision,
+    SolverDecision,
+)
 from app.agent_framework.model_call_artifacts import (
     model_call_artifact_contents,
     write_model_call_artifacts,
@@ -170,7 +177,7 @@ def test_provider_transport_is_explicit_in_artifacts(tmp_path) -> None:
     assert manifest["requestHash"] == openai.request_hash
 
 
-def test_cycle_close_uses_small_provider_common_schema_without_runtime_id_enums() -> None:
+def test_observation_integration_uses_small_provider_common_schema() -> None:
     fixture_path = (
         Path(__file__).parent
         / "fixtures/framework/tob_overview_cycle1_close_v1.json"
@@ -198,10 +205,12 @@ def test_cycle_close_uses_small_provider_common_schema_without_runtime_id_enums(
     assert "dependency_article_bindings" not in schema["properties"]
     assert "fetch_articles" not in schema["properties"]
     dependency = schema["properties"]["dependency_decisions"]
-    assert "enum" not in dependency["items"]["properties"]["work_item_id"]
+    work_item_id = dependency["items"]["properties"]["work_item_id"]
+    assert work_item_id["type"] == "string"
+    assert "enum" not in work_item_id
     serialized = json.dumps(schema, ensure_ascii=False)
     assert context.fetchable_article_ids[0] not in serialized
-    assert len(serialized) < 20_000
+    assert len(serialized) < 8_000
     anthropic_schema = _to_anthropic_schema(schema)
 
     def count_any_of(value) -> int:
@@ -214,6 +223,56 @@ def test_cycle_close_uses_small_provider_common_schema_without_runtime_id_enums(
         return 0
 
     assert count_any_of(anthropic_schema) <= 16
+
+
+def test_cycle_boundary_artifacts_are_current() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures/framework/"
+        "tob_overview_cycle1_three_articles_before_cycle_close_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    context = SolverContext.model_validate(fixture["solverContext"])
+    agent_profile = legal_agent_profile()
+    profile = agent_profile.solver_cycle_close
+    assert profile is not None
+    profile = profile.model_copy(update={"model": fixture["source"]["model"]})
+    observed = fixture["observedSolverDecision"]
+    update = observed["update"]
+    observation = ObservationIntegrationDecision(
+        decision_reason=observed["decision_reason"],
+        update_work_items=update["update_work_items"],
+        update_hypotheses=update["update_hypotheses"],
+        dependency_decisions=observed["dependency_decisions"],
+    )
+    rendered_calls = {
+        "step-4-observation-integration": (
+            render_observation_integration_model_call(context, profile)
+        ),
+        "step-5-cycle-close": render_cycle_close_model_call(
+            context,
+            observation,
+            profile,
+        ),
+    }
+
+    for artifact_stage, rendered in rendered_calls.items():
+        expected = model_call_artifact_contents(
+            rendered,
+            provider="openai",
+            profile_name=agent_profile.name,
+            profile_version=agent_profile.version,
+            model=profile.model,
+        )
+        artifact_dir = (
+            Path(__file__).parent
+            / "fixtures/model_call_artifacts/legal-research-v1"
+            / artifact_stage
+            / "openai"
+        )
+        assert {path.name for path in artifact_dir.iterdir()} == set(expected)
+        for name, content in expected.items():
+            assert (artifact_dir / name).read_text(encoding="utf-8") == content
 
 
 _INITIAL_RESEARCH_ARTIFACT_CASES = [

@@ -25,7 +25,7 @@ def legal_agent_profile() -> AgentProfile:
     timeout_sec = settings.agent_framework_model_timeout_sec
     return AgentProfile(
         name="legal-default",
-        version="157",
+        version="158",
         provider=settings.llm_provider,
         solver_research=_model_profile(
             model=settings.agent_framework_research_model,
@@ -79,17 +79,20 @@ def legal_agent_profile() -> AgentProfile:
             ),
             completion_check_prompt=_read_prompt("solver_integration_check.md"),
         ),
-        solver_cycle_close=_model_profile(
+        solver_cycle_close=ModelCallProfile(
             model=integration_model,
-            max_tokens=integration_max_tokens,
+            max_output_tokens=integration_max_tokens,
             timeout_sec=timeout_sec,
-            prompts=(
-                solver_identity_prompt,
-                _read_prompt("solver_cycle_close.md"),
-                common_solver_prompt,
-                completion_prompt,
+            system_prompt=_read_prompt("solver_observation_integration.md"),
+            followup_system_prompt=_read_prompt("solver_cycle_close.md"),
+            completion_check_prompt=_read_prompt(
+                "solver_observation_integration_check.md"
             ),
-            completion_check_prompt=_read_prompt("solver_cycle_close_check.md"),
+            followup_completion_check_prompt=_read_prompt(
+                "solver_cycle_close_check.md"
+            ),
+            context_projection="cycle_close",
+            available_tool_names=(),
         ),
         solver_finalization=_model_profile(
             model=integration_model,
@@ -224,6 +227,7 @@ def _model_profile(
         "research_decomposition",
         "research_hypothesis",
         "research_search",
+        "cycle_close",
     ] = "full",
     available_tool_names: tuple[str, ...] | None = None,
 ) -> ModelCallProfile:

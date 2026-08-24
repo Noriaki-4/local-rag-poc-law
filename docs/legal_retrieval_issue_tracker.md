@@ -63,7 +63,7 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-001` | P0 | 対応中 | 質問から必要な検索仮説を漏れなく作る | v150〜v152で規定存在や質問の言い換えを再現した。v153の労働法fixtureではHaikuが要件・上限構造・手続行為を含む仮説を1回で生成した | 収録済みの別分野でもHypothesisと`gaps`の意味形を実モデル確認する |
 | `LR-002` | P0 | 検証待ち | 法令検索表現を作り、同一Cycle内でOpenSearchを適切に再検索する | 「必要な手続」を「公告・届出・通知・提出・期間・様式」等へ言い換えるPromptと複数stepは実装済み | 初回検索、本文観察後の検索語変更、同一scopeの重複防止をtraceで確認する |
 | `LR-003` | P0 | 検証待ち | Graph由来Articleを起点に連続1ホップ探索する | 固定selectorでは法律→施行令→府令へ到達でき、Graph由来Articleの再起点化も実装済み | OpenSearchだけでは末端Articleを発見できない条件で、実モデルが2回の1ホップを選ぶE2E試験を通す |
-| `LR-004` | P0 | 対応中 | 複合問題の統合Decisionを成立させ、次の探索または完了へ進む | v153のHaiku実データE2EはCycle 2まで進んだが、AnthropicがIntegrationのstrict schemaを大きすぎるとして400で拒否した | `LR-013`の共通小型契約を適用し、収録済み問題で再実行する |
+| `LR-004` | P0 | 対応中 | 複合問題の統合Decisionを成立させ、次の探索または完了へ進む | v157のHaiku実データE2Eは最初のTool観察後にAnthropicが共通strict schemaを大きすぎるとして400で拒否した。GPT-4o miniでは3 Article取得後のCycle Closeまで到達した | `LR-016`で観察統合とCycle Closeを単一責務化し、同じfixtureから両Providerの完成Prompt・schemaを確認する |
 | `LR-005` | P0 | 未着手 | `gpt-4o-mini`で新検索経路を実モデル評価する | Provider接続、Structured Outputs、model切替は実装済み。法令E2Eは未実施 | Reviewer無効で公開買付け3問を実行し、Hypothesis、Tool、Evidence、Cycle、時間を記録する |
 | `LR-006` | P1 | 要設計 | 意味分類coverage不足時にも逆引き検索爆発と取りこぼしを両立させる | publish済み意味関係ならselectorで絞れるが、未分類範囲でraw `REFERENCES/to_subject`を使うと高fan-inになる | 限定fallbackの発動条件、scope上限、coverage不足の表示、限定回答条件を決める |
 | `LR-007` | P1 | 未着手 | CycleとStepを再開可能な状態として保存する | WorkItem、Hypothesis、Evidence、Graph review履歴はあるが、目標の`CycleRecord / StepRecord / ExplorationState`は未実装 | Tool観察後の中断から同じStepを再開し、別Cycleとして数えないfixtureを通す |
@@ -75,8 +75,29 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-013` | P0 | 検証待ち | Provider共通の小さいSolver輸送契約へ統一する | v154で全Providerを同じ処理段階別schemaへ統一し、Anthropic専用sidecarを新規経路から外した。実行時IDはenumへ複製せず共通validatorで検証する。代表Cycle Close schemaは14,494文字から7,014文字へ減少し、全895テストに合格した | 同じcheckpointをHaikuで再生し、Integrationがgrammar complexityの400エラーにならないことを確認する |
 | `LR-014` | P1 | 検証待ち | Haikuで承認した中間状態から安価なモデルで後続処理を再生する | checkpointの明示承認をpromotion時に記録し、指定Provider・modelで1回のSolver処理を再生する`replay_agent_checkpoint.py`を実装した。APIを使わない単体テストは合格した | Haikuの正常中間状態を承認済みfixtureへ昇格し、`gpt-4o-mini`、同じcheckpointのHaikuの順に実モデル再生する |
 | `LR-015` | P0 | 検証待ち | 初回Researchを単一責務のStepへ分け、要求をWorkItemとそれ以外へ欠落なく分解する | Profile v156で同一Cycle内の要求分解、仮説立案、検索要求作成を実装した。各完成Promptは単独で読めるH1を持ち、処理順のStep番号を含めない。一時的な段階比較コードを整理した後の全900テストに合格した | 別分野fixtureと公開買付けE2Eを`gpt-4o-mini`で確認し、最終的にHaikuで品質確認する |
+| `LR-016` | P0 | 検証待ち | Tool観察の意味統合とCycle Closeを単一責務のStepへ分ける | v158でObservation IntegrationとCycle Closeを独立したPrompt・入力・schemaへ分離した。検索候補、本文取得候補、Tool定義を両入力から除外し、実行時IDの既知性は共通validatorで検証する。基準成果物と全911テストに合格した | 同じfixtureをGPT-4o mini、Haikuの順で実モデル再生し、意味更新、Cycle判断、schema受理を確認する |
 
-### 3.1 LR-015 初回Researchの単一責務化で得た知見
+### 3.1 LR-016 Tool観察とCycle Closeの単一責務化
+
+新しいArticle本文を取得した後は、取得枠を使い切っていても、まず同じSolverのObservation Integration
+で本文を評価し、WorkItem・Hypothesis・下位規範確認の意味状態を更新する。Adapterはその差分を機械的に
+更新後のread modelへ投影し、続けてCycle Closeを呼ぶ。Cycle Closeは本文評価やTool選択を兼務せず、
+通常完了または次Cycleへの引継ぎだけを判断する。2つの結果は1件の`SolverDecision`へ正規化し、共通validatorを
+通過した後にCaseStoreへ一度だけ適用する。
+
+Cycle CloseのProvider入力から、`fetchable_article_ids`、検索・Graph候補、Tool定義、汎用`update`、
+本文評価用の分岐を除外する。入力には本文評価を反映済みのWorkItem・Hypothesis、引継ぎ候補となる
+既知Evidence IDを投影し、出力は通常完了または次Cycle開始の小さいdiscriminated contractにする。Programは既知ID、重複、
+件数、分岐の排他性だけを検証し、Evidenceの採否、完了可否、次Cycleの焦点はSolverが判断する。
+
+NoSQLはこの課題の解決条件にしない。永続化方式はCaseStore Adapterの責務であり、Providerがコンパイルする
+出力schemaの大きさとは独立している。まず専用View、専用Decision、Projectorによる入力投影で解決する。
+
+各処理の代表fixtureから、少なくとも`instructions.md`、`input.json`、`output_schema.json`、
+`normalized_schema.json`、`request.txt`を生成する。実行時とレビュー用成果物は同じ生成経路を使い、
+Cycle Closeの完成Promptに本文取得候補やTool契約が混入していないことを回帰テストする。
+
+### 3.2 LR-015 初回Researchの単一責務化で得た知見
 
 2026-08-24に、公開買付け総合質問と`gpt-4o-mini`を使い、初回ResearchのPrompt、入力、
 Provider schemaを段階的に変更した。各呼出しは新規API要求であり、過去応答の会話履歴を引き継いでいない。

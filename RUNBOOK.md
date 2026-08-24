@@ -1161,6 +1161,18 @@ agent-api/.venv/bin/python scripts/export_agent_model_call_artifacts.py \
   --stage search_planning \
   --output eval-results/model-call-review/step-3-search-planning/openai \
   --check
+
+agent-api/.venv/bin/python scripts/export_agent_model_call_artifacts.py \
+  --fixture agent-api/tests/fixtures/framework/tob_overview_cycle1_three_articles_before_cycle_close_v1.json \
+  --provider openai \
+  --stage observation_integration \
+  --output eval-results/model-call-review/step-4-observation-integration/openai
+
+agent-api/.venv/bin/python scripts/export_agent_model_call_artifacts.py \
+  --fixture agent-api/tests/fixtures/framework/tob_overview_cycle1_three_articles_before_cycle_close_v1.json \
+  --provider openai \
+  --stage cycle_close \
+  --output eval-results/model-call-review/step-5-cycle-close/openai
 ```
 
 初回Researchの固定成果物は`step-1-question-decomposition`、
@@ -1168,6 +1180,11 @@ agent-api/.venv/bin/python scripts/export_agent_model_call_artifacts.py \
 各段階の`instructions.md`、`input.json`、`output_schema.json`、`request.txt`を一組として確認する。
 Step 3の`input.json.available_tools`には、本番の`ToolDefinition`から取得した正規名、用途、入力Schema、
 戻り値説明が含まれる。fixture内に古いTool定義が残っていても、成果物生成時は本番定義を正本とする。
+
+Cycle境界の固定成果物は`step-4-observation-integration`と`step-5-cycle-close`に分ける。
+前者は取得本文を既存状態へ反映する判断、後者はその反映結果を前提に完了または次Cycleへの引継ぎだけを
+判断する。両方の`input.json`と`output_schema.json`に、本文取得候補、検索候補、Tool定義が混入していないことを
+確認する。実行時IDの既知性はProvider schemaのenumではなく、共通validatorが検証する。
 
 通常の整合レビューは`instructions.md`と`output_schema.json`を対にして行う。Provider輸送から
 共通契約への変換を疑う場合だけ`normalized_schema.json`、実際の直列化を疑う場合だけ`request.txt`を追加確認する。

@@ -187,6 +187,66 @@ class CaseUpdate(FrameworkModel):
     )
 
 
+class ObservationIntegrationDecision(FrameworkModel):
+    decision_reason: str = Field(
+        min_length=1,
+        max_length=1200,
+        description="提示された取得本文をどの確認事項へ反映したかの短い説明。",
+    )
+    update_work_items: tuple[WorkItemUpdate, ...] = Field(
+        default=(),
+        description="取得本文の評価により状態を変更する既存WorkItem。",
+    )
+    update_hypotheses: tuple[HypothesisUpdate, ...] = Field(
+        default=(),
+        description="取得本文の評価により判定または未確認事項を変更する既存Hypothesis。",
+    )
+    dependency_decisions: tuple[DependencyDecision, ...] = Field(
+        default=(),
+        description="取得本文から判断した、対象WorkItemごとの下位規範確認状態。",
+    )
+
+
+class CycleCloseDecision(FrameworkModel):
+    outcome: Literal["start_next_cycle", "finalize"] = Field(
+        description="未確認事項を次Cycleへ送るか、既知根拠で回答を完了するか。",
+    )
+    decision_reason: str = Field(
+        min_length=1,
+        max_length=1200,
+        description="未確認事項、完了条件、残りCycleに結び付けた境界判断の短い説明。",
+    )
+    next_focus_work_item_ids: tuple[str, ...] = Field(
+        default=(),
+        description="次Cycleで優先する、統合後もopenの既知WorkItem ID。",
+    )
+    retain_evidence_ids: tuple[str, ...] = Field(
+        default=(),
+        description="次Cycleにも本文提示が必要な、提示済みの取得本文Evidence ID。",
+    )
+    deferred_frontier_resolutions: tuple[DeferredFrontierResolution, ...] = Field(
+        default=(),
+        description="保留中Graph候補を次Cycleへ引き継ぐか終了するかの判断。",
+    )
+    unreviewed_graph_resolution: UnreviewedGraphResolution | None = Field(
+        default=None,
+        description="未評価Graph候補が残る場合のCycle境界での扱い。",
+    )
+    answer: FinalAnswer | None = Field(
+        default=None,
+        description="outcome=finalizeの場合だけ返す根拠付き回答。",
+    )
+
+    @model_validator(mode="after")
+    def validate_outcome_shape(self) -> CycleCloseDecision:
+        if self.outcome == "start_next_cycle":
+            if self.answer is not None:
+                raise ValueError("next cycle decision cannot contain an answer")
+        elif self.answer is None:
+            raise ValueError("finalize cycle decision requires an answer")
+        return self
+
+
 class SolverDecision(FrameworkModel):
     next: Literal["continue", "finalize"] = Field(
         description=(

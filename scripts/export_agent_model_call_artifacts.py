@@ -13,6 +13,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "agent-api"))
 
 from app.adapters.models.structured_json import (  # noqa: E402
+    render_cycle_close_model_call,
+    render_observation_integration_model_call,
     render_reviewer_model_call,
     render_search_assessment_model_call,
     render_search_reselection_model_call,
@@ -24,6 +26,9 @@ from app.adapters.tools.legal_search import (  # noqa: E402
     LegalSearchTool,
 )
 from app.agent_framework.context import SolverContext  # noqa: E402
+from app.agent_framework.contracts import (  # noqa: E402
+    ObservationIntegrationDecision,
+)
 from app.agent_framework.model_call_artifacts import (  # noqa: E402
     model_call_artifact_contents,
     write_model_call_artifacts,
@@ -37,6 +42,7 @@ _SOLVER_STAGES = {
     "hypothesis_generation": "solver_hypothesis_generation",
     "search_planning": "solver_search_planning",
     "integration": "solver_integration",
+    "observation_integration": "solver_cycle_close",
     "cycle_close": "solver_cycle_close",
     "finalization": "solver_finalization",
     "reviewer_revision": "solver_reviewer_revision",
@@ -163,6 +169,32 @@ def _render(
         rendered = render_search_reselection_model_call(
             context,
             assessment,
+            profile,
+        )
+    elif stage == "observation_integration":
+        rendered = render_observation_integration_model_call(context, profile)
+    elif stage == "cycle_close":
+        observation_value = fixture.get("observationIntegration")
+        if not isinstance(observation_value, dict):
+            observed_decision = fixture.get("observedSolverDecision")
+            if not isinstance(observed_decision, dict):
+                raise ValueError(
+                    "cycle_close fixture requires observationIntegration or "
+                    "observedSolverDecision"
+                )
+            update = observed_decision.get("update") or {}
+            observation_value = {
+                "decision_reason": observed_decision.get("decision_reason")
+                or "保存済みの本文評価",
+                "update_work_items": update.get("update_work_items") or [],
+                "update_hypotheses": update.get("update_hypotheses") or [],
+                "dependency_decisions": (
+                    observed_decision.get("dependency_decisions") or []
+                ),
+            }
+        rendered = render_cycle_close_model_call(
+            context,
+            ObservationIntegrationDecision.model_validate(observation_value),
             profile,
         )
     else:

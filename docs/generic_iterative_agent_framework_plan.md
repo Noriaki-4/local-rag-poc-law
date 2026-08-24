@@ -313,7 +313,8 @@ Reviewer無効時のSolver呼び出しは次の範囲になる。
 プログラムは各LLM・Tool実行前に、現Cycleを評価して閉じる時間、残りCycleの最小実行時間、
 最終回答時間を別々予約する。残り時間が現actionの実行予算と予約の合計を下回る場合、
 新しいGraph ReviewやToolを開始せず、`cycle_close_required=true`をSolverへ渡す。
-Solverは手元の結果を評価し、`finalize`または次Cycleへの結果・未解決事項・frontierの引継ぎを返す。
+Solverはまず専用のObservation Integrationで取得本文をWorkItem・Hypothesis・下位規範確認へ反映する。
+続く専用のCycle Closeで、`finalize`または次Cycleへの未解決事項・frontierの引継ぎだけを返す。
 次Cycleを開始する場合は、その後の`start_cycle`呼出しでgoal・strategyを決める。
 予算によって短縮された中間LLM呼出しがtimeoutした場合は、実際のprovider障害と区別して
 `cycle_step_timeout`を保存し、予約時間でCycle終了判断へ進む。
@@ -1616,7 +1617,8 @@ solver:
     system_prompt: domains/legal/prompts/solver_integration.md
   cycle_close:
     model: claude-haiku-4-5-20251001
-    system_prompt: domains/legal/prompts/solver_cycle_close.md
+    observation_prompt: domains/legal/prompts/solver_observation_integration.md
+    transition_prompt: domains/legal/prompts/solver_cycle_close.md
   finalization:
     model: claude-haiku-4-5-20251001
     system_prompt: domains/legal/prompts/solver_finalization.md
@@ -1700,9 +1702,10 @@ Luna Worker / Reviewerの出力はaudit履歴に残すが、Lunaの精度測定�
 ただし、Luna出力を候補hash・snapshot・Pydantic契約で検証して
 `ClassificationRun`へ取り込むimportが完成するまでは、評価JSONLをpublish済みGraphとして扱わない。
 
-`solver_common.md`は全Solver呼出しへ合成するが、判断主体、Evidence、ID、Cycleの不変条件だけを持つ。
+`solver_common.md`は汎用Integration等の複数責務を扱うSolver呼出しへ合成するが、判断主体、Evidence、ID、
+Cycleの不変条件だけを持つ。初回3 StepとCycle境界の2 Stepは、それぞれ専用の入力・Prompt・schemaを使う。
 Toolを使えるモードだけへ`solver_tools.md`、完了判断を行うモードへ`solver_completion.md`を合成する。
-実行手順は`research / integration / cycle_close / finalization / reviewer_revision / graph_review`の
+実行手順は`research / integration / observation_integration / cycle_close / finalization / reviewer_revision / graph_review`の
 用途別Promptへ分ける。Programは`reviewer_findings`の有無、`finalize_only`、`cycle_close_required`、
 未評価Graph候補の有無という構造的事実だけで用途を選び、法的意味や次のToolを決めない。
 
@@ -1847,9 +1850,10 @@ research・integrationの両方へ必ず合成する。次の契約語彙には�
   主要部分、中心仮説、検索起点または対象階層の前提を変える必要がある場合、またはCycle取得枠が尽きても
   必要と判断した未取得Evidenceが残る場合にstart_next_cycleを選ぶ。
 - cycle_budget_reached=true、cycle_step_limit_reached=true、またはcycle_close_required=trueなら、
-  現Cycleに新しいToolRequestを追加しない。直前までのToolResultを評価し、WorkItem・Hypothesisを更新する。
-  完了できるならfinalize、未解決で残りCycle予算があるなら、現Cycleの結果、次Cycleへ渡す命題、
-  再採用候補を明示してstart_next_cycleを選ぶ。次のgoal・strategyは次のstart_cycleで決める。
+  現Cycleに新しいToolRequestを追加しない。Observation Integrationで直前までのToolResultを評価して
+  WorkItem・Hypothesisを更新し、その差分を適用した状態だけをCycle Closeで評価する。完了できるなら
+  finalize、未解決で残りCycle予算があるなら、次Cycleへ渡す命題と再採用候補を明示して
+  start_next_cycleを選ぶ。次のgoal・strategyは次のstart_cycleで決める。
 - cycle_step_timeoutは中間呼出しがCycle予算で時間切れになった実行事実であり、仮説の否定、
   根拠の不存在、provider全体の障害を意味しない。予約済みのCycle終了判断で手元の結果を整理する。
 - finalize_only=falseなら必要な追加調査をcontinue_cycleでき、方針変更が必要ならstart_next_cycleを選べる。
@@ -1960,7 +1964,8 @@ Graph Review差分処理やCycle境界処理を混入させず、IntegrationとG
 | `solver_hypothesis_generation.md` | 初回Step 2。既知WorkItemごとに、検索対象を選べる未確認の法的命題を作る。 |
 | `solver_search_planning.md` | 初回Step 3。既知Hypothesisに対する今回の`legal_search`要求を作る。 |
 | `solver_integration.md` | 新しいToolResultを評価して状態を逐次更新し、未確認事項に対する次の行動を選ぶ。Graphの関係種別を説明できなければ全種別を要求せず、OpenSearchで根拠または起点を発見する。 |
-| `solver_cycle_close.md` | 現Cycleの状態更新、active Frontier全件の処理、`finalize / start_next_cycle`だけを扱う。次Cycleの詳細なTool計画は作らない。 |
+| `solver_observation_integration.md` | Cycle境界で、提示された取得本文を既存WorkItem・Hypothesis・下位規範確認へ反映する。Tool選択、Cycle移行、回答は扱わない。 |
+| `solver_cycle_close.md` | 直前の本文評価を前提に、active Frontierの引継ぎと`finalize / start_next_cycle`だけを扱う。本文再評価や次Cycleの詳細なTool計画は行わない。 |
 | `solver_finalization.md` | `finalize_only=true`で追加Toolを要求せず、確認済み範囲と未確認範囲を分けた回答を作る。 |
 | `solver_reviewer_revision.md` | 全Findingを本文と照合し、`addressed / disputed`を全件返す。回答修正か追加調査かはSolverが判断する。 |
 | `solver_search_review.md` | 候補別にまとめた検索抜粋を全件読み、条件・効果と主な法的機能を自分の言葉で短く評価する。この段階では候補を選ばず、一時評価をCaseStateへ保存しない。 |
@@ -1968,7 +1973,7 @@ Graph Review差分処理やCycle境界処理を混入させず、IntegrationとG
 | `solver_graph_review.md` | `graph_review_batch`と`graph_review_ledger`を読む。`review_trigger`を解釈し、過去の詳細が再提示されないことを候補の不存在と解釈しない。 |
 | `solver_graph_review.md` | 各batchの全候補をWorkItem・Hypothesis別に評価し、最大3件を`select`、関連する残りを`defer`、無関係と判断したものだけを`reject`する。 |
 | `solver_graph_review.md` | `remaining_fetch_capacity=0`なら新たにselectせず、関連候補をdeferしてCycle終了判断へ戻す。Graph Reviewから直接次Cycleの法的方針を決めない。 |
-| `solver_cycle_close.md` | Cycle上限では直前結果を更新し、activeな`relevant_deferred`全件を`fetch_next_cycle / carry_forward / no_longer_needed / unresolved_at_limit`のいずれかへ明示する。 |
+| `solver_cycle_close.md` | Cycle境界では、activeな`relevant_deferred`全件を`fetch_next_cycle / carry_forward / no_longer_needed / unresolved_at_limit`のいずれかへ明示する。取得本文の状態更新は直前のObservation Integrationを正本とする。 |
 | リポジトリ固有`legal-relation-adjudicator` skill | Workerは1候補の5 predicateを同じ回答で比較し、各predicate固有の二必要条件とfinding、成立predicateの方向・参照箇所・両端spanを返す。ReviewerはWorker回答を見て全5 predicateを検査し、具体的な誤りだけを差し戻す。Programは意味を補完せず、条件整合・既知ID・件数だけを検証する。 |
 | Provider schema | Review判断対象は現在のbatch、本文取得へ選べるIDはbatchの候補とledgerの`relevant_deferred`、再試行時の`selected + failed/timeout`に制限する。選択上限は`min(3, remaining_fetch_capacity)`とする。`rejected`は新Link差分でbatchへ再提示された場合を除き同じHypothesisで再選択させず、別Hypothesisへの`frontier_re_adoptions`はledgerの既知Nodeと既知のopen WorkItem・Hypothesisだけを許可する。候補の関連性や優先度はschemaまたはProgramで補正しない。 |
 | Provider schema | Deferred解消はledgerの既知IDだけを許可する。Programは全件性と次動作との矛盾だけを拒否し、関連性・必要性を補正しない。 |
@@ -2111,6 +2116,7 @@ agent-api/app/
 │           ├── solver_hypothesis_generation.md
 │           ├── solver_search_planning.md
 │           ├── solver_integration.md
+│           ├── solver_observation_integration.md
 │           ├── solver_cycle_close.md
 │           ├── solver_finalization.md
 │           ├── solver_reviewer_revision.md

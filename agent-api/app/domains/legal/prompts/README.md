@@ -27,9 +27,11 @@ Programが法的関連性、根拠の十分性、候補の採否、次のToolを
 
 Tool結果取得後
 
-solver_identity + 用途別Prompt + solver_common
-                         + 必要時solver_tools / solver_completion
-                         + 用途別完了確認
+通常時：solver_identity + integration + solver_common
+                              + solver_tools / solver_completion
+
+Cycle境界：取得本文の評価 ──→ Cycleの終了判断
+           各処理 = 専用Prompt + 専用入力 + 専用schema + 専用完了確認
 ```
 
 用途別の完了確認は`*_check.md`に置きます。完了確認自体は既存の入力を削減・選別せず、
@@ -45,7 +47,8 @@ solver_identity + 用途別Prompt + solver_common
 | `hypothesis_generation` | hypothesis_generationのみ | 入力済みの各WorkItemについて、検索前の暫定的な法的命題を作る。 |
 | `search_planning` | search_planningのみ | 入力済みHypothesisを検証する今回の`legal_search`要求を作る。 |
 | `integration` | identity + integration + common + tools + completion | ToolResultを評価し、状態を逐次更新して次の行動または完了を決める。次Cycle開始後の再計画もこの用途で扱う。 |
-| `cycle_close` | identity + cycle_close + common + completion | 現Cycleを評価して閉じ、未取得候補を処理し、完了または次Cycleへの引継ぎを決める。新しいToolは要求しない。 |
+| `observation_integration` | observation_integrationのみ | 取得本文を既存Hypothesis・WorkItem・下位規範確認状態へ反映する。次の行動は決めない。 |
+| `cycle_close` | cycle_closeのみ | 直前の本文評価を前提に、完了または次Cycleへの引継ぎだけを決める。 |
 | `finalization` | identity + finalization + common + completion | 実行上限時に追加Toolなしで、確認済み範囲と未確認範囲を分けた回答を作る。 |
 | `reviewer_revision` | identity + reviewer_revision + common + tools + completion | Reviewer Findingを全件処理し、回答修正または追加調査を決める。 |
 | `search_selection` | search_review → search_reselection | OpenSearch候補を全件要約し、その短い一覧から今回本文取得する候補を決める。 |
@@ -71,6 +74,7 @@ solver_identity + 用途別Prompt + solver_common
 | `solver_search_planning.md` | 初回Step 3。既知Hypothesisに対する`legal_search`要求の作成。 |
 | `solver_research.md` | v154以前の一括Research Prompt。現行Legal Profileでは使用しない。 |
 | `solver_integration.md` | 観察結果の評価、状態更新、下位規範監査、次の行動。 |
+| `solver_observation_integration.md` | Cycle境界で、取得本文を既存状態へ反映する単一責務の判断。 |
 | `solver_cycle_close.md` | Cycle終了と次Cycleへの構造化引継ぎ。 |
 | `solver_finalization.md` | `finalize_only=true`時の限定最終化。 |
 | `solver_reviewer_revision.md` | Reviewer Findingの受領、反映、反論、再調査。 |
@@ -93,7 +97,7 @@ Search Reviewで保留した候補と、本文取得が未完了の選択候補�
 2. 未評価OpenSearch候補があるか
 3. Reviewer Findingがあるか
 4. `finalize_only=true`か
-5. `cycle_close_required=true`か
+5. `cycle_close_required=true`か。この場合は取得本文の評価、Cycle終了判断の順に2回呼び出す
 6. 初回でWorkItemがまだないか
 7. WorkItemはあるがHypothesisがまだないか
 8. 初回HypothesisはあるがToolをまだ実行していないか
@@ -135,6 +139,13 @@ CaseStoreの正本です。`non_work_item_requirements`は重要度や全WorkIte
 初回3 Stepの実行時入力は`ResearchStepInput`を正本とし、各Stepで実際に投影した項目だけを`input_contract`へ
 生成します。Step 3では`available_tools`の一覧全体の意味と、各Toolが持つ用途・入力Schema・戻り値説明を
 完成Promptと`input.json`の組で確認できます。
+
+Cycle境界でも同じ方式を使います。取得本文の評価には既存WorkItem、Hypothesis、grounding Evidence、
+下位規範確認対象だけを投影します。続くCycle終了判断には、その評価結果、構造上の残りCycle、
+引継ぎ可能なEvidenceを投影します。`fetchable_article_ids`、検索・Graph候補、Tool定義は両方へ渡さず、
+Article IDを`retain_evidence_ids`へ混入させない専用契約にします。
+前段の意味差分はProgramが機械的に更新後のread modelへ投影します。2つのLLM出力は共通`SolverDecision`へ
+正規化し、共通validatorを通過した後にCaseStoreへ一度だけ適用します。
 
 修復指示のassetは`app/agent_framework/prompts/`にあります。法令判断の手順はこのディレクトリ、
 Provider輸送と契約修復はFramework側へ分け、同じ規則を両方へ重複記載しません。

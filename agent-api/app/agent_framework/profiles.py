@@ -23,6 +23,7 @@ class ModelCallProfile(FrameworkModel):
         "research_decomposition",
         "research_hypothesis",
         "research_search",
+        "cycle_close",
     ] = "full"
     available_tool_names: tuple[str, ...] | None = None
 

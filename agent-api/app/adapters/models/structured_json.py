@@ -25,7 +25,9 @@ from app.agent_framework.contract_rendering import (
 )
 from app.agent_framework.contracts import (
     CaseUpdate,
+    CycleCloseDecision,
     HypothesisUpdate,
+    ObservationIntegrationDecision,
     SearchAssessmentDecision,
     SearchCandidateAssessment,
     SearchReselectionDecision,
@@ -90,6 +92,8 @@ class StructuredJSONModelAdapter:
             and not context.finalize_only
         ):
             return self._solve_search_review(context, profile)
+        if profile.context_projection == "cycle_close":
+            return self._solve_cycle_close(context, profile)
         rendered = render_solver_model_call(context, profile, provider=provider)
         transport_schema = rendered.output_schema
         prompt = rendered.request
@@ -240,6 +244,149 @@ class StructuredJSONModelAdapter:
         if isinstance(last_error, ModelProtocolError):
             raise last_error
         raise ModelProtocolError("solver decision is unavailable")
+
+    def _solve_cycle_close(
+        self,
+        context: SolverContext,
+        profile: ModelCallProfile,
+    ) -> SolverCallResult:
+        """取得本文の意味統合とCycle境界判断を別コンテキストで実行する。"""
+
+        observation_call = render_observation_integration_model_call(
+            context,
+            profile,
+        )
+        if self._diagnostics is not None:
+            self._diagnostics.record_transport_input(
+                context=context,
+                profile=profile,
+                rendered=observation_call,
+                repair_index=0,
+                transport_stage="observation_integration",
+                provider=getattr(self._client, "provider", None),
+            )
+        started_at = monotonic()
+        try:
+            observation_result = self._client.generate_structured_json(
+                prompt=observation_call.request,
+                schema=observation_call.output_schema,
+                model=profile.model,
+                max_tokens=profile.max_output_tokens,
+                timeout_sec=max(1, round(profile.timeout_sec)),
+            )
+        except requests.Timeout as exc:
+            raise TimeoutError("observation integration timed out") from exc
+        observation_error = observation_result.validationError
+        if observation_result.payload is None and observation_error is None:
+            observation_error = "empty"
+        if self._diagnostics is not None:
+            self._diagnostics.record_transport_output(
+                context=context,
+                repair_index=0,
+                payload=observation_result.payload,
+                validation_error=observation_error,
+                input_tokens=observation_result.inputTokens,
+                output_tokens=observation_result.outputTokens,
+                provider_retry_count=observation_result.retryCount,
+                transport_stage="observation_integration",
+            )
+        if observation_error is not None or observation_result.payload is None:
+            raise ModelProtocolError(
+                "observation integration transport invalid: "
+                f"{observation_error}"
+            )
+        try:
+            observation = ObservationIntegrationDecision.model_validate(
+                observation_result.payload
+            )
+        except ValidationError as exc:
+            detail = exc.errors(include_url=False, include_input=False)[0]
+            raise ModelProtocolError(
+                "observation integration contract invalid: "
+                f"{detail['msg']}"
+            ) from exc
+
+        transition_call = render_cycle_close_model_call(
+            context,
+            observation,
+            profile,
+        )
+        remaining_timeout = profile.timeout_sec - (monotonic() - started_at)
+        if remaining_timeout <= 1:
+            raise TimeoutError("cycle close transition time exhausted")
+        if self._diagnostics is not None:
+            self._diagnostics.record_transport_input(
+                context=context,
+                profile=profile,
+                rendered=transition_call,
+                repair_index=0,
+                transport_stage="cycle_close",
+                provider=getattr(self._client, "provider", None),
+            )
+        try:
+            transition_result = self._client.generate_structured_json(
+                prompt=transition_call.request,
+                schema=transition_call.output_schema,
+                model=profile.model,
+                max_tokens=profile.max_output_tokens,
+                timeout_sec=max(1, round(remaining_timeout)),
+            )
+        except requests.Timeout as exc:
+            raise TimeoutError("cycle close transition timed out") from exc
+        transition_error = transition_result.validationError
+        if transition_result.payload is None and transition_error is None:
+            transition_error = "empty"
+        if self._diagnostics is not None:
+            self._diagnostics.record_transport_output(
+                context=context,
+                repair_index=0,
+                payload=transition_result.payload,
+                validation_error=transition_error,
+                input_tokens=transition_result.inputTokens,
+                output_tokens=transition_result.outputTokens,
+                provider_retry_count=transition_result.retryCount,
+                transport_stage="cycle_close",
+            )
+        if transition_error is not None or transition_result.payload is None:
+            raise ModelProtocolError(
+                f"cycle close transport invalid: {transition_error}"
+            )
+        try:
+            transition = CycleCloseDecision.model_validate(
+                transition_result.payload
+            )
+            decision = _normalize_cycle_close_decisions(
+                observation,
+                transition,
+            )
+        except ValidationError as exc:
+            detail = exc.errors(include_url=False, include_input=False)[0]
+            raise ModelProtocolError(
+                f"cycle close contract invalid: {detail['msg']}"
+            ) from exc
+
+        input_tokens = (
+            observation_result.inputTokens + transition_result.inputTokens
+            if observation_result.inputTokens is not None
+            and transition_result.inputTokens is not None
+            else None
+        )
+        output_tokens = (
+            observation_result.outputTokens + transition_result.outputTokens
+            if observation_result.outputTokens is not None
+            and transition_result.outputTokens is not None
+            else None
+        )
+        return SolverCallResult(
+            decision=decision,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            attempt_count=(
+                2
+                + observation_result.retryCount
+                + transition_result.retryCount
+            ),
+        )
 
     def _solve_search_review(
         self,
@@ -491,6 +638,11 @@ def render_solver_model_call(
         context,
         profile.available_tool_names,
     )
+    if profile.context_projection == "cycle_close":
+        return render_observation_integration_model_call(
+            projected_context,
+            profile,
+        )
     if profile.context_projection in {
         "research_decomposition",
         "research_hypothesis",
@@ -910,6 +1062,512 @@ def _contract_repair_catalog(context: SolverContext) -> str:
         f"{render_prompt_section('solver_contract_repair.md', 'contract_feedback_rule')}\n"
         "contract_feedback.violationに該当する規則だけを適用してください。\n"
         f"<contract_repair_rules>\n{rules}\n</contract_repair_rules>\n"
+    )
+
+
+def render_observation_integration_model_call(
+    context: SolverContext,
+    profile: ModelCallProfile,
+) -> RenderedModelCall:
+    input_payload = _observation_integration_context_payload(context)
+    instructions = (
+        f"{profile.system_prompt}\n\n"
+        f"{RUNTIME_INPUT_MARKER}"
+        f"{_post_context_completion_check(profile.completion_check_prompt)}"
+    )
+    rendered = build_rendered_model_call(
+        stage="observation_integration",
+        instructions=instructions,
+        input_tag="observation_input",
+        input_payload=input_payload,
+        output_schema=_strip_runtime_id_enums(
+            _observation_integration_transport_schema(context)
+        ),
+        normalized_schema=ObservationIntegrationDecision.model_json_schema(),
+    )
+    _ensure_solver_prompt_capacity(rendered.request, context.max_solver_input_chars)
+    return rendered
+
+
+def render_cycle_close_model_call(
+    context: SolverContext,
+    observation: ObservationIntegrationDecision,
+    profile: ModelCallProfile,
+) -> RenderedModelCall:
+    if profile.followup_system_prompt is None:
+        raise ModelProtocolError("cycle close followup prompt is unavailable")
+    input_payload = _cycle_close_context_payload(context, observation)
+    instructions = (
+        f"{profile.followup_system_prompt}\n\n"
+        f"{RUNTIME_INPUT_MARKER}"
+        f"{_post_context_completion_check(profile.followup_completion_check_prompt)}"
+    )
+    rendered = build_rendered_model_call(
+        stage="cycle_close",
+        instructions=instructions,
+        input_tag="cycle_close_input",
+        input_payload=input_payload,
+        output_schema=_strip_runtime_id_enums(
+            _cycle_close_transport_schema(context)
+        ),
+        normalized_schema=CycleCloseDecision.model_json_schema(),
+    )
+    _ensure_solver_prompt_capacity(rendered.request, context.max_solver_input_chars)
+    return rendered
+
+
+def _observation_integration_context_payload(
+    context: SolverContext,
+) -> dict[str, Any]:
+    grounding_ids = set(context.grounding_evidence_ids)
+    payload: dict[str, Any] = {
+        "question": context.question,
+        "non_work_item_requirements": list(context.non_work_item_requirements),
+        "work_items": [
+            item.model_dump(mode="json") for item in context.work_tree
+        ],
+        "hypotheses": [
+            item.model_dump(mode="json") for item in context.hypotheses
+        ],
+        "grounding_evidence": [
+            item.model_dump(mode="json")
+            for item in context.material_evidence
+            if item.evidence_id in grounding_ids
+        ],
+        "required_dependency_kind": context.required_dependency_kind,
+        "required_dependency_work_item_ids": list(
+            context.required_dependency_work_item_ids
+        ),
+        "existing_dependency_decisions": [
+            item.model_dump(mode="json") for item in context.dependency_decisions
+        ],
+    }
+    if context.contract_feedback is not None:
+        payload["contract_feedback"] = {
+            "violation": context.contract_feedback.violation,
+        }
+    return payload
+
+
+def _cycle_close_context_payload(
+    context: SolverContext,
+    observation: ObservationIntegrationDecision,
+) -> dict[str, Any]:
+    grounding_ids = set(context.grounding_evidence_ids)
+    work_items, hypotheses = _project_observation_integration_state(
+        context,
+        observation,
+    )
+    active_deferred = [
+        item.model_dump(mode="json")
+        for item in context.graph_review_ledger
+        if item.review_status == "relevant_deferred"
+        and item.content_status in {"not_requested", "failed", "timeout"}
+        and item.deferred_resolution_action != "no_longer_needed"
+    ]
+    payload: dict[str, Any] = {
+        "question": context.question,
+        "non_work_item_requirements": list(context.non_work_item_requirements),
+        "work_items_after_observation": [
+            item.model_dump(mode="json") for item in work_items
+        ],
+        "hypotheses_after_observation": [
+            item.model_dump(mode="json") for item in hypotheses
+        ],
+        "observation_summary": observation.decision_reason,
+        "dependency_decisions_after_observation": [
+            item.model_dump(mode="json")
+            for item in observation.dependency_decisions
+        ],
+        "can_start_next_cycle": context.can_start_next_cycle,
+        "remaining_research_cycles": context.remaining_research_cycles,
+        "retainable_evidence": [
+            item.model_dump(mode="json")
+            for item in context.evidence_manifest
+            if item.evidence_id in grounding_ids
+        ],
+        "grounding_evidence": [
+            item.model_dump(mode="json")
+            for item in context.material_evidence
+            if item.evidence_id in grounding_ids
+        ],
+        "active_deferred_frontiers": active_deferred,
+        "unreviewed_graph_candidate_count": (
+            context.graph_review_batch.remaining_unreviewed_count
+        ),
+    }
+    if context.contract_feedback is not None:
+        payload["contract_feedback"] = {
+            "violation": context.contract_feedback.violation,
+        }
+    return payload
+
+
+def _project_observation_integration_state(
+    context: SolverContext,
+    observation: ObservationIntegrationDecision,
+) -> tuple[tuple[WorkItem, ...], tuple[Hypothesis, ...]]:
+    """意味判断済みの差分を、Cycle Close向けread modelへ機械適用する。"""
+
+    work_items = {item.work_item_id: item for item in context.work_tree}
+    hypotheses = {
+        item.hypothesis_id: item for item in context.hypotheses
+    }
+    updated_work_item_ids: set[str] = set()
+    for update in observation.update_work_items:
+        if update.work_item_id in updated_work_item_ids:
+            raise ModelProtocolError(
+                f"duplicate observation WorkItem update: {update.work_item_id}"
+            )
+        updated_work_item_ids.add(update.work_item_id)
+        current = work_items.get(update.work_item_id)
+        if current is None:
+            raise ModelProtocolError(
+                f"unknown observation WorkItem update: {update.work_item_id}"
+            )
+        work_items[update.work_item_id] = WorkItem.model_validate(
+            {
+                **current.model_dump(mode="json"),
+                "state": update.state,
+                "resolution": update.resolution,
+                "basis_hypothesis_ids": update.basis_hypothesis_ids,
+            }
+        )
+
+    updated_hypothesis_ids: set[str] = set()
+    for update in observation.update_hypotheses:
+        if update.hypothesis_id in updated_hypothesis_ids:
+            raise ModelProtocolError(
+                "duplicate observation Hypothesis update: "
+                f"{update.hypothesis_id}"
+            )
+        updated_hypothesis_ids.add(update.hypothesis_id)
+        current = hypotheses.get(update.hypothesis_id)
+        if current is None:
+            raise ModelProtocolError(
+                "unknown observation Hypothesis update: "
+                f"{update.hypothesis_id}"
+            )
+        hypotheses[update.hypothesis_id] = Hypothesis.model_validate(
+            {
+                **current.model_dump(mode="json"),
+                "judgment": update.judgment,
+                "evidence_ids": update.evidence_ids,
+                "gaps": update.gaps,
+            }
+        )
+
+    return tuple(work_items.values()), tuple(hypotheses.values())
+
+
+def _observation_integration_transport_schema(
+    context: SolverContext,
+) -> dict[str, Any]:
+    work_item_ids = tuple(item.work_item_id for item in context.work_tree)
+    hypothesis_ids = tuple(item.hypothesis_id for item in context.hypotheses)
+    evidence_ids = context.grounding_evidence_ids
+    nullable_string = {"anyOf": [{"type": "string"}, {"type": "null"}]}
+    work_item_update = _strict_object(
+        {
+            "work_item_id": _described(
+                _enum_string(work_item_ids),
+                WorkItemUpdate,
+                "work_item_id",
+            ),
+            "state": _described(
+                {"type": "string", "enum": ["open", "resolved", "dropped"]},
+                WorkItemUpdate,
+                "state",
+            ),
+            "resolution": _described(
+                nullable_string,
+                WorkItemUpdate,
+                "resolution",
+            ),
+            "basis_hypothesis_ids": _described(
+                _bounded_enum_array(hypothesis_ids),
+                WorkItemUpdate,
+                "basis_hypothesis_ids",
+            ),
+        }
+    )
+    hypothesis_update = _strict_object(
+        {
+            "hypothesis_id": _described(
+                _enum_string(hypothesis_ids),
+                HypothesisUpdate,
+                "hypothesis_id",
+            ),
+            "judgment": _described(
+                {
+                    "type": "string",
+                    "enum": ["supported", "contradicted", "unresolved"],
+                },
+                HypothesisUpdate,
+                "judgment",
+            ),
+            "evidence_ids": _described(
+                _bounded_enum_array(evidence_ids),
+                HypothesisUpdate,
+                "evidence_ids",
+            ),
+            "gaps": _described(
+                {"type": "array", "items": {"type": "string"}, "maxItems": 12},
+                HypothesisUpdate,
+                "gaps",
+            ),
+        }
+    )
+    dependency_decision = _strict_object(
+        {
+            "dependency_kind": _described(
+                (
+                    {
+                        "type": "string",
+                        "enum": [context.required_dependency_kind],
+                    }
+                    if context.required_dependency_kind is not None
+                    else {"type": "string"}
+                ),
+                DependencyDecision,
+                "dependency_kind",
+            ),
+            "work_item_id": _described(
+                _enum_string(context.required_dependency_work_item_ids),
+                DependencyDecision,
+                "work_item_id",
+            ),
+            "status": _described(
+                {
+                    "type": "string",
+                    "enum": ["not_required", "needs_action", "resolved"],
+                },
+                DependencyDecision,
+                "status",
+            ),
+            "reason": _described(
+                {"type": "string", "minLength": 1},
+                DependencyDecision,
+                "reason",
+            ),
+            "basis_evidence_ids": _described(
+                _bounded_enum_array(evidence_ids),
+                DependencyDecision,
+                "basis_evidence_ids",
+            ),
+            "action_request_id": _described(
+                {"type": "null"},
+                DependencyDecision,
+                "action_request_id",
+            ),
+        }
+    )
+    dependency_count = len(context.required_dependency_work_item_ids)
+    return _strict_object(
+        {
+            "decision_reason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1200,
+                "description": ObservationIntegrationDecision.model_fields[
+                    "decision_reason"
+                ].description,
+            },
+            "update_work_items": {
+                "type": "array",
+                "items": work_item_update,
+                "maxItems": len(work_item_ids),
+                "description": ObservationIntegrationDecision.model_fields[
+                    "update_work_items"
+                ].description,
+            },
+            "update_hypotheses": {
+                "type": "array",
+                "items": hypothesis_update,
+                "maxItems": len(hypothesis_ids),
+                "description": ObservationIntegrationDecision.model_fields[
+                    "update_hypotheses"
+                ].description,
+            },
+            "dependency_decisions": {
+                "type": "array",
+                "items": dependency_decision,
+                "minItems": dependency_count,
+                "maxItems": dependency_count,
+                "description": ObservationIntegrationDecision.model_fields[
+                    "dependency_decisions"
+                ].description,
+            },
+        }
+    )
+
+
+def _cycle_close_transport_schema(context: SolverContext) -> dict[str, Any]:
+    work_item_ids = tuple(
+        item.work_item_id for item in context.work_tree if item.state == "open"
+    )
+    evidence_ids = context.grounding_evidence_ids
+    answer = _strict_object(
+        {
+            "text": _described({"type": "string"}, FinalAnswer, "text"),
+            "citation_ids": _described(
+                _bounded_enum_array(evidence_ids),
+                FinalAnswer,
+                "citation_ids",
+            ),
+            "limitations": _described(
+                _string_array_schema(),
+                FinalAnswer,
+                "limitations",
+            ),
+            "unresolved_work_item_ids": _described(
+                _bounded_enum_array(work_item_ids),
+                FinalAnswer,
+                "unresolved_work_item_ids",
+            ),
+            "unresolved_hypothesis_ids": _described(
+                _bounded_enum_array(
+                    tuple(item.hypothesis_id for item in context.hypotheses)
+                ),
+                FinalAnswer,
+                "unresolved_hypothesis_ids",
+            ),
+        }
+    )
+    properties: dict[str, Any] = {
+        "outcome": {
+            "type": "string",
+            "enum": (
+                ["start_next_cycle", "finalize"]
+                if context.can_start_next_cycle
+                else ["finalize"]
+            ),
+            "description": CycleCloseDecision.model_fields["outcome"].description,
+        },
+        "decision_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1200,
+            "description": CycleCloseDecision.model_fields[
+                "decision_reason"
+            ].description,
+        },
+        "next_focus_work_item_ids": {
+            **_bounded_enum_array(work_item_ids),
+            "description": CycleCloseDecision.model_fields[
+                "next_focus_work_item_ids"
+            ].description,
+        },
+        "retain_evidence_ids": {
+            **_bounded_enum_array(
+                evidence_ids,
+                max_items=context.max_retained_evidence,
+            ),
+            "description": CycleCloseDecision.model_fields[
+                "retain_evidence_ids"
+            ].description,
+        },
+        "answer": {
+            "anyOf": [answer, {"type": "null"}],
+            "description": CycleCloseDecision.model_fields["answer"].description,
+        },
+    }
+    active_deferred = tuple(
+        item
+        for item in context.graph_review_ledger
+        if item.review_status == "relevant_deferred"
+        and item.content_status in {"not_requested", "failed", "timeout"}
+        and item.deferred_resolution_action != "no_longer_needed"
+    )
+    if active_deferred:
+        properties["deferred_frontier_resolutions"] = {
+            "type": "array",
+            "items": _strict_object(
+                {
+                    "frontier_item_id": _enum_string(
+                        tuple(item.frontier_item_id for item in active_deferred)
+                    ),
+                    "article_id": _enum_string(
+                        tuple(item.article_id for item in active_deferred)
+                    ),
+                    "work_item_id": _enum_string(
+                        tuple(item.work_item_id for item in active_deferred)
+                    ),
+                    "hypothesis_id": {
+                        "anyOf": [
+                            _enum_string(
+                                tuple(
+                                    item.hypothesis_id
+                                    for item in active_deferred
+                                    if item.hypothesis_id is not None
+                                )
+                            ),
+                            {"type": "null"},
+                        ]
+                    },
+                    "action": {
+                        "type": "string",
+                        "enum": [
+                            "fetch_next_cycle",
+                            "carry_forward",
+                            "no_longer_needed",
+                            "unresolved_at_limit",
+                        ],
+                    },
+                    "reason": {"type": "string", "minLength": 1},
+                }
+            ),
+            "maxItems": len(active_deferred),
+            "description": CycleCloseDecision.model_fields[
+                "deferred_frontier_resolutions"
+            ].description,
+        }
+    if context.graph_review_batch.remaining_unreviewed_count:
+        properties["unreviewed_graph_resolution"] = {
+            "anyOf": [
+                _strict_object(
+                    {
+                        "action": {
+                            "type": "string",
+                            "enum": [
+                                "review_next_cycle",
+                                "no_longer_needed",
+                                "unresolved_at_limit",
+                            ],
+                        },
+                        "reason": {"type": "string", "minLength": 1},
+                    }
+                ),
+                {"type": "null"},
+            ],
+            "description": CycleCloseDecision.model_fields[
+                "unreviewed_graph_resolution"
+            ].description,
+        }
+    return _strict_object(properties)
+
+
+def _normalize_cycle_close_decisions(
+    observation: ObservationIntegrationDecision,
+    transition: CycleCloseDecision,
+) -> SolverDecision:
+    start_next_cycle = transition.outcome == "start_next_cycle"
+    return SolverDecision(
+        next="continue" if start_next_cycle else "finalize",
+        decision_reason=transition.decision_reason,
+        start_next_cycle=start_next_cycle,
+        update=CaseUpdate(
+            update_work_items=observation.update_work_items,
+            update_hypotheses=observation.update_hypotheses,
+        ),
+        next_focus_work_item_ids=transition.next_focus_work_item_ids,
+        retain_evidence_ids=transition.retain_evidence_ids,
+        dependency_decisions=observation.dependency_decisions,
+        deferred_frontier_resolutions=(
+            transition.deferred_frontier_resolutions
+        ),
+        unreviewed_graph_resolution=transition.unreviewed_graph_resolution,
+        answer=transition.answer,
     )
 
 

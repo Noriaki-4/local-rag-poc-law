@@ -1,0 +1,271 @@
+{
+  "$defs": {
+    "DeferredFrontierResolution": {
+      "additionalProperties": false,
+      "description": "Solverが以前のdefer判断をCycle境界でどう扱うかを明示する。",
+      "properties": {
+        "action": {
+          "description": "fetch_next_cycleは次Cycle冒頭で取得、carry_forwardは後続へ保留、no_longer_neededは不要、unresolved_at_limitは上限で未解決。",
+          "enum": [
+            "fetch_next_cycle",
+            "carry_forward",
+            "no_longer_needed",
+            "unresolved_at_limit"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "article_id": {
+          "description": "保留Frontierが示す既知Article ID。",
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Article Id",
+          "type": "string"
+        },
+        "decided_cycle": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Programが記録する判断Cycle番号。新しい判断ではnull。",
+          "title": "Decided Cycle"
+        },
+        "frontier_item_id": {
+          "description": "以前relevant_deferredにしたFrontierの完全一致ID。",
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Frontier Item Id",
+          "type": "string"
+        },
+        "hypothesis_id": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "保留Frontierが対応するHypothesis ID。特定されていなければnull。",
+          "title": "Hypothesis Id"
+        },
+        "reason": {
+          "description": "保留Frontierの次の扱いを選んだ理由。",
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "work_item_id": {
+          "description": "保留Frontierが属するopen WorkItem ID。",
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Work Item Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "frontier_item_id",
+        "article_id",
+        "work_item_id",
+        "action",
+        "reason"
+      ],
+      "title": "DeferredFrontierResolution",
+      "type": "object"
+    },
+    "FinalAnswer": {
+      "additionalProperties": false,
+      "properties": {
+        "citation_ids": {
+          "default": [],
+          "description": "回答で実際に使用したgrounding Evidence ID。",
+          "items": {
+            "type": "string"
+          },
+          "title": "Citation Ids",
+          "type": "array"
+        },
+        "limitations": {
+          "default": [],
+          "description": "上限等により確認できなかった事項と回答上の制約。",
+          "items": {
+            "type": "string"
+          },
+          "title": "Limitations",
+          "type": "array"
+        },
+        "text": {
+          "description": "質問へ返す根拠付き回答本文。",
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "unresolved_hypothesis_ids": {
+          "default": [],
+          "description": "限定回答で未解決のまま残すHypothesis ID。",
+          "items": {
+            "type": "string"
+          },
+          "title": "Unresolved Hypothesis Ids",
+          "type": "array"
+        },
+        "unresolved_work_item_ids": {
+          "default": [],
+          "description": "限定回答で未解決のまま残すWorkItem ID。",
+          "items": {
+            "type": "string"
+          },
+          "title": "Unresolved Work Item Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "FinalAnswer",
+      "type": "object"
+    },
+    "UnreviewedGraphResolution": {
+      "additionalProperties": false,
+      "description": "SolverがCycle境界で未評価Graph候補群をどう扱うかを明示する。",
+      "properties": {
+        "action": {
+          "description": "review_next_cycleは次Cycleで評価、no_longer_neededは全候補不要、unresolved_at_limitは上限で未評価のまま残す。",
+          "enum": [
+            "review_next_cycle",
+            "no_longer_needed",
+            "unresolved_at_limit"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "candidate_count": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Programが記録する対象候補数。新しい判断ではnull。",
+          "title": "Candidate Count"
+        },
+        "decided_cycle": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Programが記録する判断Cycle番号。新しい判断ではnull。",
+          "title": "Decided Cycle"
+        },
+        "reason": {
+          "description": "未評価Graph候補群の扱いを選んだ理由。",
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "reason"
+      ],
+      "title": "UnreviewedGraphResolution",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "answer": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FinalAnswer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "outcome=finalizeの場合だけ返す根拠付き回答。"
+    },
+    "decision_reason": {
+      "description": "未確認事項、完了条件、残りCycleに結び付けた境界判断の短い説明。",
+      "maxLength": 1200,
+      "minLength": 1,
+      "title": "Decision Reason",
+      "type": "string"
+    },
+    "deferred_frontier_resolutions": {
+      "default": [],
+      "description": "保留中Graph候補を次Cycleへ引き継ぐか終了するかの判断。",
+      "items": {
+        "$ref": "#/$defs/DeferredFrontierResolution"
+      },
+      "title": "Deferred Frontier Resolutions",
+      "type": "array"
+    },
+    "next_focus_work_item_ids": {
+      "default": [],
+      "description": "次Cycleで優先する、統合後もopenの既知WorkItem ID。",
+      "items": {
+        "type": "string"
+      },
+      "title": "Next Focus Work Item Ids",
+      "type": "array"
+    },
+    "outcome": {
+      "description": "未確認事項を次Cycleへ送るか、既知根拠で回答を完了するか。",
+      "enum": [
+        "start_next_cycle",
+        "finalize"
+      ],
+      "title": "Outcome",
+      "type": "string"
+    },
+    "retain_evidence_ids": {
+      "default": [],
+      "description": "次Cycleにも本文提示が必要な、提示済みの取得本文Evidence ID。",
+      "items": {
+        "type": "string"
+      },
+      "title": "Retain Evidence Ids",
+      "type": "array"
+    },
+    "unreviewed_graph_resolution": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UnreviewedGraphResolution"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "未評価Graph候補が残る場合のCycle境界での扱い。"
+    }
+  },
+  "required": [
+    "outcome",
+    "decision_reason"
+  ],
+  "title": "CycleCloseDecision",
+  "type": "object"
+}

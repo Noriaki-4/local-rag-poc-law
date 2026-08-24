@@ -1,0 +1,170 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "decision_reason": {
+      "description": "提示された取得本文をどの確認事項へ反映したかの短い説明。",
+      "maxLength": 1200,
+      "minLength": 1,
+      "type": "string"
+    },
+    "dependency_decisions": {
+      "description": "取得本文から判断した、対象WorkItemごとの下位規範確認状態。",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "action_request_id": {
+            "description": "needs_actionを現在stepで実行するToolRequest ID。次Cycleへ送る場合はnull。",
+            "type": "null"
+          },
+          "basis_evidence_ids": {
+            "description": "この状態判断に使用した取得済みgrounding Evidence ID。",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 30,
+            "type": "array"
+          },
+          "dependency_kind": {
+            "description": "確認対象となる下位規範依存の種類。",
+            "enum": [
+              "lower_norm"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "description": "statusを選んだ本文に基づく短い理由。",
+            "minLength": 1,
+            "type": "string"
+          },
+          "status": {
+            "description": "not_requiredは下位規範確認不要、needs_actionは追加探索必要、resolvedは委任元と末端の本文確認済み。",
+            "enum": [
+              "not_required",
+              "needs_action",
+              "resolved"
+            ],
+            "type": "string"
+          },
+          "work_item_id": {
+            "description": "この依存判断が属する既知WorkItem ID。",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dependency_kind",
+          "work_item_id",
+          "status",
+          "reason",
+          "basis_evidence_ids",
+          "action_request_id"
+        ],
+        "type": "object"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "type": "array"
+    },
+    "update_hypotheses": {
+      "description": "取得本文の評価により判定または未確認事項を変更する既存Hypothesis。",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_ids": {
+            "description": "判定を直接支える取得済みgrounding Evidence ID。",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 30,
+            "type": "array"
+          },
+          "gaps": {
+            "description": "この命題を判定するために、本文でまだ確認すべき具体的情報。",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 12,
+            "type": "array"
+          },
+          "hypothesis_id": {
+            "description": "更新する既存Hypothesisの完全一致ID。",
+            "type": "string"
+          },
+          "judgment": {
+            "description": "本文評価後の判定。",
+            "enum": [
+              "supported",
+              "contradicted",
+              "unresolved"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "hypothesis_id",
+          "judgment",
+          "evidence_ids",
+          "gaps"
+        ],
+        "type": "object"
+      },
+      "maxItems": 5,
+      "type": "array"
+    },
+    "update_work_items": {
+      "description": "取得本文の評価により状態を変更する既存WorkItem。",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "basis_hypothesis_ids": {
+            "description": "更新後のbasis。openでは作成・継続の前提Hypothesis ID、resolvedではresolutionを支える判定済みHypothesis ID。Hypothesis.work_item_idは所属先を表す別項目。",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 5,
+            "type": "array"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "resolvedまたはdroppedにする理由・結論。openではnull。"
+          },
+          "state": {
+            "description": "更新後のWorkItem状態。",
+            "enum": [
+              "open",
+              "resolved",
+              "dropped"
+            ],
+            "type": "string"
+          },
+          "work_item_id": {
+            "description": "更新する既存WorkItemの完全一致ID。",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_item_id",
+          "state",
+          "resolution",
+          "basis_hypothesis_ids"
+        ],
+        "type": "object"
+      },
+      "maxItems": 5,
+      "type": "array"
+    }
+  },
+  "required": [
+    "decision_reason",
+    "update_work_items",
+    "update_hypotheses",
+    "dependency_decisions"
+  ],
+  "type": "object"
+}
