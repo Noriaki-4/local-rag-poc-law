@@ -130,6 +130,13 @@ class SearchCandidateAssessment(FrameworkModel):
         max_length=2000,
         description="検索抜粋から読み取れる候補内容の短い自己要約。回答根拠ではない。",
     )
+    matched_hypothesis_ids: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "主体、行為、対象、条件が一致し、この候補が直接検証できる未確認"
+            "Hypothesis ID。該当しなければ空。"
+        ),
+    )
 
 
 class SearchAssessmentDecision(FrameworkModel):
@@ -205,6 +212,25 @@ class ObservationIntegrationDecision(FrameworkModel):
         default=(),
         description="取得本文から判断した、対象WorkItemごとの下位規範確認状態。",
     )
+
+
+class EvidenceIntegrationDecision(FrameworkModel):
+    decision_reason: str = Field(
+        min_length=1,
+        max_length=1200,
+        description="提示された取得本文をどの確認事項へ反映したかの短い説明。",
+    )
+    update_work_items: tuple[WorkItemUpdate, ...] = Field(default=())
+    update_hypotheses: tuple[HypothesisUpdate, ...] = Field(default=())
+
+
+class DependencyAssessmentDecision(FrameworkModel):
+    decision_reason: str = Field(
+        min_length=1,
+        max_length=1200,
+        description="下位規範の末端本文確認状態を判断した短い説明。",
+    )
+    dependency_decisions: tuple[DependencyDecision, ...] = Field(default=())
 
 
 class CycleCloseDecision(FrameworkModel):

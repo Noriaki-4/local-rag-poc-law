@@ -21,6 +21,8 @@ from app.llm import LLMClient  # noqa: E402
 
 _PROFILE_ATTRIBUTES = {
     "research": "solver_research",
+    "hypothesis_generation": "solver_hypothesis_generation",
+    "search_planning": "solver_search_planning",
     "integration": "solver_integration",
     "cycle_close": "solver_cycle_close",
     "finalization": "solver_finalization",

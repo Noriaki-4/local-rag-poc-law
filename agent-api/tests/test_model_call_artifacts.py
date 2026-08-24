@@ -7,6 +7,7 @@ import pytest
 
 from app.adapters.models.structured_json import (
     render_cycle_close_model_call,
+    render_dependency_assessment_model_call,
     render_observation_integration_model_call,
     render_solver_model_call,
 )
@@ -95,6 +96,14 @@ def test_question_decomposition_uses_only_question_and_small_contract() -> None:
         "work_items",
         "non_work_item_requirements",
     }
+    assert "行為者、行為、対象、限定条件" in (
+        rendered.output_schema["properties"]["work_items"]["items"]
+        ["properties"]["question"]["description"]
+    )
+    assert "重複させない" in (
+        rendered.output_schema["properties"]["non_work_item_requirements"]
+        ["description"]
+    )
     assert "graph_candidate_review" in rendered.normalized_schema["properties"]
 
 
@@ -177,7 +186,7 @@ def test_provider_transport_is_explicit_in_artifacts(tmp_path) -> None:
     assert manifest["requestHash"] == openai.request_hash
 
 
-def test_observation_integration_uses_small_provider_common_schema() -> None:
+def test_dependency_assessment_uses_small_provider_common_schema() -> None:
     fixture_path = (
         Path(__file__).parent
         / "fixtures/framework/tob_overview_cycle1_close_v1.json"
@@ -187,14 +196,16 @@ def test_observation_integration_uses_small_provider_common_schema() -> None:
     profile = legal_agent_profile().solver_cycle_close
     assert profile is not None
 
+    observation = ObservationIntegrationDecision(
+        decision_reason="取得本文を評価した",
+    )
     rendered = [
-        render_solver_model_call(
+        render_dependency_assessment_model_call(
             context,
+            observation,
             profile,
-            provider=provider,
-            stage="cycle_close",
         )
-        for provider in ("openai", "anthropic", "ollama")
+        for _provider in ("openai", "anthropic", "ollama")
     ]
 
     assert rendered[0].output_schema == rendered[1].output_schema
@@ -207,7 +218,9 @@ def test_observation_integration_uses_small_provider_common_schema() -> None:
     dependency = schema["properties"]["dependency_decisions"]
     work_item_id = dependency["items"]["properties"]["work_item_id"]
     assert work_item_id["type"] == "string"
-    assert "enum" not in work_item_id
+    assert set(work_item_id["enum"]) == set(
+        context.required_dependency_work_item_ids
+    )
     serialized = json.dumps(schema, ensure_ascii=False)
     assert context.fetchable_article_ids[0] not in serialized
     assert len(serialized) < 8_000
@@ -243,15 +256,27 @@ def test_cycle_boundary_artifacts_are_current() -> None:
         decision_reason=observed["decision_reason"],
         update_work_items=update["update_work_items"],
         update_hypotheses=update["update_hypotheses"],
-        dependency_decisions=observed["dependency_decisions"],
+    )
+    observation_with_dependency = ObservationIntegrationDecision.model_validate(
+        {
+            **observation.model_dump(mode="json"),
+            "dependency_decisions": observed["dependency_decisions"],
+        }
     )
     rendered_calls = {
         "step-4-observation-integration": (
             render_observation_integration_model_call(context, profile)
         ),
-        "step-5-cycle-close": render_cycle_close_model_call(
+        "step-5-dependency-assessment": (
+            render_dependency_assessment_model_call(
+                context,
+                observation,
+                profile,
+            )
+        ),
+        "step-6-cycle-close": render_cycle_close_model_call(
             context,
-            observation,
+            observation_with_dependency,
             profile,
         ),
     }

@@ -1,0 +1,57 @@
+{
+  "fixtureId": "tob-overview-cycle-close-finalizes-open-dependency-v1",
+  "questionId": "tob-overview",
+  "source": {
+    "diagnosticsMode": "snapshot",
+    "diagnosticCaseId": "legal-c4d80153f49f4cc0b8878d7af0f56dbf",
+    "observationOutputSequence": 41,
+    "dependencyOutputSequence": 43,
+    "cycleCloseOutputSequence": 45,
+    "model": "gpt-4o-mini-2024-07-18"
+  },
+  "observedFailure": {
+    "cycleCloseOutcome": "finalize",
+    "violation": "dependency action must reference a ToolRequest in the same decision",
+    "cause": "同一Articleしか根拠にない確認済み判断をneeds_actionへ戻した後も、Cycle Close schemaがfinalizeを許していた。"
+  },
+  "observedObservation": {
+    "decision_reason": "本文だけでは末端下位規範まで確認できていない。",
+    "update_work_items": [
+      {
+        "work_item_id": "wi-1",
+        "state": "resolved",
+        "resolution": "公開買付けの条件を確認した。",
+        "basis_hypothesis_ids": [
+          "h-1"
+        ]
+      }
+    ],
+    "update_hypotheses": [
+      {
+        "hypothesis_id": "h-1",
+        "judgment": "supported",
+        "evidence_ids": [
+          "law-323AC0000000025-article-27_2-paragraph-1"
+        ],
+        "gaps": []
+      }
+    ],
+    "dependency_decisions": [
+      {
+        "dependency_kind": "lower_norm",
+        "work_item_id": "wi-1",
+        "status": "needs_action",
+        "reason": "委任元と末端下位規範を示す異なるArticle本文が揃っていない。",
+        "basis_evidence_ids": [
+          "law-323AC0000000025-article-27_2-paragraph-1"
+        ],
+        "action_request_id": null
+      }
+    ]
+  },
+  "expectedBehavior": {
+    "workItemState": "open",
+    "outcome": "start_next_cycle",
+    "answer": null
+  }
+}

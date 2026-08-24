@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from copy import deepcopy
 from time import monotonic
 from typing import Any
@@ -17,6 +18,7 @@ from app.agent_framework.context import (
     ResearchStepInput,
     ResearchStepWorkItem,
     SolverContext,
+    WorkTreeItem,
 )
 from app.agent_framework.contract_rendering import (
     contract_field_description,
@@ -26,6 +28,8 @@ from app.agent_framework.contract_rendering import (
 from app.agent_framework.contracts import (
     CaseUpdate,
     CycleCloseDecision,
+    DependencyAssessmentDecision,
+    EvidenceIntegrationDecision,
     HypothesisUpdate,
     ObservationIntegrationDecision,
     SearchAssessmentDecision,
@@ -297,7 +301,9 @@ class StructuredJSONModelAdapter:
             )
         try:
             observation = ObservationIntegrationDecision.model_validate(
-                observation_result.payload
+                _normalize_observation_integration_payload(
+                    observation_result.payload
+                )
             )
         except ValidationError as exc:
             detail = exc.errors(include_url=False, include_input=False)[0]
@@ -305,6 +311,81 @@ class StructuredJSONModelAdapter:
                 "observation integration contract invalid: "
                 f"{detail['msg']}"
             ) from exc
+
+        dependency_call = render_dependency_assessment_model_call(
+            context,
+            observation,
+            profile,
+        )
+        remaining_timeout = profile.timeout_sec - (monotonic() - started_at)
+        if remaining_timeout <= 1:
+            raise TimeoutError("dependency assessment time exhausted")
+        if self._diagnostics is not None:
+            self._diagnostics.record_transport_input(
+                context=context,
+                profile=profile,
+                rendered=dependency_call,
+                repair_index=0,
+                transport_stage="dependency_assessment",
+                provider=getattr(self._client, "provider", None),
+            )
+        try:
+            dependency_result = self._client.generate_structured_json(
+                prompt=dependency_call.request,
+                schema=dependency_call.output_schema,
+                model=profile.model,
+                max_tokens=profile.max_output_tokens,
+                timeout_sec=max(1, round(remaining_timeout)),
+            )
+        except requests.Timeout as exc:
+            raise TimeoutError("dependency assessment timed out") from exc
+        dependency_error = dependency_result.validationError
+        if dependency_result.payload is None and dependency_error is None:
+            dependency_error = "empty"
+        if self._diagnostics is not None:
+            self._diagnostics.record_transport_output(
+                context=context,
+                repair_index=0,
+                payload=dependency_result.payload,
+                validation_error=dependency_error,
+                input_tokens=dependency_result.inputTokens,
+                output_tokens=dependency_result.outputTokens,
+                provider_retry_count=dependency_result.retryCount,
+                transport_stage="dependency_assessment",
+            )
+        if dependency_error is not None or dependency_result.payload is None:
+            raise ModelProtocolError(
+                "dependency assessment transport invalid: "
+                f"{dependency_error}"
+            )
+        try:
+            dependency = DependencyAssessmentDecision.model_validate(
+                _normalize_observation_integration_payload(
+                    dependency_result.payload
+                )
+            )
+            dependency = _downgrade_unproven_dependency_confirmations(
+                dependency,
+                article_id_by_evidence={
+                    item.evidence_id: article_id
+                    for item in context.material_evidence
+                    if item.evidence_id in context.grounding_evidence_ids
+                    and isinstance(
+                        article_id := item.metadata.get("articleId"),
+                        str,
+                    )
+                },
+            )
+        except ValidationError as exc:
+            detail = exc.errors(include_url=False, include_input=False)[0]
+            raise ModelProtocolError(
+                "dependency assessment contract invalid: "
+                f"{detail['msg']}"
+            ) from exc
+        observation = observation.model_copy(
+            update={"dependency_decisions": dependency.dependency_decisions}
+        )
+        observation = _align_observation_with_dependency_decisions(observation)
 
         transition_call = render_cycle_close_model_call(
             context,
@@ -366,14 +447,20 @@ class StructuredJSONModelAdapter:
             ) from exc
 
         input_tokens = (
-            observation_result.inputTokens + transition_result.inputTokens
+            observation_result.inputTokens
+            + dependency_result.inputTokens
+            + transition_result.inputTokens
             if observation_result.inputTokens is not None
+            and dependency_result.inputTokens is not None
             and transition_result.inputTokens is not None
             else None
         )
         output_tokens = (
-            observation_result.outputTokens + transition_result.outputTokens
+            observation_result.outputTokens
+            + dependency_result.outputTokens
+            + transition_result.outputTokens
             if observation_result.outputTokens is not None
+            and dependency_result.outputTokens is not None
             and transition_result.outputTokens is not None
             else None
         )
@@ -382,8 +469,9 @@ class StructuredJSONModelAdapter:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             attempt_count=(
-                2
+                3
                 + observation_result.retryCount
+                + dependency_result.retryCount
                 + transition_result.retryCount
             ),
         )
@@ -443,14 +531,15 @@ class StructuredJSONModelAdapter:
             raise ModelProtocolError(
                 f"search assessment transport invalid: {assessment_error}"
             )
-        _validate_search_assessment_payload(
+        assessment_payload = _normalize_search_assessment_transport_payload(
             assessment_result.payload,
             context,
         )
+        _validate_search_assessment_payload(assessment_payload, context)
 
         selection_call = render_search_reselection_model_call(
             context,
-            assessment_result.payload,
+            assessment_payload,
             profile,
         )
         selection_prompt = selection_call.request
@@ -504,6 +593,10 @@ class StructuredJSONModelAdapter:
             )
         try:
             SearchReselectionDecision.model_validate(selection_result.payload)
+            _validate_search_reselection_payload(
+                selection_result.payload,
+                assessment_payload,
+            )
         except ValidationError as exc:
             detail = exc.errors(include_url=False, include_input=False)[0]
             raise ModelProtocolError(
@@ -511,7 +604,7 @@ class StructuredJSONModelAdapter:
             ) from exc
 
         combined_payload = {
-            **assessment_result.payload,
+            **assessment_payload,
             **selection_result.payload,
         }
         try:
@@ -862,7 +955,10 @@ def _staged_research_transport_schema(
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 1000,
-                    "description": "独立して法的結論を出し、完了判定できる1つの確認事項。",
+                    "description": (
+                        "独立して法的結論を出し、完了判定できる1つの確認事項。"
+                        "元の質問の行為者、行為、対象、限定条件を省略しない。"
+                    ),
                 }
             }
         )
@@ -882,6 +978,7 @@ def _staged_research_transport_schema(
                     "description": (
                         "質問の明示要求のうち、独立した法的結論を要しない要求。"
                         "根拠・出典・引用・対象時点・地域・出力形式等。"
+                        "work_itemsに入れた確認事項や、その説明要求は重複させない。"
                     ),
                 },
             }
@@ -898,6 +995,7 @@ def _staged_research_transport_schema(
                     "description": (
                         "検索前の未確認で誤り得る暫定的な法的命題。"
                         "WorkItemの言い換えではなく、検索対象を選べる具体性を持つ。"
+                        "行為者を省略せず、行為対象と区別する。"
                     ),
                 },
                 "gaps": {
@@ -1083,7 +1181,7 @@ def render_observation_integration_model_call(
         output_schema=_strip_runtime_id_enums(
             _observation_integration_transport_schema(context)
         ),
-        normalized_schema=ObservationIntegrationDecision.model_json_schema(),
+        normalized_schema=EvidenceIntegrationDecision.model_json_schema(),
     )
     _ensure_solver_prompt_capacity(rendered.request, context.max_solver_input_chars)
     return rendered
@@ -1108,9 +1206,71 @@ def render_cycle_close_model_call(
         input_tag="cycle_close_input",
         input_payload=input_payload,
         output_schema=_strip_runtime_id_enums(
-            _cycle_close_transport_schema(context)
+            _cycle_close_transport_schema(context, observation)
         ),
         normalized_schema=CycleCloseDecision.model_json_schema(),
+    )
+    _ensure_solver_prompt_capacity(rendered.request, context.max_solver_input_chars)
+    return rendered
+
+
+def render_dependency_assessment_model_call(
+    context: SolverContext,
+    observation: ObservationIntegrationDecision,
+    profile: ModelCallProfile,
+) -> RenderedModelCall:
+    if profile.dependency_system_prompt is None:
+        raise ModelProtocolError("dependency assessment prompt is unavailable")
+    work_items, hypotheses = _project_observation_integration_state(
+        context,
+        observation,
+    )
+    required_ids = set(context.required_dependency_work_item_ids)
+    input_payload: dict[str, Any] = {
+        "question": context.question,
+        "required_dependency_kind": context.required_dependency_kind,
+        "work_items": [
+            item.model_dump(mode="json")
+            for item in work_items
+            if item.work_item_id in required_ids
+        ],
+        "hypotheses": [
+            item.model_dump(mode="json")
+            for item in hypotheses
+            if item.work_item_id in required_ids
+        ],
+        "grounding_evidence": [
+            item.model_dump(mode="json")
+            for item in context.material_evidence
+            if item.evidence_id in set(context.grounding_evidence_ids)
+        ],
+    }
+    if context.contract_feedback is not None:
+        previous = context.contract_feedback.previous_decision
+        input_payload["contract_feedback"] = {
+            "violation": context.contract_feedback.violation,
+        }
+        input_payload["previous_dependency_assessment"] = {
+            "decision_reason": previous.decision_reason,
+            "dependency_decisions": [
+                _dependency_decision_transport_payload(item)
+                for item in previous.dependency_decisions
+                if item.work_item_id in required_ids
+                and item.dependency_kind == context.required_dependency_kind
+            ],
+        }
+    instructions = (
+        f"{profile.dependency_system_prompt}\n\n"
+        f"{RUNTIME_INPUT_MARKER}"
+        f"{_post_context_completion_check(profile.dependency_completion_check_prompt)}"
+    )
+    rendered = build_rendered_model_call(
+        stage="dependency_assessment",
+        instructions=instructions,
+        input_tag="dependency_input",
+        input_payload=input_payload,
+        output_schema=_dependency_assessment_transport_schema(context),
+        normalized_schema=DependencyAssessmentDecision.model_json_schema(),
     )
     _ensure_solver_prompt_capacity(rendered.request, context.max_solver_input_chars)
     return rendered
@@ -1120,33 +1280,56 @@ def _observation_integration_context_payload(
     context: SolverContext,
 ) -> dict[str, Any]:
     grounding_ids = set(context.grounding_evidence_ids)
+    active_work_items, active_hypotheses = _active_observation_items(context)
     payload: dict[str, Any] = {
         "question": context.question,
         "non_work_item_requirements": list(context.non_work_item_requirements),
         "work_items": [
-            item.model_dump(mode="json") for item in context.work_tree
+            item.model_dump(mode="json") for item in active_work_items
         ],
         "hypotheses": [
-            item.model_dump(mode="json") for item in context.hypotheses
+            item.model_dump(mode="json") for item in active_hypotheses
         ],
         "grounding_evidence": [
             item.model_dump(mode="json")
             for item in context.material_evidence
             if item.evidence_id in grounding_ids
         ],
-        "required_dependency_kind": context.required_dependency_kind,
-        "required_dependency_work_item_ids": list(
-            context.required_dependency_work_item_ids
-        ),
-        "existing_dependency_decisions": [
-            item.model_dump(mode="json") for item in context.dependency_decisions
-        ],
     }
     if context.contract_feedback is not None:
+        previous = context.contract_feedback.previous_decision
         payload["contract_feedback"] = {
             "violation": context.contract_feedback.violation,
         }
+        payload["previous_observation"] = {
+            "decision_reason": previous.decision_reason,
+            "update_work_items": [
+                item.model_dump(mode="json")
+                for item in previous.update.update_work_items
+            ],
+            "update_hypotheses": [
+                item.model_dump(mode="json")
+                for item in previous.update.update_hypotheses
+            ],
+        }
     return payload
+
+
+def _active_observation_items(
+    context: SolverContext,
+) -> tuple[tuple[WorkTreeItem, ...], tuple[Hypothesis, ...]]:
+    """通常の逐次統合対象を、現在openの作業へ限定する。"""
+
+    work_items = tuple(
+        item for item in context.work_tree if item.state == "open"
+    )
+    work_item_ids = {item.work_item_id for item in work_items}
+    hypotheses = tuple(
+        item
+        for item in context.hypotheses
+        if item.work_item_id in work_item_ids
+    )
+    return work_items, hypotheses
 
 
 def _cycle_close_context_payload(
@@ -1206,7 +1389,7 @@ def _cycle_close_context_payload(
 def _project_observation_integration_state(
     context: SolverContext,
     observation: ObservationIntegrationDecision,
-) -> tuple[tuple[WorkItem, ...], tuple[Hypothesis, ...]]:
+) -> tuple[tuple[WorkTreeItem, ...], tuple[Hypothesis, ...]]:
     """意味判断済みの差分を、Cycle Close向けread modelへ機械適用する。"""
 
     work_items = {item.work_item_id: item for item in context.work_tree}
@@ -1225,9 +1408,8 @@ def _project_observation_integration_state(
             raise ModelProtocolError(
                 f"unknown observation WorkItem update: {update.work_item_id}"
             )
-        work_items[update.work_item_id] = WorkItem.model_validate(
-            {
-                **current.model_dump(mode="json"),
+        work_items[update.work_item_id] = current.model_copy(
+            update={
                 "state": update.state,
                 "resolution": update.resolution,
                 "basis_hypothesis_ids": update.basis_hypothesis_ids,
@@ -1248,29 +1430,65 @@ def _project_observation_integration_state(
                 "unknown observation Hypothesis update: "
                 f"{update.hypothesis_id}"
             )
-        hypotheses[update.hypothesis_id] = Hypothesis.model_validate(
-            {
-                **current.model_dump(mode="json"),
+        hypotheses[update.hypothesis_id] = current.model_copy(
+            update={
                 "judgment": update.judgment,
                 "evidence_ids": update.evidence_ids,
                 "gaps": update.gaps,
             }
         )
 
-    return tuple(work_items.values()), tuple(hypotheses.values())
+    hypotheses_by_work_item: dict[str, list[Hypothesis]] = {}
+    for hypothesis in hypotheses.values():
+        hypotheses_by_work_item.setdefault(
+            hypothesis.work_item_id,
+            [],
+        ).append(hypothesis)
+    projected_work_items = tuple(
+        item.model_copy(
+            update={
+                "hypothesis_ids": tuple(
+                    hypothesis.hypothesis_id
+                    for hypothesis in hypotheses_by_work_item.get(
+                        item.work_item_id,
+                        (),
+                    )
+                ),
+                "evidence_count": len(
+                    {
+                        evidence_id
+                        for hypothesis in hypotheses_by_work_item.get(
+                            item.work_item_id,
+                            (),
+                        )
+                        for evidence_id in hypothesis.evidence_ids
+                    }
+                ),
+            }
+        )
+        for item in work_items.values()
+    )
+    return projected_work_items, tuple(hypotheses.values())
 
 
 def _observation_integration_transport_schema(
     context: SolverContext,
 ) -> dict[str, Any]:
-    work_item_ids = tuple(item.work_item_id for item in context.work_tree)
-    hypothesis_ids = tuple(item.hypothesis_id for item in context.hypotheses)
+    active_work_items, active_hypotheses = _active_observation_items(context)
+    work_item_ids = tuple(item.work_item_id for item in active_work_items)
+    hypothesis_ids = tuple(item.hypothesis_id for item in active_hypotheses)
+    schema_work_item_ids = work_item_ids or tuple(
+        item.work_item_id for item in context.work_tree
+    )
+    schema_hypothesis_ids = hypothesis_ids or tuple(
+        item.hypothesis_id for item in context.hypotheses
+    )
     evidence_ids = context.grounding_evidence_ids
     nullable_string = {"anyOf": [{"type": "string"}, {"type": "null"}]}
     work_item_update = _strict_object(
         {
             "work_item_id": _described(
-                _enum_string(work_item_ids),
+                _enum_string(schema_work_item_ids),
                 WorkItemUpdate,
                 "work_item_id",
             ),
@@ -1285,7 +1503,7 @@ def _observation_integration_transport_schema(
                 "resolution",
             ),
             "basis_hypothesis_ids": _described(
-                _bounded_enum_array(hypothesis_ids),
+                _bounded_enum_array(schema_hypothesis_ids),
                 WorkItemUpdate,
                 "basis_hypothesis_ids",
             ),
@@ -1294,7 +1512,7 @@ def _observation_integration_transport_schema(
     hypothesis_update = _strict_object(
         {
             "hypothesis_id": _described(
-                _enum_string(hypothesis_ids),
+                _enum_string(schema_hypothesis_ids),
                 HypothesisUpdate,
                 "hypothesis_id",
             ),
@@ -1318,51 +1536,6 @@ def _observation_integration_transport_schema(
             ),
         }
     )
-    dependency_decision = _strict_object(
-        {
-            "dependency_kind": _described(
-                (
-                    {
-                        "type": "string",
-                        "enum": [context.required_dependency_kind],
-                    }
-                    if context.required_dependency_kind is not None
-                    else {"type": "string"}
-                ),
-                DependencyDecision,
-                "dependency_kind",
-            ),
-            "work_item_id": _described(
-                _enum_string(context.required_dependency_work_item_ids),
-                DependencyDecision,
-                "work_item_id",
-            ),
-            "status": _described(
-                {
-                    "type": "string",
-                    "enum": ["not_required", "needs_action", "resolved"],
-                },
-                DependencyDecision,
-                "status",
-            ),
-            "reason": _described(
-                {"type": "string", "minLength": 1},
-                DependencyDecision,
-                "reason",
-            ),
-            "basis_evidence_ids": _described(
-                _bounded_enum_array(evidence_ids),
-                DependencyDecision,
-                "basis_evidence_ids",
-            ),
-            "action_request_id": _described(
-                {"type": "null"},
-                DependencyDecision,
-                "action_request_id",
-            ),
-        }
-    )
-    dependency_count = len(context.required_dependency_work_item_ids)
     return _strict_object(
         {
             "decision_reason": {
@@ -1389,20 +1562,177 @@ def _observation_integration_transport_schema(
                     "update_hypotheses"
                 ].description,
             },
+        }
+    )
+
+
+def _dependency_decision_transport_payload(
+    decision: DependencyDecision,
+) -> dict[str, Any]:
+    payload = decision.model_dump(mode="json")
+    payload["status"] = {
+        "needs_action": "terminal_text_missing",
+        "resolved": "terminal_text_confirmed",
+    }.get(decision.status, decision.status)
+    return payload
+
+
+def _normalize_observation_integration_payload(
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    normalized = deepcopy(payload)
+    for decision in normalized.get("dependency_decisions") or []:
+        if not isinstance(decision, dict):
+            continue
+        decision["status"] = {
+            "terminal_text_missing": "needs_action",
+            "terminal_text_confirmed": "resolved",
+        }.get(decision.get("status"), decision.get("status"))
+    return normalized
+
+
+def _downgrade_unproven_dependency_confirmations(
+    assessment: DependencyAssessmentDecision,
+    *,
+    article_id_by_evidence: Mapping[str, str],
+) -> DependencyAssessmentDecision:
+    """構造上成立しない確認済み判断を、未確認へ安全側に戻す。"""
+
+    decisions: list[DependencyDecision] = []
+    for decision in assessment.dependency_decisions:
+        if decision.status != "resolved":
+            decisions.append(decision)
+            continue
+        article_ids = {
+            article_id_by_evidence[evidence_id]
+            for evidence_id in decision.basis_evidence_ids
+            if evidence_id in article_id_by_evidence
+        }
+        if len(article_ids) >= 2:
+            decisions.append(decision)
+            continue
+        decisions.append(
+            decision.model_copy(
+                update={
+                    "status": "needs_action",
+                    "reason": (
+                        "委任元と末端下位規範を示す異なるArticle本文が"
+                        "揃っていないため、末端本文は未確認。"
+                    ),
+                    "action_request_id": None,
+                }
+            )
+        )
+    return assessment.model_copy(
+        update={"dependency_decisions": tuple(decisions)}
+    )
+
+
+def _align_observation_with_dependency_decisions(
+    observation: ObservationIntegrationDecision,
+) -> ObservationIntegrationDecision:
+    """下位規範が未確認のWorkItemを、Cycle境界でopenに保つ。"""
+
+    needs_action_ids = {
+        item.work_item_id
+        for item in observation.dependency_decisions
+        if item.status == "needs_action"
+    }
+    if not needs_action_ids:
+        return observation
+    updates = tuple(
+        item.model_copy(
+            update={
+                "state": "open",
+                "resolution": None,
+                "basis_hypothesis_ids": (),
+            }
+        )
+        if item.work_item_id in needs_action_ids
+        else item
+        for item in observation.update_work_items
+    )
+    return observation.model_copy(update={"update_work_items": updates})
+
+
+def _dependency_assessment_transport_schema(
+    context: SolverContext,
+) -> dict[str, Any]:
+    evidence_ids = context.grounding_evidence_ids
+    dependency_decision = _strict_object(
+        {
+            "dependency_kind": _described(
+                {
+                    "type": "string",
+                    "enum": [context.required_dependency_kind],
+                },
+                DependencyDecision,
+                "dependency_kind",
+            ),
+            "work_item_id": _described(
+                _enum_string(context.required_dependency_work_item_ids),
+                DependencyDecision,
+                "work_item_id",
+            ),
+            "status": {
+                "type": "string",
+                "enum": [
+                    "not_required",
+                    "terminal_text_missing",
+                    "terminal_text_confirmed",
+                ],
+                "description": (
+                    "not_requiredは下位規範確認不要、"
+                    "terminal_text_missingは末端下位規範本文が未確認、"
+                    "terminal_text_confirmedは委任元とそれを具体化する"
+                    "末端下位規範の本文を確認済み。"
+                ),
+            },
+            "reason": _described(
+                {"type": "string", "minLength": 1},
+                DependencyDecision,
+                "reason",
+            ),
+            "basis_evidence_ids": {
+                **_bounded_enum_array(evidence_ids),
+                "description": (
+                    "状態判断に使ったgrounding Evidence ID。"
+                    "terminal_text_confirmedでは、委任元と末端下位規範を"
+                    "それぞれ示すEvidenceをこの順で含め、両者の"
+                    "metadata.articleIdが異なる必要がある。"
+                    "terminal_text_missingでは、判断に使える本文がなければ"
+                    "空配列でよい。"
+                ),
+            },
+            "action_request_id": _described(
+                {"type": "null"},
+                DependencyDecision,
+                "action_request_id",
+            ),
+        }
+    )
+    count = len(context.required_dependency_work_item_ids)
+    return _strict_object(
+        {
+            "decision_reason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1200,
+            },
             "dependency_decisions": {
                 "type": "array",
                 "items": dependency_decision,
-                "minItems": dependency_count,
-                "maxItems": dependency_count,
-                "description": ObservationIntegrationDecision.model_fields[
-                    "dependency_decisions"
-                ].description,
+                "minItems": count,
+                "maxItems": count,
             },
         }
     )
 
 
-def _cycle_close_transport_schema(context: SolverContext) -> dict[str, Any]:
+def _cycle_close_transport_schema(
+    context: SolverContext,
+    observation: ObservationIntegrationDecision,
+) -> dict[str, Any]:
     work_item_ids = tuple(
         item.work_item_id for item in context.work_tree if item.state == "open"
     )
@@ -1434,11 +1764,20 @@ def _cycle_close_transport_schema(context: SolverContext) -> dict[str, Any]:
             ),
         }
     )
+    dependency_needs_action = any(
+        item.status == "needs_action"
+        for item in observation.dependency_decisions
+    )
+    must_start_next_cycle = (
+        dependency_needs_action and context.can_start_next_cycle
+    )
     properties: dict[str, Any] = {
         "outcome": {
             "type": "string",
             "enum": (
-                ["start_next_cycle", "finalize"]
+                ["start_next_cycle"]
+                if must_start_next_cycle
+                else ["start_next_cycle", "finalize"]
                 if context.can_start_next_cycle
                 else ["finalize"]
             ),
@@ -1468,7 +1807,11 @@ def _cycle_close_transport_schema(context: SolverContext) -> dict[str, Any]:
             ].description,
         },
         "answer": {
-            "anyOf": [answer, {"type": "null"}],
+            "anyOf": (
+                [{"type": "null"}]
+                if must_start_next_cycle
+                else [answer, {"type": "null"}]
+            ),
             "description": CycleCloseDecision.model_fields["answer"].description,
         },
     }
@@ -1576,7 +1919,6 @@ def render_search_assessment_model_call(
     profile: ModelCallProfile,
 ) -> RenderedModelCall:
     input_payload = _search_review_context_payload(context)
-    input_payload["candidate_checklist"] = _search_candidate_checklist(context)
     instructions = (
         f"{profile.system_prompt}\n\n"
         f"{RUNTIME_INPUT_MARKER}"
@@ -1606,17 +1948,6 @@ def _search_review_prompt(
         completion_check_prompt=completion_check_prompt,
     )
     return render_search_assessment_model_call(context, profile).request
-
-
-def _search_candidate_checklist(context: SolverContext) -> dict[str, Any]:
-    """Search Assessmentが照合する候補IDを入力順に再掲する。"""
-
-    return {
-        "candidate_count": len(context.search_candidates),
-        "article_ids_in_input_order": [
-            item.article_id for item in context.search_candidates
-        ],
-    }
 
 
 def _search_review_context_payload(
@@ -1907,6 +2238,33 @@ def _solver_prompt_assets(context: SolverContext) -> tuple[PromptAssetTrace, ...
 
 def _solver_transport_schema(context: SolverContext) -> dict:
     string_array = {"type": "array", "items": {"type": "string"}}
+    open_work_item_ids = tuple(
+        item.work_item_id for item in context.work_tree if item.state == "open"
+    )
+    open_work_item_id_set = set(open_work_item_ids)
+    unresolved_hypothesis_ids = tuple(
+        item.hypothesis_id
+        for item in context.hypotheses
+        if item.work_item_id in open_work_item_id_set
+        and item.judgment == "unresolved"
+    )
+    finalization_limitations = dict(string_array)
+    finalization_work_items = string_array
+    finalization_hypotheses = string_array
+    if context.finalize_only:
+        if open_work_item_ids:
+            finalization_limitations = {
+                **string_array,
+                "minItems": 1,
+            }
+        finalization_work_items = {
+            **_bounded_enum_array(open_work_item_ids),
+            "minItems": len(open_work_item_ids),
+        }
+        finalization_hypotheses = {
+            **_bounded_enum_array(unresolved_hypothesis_ids),
+            "minItems": len(unresolved_hypothesis_ids),
+        }
     answer = _strict_object(
         {
             "text": _described({"type": "string"}, FinalAnswer, "text"),
@@ -1916,17 +2274,17 @@ def _solver_transport_schema(context: SolverContext) -> dict:
                 "citation_ids",
             ),
             "limitations": _described(
-                string_array,
+                finalization_limitations,
                 FinalAnswer,
                 "limitations",
             ),
             "unresolved_work_item_ids": _described(
-                string_array,
+                finalization_work_items,
                 FinalAnswer,
                 "unresolved_work_item_ids",
             ),
             "unresolved_hypothesis_ids": _described(
-                string_array,
+                finalization_hypotheses,
                 FinalAnswer,
                 "unresolved_hypothesis_ids",
             ),
@@ -2513,7 +2871,35 @@ def _search_review_transport_schema(context: SolverContext) -> dict[str, Any]:
     """Search Reviewが意味選択だけへ集中する専用輸送schema。"""
 
     candidate_ids = tuple(item.article_id for item in context.search_candidates)
-    return _strict_object(
+    hypothesis_ids = tuple(item.hypothesis_id for item in context.hypotheses)
+    assessment = _strict_object(
+        {
+            "legal_function": _described(
+                {
+                    "type": "string",
+                    "enum": [
+                        "applicability",
+                        "exception",
+                        "procedure",
+                        "scope",
+                    ],
+                },
+                SearchCandidateAssessment,
+                "legal_function",
+            ),
+            "summary": _described(
+                {"type": "string", "minLength": 1},
+                SearchCandidateAssessment,
+                "summary",
+            ),
+            "matched_hypothesis_ids": _described(
+                _bounded_enum_array(hypothesis_ids),
+                SearchCandidateAssessment,
+                "matched_hypothesis_ids",
+            ),
+        }
+    )
+    schema = _strict_object(
         {
             "search_request_ids": _described(
                 {
@@ -2533,36 +2919,15 @@ def _search_review_transport_schema(context: SolverContext) -> dict[str, Any]:
             ),
             "assessments": _described(
                 {
-                    "type": "array",
-                    "items": _strict_object(
-                        {
-                            "article_id": _described(
-                                _enum_string(candidate_ids),
-                                SearchCandidateAssessment,
-                                "article_id",
-                            ),
-                            "legal_function": _described(
-                                {
-                                    "type": "string",
-                                    "enum": [
-                                        "applicability",
-                                        "exception",
-                                        "procedure",
-                                        "scope",
-                                    ],
-                                },
-                                SearchCandidateAssessment,
-                                "legal_function",
-                            ),
-                            "summary": _described(
-                                {"type": "string", "minLength": 1},
-                                SearchCandidateAssessment,
-                                "summary",
-                            ),
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        article_id: {
+                            "$ref": "#/$defs/search_candidate_assessment"
                         }
-                    ),
-                    "minItems": len(candidate_ids),
-                    "maxItems": len(candidate_ids),
+                        for article_id in candidate_ids
+                    },
+                    "required": list(candidate_ids),
                 },
                 SearchAssessmentDecision,
                 "assessments",
@@ -2574,6 +2939,8 @@ def _search_review_transport_schema(context: SolverContext) -> dict[str, Any]:
             ),
         }
     )
+    schema["$defs"] = {"search_candidate_assessment": assessment}
+    return schema
 
 
 def _search_reselection_transport_schema(
@@ -2686,6 +3053,43 @@ def _solver_compact_transport_schema(context: SolverContext) -> dict:
         SolverDecision,
         "tool_requests",
     )
+    if context.finalize_only:
+        properties["next"] = _described(
+            {"type": "string", "enum": ["finalize"]},
+            SolverDecision,
+            "next",
+        )
+        properties["start_next_cycle"] = _described(
+            {"type": "boolean", "enum": [False]},
+            SolverDecision,
+            "start_next_cycle",
+        )
+        properties["update"] = _described(
+            _empty_case_update_transport_schema(),
+            SolverDecision,
+            "update",
+        )
+        properties["next_focus_work_item_ids"] = _described(
+            _empty_array_schema(),
+            SolverDecision,
+            "next_focus_work_item_ids",
+        )
+        answer_variants = properties["answer"].get("anyOf", ())
+        answer_schema = next(
+            (
+                variant
+                for variant in answer_variants
+                if isinstance(variant, dict)
+                and variant.get("type") == "object"
+            ),
+            None,
+        )
+        if answer_schema is not None:
+            properties["answer"] = _described(
+                answer_schema,
+                SolverDecision,
+                "answer",
+            )
     schema["required"] = [
         "update" if item == "update_json" else (
             "tool_requests" if item == "tool_requests_json" else item
@@ -3077,6 +3481,15 @@ def _tool_requests_transport_schema(context: SolverContext) -> dict[str, Any]:
     }
     variants: list[dict[str, Any]] = []
     for definition in context.available_tools:
+        if (
+            definition.name == "legal_search"
+            and context.contract_feedback is not None
+            and "successful legal_search scope was already completed"
+            in context.contract_feedback.violation
+        ):
+            # 同じ検索を修復Promptへ返しても再度拒否される。意味選択は
+            # LLMへ残しつつ、この修復呼出しでは既知候補を扱うToolだけを許す。
+            continue
         argument_schema = deepcopy(definition.input_schema)
         if definition.name == "fetch_articles":
             article_ids = argument_schema.get("properties", {}).get("article_ids")
@@ -3741,7 +4154,7 @@ def _assign_tool_request_ids(
     normalized: dict[str, Any],
     context: SolverContext,
 ) -> None:
-    """LLMの局所参照を保ち、永続化用ToolRequest IDを機械採番する。"""
+    """永続化用IDを機械採番し、曖昧でない局所参照だけを結び直す。"""
 
     requests = normalized.get("tool_requests") or []
     if not requests:
@@ -3752,10 +4165,9 @@ def _assign_tool_request_ids(
     ]
     if any(not isinstance(request_id, str) or not request_id for request_id in local_ids):
         return
-    if len(local_ids) != len(set(local_ids)):
-        raise ModelProtocolError(
-            "tool request local IDs must be unique within the decision"
-        )
+    local_id_counts = {
+        local_id: local_ids.count(local_id) for local_id in set(local_ids)
+    }
 
     used_ids = set(context.used_tool_request_ids)
     assigned_ids: set[str] = set()
@@ -3769,7 +4181,8 @@ def _assign_tool_request_ids(
                 break
         request["request_id"] = assigned_id
         assigned_ids.add(assigned_id)
-        id_map[local_id] = assigned_id
+        if local_id_counts[local_id] == 1:
+            id_map[local_id] = assigned_id
 
     requests_by_work_item: dict[str, list[str]] = {}
     for request in requests:
@@ -3830,6 +4243,30 @@ def _normalize_search_review_payload(
     }
 
 
+def _normalize_search_assessment_transport_payload(
+    payload: dict[str, Any],
+    context: SolverContext,
+) -> dict[str, Any]:
+    """Article IDをキーにした輸送objectを内部の評価配列へ機械変換する。"""
+
+    normalized = deepcopy(payload)
+    assessments = normalized.get("assessments")
+    if not isinstance(assessments, dict):
+        return normalized
+    normalized["assessments"] = [
+        {
+            "article_id": candidate.article_id,
+            **assessment,
+        }
+        for candidate in context.search_candidates
+        if isinstance(
+            assessment := assessments.get(candidate.article_id),
+            dict,
+        )
+    ]
+    return normalized
+
+
 def _validate_search_assessment_payload(
     payload: dict[str, Any],
     context: SolverContext,
@@ -3844,6 +4281,19 @@ def _validate_search_assessment_payload(
         raise ModelProtocolError("search assessments must be unique")
     if set(assessment_ids) != expected_ids:
         raise ModelProtocolError("search assessments must cover every candidate")
+    known_hypothesis_ids = {
+        item.hypothesis_id for item in context.hypotheses
+    }
+    for assessment in payload.get("assessments") or []:
+        matched_ids = assessment.get("matched_hypothesis_ids") or []
+        if len(matched_ids) != len(set(matched_ids)):
+            raise ModelProtocolError(
+                "search assessment hypothesis IDs must be unique"
+            )
+        if not set(matched_ids).issubset(known_hypothesis_ids):
+            raise ModelProtocolError(
+                "search assessment references unknown hypothesis IDs"
+            )
     try:
         SearchAssessmentDecision.model_validate(payload)
     except ValidationError as exc:
@@ -3851,6 +4301,28 @@ def _validate_search_assessment_payload(
         raise ModelProtocolError(
             f"search assessment contract invalid: {detail['msg']}"
         ) from exc
+
+
+def _validate_search_reselection_payload(
+    payload: dict[str, Any],
+    assessment_payload: dict[str, Any],
+) -> None:
+    """LLMが直接検証可能とした候補だけが選択されたことを検証する。"""
+
+    matched_by_article = {
+        item.get("article_id"): tuple(item.get("matched_hypothesis_ids") or ())
+        for item in assessment_payload.get("assessments") or []
+        if isinstance(item, dict)
+    }
+    for selection in payload.get("selections") or []:
+        if not isinstance(selection, dict):
+            continue
+        article_id = selection.get("article_id")
+        if not matched_by_article.get(article_id):
+            raise ModelProtocolError(
+                "selected search candidate must directly match a hypothesis: "
+                f"{article_id}"
+            )
 
 
 def _apply_hypothesis_evidence_bindings(

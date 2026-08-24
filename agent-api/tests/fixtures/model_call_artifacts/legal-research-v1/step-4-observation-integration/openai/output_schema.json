@@ -7,63 +7,6 @@
       "minLength": 1,
       "type": "string"
     },
-    "dependency_decisions": {
-      "description": "取得本文から判断した、対象WorkItemごとの下位規範確認状態。",
-      "items": {
-        "additionalProperties": false,
-        "properties": {
-          "action_request_id": {
-            "description": "needs_actionを現在stepで実行するToolRequest ID。次Cycleへ送る場合はnull。",
-            "type": "null"
-          },
-          "basis_evidence_ids": {
-            "description": "この状態判断に使用した取得済みgrounding Evidence ID。",
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 30,
-            "type": "array"
-          },
-          "dependency_kind": {
-            "description": "確認対象となる下位規範依存の種類。",
-            "enum": [
-              "lower_norm"
-            ],
-            "type": "string"
-          },
-          "reason": {
-            "description": "statusを選んだ本文に基づく短い理由。",
-            "minLength": 1,
-            "type": "string"
-          },
-          "status": {
-            "description": "not_requiredは下位規範確認不要、needs_actionは追加探索必要、resolvedは委任元と末端の本文確認済み。",
-            "enum": [
-              "not_required",
-              "needs_action",
-              "resolved"
-            ],
-            "type": "string"
-          },
-          "work_item_id": {
-            "description": "この依存判断が属する既知WorkItem ID。",
-            "type": "string"
-          }
-        },
-        "required": [
-          "dependency_kind",
-          "work_item_id",
-          "status",
-          "reason",
-          "basis_evidence_ids",
-          "action_request_id"
-        ],
-        "type": "object"
-      },
-      "maxItems": 2,
-      "minItems": 2,
-      "type": "array"
-    },
     "update_hypotheses": {
       "description": "取得本文の評価により判定または未確認事項を変更する既存Hypothesis。",
       "items": {
@@ -163,8 +106,7 @@
   "required": [
     "decision_reason",
     "update_work_items",
-    "update_hypotheses",
-    "dependency_decisions"
+    "update_hypotheses"
   ],
   "type": "object"
 }

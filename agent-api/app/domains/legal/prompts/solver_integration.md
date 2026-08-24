@@ -51,6 +51,8 @@
 
 ### Tool選択ルール
 
+- `completed_legal_searches`とWorkItem、Hypothesis、入力引数がすべて同じ`legal_search`は要求しません。
+  再検索が必要なら、未確認の内容に合わせて検索表現または対象を変えます。
 - `search_candidates`が空でなければ、新しい`legal_search`を考える前に全候補をWorkItem・Hypothesis・検索抜粋と照合します。
 - 関係する候補が1件以上あれば、`remaining_fetch_capacity`以内で今回確認するArticleを選び、1つの`fetch_articles`で本文取得します。
 - 既存候補では検証できないと判断した場合だけ再検索できます。その場合は、候補で不足する確認事項を`decision_reason`に示し、成功済み検索と異なる検索表現を使います。

@@ -1,0 +1,49 @@
+{
+  "fixtureId": "tob-overview-dependency-same-article-fallback-v1",
+  "questionId": "tob-overview",
+  "source": {
+    "diagnosticsMode": "snapshot",
+    "diagnosticCaseId": "legal-4d6571a80aea43e49de64d7c34f17f2d",
+    "transportOutputSequences": [
+      27,
+      36,
+      45
+    ],
+    "model": "gpt-4o-mini-2024-07-18"
+  },
+  "observedFailure": {
+    "contractAttemptCount": 3,
+    "violation": "resolved dependency requires the delegating source and terminal target from at least two distinct Articles",
+    "actualArticleIds": [
+      "law-323AC0000000025-article-27_22_2"
+    ]
+  },
+  "articleIdByEvidence": {
+    "law-323AC0000000025-article-27_22_2-paragraph-1": "law-323AC0000000025-article-27_22_2",
+    "law-323AC0000000025-article-27_22_2-paragraph-2": "law-323AC0000000025-article-27_22_2"
+  },
+  "observedDependencyAssessment": {
+    "decision_reason": "同一Articleの2項を委任元と末端本文として扱った。",
+    "dependency_decisions": [
+      {
+        "dependency_kind": "lower_norm",
+        "work_item_id": "wi-1",
+        "status": "resolved",
+        "reason": "第1項と第2項を確認したため末端本文まで確認済み。",
+        "basis_evidence_ids": [
+          "law-323AC0000000025-article-27_22_2-paragraph-1",
+          "law-323AC0000000025-article-27_22_2-paragraph-2"
+        ],
+        "action_request_id": null
+      }
+    ]
+  },
+  "expectedDependencyAssessment": {
+    "status": "needs_action",
+    "basisEvidenceIds": [
+      "law-323AC0000000025-article-27_22_2-paragraph-1",
+      "law-323AC0000000025-article-27_22_2-paragraph-2"
+    ],
+    "actionRequestId": null
+  }
+}

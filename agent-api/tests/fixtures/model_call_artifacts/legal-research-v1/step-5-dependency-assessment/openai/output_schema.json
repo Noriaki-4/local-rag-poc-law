@@ -1,0 +1,107 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "decision_reason": {
+      "maxLength": 1200,
+      "minLength": 1,
+      "type": "string"
+    },
+    "dependency_decisions": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "action_request_id": {
+            "description": "needs_actionを現在stepで実行するToolRequest ID。次Cycleへ送る場合はnull。",
+            "type": "null"
+          },
+          "basis_evidence_ids": {
+            "description": "状態判断に使ったgrounding Evidence ID。terminal_text_confirmedでは、委任元と末端下位規範をそれぞれ示すEvidenceをこの順で含め、両者のmetadata.articleIdが異なる必要がある。terminal_text_missingでは、判断に使える本文がなければ空配列でよい。",
+            "items": {
+              "enum": [
+                "law-323AC0000000025-article-27_22_2-paragraph-1",
+                "law-323AC0000000025-article-27_22_2-paragraph-2",
+                "law-323AC0000000025-article-27_22_2-paragraph-3",
+                "law-323AC0000000025-article-27_22_2-paragraph-4",
+                "law-323AC0000000025-article-27_22_2-paragraph-5",
+                "law-323AC0000000025-article-27_22_2-paragraph-6",
+                "law-323AC0000000025-article-27_22_2-paragraph-7",
+                "law-323AC0000000025-article-27_22_2-paragraph-8",
+                "law-323AC0000000025-article-27_22_2-paragraph-9",
+                "law-323AC0000000025-article-27_22_2-paragraph-10",
+                "law-323AC0000000025-article-27_22_2-paragraph-11",
+                "law-323AC0000000025-article-27_22_2-paragraph-12",
+                "law-323AC0000000025-article-27_22_2-paragraph-13",
+                "law-323AC0000000025-article-27_2-paragraph-1",
+                "law-323AC0000000025-article-27_2-paragraph-1-item-1",
+                "law-323AC0000000025-article-27_2-paragraph-1-item-2",
+                "law-323AC0000000025-article-27_2-paragraph-1-item-3",
+                "law-323AC0000000025-article-27_2-paragraph-2",
+                "law-323AC0000000025-article-27_2-paragraph-3",
+                "law-323AC0000000025-article-27_2-paragraph-4",
+                "law-323AC0000000025-article-27_2-paragraph-5",
+                "law-323AC0000000025-article-27_2-paragraph-6",
+                "law-323AC0000000025-article-27_2-paragraph-7",
+                "law-323AC0000000025-article-27_2-paragraph-8",
+                "law-340CO0000000321-article-14_3_3-paragraph-1",
+                "law-340CO0000000321-article-14_3_3-paragraph-2",
+                "law-340CO0000000321-article-14_3_3-paragraph-3",
+                "law-340CO0000000321-article-14_3_3-paragraph-4",
+                "law-340CO0000000321-article-14_3_3-paragraph-5",
+                "law-340CO0000000321-article-14_3_3-paragraph-6"
+              ],
+              "type": "string"
+            },
+            "maxItems": 30,
+            "type": "array"
+          },
+          "dependency_kind": {
+            "description": "確認対象となる下位規範依存の種類。",
+            "enum": [
+              "lower_norm"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "description": "statusを選んだ本文に基づく短い理由。",
+            "minLength": 1,
+            "type": "string"
+          },
+          "status": {
+            "description": "not_requiredは下位規範確認不要、terminal_text_missingは末端下位規範本文が未確認、terminal_text_confirmedは委任元とそれを具体化する末端下位規範の本文を確認済み。",
+            "enum": [
+              "not_required",
+              "terminal_text_missing",
+              "terminal_text_confirmed"
+            ],
+            "type": "string"
+          },
+          "work_item_id": {
+            "description": "この依存判断が属する既知WorkItem ID。",
+            "enum": [
+              "wi-1",
+              "wi-2"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "dependency_kind",
+          "work_item_id",
+          "status",
+          "reason",
+          "basis_evidence_ids",
+          "action_request_id"
+        ],
+        "type": "object"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "type": "array"
+    }
+  },
+  "required": [
+    "decision_reason",
+    "dependency_decisions"
+  ],
+  "type": "object"
+}

@@ -1,0 +1,26 @@
+{
+  "fixtureId": "tob-overview-same-cycle-repeated-search-v1",
+  "questionId": "tob-overview",
+  "source": {
+    "diagnosticsMode": "snapshot",
+    "diagnosticCaseId": "legal-6667155d6b524b08a0e8a2b629ad0195",
+    "firstIntegrationOutputSequence": 26,
+    "lastIntegrationOutputSequence": 35,
+    "model": "gpt-4o-mini-2024-07-18",
+    "profileVersion": "180"
+  },
+  "observedFailure": {
+    "attemptCount": 3,
+    "violation": "successful legal_search scope was already completed",
+    "cause": "同一Cycle内で本文を1条だけ取得した後、18件の既知未取得候補があるのに成功済み検索を再要求した。"
+  },
+  "expectedBehavior": {
+    "repairAllowedTools": [
+      "fetch_articles",
+      "legal_graph_neighbors"
+    ],
+    "repairForbiddenTools": [
+      "legal_search"
+    ]
+  }
+}

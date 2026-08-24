@@ -17,6 +17,8 @@ class ModelCallProfile(FrameworkModel):
     followup_system_prompt: str | None = None
     completion_check_prompt: str | None = None
     followup_completion_check_prompt: str | None = None
+    dependency_system_prompt: str | None = None
+    dependency_completion_check_prompt: str | None = None
     context_projection: Literal[
         "full",
         "initial_research",

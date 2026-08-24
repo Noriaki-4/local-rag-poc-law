@@ -1,0 +1,32 @@
+{
+  "fixtureId": "tob-overview-observation-open-work-focus-v1",
+  "questionId": "tob-overview",
+  "source": {
+    "diagnosticsMode": "snapshot",
+    "diagnosticCaseId": "legal-5d76b1e40be14c19b51881c143a08048",
+    "transportInputSequence": 56,
+    "transportOutputSequence": 57,
+    "model": "gpt-4o-mini-2024-07-18"
+  },
+  "observedFailure": {
+    "cause": "完了済みHypothesis h-1を毎Cycle再提示したため、モデルがh-1だけを再評価し、未解決Hypothesisを処理しなかった。"
+  },
+  "expectedBehavior": {
+    "workItemIds": [
+      "wi-2",
+      "wi-3",
+      "wi-4"
+    ],
+    "hypothesisIds": [
+      "h-2",
+      "h-3",
+      "h-4"
+    ],
+    "excludedWorkItemIds": [
+      "wi-1"
+    ],
+    "excludedHypothesisIds": [
+      "h-1"
+    ]
+  }
+}

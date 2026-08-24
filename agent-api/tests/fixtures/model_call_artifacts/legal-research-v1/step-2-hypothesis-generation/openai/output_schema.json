@@ -16,7 +16,7 @@
             "type": "array"
           },
           "statement": {
-            "description": "検索前の未確認で誤り得る暫定的な法的命題。WorkItemの言い換えではなく、検索対象を選べる具体性を持つ。",
+            "description": "検索前の未確認で誤り得る暫定的な法的命題。WorkItemの言い換えではなく、検索対象を選べる具体性を持つ。行為者を省略せず、行為対象と区別する。",
             "maxLength": 2000,
             "minLength": 1,
             "type": "string"

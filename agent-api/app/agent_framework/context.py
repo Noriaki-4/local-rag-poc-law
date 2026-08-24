@@ -299,6 +299,18 @@ class SolverContractFeedback(FrameworkModel):
     )
 
 
+class CompletedLegalSearch(FrameworkModel):
+    work_item_id: str = Field(
+        description="成功済みlegal_searchが対象にした既知WorkItem ID。",
+    )
+    hypothesis_ids: tuple[str, ...] = Field(
+        description="成功済みlegal_searchが検証対象にした既知Hypothesis ID。",
+    )
+    arguments: dict[str, Any] = Field(
+        description="成功済みlegal_searchへ渡した入力引数。完全一致する再要求は禁止。",
+    )
+
+
 class SolverContext(FrameworkModel):
     case_id: str = Field(description="Programが管理する現在CaseのID。")
     question: str = Field(description="利用者が回答を求めている元の質問。")
@@ -392,6 +404,13 @@ class SolverContext(FrameworkModel):
     )
     recent_tool_results: tuple[SolverToolResult, ...] = Field(
         description="直近Toolの機械的な成功・失敗・timeoutとEvidence件数。",
+    )
+    completed_legal_searches: tuple[CompletedLegalSearch, ...] = Field(
+        default=(),
+        description=(
+            "過去Cycleを含む成功済みlegal_searchのWorkItem、Hypothesis、入力引数。"
+            "同じ3要素の完全一致を再要求しないための履歴。"
+        ),
     )
     evidence_manifest: tuple[EvidenceManifestItem, ...] = Field(
         description="Caseで既知のEvidenceと、今回本文が提示されているかの一覧。",
@@ -710,17 +729,38 @@ def build_solver_context(
             for request_id in candidate.search_request_ids
         )
     )
+    carried_search_request_ids = tuple(
+        dict.fromkeys(
+            request_id
+            for candidate in carried_search_candidates
+            for request_id in candidate.search_request_ids
+        )
+    )
+    # Cycle開始時は、前Cycleで取得枠から保留した候補を専用Search Reviewへ
+    # 戻す。候補の採否はLLMが再判断し、Programは未取得候補と実行段階だけを
+    # 判定する。
+    carried_reselection_required = bool(
+        not finalize_only
+        and not recent_results
+        and remaining_fetch_capacity > 0
+        and carried_search_candidates
+        and carried_search_request_ids
+    )
     required_search_review_request_ids = (
         fresh_search_request_ids
         if not finalize_only
         and fresh_search_request_ids
-        else ()
+        else (
+            carried_search_request_ids
+            if carried_reselection_required
+            else ()
+        )
     )
     # 新規候補のReview中は、その候補だけを提示する。Review済み候補は
     # 本文取得が完了するまでCycleをまたいでIntegrationへ引き継ぐ。
     search_candidates = (
         fresh_search_candidates
-        if required_search_review_request_ids
+        if fresh_search_request_ids
         else carried_search_candidates
     )
     manifest = tuple(
@@ -742,6 +782,19 @@ def build_solver_context(
             graph_navigation_ids=graph_navigation_ids,
         )
         for item in recent_results
+    )
+    succeeded_request_ids = {
+        item.request_id for item in state.tool_results if item.status == "succeeded"
+    }
+    completed_legal_searches = tuple(
+        CompletedLegalSearch(
+            work_item_id=request.work_item_id,
+            hypothesis_ids=request.hypothesis_ids,
+            arguments=request.arguments,
+        )
+        for request in state.tool_requests
+        if request.tool_name == "legal_search"
+        and request.request_id in succeeded_request_ids
     )
 
     return SolverContext(
@@ -792,6 +845,7 @@ def build_solver_context(
         used_tool_request_ids=tuple(item.request_id for item in state.tool_requests),
         recent_tool_requests=recent_requests,
         recent_tool_results=solver_recent_results,
+        completed_legal_searches=completed_legal_searches,
         evidence_manifest=manifest,
         graph_review_batch=graph_review_batch,
         graph_review_ledger=graph_review_ledger,

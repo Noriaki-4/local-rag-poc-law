@@ -1,6 +1,7 @@
 ## 出力前の完了確認
 
-1. `assessments`の件数が`candidate_count`と一致するか確認します。
-2. `assessments.article_id`がチェックリストと同じ順序で、重複も欠落もないか確認します。
+1. `assessments`のキーが全`search_candidates[].article_id`と一致し、余分なキーや欠落がないか確認します。
+2. 各キーの値が、そのArticleの評価になっているか確認します。
 3. 各評価を、対応するWorkItem・Hypothesis・検索抜粋に基づいて記述したか確認します。
 4. この処理では候補を選ばず、評価だけを返しているか確認します。
+5. 各`matched_hypothesis_ids`で、主体、行為、対象、条件が一致しているか確認します。対象の所有者、発行者、所属先等を行為者と誤認していないか確認します。

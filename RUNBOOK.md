@@ -1092,6 +1092,53 @@ Reviewerは`AGENT_FRAMEWORK_REVIEWER_ENABLED=true`を明示した場合だけ有
 cycle_close / finalization / reviewer_revision / search_selection / graph_selection`別のPromptから一つだけ選ぶ。
 選択条件はContextの構造値だけで、法的意味やToolの必要性はSolverが判断する。
 
+#### 実モデル検証前の設定確認
+
+`docker compose up`は実行時に`.env`を読み直す。特定のmodelを検証する場合、以前のshell設定や
+既存コンテナを前提にせず、provider、model、診断modeを再作成コマンドへ明示する。
+次は全Solverを`gpt-4o-mini`にし、診断snapshotを保存する例である。
+
+```bash
+LLM_PROVIDER=openai \
+LLM_MODEL=gpt-4o-mini-2024-07-18 \
+AGENT_FRAMEWORK_REVIEWER_ENABLED=false \
+AGENT_FRAMEWORK_DIAGNOSTICS_MODE=snapshot \
+docker compose up --build -d --force-recreate agent-api
+```
+
+コマンド行で指定した値は、その`docker compose`実行にだけ適用される。検証中にもう一度コンテナを
+再作成する場合も同じ値を明示するか、先に`.env`を検証条件へ変更する。値を省略して再作成すると、
+`.env`に残る別provider・modelへ戻ることがある。
+
+起動後、APIを呼ぶ前にコンテナの実効設定を確認する。
+
+```bash
+curl -s http://localhost:8000/health | jq '{
+  llm: (.llm | {provider, answerModel}),
+  framework: (.agentFramework | {
+    researchModel,
+    integrationModel,
+    reviewerEnabled,
+    diagnosticsMode
+  })
+}'
+```
+
+回答後は、実際の呼出し記録も確認する。
+
+```bash
+jq '.trace.agentFramework | {
+  provider,
+  diagnosticsMode,
+  models: ([.modelCalls[].model] | unique),
+  runStatus,
+  stopReason
+}' response.json
+```
+
+指定したprovider・model・診断modeと、healthまたは回答traceが一致しない実行は評価対象にしない。
+その実行のtimeoutや回答品質を指定modelの結果として扱わず、正しい設定で再作成してからやり直す。
+
 最初の検索動作確認用設定:
 
 ```bash

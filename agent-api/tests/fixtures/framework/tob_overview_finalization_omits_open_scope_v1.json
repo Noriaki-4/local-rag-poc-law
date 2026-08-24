@@ -1,0 +1,33 @@
+{
+  "fixtureId": "tob-overview-finalization-omits-open-scope-v1",
+  "questionId": "tob-overview",
+  "source": {
+    "diagnosticsMode": "snapshot",
+    "diagnosticCaseId": "legal-40b74e2efba1451bb9c54d2076dadc5c",
+    "firstFinalizationOutputSequence": 66,
+    "lastFinalizationOutputSequence": 76,
+    "model": "gpt-4o-mini-2024-07-18",
+    "profileVersion": "179"
+  },
+  "observedFailure": {
+    "attemptCount": 3,
+    "violation": "finalize must account for every open WorkItem as an unresolved answer scope; open=['wi-1', 'wi-2', 'wi-3', 'wi-4'], declared=[]",
+    "cause": "実行上限時のFinalizationで状態更新を返さないまま、未解決IDとlimitationsも空にした。"
+  },
+  "expectedBehavior": {
+    "stateUpdates": [],
+    "unresolvedWorkItemIds": [
+      "wi-1",
+      "wi-2",
+      "wi-3",
+      "wi-4"
+    ],
+    "unresolvedHypothesisIds": [
+      "h-1",
+      "h-2",
+      "h-3",
+      "h-4"
+    ],
+    "limitationsRequired": true
+  }
+}

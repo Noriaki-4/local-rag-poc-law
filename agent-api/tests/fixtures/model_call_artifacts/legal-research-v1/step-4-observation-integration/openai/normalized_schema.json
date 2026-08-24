@@ -1,72 +1,5 @@
 {
   "$defs": {
-    "DependencyDecision": {
-      "additionalProperties": false,
-      "properties": {
-        "action_request_id": {
-          "anyOf": [
-            {
-              "maxLength": 160,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "needs_actionを現在stepで実行するToolRequest ID。次Cycleへ送る場合はnull。",
-          "title": "Action Request Id"
-        },
-        "basis_evidence_ids": {
-          "default": [],
-          "description": "この状態判断に使用した取得済みgrounding Evidence ID。",
-          "items": {
-            "type": "string"
-          },
-          "title": "Basis Evidence Ids",
-          "type": "array"
-        },
-        "dependency_kind": {
-          "description": "確認対象となる下位規範依存の種類。",
-          "maxLength": 160,
-          "minLength": 1,
-          "title": "Dependency Kind",
-          "type": "string"
-        },
-        "reason": {
-          "description": "statusを選んだ本文に基づく短い理由。",
-          "maxLength": 1000,
-          "minLength": 1,
-          "title": "Reason",
-          "type": "string"
-        },
-        "status": {
-          "description": "not_requiredは下位規範確認不要、needs_actionは追加探索必要、resolvedは委任元と末端の本文確認済み。",
-          "enum": [
-            "not_required",
-            "needs_action",
-            "resolved"
-          ],
-          "title": "Status",
-          "type": "string"
-        },
-        "work_item_id": {
-          "description": "この依存判断が属する既知WorkItem ID。",
-          "maxLength": 160,
-          "minLength": 1,
-          "title": "Work Item Id",
-          "type": "string"
-        }
-      },
-      "required": [
-        "dependency_kind",
-        "work_item_id",
-        "status",
-        "reason"
-      ],
-      "title": "DependencyDecision",
-      "type": "object"
-    },
     "HypothesisUpdate": {
       "additionalProperties": false,
       "properties": {
@@ -174,18 +107,8 @@
       "title": "Decision Reason",
       "type": "string"
     },
-    "dependency_decisions": {
-      "default": [],
-      "description": "取得本文から判断した、対象WorkItemごとの下位規範確認状態。",
-      "items": {
-        "$ref": "#/$defs/DependencyDecision"
-      },
-      "title": "Dependency Decisions",
-      "type": "array"
-    },
     "update_hypotheses": {
       "default": [],
-      "description": "取得本文の評価により判定または未確認事項を変更する既存Hypothesis。",
       "items": {
         "$ref": "#/$defs/HypothesisUpdate"
       },
@@ -194,7 +117,6 @@
     },
     "update_work_items": {
       "default": [],
-      "description": "取得本文の評価により状態を変更する既存WorkItem。",
       "items": {
         "$ref": "#/$defs/WorkItemUpdate"
       },
@@ -205,6 +127,6 @@
   "required": [
     "decision_reason"
   ],
-  "title": "ObservationIntegrationDecision",
+  "title": "EvidenceIntegrationDecision",
   "type": "object"
 }

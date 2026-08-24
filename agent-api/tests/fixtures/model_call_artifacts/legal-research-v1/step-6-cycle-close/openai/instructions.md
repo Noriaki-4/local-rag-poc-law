@@ -17,8 +17,8 @@
 
 ## 手順
 
-1. 反映済み状態にopen WorkItemまたはunresolved Hypothesisが残るか確認します。
-2. 未確認事項が残り、`can_start_next_cycle=true`なら`start_next_cycle`を選びます。
+1. open WorkItem、unresolved Hypothesis、`status=needs_action`の下位規範確認が残るか確認します。
+2. いずれかが残り、`can_start_next_cycle=true`なら`start_next_cycle`を選びます。
 3. 全確認事項を取得本文で回答できる場合、または次Cycleを開始できない場合は`finalize`を選びます。
 4. 次Cycleを始める場合だけ、優先するWorkItemと再提示が必要なEvidenceを選びます。
 5. `finalize`では、確認済み範囲と未確認範囲を区別した根拠付き回答を返します。

@@ -1,0 +1,165 @@
+{
+  "fixtureId": "tob-overview-cycle2-carried-candidate-reselection-v1",
+  "questionId": "tob-overview",
+  "source": {
+    "diagnosticsMode": "snapshot",
+    "diagnosticCaseId": "legal-512592191a084135b6beff560f446b8b",
+    "sequence": 32,
+    "purpose": "integration",
+    "model": "gpt-4o-mini-2024-07-18"
+  },
+  "observedFailure": {
+    "contractAttemptCount": 3,
+    "cause": "Cycle 2に未取得の検索候補があるのに、汎用Integrationが候補選別を飛ばして成功済み検索を再要求した。"
+  },
+  "expectedBehavior": {
+    "purpose": "search_selection",
+    "requiredSearchReviewRequestIds": [
+      "search-exception",
+      "search-procedure"
+    ],
+    "candidateArticleIds": [
+      "law-402M50000040038-article-2_5",
+      "law-323AC0000000025-article-27_13"
+    ]
+  },
+  "caseState": {
+    "case_id": "fixture-tob-cycle2-carried-reselection",
+    "question": "公開買付けの主な例外と必要な手続を根拠条文とともに説明してください。",
+    "run_status": "running",
+    "research_cycle_count": 2,
+    "work_items": [
+      {
+        "work_item_id": "wi-exception",
+        "question": "公開買付けの主な例外は何か。"
+      },
+      {
+        "work_item_id": "wi-procedure",
+        "question": "公開買付けに必要な手続は何か。"
+      }
+    ],
+    "hypotheses": [
+      {
+        "hypothesis_id": "h-exception",
+        "work_item_id": "wi-exception",
+        "statement": "少人数からの買付けには公開買付けの適用除外条件がある。",
+        "gaps": [
+          "適用除外となる人数その他の条件"
+        ]
+      },
+      {
+        "hypothesis_id": "h-procedure",
+        "work_item_id": "wi-procedure",
+        "statement": "公開買付けでは公告と届出書の提出が必要になる。",
+        "gaps": [
+          "公告と届出の具体的な手続"
+        ]
+      }
+    ],
+    "tool_requests": [
+      {
+        "request_id": "search-exception",
+        "work_item_id": "wi-exception",
+        "tool_name": "legal_search",
+        "arguments": {
+          "query": "公開買付け 適用除外 少人数 府令",
+          "doc_types": [
+            "law"
+          ],
+          "document_ids": []
+        },
+        "purpose": "公開買付けの適用除外条件を探す。",
+        "hypothesis_ids": [
+          "h-exception"
+        ]
+      },
+      {
+        "request_id": "search-procedure",
+        "work_item_id": "wi-procedure",
+        "tool_name": "legal_search",
+        "arguments": {
+          "query": "公開買付け 公告 届出書 提出 手続",
+          "doc_types": [
+            "law"
+          ],
+          "document_ids": []
+        },
+        "purpose": "公開買付けに必要な公告と届出を探す。",
+        "hypothesis_ids": [
+          "h-procedure"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "evidence_id": "nav-ordinance-2-5",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5",
+        "content": "（株券等の所有者が少数である場合）第二条の五",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_5",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二条の五（株券等の所有者が少数である場合）"
+        }
+      },
+      {
+        "evidence_id": "nav-law-27-13",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_13",
+        "content": "（公開買付けに係る応募株券等の数等の公告等及び公開買付報告書等の提出）第二十七条の十三",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_13",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十七条の十三（公開買付けに係る公告等及び公開買付報告書等の提出）"
+        }
+      }
+    ],
+    "search_candidate_reviews": [
+      {
+        "search_request_ids": [
+          "search-exception",
+          "search-procedure"
+        ],
+        "selections": [],
+        "deferred_article_ids": [
+          "law-402M50000040038-article-2_5",
+          "law-323AC0000000025-article-27_13"
+        ],
+        "reason": "前Cycleの取得枠では本文を取得できなかったため保留した。",
+        "reviewed_cycle": 1
+      }
+    ],
+    "tool_results": [
+      {
+        "request_id": "search-exception",
+        "status": "succeeded",
+        "evidence_ids": [
+          "nav-ordinance-2-5"
+        ],
+        "elapsed_ms": 10,
+        "cycle_no": 1
+      },
+      {
+        "request_id": "search-procedure",
+        "status": "succeeded",
+        "evidence_ids": [
+          "nav-law-27-13"
+        ],
+        "elapsed_ms": 10,
+        "cycle_no": 1
+      }
+    ],
+    "focus_work_item_ids": [
+      "wi-exception",
+      "wi-procedure"
+    ]
+  }
+}

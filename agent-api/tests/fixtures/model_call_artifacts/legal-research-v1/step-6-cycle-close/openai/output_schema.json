@@ -1,0 +1,50 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "answer": {
+      "anyOf": [
+        {
+          "type": "null"
+        }
+      ],
+      "description": "outcome=finalizeの場合だけ返す根拠付き回答。"
+    },
+    "decision_reason": {
+      "description": "未確認事項、完了条件、残りCycleに結び付けた境界判断の短い説明。",
+      "maxLength": 1200,
+      "minLength": 1,
+      "type": "string"
+    },
+    "next_focus_work_item_ids": {
+      "description": "次Cycleで優先する、統合後もopenの既知WorkItem ID。",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 5,
+      "type": "array"
+    },
+    "outcome": {
+      "description": "未確認事項を次Cycleへ送るか、既知根拠で回答を完了するか。",
+      "enum": [
+        "start_next_cycle"
+      ],
+      "type": "string"
+    },
+    "retain_evidence_ids": {
+      "description": "次Cycleにも本文提示が必要な、提示済みの取得本文Evidence ID。",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 12,
+      "type": "array"
+    }
+  },
+  "required": [
+    "outcome",
+    "decision_reason",
+    "next_focus_work_item_ids",
+    "retain_evidence_ids",
+    "answer"
+  ],
+  "type": "object"
+}

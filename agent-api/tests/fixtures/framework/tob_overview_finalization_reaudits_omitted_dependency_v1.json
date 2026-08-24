@@ -1,0 +1,19 @@
+{
+  "fixtureId": "tob-overview-finalization-reaudits-omitted-dependency-v1",
+  "questionId": "tob-overview",
+  "source": {
+    "diagnosticsMode": "snapshot",
+    "diagnosticCaseId": "legal-ac2482ee105545d8aab083e8c98de7d7",
+    "model": "gpt-4o-mini-2024-07-18",
+    "profileVersion": "181"
+  },
+  "observedFailure": {
+    "attemptCount": 3,
+    "violation": "dependency basis evidence was not shown in full",
+    "cause": "Finalizationが保存済みDependencyDecisionの再提出を要求し、現在Promptで省略された過去Evidence IDをモデルが再出力した。"
+  },
+  "expectedBehavior": {
+    "requiredDependencyWorkItemIds": [],
+    "reuseStoredDependencyDecisions": true
+  }
+}

@@ -267,11 +267,13 @@ class AgentLoop:
                 self._store.save(state)
 
             integration_call = bool(state.research_cycle_count or reviewer_findings)
-            dependency_audit_work_item_ids = (
-                _dependency_audit_work_item_ids(state)
-                if integration_call
-                and self._profile.required_dependency_kind is not None
-                else ()
+            dependency_audit_work_item_ids = _dependency_audit_scope(
+                state,
+                integration_call=integration_call,
+                finalize_only=finalize_only,
+                required_dependency_kind=(
+                    self._profile.required_dependency_kind
+                ),
             )
             dependency_audit_required = bool(dependency_audit_work_item_ids)
             contract_feedback: SolverContractFeedback | None = None
@@ -1392,3 +1394,21 @@ def _dependency_audit_work_item_ids(state: CaseState) -> tuple[str, ...]:
             ):
                 projected.append(work_item_id)
     return tuple(projected)
+
+
+def _dependency_audit_scope(
+    state: CaseState,
+    *,
+    integration_call: bool,
+    finalize_only: bool,
+    required_dependency_kind: str | None,
+) -> tuple[str, ...]:
+    """意味統合時だけ下位規範判断を要求し、最終整形では再提出させない。"""
+
+    if (
+        finalize_only
+        or not integration_call
+        or required_dependency_kind is None
+    ):
+        return ()
+    return _dependency_audit_work_item_ids(state)

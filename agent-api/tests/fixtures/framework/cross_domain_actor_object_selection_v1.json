@@ -1,0 +1,79 @@
+{
+  "fixtureId": "cross-domain-actor-object-selection-v1",
+  "purpose": "候補の法分野や固有語ではなく、主体・行為・対象の一致で選別することを確認する",
+  "question": "土地所有者から借りた土地で開発行為を行う事業者に必要な許可条件を確認したい。",
+  "hypotheses": [
+    {
+      "hypothesis_id": "h-developer-permit",
+      "statement": "借地上で開発行為を行う事業者は、一定の条件では事前に許可を受ける必要がある。"
+    }
+  ],
+  "assessment": {
+    "assessments": [
+      {
+        "article_id": "article-developer-permit",
+        "legal_function": "applicability",
+        "summary": "開発行為を行おうとする事業者に、一定の場合の許可取得義務を課す。",
+        "matched_hypothesis_ids": [
+          "h-developer-permit"
+        ]
+      },
+      {
+        "article_id": "article-landowner-duty",
+        "legal_function": "applicability",
+        "summary": "土地所有者に、土地の管理に関する義務を課す。",
+        "matched_hypothesis_ids": []
+      }
+    ]
+  },
+  "validSelection": {
+    "selections": [
+      {
+        "article_id": "article-developer-permit",
+        "reason": "質問の行為者である開発事業者の許可取得義務を直接検証できる。"
+      }
+    ]
+  },
+  "invalidSelection": {
+    "selections": [
+      {
+        "article_id": "article-landowner-duty",
+        "reason": "同じ土地に関する規定である。"
+      }
+    ]
+  },
+  "realModelVerification": {
+    "provider": "openai",
+    "model": "gpt-4o-mini-2024-07-18",
+    "profileVersion": "170",
+    "assessment": {
+      "assessments": [
+        {
+          "article_id": "article-developer-permit",
+          "legal_function": "procedure",
+          "summary": "都市計画区域または準都市計画区域内で開発行為を行う者は、国土交通省令に従い、都道府県知事の許可を事前に受ける必要がある。",
+          "matched_hypothesis_ids": [
+            "h-developer-permit"
+          ]
+        },
+        {
+          "article_id": "article-landowner-duty",
+          "legal_function": "scope",
+          "summary": "土地の所有者は、その土地を適正に管理し、周辺環境の保全に努める責務がある。",
+          "matched_hypothesis_ids": []
+        }
+      ]
+    },
+    "selection": {
+      "article_id": "article-developer-permit",
+      "reason": "借地上で開発行為を行う事業者の許可条件を直接検証できる。"
+    },
+    "deferred_article_ids": [
+      "article-landowner-duty"
+    ],
+    "inputTokens": 3654,
+    "outputTokens": 295,
+    "attemptCount": 2,
+    "validationError": null
+  }
+}

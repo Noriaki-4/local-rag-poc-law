@@ -14,6 +14,7 @@ sys.path.insert(0, str(REPO_ROOT / "agent-api"))
 
 from app.adapters.models.structured_json import (  # noqa: E402
     render_cycle_close_model_call,
+    render_dependency_assessment_model_call,
     render_observation_integration_model_call,
     render_reviewer_model_call,
     render_search_assessment_model_call,
@@ -43,6 +44,7 @@ _SOLVER_STAGES = {
     "search_planning": "solver_search_planning",
     "integration": "solver_integration",
     "observation_integration": "solver_cycle_close",
+    "dependency_assessment": "solver_cycle_close",
     "cycle_close": "solver_cycle_close",
     "finalization": "solver_finalization",
     "reviewer_revision": "solver_reviewer_revision",
@@ -173,6 +175,27 @@ def _render(
         )
     elif stage == "observation_integration":
         rendered = render_observation_integration_model_call(context, profile)
+    elif stage == "dependency_assessment":
+        observation_value = fixture.get("observationIntegration")
+        if not isinstance(observation_value, dict):
+            observed_decision = fixture.get("observedSolverDecision")
+            if not isinstance(observed_decision, dict):
+                raise ValueError(
+                    "dependency_assessment fixture requires "
+                    "observationIntegration or observedSolverDecision"
+                )
+            update = observed_decision.get("update") or {}
+            observation_value = {
+                "decision_reason": observed_decision.get("decision_reason")
+                or "保存済みの本文評価",
+                "update_work_items": update.get("update_work_items") or [],
+                "update_hypotheses": update.get("update_hypotheses") or [],
+            }
+        rendered = render_dependency_assessment_model_call(
+            context,
+            ObservationIntegrationDecision.model_validate(observation_value),
+            profile,
+        )
     elif stage == "cycle_close":
         observation_value = fixture.get("observationIntegration")
         if not isinstance(observation_value, dict):

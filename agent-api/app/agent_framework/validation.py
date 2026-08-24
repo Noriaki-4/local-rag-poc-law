@@ -305,19 +305,36 @@ def apply_solver_decision(
     new_requests_by_id = {
         item.request_id: item for item in decision.tool_requests
     }
+    duplicate_search_scopes = [
+        request
+        for request in decision.tool_requests
+        if request.tool_name == "legal_search"
+        and _tool_request_scope(request) in completed_search_scopes
+    ]
+    if duplicate_search_scopes:
+        duplicate_details = [
+            {
+                "work_item_id": request.work_item_id,
+                "hypothesis_ids": list(request.hypothesis_ids),
+                "arguments": request.arguments,
+            }
+            for request in duplicate_search_scopes
+        ]
+        raise ContractViolation(
+            "successful legal_search scope was already completed: "
+            + json.dumps(
+                duplicate_details,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
     for request in decision.tool_requests:
         if request.request_id in request_ids or request.request_id in new_request_ids:
             raise ContractViolation(f"duplicate tool request ID: {request.request_id}")
         new_request_ids.add(request.request_id)
         if request.tool_name not in known_tool_names:
             raise ContractViolation(f"unknown tool: {request.tool_name}")
-        if (
-            request.tool_name == "legal_search"
-            and _tool_request_scope(request) in completed_search_scopes
-        ):
-            raise ContractViolation(
-                "successful legal_search scope was already completed"
-            )
         for (tool_name, argument_name), max_items in (
             tool_list_argument_limits or {}
         ).items():
@@ -758,7 +775,10 @@ def apply_solver_decision(
                 f"dependency decision references unknown work item: "
                 f"{dependency.work_item_id}"
             )
-        if not dependency.basis_evidence_ids:
+        if (
+            not dependency.basis_evidence_ids
+            and dependency.status != "needs_action"
+        ):
             raise ContractViolation("dependency decision requires basis evidence")
         if len(dependency.basis_evidence_ids) != len(
             set(dependency.basis_evidence_ids)
@@ -806,6 +826,20 @@ def apply_solver_decision(
         dependency_by_key[
             (dependency.dependency_kind, dependency.work_item_id)
         ] = dependency
+
+    closed_dependency_work_items = sorted(
+        {
+            dependency.work_item_id
+            for dependency in decision.dependency_decisions
+            if dependency.status == "needs_action"
+            and work_items[dependency.work_item_id].state != "open"
+        }
+    )
+    if closed_dependency_work_items:
+        raise ContractViolation(
+            "needs_action dependency requires open WorkItem IDs: "
+            f"{closed_dependency_work_items}"
+        )
 
     if required_dependency_kind is not None and require_dependency_decisions:
         provided_scope_ids = {
