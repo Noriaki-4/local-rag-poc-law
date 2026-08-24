@@ -18,6 +18,14 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--violation-sequence", type=int)
     parser.add_argument("--fixture-id", required=True)
     parser.add_argument("--question-id", required=True)
+    parser.add_argument(
+        "--approved-by",
+        help="承認済みcheckpointとして再生を許可する確認者名。",
+    )
+    parser.add_argument(
+        "--source-provider",
+        choices=("anthropic", "openai", "ollama"),
+    )
     parser.add_argument("--output", required=True, type=Path)
     return parser.parse_args()
 
@@ -86,6 +94,13 @@ def main() -> None:
             "model": record["model"],
             "profileName": record.get("profileName"),
             "profileVersion": record.get("profileVersion"),
+        },
+        "checkpoint": {
+            "resumeFrom": record["purpose"],
+            "approved": args.approved_by is not None,
+            "approvedBy": args.approved_by,
+            "sourceProvider": args.source_provider,
+            "sourceModel": record["model"],
         },
         "expectations": {
             "researchCycleCount": solver_context["research_cycle_count"],

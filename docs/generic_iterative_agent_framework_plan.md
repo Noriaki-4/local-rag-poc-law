@@ -33,8 +33,9 @@
 - 現行経路では、主要な`SolverContext / SolverDecision / CaseUpdate / WorkItem / Hypothesis /
   ToolRequest / DependencyDecision / FinalAnswer`の`Field.description`から`contract_glossary`を決定的に生成し、
   全Solver呼出しへ合成する。Toolは`ToolDefinition`に正規名、用途、Provider非依存の入力Schema、
-  戻り値説明を持ち、利用可能な定義だけを`available_tools`へ投影する。OpenAI輸送は
-  `arguments`を構造化objectのまま受け、Provider別Adapterは意味名を変えず輸送制約だけを吸収する。
+  戻り値説明を持ち、利用可能な定義だけを`available_tools`へ投影する。v154では全Providerが
+  `update`、構造化`tool_requests`、実Article / Evidence IDを同じ意味契約で返し、Provider別Adapterは
+  API形式、schema方言、利用量、終了理由、エラーだけを吸収する。
   ただし全statusのowner・遷移・永続化versionを1つの正本から生成するPhase 1全体は未完了である。
 - Reviewerの既定値は無効で、新経路のFeature Flagも既定では無効である。
 - 現行Legal Profileは本文取得後の自動Graph連動を持たず、`automatic_tools=()`である。
@@ -57,7 +58,7 @@
   `classification-run-public-tender-mini-v1-v23`は17/17承認・24 Assertionでpublish済みである。
   `IMPLEMENTS/from_subject`と`EXCEPTION_TO/to_subject`の直接Tool確認では、金商法27条の2→施行令7条、
   施行令7条→府令2条の5、金商法27条の3→府令10条へ到達できる。全件indexはこの検証では再構築しない。
-- 回答経路では、Ollama用compact transportとAnthropic用hybrid transport、Graph差分Review、
+- 回答経路では、Provider共通の処理段階別compact transport、Graph差分Review、
   `lower_norm`依存監査を実装済みである。Gemmaは候補検索後の本文取得・完了判断が安定せず、Haikuでは
   必要本文取得まで進んだが、旧DependencyDecisionの委任元・委任先Evidence二重管理と180秒上限で
   完了が安定しなかった。v53ではDependencyDecisionをstatus、reason、判断根拠、追加ToolRequest参照だけへ
@@ -68,7 +69,8 @@
   Hypothesisの根拠へ残すか、実際に全て使うなら全件を引用する形へ再判断できるようにした。
   v57ではLegal Profileの全体上限を240秒へ変更し、通常探索・契約修復用の時間を使い切っても、予約した
   最終化時間へ制御を戻す。時間切れを法的な完了判断へ変換せず、未解決範囲は限定回答へ残す。
-  v58ではAnthropicが配列の`maxItems`を構造化出力で強制しない差を吸収するため、Article本文取得を
+  v58からv98のAnthropic専用固定slot、候補別名、Evidence sidecarはgrammar上限を回避するための
+  過去の輸送方式である。v58ではAnthropicが配列の`maxItems`を構造化出力で強制しない差を吸収するため、Article本文取得を
   `article_id_1`から最大4個の固定slotを持つ単一`article_fetch`として輸送する。各IDはLLMが選び、
   Adapterは1件の`fetch_articles`へ復元するだけで、候補の切捨てや優先順位付けを行わない。
   v60ではその他のToolRequestを、固定数のJSON object文字列slotで輸送する。完全なToolRequest schemaを
@@ -80,7 +82,7 @@
   `lower_norm=resolved`は委任元と末端の2つ以上の異なるArticle本文Evidenceを必要とする構造契約も追加した。
   また、Cycle境界で共通schemaが禁止した新規ToolをAnthropic / compact輸送schemaが再び許可しないよう、
   Tool slotを0件へ固定する。Cycleを閉じるか次Cycleへ進む意味判断はSolverが行う。
-  Anthropic輸送ではCaseUpdateのJSON文字列と、Hypothesisが選ぶEvidence IDの小さな構造化sidecarを分ける。
+  当時のAnthropic輸送ではCaseUpdateのJSON文字列と、Hypothesisが選ぶEvidence IDの小さな構造化sidecarを分けた。
   sidecarだけを提示済みIDへ制限して機械転記し、CaseUpdate全体の構造化でgrammar上限を超えることを避ける。
   ToolRequestも固定slotを維持する。v98では汎用slotの`tool_name`を構造化し、
   `legal_search / legal_graph_neighbors / load_evidence`だけを許可する。残りのRequest本体はJSON文字列で輸送する。
@@ -89,6 +91,9 @@
   また、今回更新するHypothesisだけをsidecar対象とし、
   選択可能な本文Evidenceがない場合は`null`を返す。sidecarをEvidence選択の正本として扱い、
   `update_json`内へ誤って残ったEvidence IDは採用しない。
+  v154ではこの方式を新規出力経路から撤去した。現在の処理段階で使わない`SolverDecision`欄をschemaから除き、
+  実行時IDをschemaの`enum`へ複製しない。LLMは共通の構造化objectと実IDを返し、Programが既知ID、重複、
+  件数、参照整合を共通validatorで検証する。旧sidecarの復元処理は保存済み診断payloadの読取り互換に限定する。
   また、本文取得済みArticleを`fetch_articles`候補から除外しても、そのArticleは既知のGraph起点として保持する。
   本文取得候補とGraph起点の許可集合を分離し、Graph由来かOpenSearch由来かを理由に後続1ホップ探索を禁止しない。
   共通輸送Promptは差分更新の正確なフィールド名と状態整合だけを短く構造化し、契約修復時は該当違反の規則だけを提示する。

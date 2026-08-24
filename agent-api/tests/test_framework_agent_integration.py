@@ -320,17 +320,30 @@ class FakeStructuredLLM:
         self.calls.append(kwargs)
         decision = self.payloads.pop(0)
         if "update" in kwargs["schema"]["properties"]:
+            defaults = {
+                "start_next_cycle": False,
+                "next_focus_work_item_ids": [],
+                "retain_evidence_ids": [],
+                "review_finding_resolutions": [],
+                "dependency_decisions": [],
+                "graph_candidate_review": None,
+                "frontier_re_adoptions": [],
+                "deferred_frontier_resolutions": [],
+                "unreviewed_graph_resolution": None,
+                "tool_requests": [],
+                "answer": None,
+            }
+            payload = {
+                "next": decision["next"],
+                "decision_reason": decision["decision_reason"],
+                "update": decision["update"],
+            }
+            for name in kwargs["schema"]["required"]:
+                if name in payload:
+                    continue
+                payload[name] = decision.get(name, defaults.get(name))
             return StructuredJSONResult(
-                payload={
-                    "next": decision["next"],
-                    "decision_reason": decision["decision_reason"],
-                    "start_next_cycle": False,
-                    "update": decision["update"],
-                    "next_focus_work_item_ids": decision.get(
-                        "next_focus_work_item_ids", []
-                    ),
-                    "tool_requests": decision.get("tool_requests", []),
-                },
+                payload=payload,
                 provider="fake",
                 model=kwargs["model"],
                 latencyMs=1,
@@ -522,7 +535,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "153"
+    assert diagnostic_records[0]["profileVersion"] == "154"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -530,7 +543,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "153"
+    assert transport_input["profileVersion"] == "154"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -883,7 +896,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "153"
+    assert profile.version == "154"
     mode_prompts = {
         "research": profile.solver_research.system_prompt,
         "integration": profile.solver_integration.system_prompt,
@@ -1098,7 +1111,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "153"
+    assert profile.version == "154"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -3292,7 +3305,7 @@ def test_transport_repair_explains_finalize_requires_an_answer() -> None:
     assert "start_next_cycle=true" in prompt
 
 
-def test_anthropic_prompt_limits_bindings_to_current_hypothesis_updates() -> None:
+def test_common_prompt_does_not_expose_provider_sidecars() -> None:
     context = build_solver_context(
         CaseState(case_id="case-1", question="質問"),
         AgentLimits(),
@@ -3306,12 +3319,12 @@ def test_anthropic_prompt_limits_bindings_to_current_hypothesis_updates() -> Non
         structured_tool_transport=True,
     )
 
-    assert "今回のupdate_jsonのadd_hypotheses" in prompt
-    assert "変更しない既存Hypothesisは返しません" in prompt
-    assert "専用fetch_articles欄は正規のfetch_articles ToolRequestの輸送表現" in prompt
-    assert "tool_name=fetch_articlesを決して再掲しません" in prompt
-    assert "dependency_article_bindingsへ判断に使った取得済みArticle ID" in prompt
-    assert "160文字以内の短いASCII識別子" in prompt
+    assert "update_json" in prompt
+    assert "update_json、tool_requests_json、arguments_jsonは返しません" in prompt
+    assert "hypothesis_evidence_bindings" not in prompt
+    assert "dependency_article_bindings" not in prompt
+    assert "fetch_articles_aliases" not in prompt
+    assert "schemaにないSolverDecision項目は返さず" in prompt
 
 
 def test_anthropic_generic_fetch_slot_is_canonicalized_without_another_model_call() -> None:

@@ -16,6 +16,7 @@ from app.agent_framework.model_call_artifacts import (
 from app.agent_framework.profiles import AgentLimits, ModelCallProfile
 from app.agent_framework.state import CaseState
 from app.domains.legal.profiles import legal_agent_profile
+from app.llm import _to_anthropic_schema
 
 
 def _context(case_id: str, question: str):
@@ -153,9 +154,9 @@ def test_provider_transport_is_explicit_in_artifacts(tmp_path) -> None:
         stage="research",
     )
 
-    assert openai.output_schema != anthropic.output_schema
+    assert openai.output_schema == anthropic.output_schema
     assert "transport_values" not in openai.input_payload
-    assert "transport_values" in anthropic.input_payload
+    assert "transport_values" not in anthropic.input_payload
     assert openai.normalized_schema == anthropic.normalized_schema
 
     paths = write_model_call_artifacts(
@@ -181,6 +182,52 @@ def test_provider_transport_is_explicit_in_artifacts(tmp_path) -> None:
     assert manifest["outputSchemaHash"] == openai.output_schema_hash
     assert manifest["normalizedSchemaHash"] == openai.normalized_schema_hash
     assert manifest["requestHash"] == openai.request_hash
+
+
+def test_cycle_close_uses_small_provider_common_schema_without_runtime_id_enums() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures/framework/tob_overview_cycle1_close_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    context = SolverContext.model_validate(fixture["solverContext"])
+    profile = legal_agent_profile().solver_cycle_close
+    assert profile is not None
+
+    rendered = [
+        render_solver_model_call(
+            context,
+            profile,
+            provider=provider,
+            stage="cycle_close",
+        )
+        for provider in ("openai", "anthropic", "ollama")
+    ]
+
+    assert rendered[0].output_schema == rendered[1].output_schema
+    assert rendered[1].output_schema == rendered[2].output_schema
+    schema = rendered[0].output_schema
+    assert "update_json" not in schema["properties"]
+    assert "hypothesis_evidence_bindings" not in schema["properties"]
+    assert "dependency_article_bindings" not in schema["properties"]
+    assert "fetch_articles" not in schema["properties"]
+    dependency = schema["properties"]["dependency_decisions"]
+    assert "enum" not in dependency["items"]["properties"]["work_item_id"]
+    serialized = json.dumps(schema, ensure_ascii=False)
+    assert context.fetchable_article_ids[0] not in serialized
+    assert len(serialized) < 20_000
+    anthropic_schema = _to_anthropic_schema(schema)
+
+    def count_any_of(value) -> int:
+        if isinstance(value, dict):
+            return int("anyOf" in value) + sum(
+                count_any_of(item) for item in value.values()
+            )
+        if isinstance(value, list):
+            return sum(count_any_of(item) for item in value)
+        return 0
+
+    assert count_any_of(anthropic_schema) <= 16
 
 
 @pytest.mark.parametrize("provider", ["openai", "anthropic", "ollama"])

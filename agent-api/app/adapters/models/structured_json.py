@@ -462,27 +462,17 @@ def render_solver_model_call(
         context,
         profile.available_tool_names,
     )
-    compact_transport = initial_research or provider in {"ollama", "openai"}
-    structured_tool_transport = not initial_research and provider == "anthropic"
     output_schema = (
-        _initial_research_transport_schema(projected_context)
-        if initial_research
-        else (
-            _solver_compact_transport_schema(context)
-            if compact_transport
-            else (
-                _solver_anthropic_transport_schema(context)
-                if structured_tool_transport
-                else _solver_transport_schema(context)
-            )
+        _strip_runtime_id_enums(
+            _initial_research_transport_schema(projected_context)
         )
+        if initial_research
+        else _solver_common_transport_schema(projected_context)
     )
     return _render_solver_model_call(
         context,
         profile.system_prompt,
         completion_check_prompt=profile.completion_check_prompt,
-        compact_transport=compact_transport,
-        structured_tool_transport=structured_tool_transport,
         output_schema=output_schema,
         input_payload=_solver_context_payload(
             projected_context,
@@ -502,36 +492,19 @@ def _render_solver_model_call(
     system_prompt: str,
     *,
     completion_check_prompt: str | None = None,
-    compact_transport: bool = False,
-    structured_tool_transport: bool = False,
     output_schema: dict[str, Any] | None = None,
     input_payload: dict[str, Any] | None = None,
     minimal_contract: str = "",
     stage: str = "solver",
 ) -> RenderedModelCall:
     if output_schema is None:
-        output_schema = (
-            _solver_compact_transport_schema(context)
-            if compact_transport
-            else (
-                _solver_anthropic_transport_schema(context)
-                if structured_tool_transport
-                else _solver_transport_schema(context)
-            )
-        )
-    transport_instruction = _solver_transport_instruction(
-        compact_transport=compact_transport,
-        structured_tool_transport=structured_tool_transport,
-    )
+        output_schema = _solver_common_transport_schema(context)
+    transport_instruction = _solver_transport_instruction()
     repair_instructions = _contract_repair_catalog(context)
     if input_payload is None:
         input_payload = context.model_dump(mode="json")
     else:
         input_payload = deepcopy(input_payload)
-    if structured_tool_transport:
-        input_payload["transport_values"] = {
-            "fetch_articles_aliases": _article_fetch_alias_map(context),
-        }
     decision_field_names = tuple(
         name
         for name in output_schema.get("properties", {})
@@ -674,70 +647,18 @@ def _solver_prompt(
         context,
         system_prompt,
         completion_check_prompt=completion_check_prompt,
-        compact_transport=compact_transport,
-        structured_tool_transport=structured_tool_transport,
     ).request
 
 
-def _solver_transport_instruction(
-    *,
-    compact_transport: bool,
-    structured_tool_transport: bool,
-) -> str:
+def _solver_transport_instruction() -> str:
     return (
         "以下は現在のSolverContextです。コンパクト輸送schemaに従い、"
         "復元後SolverDecisionのうちupdateを構造化object、tool_requestsを"
         "構造化配列として直接返してください。各ToolRequestのargumentsは、"
         "available_toolsにある該当Toolのinput_schemaへ一致するJSON objectとして返します。"
         "update_json、tool_requests_json、arguments_jsonは返しません。"
-        "AdapterがSolverDecisionとして上記契約で完全検証します。\n"
-        if compact_transport
-        else (
-            "以下は現在のSolverContextです。Anthropic軽量輸送schemaに従い、"
-            "update全体はupdate_jsonへJSON object文字列として格納します。"
-            "add_hypothesesとupdate_hypothesesのevidence_idsはupdate_json内では空配列にし、"
-            "実際に選ぶ既知Evidence IDはhypothesis_evidence_bindingsへ返してください。"
-            "hypothesis_evidence_bindingsには今回のupdate_jsonのadd_hypothesesまたは"
-            "update_hypothesesに含めたhypothesis_idだけを返し、変更しない既存Hypothesisは返しません。"
-            "grounding_evidence_idsが空ならhypothesis_evidence_bindingsはnullにし、update_jsonで"
-            "追加・更新するHypothesisはjudgment=unresolved、evidence_ids=[]のままにします。"
-            "検索候補だけでsupported/contradictedにせず、必要なArticle本文を取得します。"
-            "dependency_decisionsはWorkItemごとの固定JSON文字列slotです。各slotへ"
-            "dependency_kind、work_item_id、status、reason、basis_evidence_ids、action_request_idを持つ"
-            "1個のobjectをJSON文字列化して返します。指定されたwork_item_idは変更せず、"
-            "basis_evidence_idsは空配列にします。実際に使う既知Evidence IDは"
-            "直接返さず、dependency_article_bindingsへ判断に使った取得済みArticle IDを"
-            "WorkItemごとに1件返します。Adapterが選ばれたArticleの取得済みEvidence IDを"
-            "basis_evidence_idsへ機械転記します。"
-            "legal_search、legal_graph_neighbors、load_evidenceはtool_requestsへ"
-            "固定slotとして返してください。各tool_request_N_jsonにはtool_nameとrequest_jsonを持つ"
-            "objectを返し、request_jsonにはrequest_id、work_item_id、arguments、purpose、"
-            "hypothesis_idsを持つToolRequestをJSON文字列化して格納します。外側のtool_nameが正本で、"
-            "使わないslotはnullにします。新規request_idは"
-            "160文字以内の短いASCII識別子にし、説明文はpurposeへ入れます。"
-            "fetch_articlesだけはtool_requestsへ入れず、"
-            "専用fetch_articles欄へ1件だけ返し、article_ref_1から順に上記の既知候補別名を指定してください。"
-            "既知候補別名とArticle IDの対応はSolverContext.transport_values.fetch_articles_aliasesにあります。"
-            "専用fetch_articles欄は正規のfetch_articles ToolRequestの輸送表現であり、追加情報ではありません。"
-            "専用fetch_articles欄を返す場合も返さない場合も、tool_requestsの各slotへ"
-            "tool_name=fetch_articlesを決して再掲しません。"
-            "不要な残りslotはnullにします。"
-            "各ToolRequest内のargumentsはJSON objectのまま格納し、arguments_jsonと"
-            "tool_requests_jsonは返しません。"
-            "Adapterがupdate_json、Evidence対応、各ToolRequest文字列、専用fetch_articles欄を復元し、SolverDecisionとして"
-            "上記契約で完全検証します。\n"
-            if structured_tool_transport
-            else (
-                "以下は現在のSolverContextです。Provider輸送schemaに従い、"
-                "next、next_focus_work_item_ids、retain_evidence_ids、answerは直接返し、"
-                "update全体をupdate_json、tool_requests全体をtool_requests_jsonへ"
-                "JSON文字列化し、dependency_decisionsはschemaどおりの配列として直接"
-                "返し、graph_candidate_review、search_candidate_review、frontier_re_adoptions、"
-                "deferred_frontier_resolutions、unreviewed_graph_resolutionもschemaどおり直接返してください。"
-                "Adapterが2つのJSON文字列を復元し、"
-                "SolverDecisionとして上記契約で完全検証します。\n"
-            )
-        )
+        "schemaにないSolverDecision項目は返さず、既定値へ復元します。"
+        "Adapterが既知ID、件数、参照整合を含む共通契約で完全検証します。\n"
     )
 
 
@@ -1847,6 +1768,91 @@ def _solver_compact_transport_schema(context: SolverContext) -> dict:
         for item in schema["required"]
     ]
     return schema
+
+
+def _solver_common_transport_schema(context: SolverContext) -> dict[str, Any]:
+    """全Providerへ渡す、現在の処理に必要な意味項目だけのschema。"""
+
+    schema = _solver_compact_transport_schema(context)
+    properties = schema["properties"]
+    graph_review_mode = bool(
+        context.graph_review_batch.candidates and not context.finalize_only
+    )
+    if graph_review_mode:
+        included = {
+            "next",
+            "decision_reason",
+            "graph_candidate_review",
+        }
+    else:
+        included = {
+            "next",
+            "decision_reason",
+            "start_next_cycle",
+            "update",
+            "next_focus_work_item_ids",
+        }
+        if context.evidence_manifest:
+            included.add("retain_evidence_ids")
+        if context.reviewer_findings:
+            included.add("review_finding_resolutions")
+        if context.required_dependency_work_item_ids:
+            included.add("dependency_decisions")
+        if context.graph_review_ledger:
+            included.add("frontier_re_adoptions")
+        if any(
+            item.review_status == "relevant_deferred"
+            and item.content_status in {"not_requested", "failed", "timeout"}
+            and item.deferred_resolution_action != "no_longer_needed"
+            for item in context.graph_review_ledger
+        ):
+            included.add("deferred_frontier_resolutions")
+        if context.graph_review_batch.remaining_unreviewed_count:
+            included.add("unreviewed_graph_resolution")
+        if not _schema_is_empty_array(properties["tool_requests"]):
+            included.add("tool_requests")
+        if properties["answer"].get("type") != "null":
+            included.add("answer")
+
+    schema["properties"] = {
+        name: value
+        for name, value in properties.items()
+        if name in included
+    }
+    schema["required"] = [
+        name for name in schema["required"] if name in included
+    ]
+    return _strip_runtime_id_enums(schema)
+
+
+def _schema_is_empty_array(schema: dict[str, Any]) -> bool:
+    return schema.get("type") == "array" and schema.get("maxItems") == 0
+
+
+def _strip_runtime_id_enums(
+    value: Any,
+    field_name: str | None = None,
+) -> Any:
+    """実行時IDをschemaへ複製せず、既知性は共通validatorへ委ねる。"""
+
+    if isinstance(value, list):
+        return [_strip_runtime_id_enums(item, field_name) for item in value]
+    if not isinstance(value, dict):
+        return value
+    converted: dict[str, Any] = {}
+    for key, item in value.items():
+        if key == "properties" and isinstance(item, dict):
+            converted[key] = {
+                name: _strip_runtime_id_enums(schema, name)
+                for name, schema in item.items()
+            }
+        else:
+            converted[key] = _strip_runtime_id_enums(item, field_name)
+    if field_name is not None and (
+        field_name.endswith("_id") or field_name.endswith("_ids")
+    ):
+        converted.pop("enum", None)
+    return converted
 
 
 def _solver_anthropic_transport_schema(context: SolverContext) -> dict:

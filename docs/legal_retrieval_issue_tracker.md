@@ -1,6 +1,6 @@
 # 法令検索 課題管理
 
-> 更新日: 2026-08-23
+> 更新日: 2026-08-24
 >
 > 本書は、法令検索の現在地、未解決課題、優先順位、完了条件を管理する。
 > 設計仕様の正本ではない。Agent契約は
@@ -63,7 +63,7 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-001` | P0 | 対応中 | 質問から必要な検索仮説を漏れなく作る | v150〜v152で規定存在や質問の言い換えを再現した。v153の労働法fixtureではHaikuが要件・上限構造・手続行為を含む仮説を1回で生成した | 収録済みの別分野でもHypothesisと`gaps`の意味形を実モデル確認する |
 | `LR-002` | P0 | 検証待ち | 法令検索表現を作り、同一Cycle内でOpenSearchを適切に再検索する | 「必要な手続」を「公告・届出・通知・提出・期間・様式」等へ言い換えるPromptと複数stepは実装済み | 初回検索、本文観察後の検索語変更、同一scopeの重複防止をtraceで確認する |
 | `LR-003` | P0 | 検証待ち | Graph由来Articleを起点に連続1ホップ探索する | 固定selectorでは法律→施行令→府令へ到達でき、Graph由来Articleの再起点化も実装済み | OpenSearchだけでは末端Articleを発見できない条件で、実モデルが2回の1ホップを選ぶE2E試験を通す |
-| `LR-004` | P0 | 対応中 | 複合問題の統合Decisionを成立させ、次の探索または完了へ進む | v153のHaiku実データE2EはCycle 2まで進んだが、AnthropicがIntegrationのstrict schemaを大きすぎるとして400で拒否した | IntegrationのProvider schemaを現処理に必要な項目へ縮小し、収録済み問題で再実行する |
+| `LR-004` | P0 | 対応中 | 複合問題の統合Decisionを成立させ、次の探索または完了へ進む | v153のHaiku実データE2EはCycle 2まで進んだが、AnthropicがIntegrationのstrict schemaを大きすぎるとして400で拒否した | `LR-013`の共通小型契約を適用し、収録済み問題で再実行する |
 | `LR-005` | P0 | 未着手 | `gpt-4o-mini`で新検索経路を実モデル評価する | Provider接続、Structured Outputs、model切替は実装済み。法令E2Eは未実施 | Reviewer無効で公開買付け3問を実行し、Hypothesis、Tool、Evidence、Cycle、時間を記録する |
 | `LR-006` | P1 | 要設計 | 意味分類coverage不足時にも逆引き検索爆発と取りこぼしを両立させる | publish済み意味関係ならselectorで絞れるが、未分類範囲でraw `REFERENCES/to_subject`を使うと高fan-inになる | 限定fallbackの発動条件、scope上限、coverage不足の表示、限定回答条件を決める |
 | `LR-007` | P1 | 未着手 | CycleとStepを再開可能な状態として保存する | WorkItem、Hypothesis、Evidence、Graph review履歴はあるが、目標の`CycleRecord / StepRecord / ExplorationState`は未実装 | Tool観察後の中断から同じStepを再開し、別Cycleとして数えないfixtureを通す |
@@ -72,6 +72,8 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-010` | P2 | 停止中 | 全件Relation分類を安全に再開する | 全件Runは1,615 checkpointで参照scopeと改正法構造の問題が見つかり停止中 | shadow差分監査、影響候補特定、再開条件合格後に同じsnapshot・checkpointから再開する |
 | `LR-011` | P2 | 要設計 | 自治体の条例・規則・要綱を使う小規模データセットを決める | 自治体向け利用像はあるが、データセットは未決定 | 上位法令改正→条例→規則→要綱の逆引きを検証できる最小集合を利用者と決める |
 | `LR-012` | P0 | 完了 | LLMの固定指示、実行時入力、最終契約を分離し、レビュー可能な成果物として出力する | API送信・診断・成果物出力が同じ`RenderedModelCall`を使用し、snapshotでは呼出し別ファイルを出力する。代表research fixtureはOpenAI・Anthropic・Ollamaの基準成果物を持つ | 固定指示hash、動的入力hash、両schema、実送信hashの回帰テストと全887テストに合格 |
+| `LR-013` | P0 | 検証待ち | Provider共通の小さいSolver輸送契約へ統一する | v154で全Providerを同じ処理段階別schemaへ統一し、Anthropic専用sidecarを新規経路から外した。実行時IDはenumへ複製せず共通validatorで検証する。代表Cycle Close schemaは14,494文字から7,014文字へ減少し、全895テストに合格した | 同じcheckpointをHaikuで再生し、Integrationがgrammar complexityの400エラーにならないことを確認する |
+| `LR-014` | P1 | 検証待ち | Haikuで承認した中間状態から安価なモデルで後続処理を再生する | checkpointの明示承認をpromotion時に記録し、指定Provider・modelで1回のSolver処理を再生する`replay_agent_checkpoint.py`を実装した。APIを使わない単体テストは合格した | Haikuの正常中間状態を承認済みfixtureへ昇格し、`gpt-4o-mini`、同じcheckpointのHaikuの順に実モデル再生する |
 
 ## 4. 最優先分析: 複合問題の統合
 
@@ -322,6 +324,26 @@ Programは既知ID、型、件数、参照整合、予算を検証する。Evide
 - 通常実行の成果物はGit管理外、代表fixtureの基準成果物だけをGit管理し、再生成差分をテストで検出する。
 - 既存fixtureを固有の回帰価値で監査し、古いPrompt文言または修正済み輸送形式だけを固定するものを削除する。
 
+### LR-013 Provider共通の小型Solver輸送契約
+
+- 同じ処理段階と`SolverContext`から、OpenAI、Anthropic、Ollamaへ同じ意味項目を持つ
+  `output_schema.json`を生成する。Provider差で正規契約の項目名や意味を変えない。
+- `update_json`、`tool_request_N_json`、Article別名、Evidence対応sidecarを新規出力に使わない。
+- schemaへ実行時IDの全件を`enum`として埋め込まず、LLMが返したIDの既知性、重複、件数、参照整合は
+  共通validatorで検証する。
+- 現在の処理段階で使用できない`SolverDecision`欄をProvider schemaから除外し、欠落欄は正規契約の
+  既定値へ復元する。意味上必要な欄を入力容量のために黙って除外しない。
+- 代表fixtureで、Provider schemaの文字量、固定指示の文字量、正規化後Decision、契約違反を比較できる。
+- HaikuのIntegration呼出しがgrammar complexityの400エラーにならず、共通契約として検証される。
+
+### LR-014 承認済みcheckpointからのモデル差替え再生
+
+- 診断fixtureに、再生開始境界、元Provider・model、承認状態を記録できる。
+- fixtureの`SolverContext`を変更せず、指定したProvider・modelで1回の後続Solver処理を実行できる。
+- 通常のpytestと成果物生成は外部APIを呼ばず、実モデル再生は明示コマンドだけで実行する。
+- `gpt-4o-mini`の成功を正解とはみなさず、Prompt・契約・プログラム境界の切り分けに使う。
+  修正の最終確認は同じfixtureをHaikuで再生し、最後にHaikuのE2Eを行う。
+
 ## 6. 確認済みの前提
 
 次は新規課題として再度設計し直さず、回帰対象として維持する。
@@ -339,7 +361,9 @@ Programは既知ID、型、件数、参照整合、予算を検証する。Evide
 ## 7. 推奨する実行順
 
 ```text
-LR-012  固定指示・動的入力・最終契約の成果物出力を整備
+LR-013  Provider共通の小型Solver輸送契約へ統一
+    ↓
+LR-014  Haiku承認済みcheckpointをgpt-4o-miniで再生可能にする
     ↓
 LR-004  Cycle 1直後の統合fixtureと計測を整備
     ↓
@@ -374,3 +398,4 @@ LR-010  必要性と費用を再評価して全件分類を再開
 | 2026-08-21 | Haiku・総合問題 | 240秒で停止し、必要Article 2/6。第二期Step 1は未合格 | [第二期開発備忘録](second_phase_development_memo.md#22-第二期step-1公開買付け3階層ミニデータセット) |
 | 2026-08-22 | OpenAI Provider | `gpt-4o-mini`への切替とStructured Outputs接続を実装。法令E2Eは未実施 | [RUNBOOK](../RUNBOOK.md) |
 | 2026-08-23 | LR-012 Prompt・契約成果物 | 固定指示、動的入力、Provider schema、正規化後schema、実送信内容を分離。3 Provider基準成果物と全887テストに合格 | [RUNBOOK](../RUNBOOK.md) |
+| 2026-08-24 | LR-013 / LR-014 共通小型契約・checkpoint再生 | Legal Profile v154。Provider共通schema、実行時IDの事後検証、承認済みcheckpoint再生コマンドを実装。代表Cycle Close schemaは14,494→7,014文字、全895テスト合格。実モデル再生は未実施 | [RUNBOOK](../RUNBOOK.md) |

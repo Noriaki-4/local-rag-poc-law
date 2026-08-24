@@ -1144,8 +1144,9 @@ LLMへの入力tokenは増えない。通常は`off`を維持し、再現対象�
 `solverDecisionHash`を持つ。同じhashにより、生応答、正規化後、契約違反、CaseState適用の境界を区別する。
 Prompt assetの本文を変更した場合はProfile versionも更新し、実行時の来歴と設定上の契約versionを一致させる。
 
-APIを呼ばず、固定fixtureから同じ成果物を生成・差分確認できる。Providerを変更すると輸送指示と
-`output_schema.json`だけでなく実送信内容も変わるため、対象Providerを明示する。
+APIを呼ばず、固定fixtureから同じ成果物を生成・差分確認できる。v154以降、同じ処理段階では
+Providerを変更しても固定指示と意味上の`output_schema.json`を変えない。Provider指定はmanifestと、
+API送信時のschema方言・request envelopeを確認するために残す。
 
 ```bash
 agent-api/.venv/bin/python scripts/export_agent_model_call_artifacts.py \
@@ -1169,8 +1170,9 @@ Solverへ渡る項目の基本的な意味はPydanticの`Field.description`か�
 Toolの正規名、用途、入力Schema、戻り値は実行時の`available_tools`へ投影する。
 `snapshot`では、Providerへ実際に渡したPrompt内の`contract_glossary`と
 `solver_context.available_tools`、構造化出力schemaが同じ正規項目名を使っていることを確認する。
-OpenAI経路のTool引数は`arguments` objectであり、`arguments_json`の二重JSONを新規出力しない。
-Anthropic adapterに輸送上のsidecarが必要でも、正規の契約名と意味は変更しない。
+全ProviderのTool引数は`arguments` objectであり、`arguments_json`の二重JSONを新規出力しない。
+Anthropic専用の`update_json`、固定Tool slot、候補別名、Evidence sidecarも新規出力しない。
+LLMが返した実IDの既知性、重複、件数、参照整合は共通validatorで検証する。
 
 特定の`solver_input`を外部LLMなしで再現するfixtureへ固定する場合は、診断JSONLの`sequence`を指定する。
 `sequence`は診断ファイル内の対象recordを`jq`等で確認してから選ぶ。次は公開買付け総合問題の、初回
@@ -1182,6 +1184,8 @@ python3 scripts/promote_agent_diagnostic_fixture.py \
   --sequence 6 \
   --fixture-id tob-overview-cycle1-after-search-v1 \
   --question-id tob-overview \
+  --source-provider anthropic \
+  --approved-by human-review \
   --output agent-api/tests/fixtures/framework/tob_overview_cycle1_after_search_v1.json
 ```
 
@@ -1189,6 +1193,19 @@ python3 scripts/promote_agent_diagnostic_fixture.py \
 回帰テストでは同じ`CaseState`から`SolverContext`を再投影し、完全一致を確認する。元の診断JSONLや
 Prompt全体はfixtureへ複製しない。現在の`after-search` fixtureは本文取得前の失敗分析用であり、
 LR-004が求める「Cycle 1で3 Article取得直後」のfixtureとは区別する。
+
+承認済みcheckpointから先のSolver呼出しだけを安価なmodelで再生する場合は、次を使う。このコマンドは
+外部APIを呼ぶため通常のpytestやCIには含めない。`gpt-4o-mini`の結果はPrompt・契約・Program境界の
+切り分けに使い、最終合格は同じcheckpointのHaiku再生とHaiku E2Eで確認する。
+
+```bash
+python3 scripts/replay_agent_checkpoint.py \
+  --fixture agent-api/tests/fixtures/framework/tob_overview_cycle1_after_search_v1.json \
+  --provider openai \
+  --model gpt-4o-mini-2024-07-18 \
+  --stage integration \
+  --output eval-results/checkpoint-replay/tob-overview-openai.json
+```
 
 各Solver呼出しは、内部思考の逐語記録ではなく、そのStepで`continue`または`finalize`を選ぶ直接の理由を
 `SolverDecision.decision_reason`へ一文で返す。構造契約を通過してCaseStateへ適用されたDecisionだけを
