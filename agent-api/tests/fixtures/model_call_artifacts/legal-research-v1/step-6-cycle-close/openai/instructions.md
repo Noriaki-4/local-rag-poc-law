@@ -18,15 +18,18 @@
 ## 手順
 
 1. open WorkItem、unresolved Hypothesis、`status=needs_action`の下位規範確認が残るか確認します。
-2. いずれかが残り、`can_start_next_cycle=true`なら`start_next_cycle`を選びます。
-3. 全確認事項を取得本文で回答できる場合、または次Cycleを開始できない場合は`finalize`を選びます。
-4. 次Cycleを始める場合だけ、優先するWorkItemと再提示が必要なEvidenceを選びます。
-5. `finalize`では、確認済み範囲と未確認範囲を区別した根拠付き回答を返します。
+2. `active_deferred_frontiers`の各候補について、次の扱いを1件ずつ`deferred_frontier_resolutions`へ書きます。
+3. 未確認事項が残り、`can_start_next_cycle=true`なら`start_next_cycle`を選びます。
+4. 全確認事項を取得本文で回答できる場合、または次Cycleを開始できない場合は`finalize`を選びます。
+5. 次Cycleを始める場合だけ、優先するWorkItemと再提示が必要なEvidenceを選びます。
+6. `finalize`では、確認済み範囲と未確認範囲を区別した根拠付き回答を返します。
 
 ## ルール
 
 - `retain_evidence_ids`には`retainable_evidence`にあるEvidence IDだけを指定します。
 - Article ID、検索候補ID、Graph候補IDを`retain_evidence_ids`へ入れません。
+- `active_deferred_frontiers`があれば全件を処理します。次Cycleで本文を取得する候補は`fetch_next_cycle`、保留する候補は`carry_forward`、確認済み範囲には不要になった候補は`no_longer_needed`にします。上限で次Cycleへ進めない場合だけ`unresolved_at_limit`にします。
+- `fetch_next_cycle`と`carry_forward`は、対応するWorkItemがopenで`start_next_cycle`を選ぶ場合だけ使います。WorkItemとHypothesisが解決済みなら、残った候補を`no_longer_needed`にして`finalize`します。
 - `start_next_cycle`では`answer=null`にします。
 - `finalize`では`answer`を返します。
 - 次Cycleの検索計画は次Cycleで作るため、ここでは作りません。
@@ -36,5 +39,7 @@
 ## 出力前の確認
 
 1. 本文評価を反映済みの状態から、完了または次Cycleを選んだか確認します。
-2. 次Cycleへ送るIDが`retainable_evidence`とopen WorkItemのIDだけか確認します。
-3. `start_next_cycle`と`finalize`の出力を混在させていないか確認します。
+2. `active_deferred_frontiers`の全IDを`deferred_frontier_resolutions`で1回ずつ扱ったか確認します。
+3. open WorkItem、unresolved Hypothesis、`needs_action`、後続確認が必要なGraph候補がないのに`start_next_cycle`を選んでいないか確認します。
+4. 次Cycleへ送るIDが`retainable_evidence`とopen WorkItemのIDだけか確認します。
+5. `start_next_cycle`と`finalize`の出力を混在させていないか確認します。

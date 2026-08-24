@@ -381,6 +381,14 @@ class SolverContext(FrameworkModel):
     max_selected_frontier_per_step: int = Field(
         description="今回のGraph reviewでselectedにできる候補数上限。",
     )
+
+    @property
+    def graph_review_selection_limit(self) -> int:
+        return min(
+            self.max_selected_frontier_per_step,
+            self.remaining_fetch_capacity,
+        )
+
     cycle_budget_reached: bool = Field(
         description="現在Cycleの決定的な実行上限へ到達したか。",
     )

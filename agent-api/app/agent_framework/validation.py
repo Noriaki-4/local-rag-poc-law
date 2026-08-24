@@ -271,16 +271,6 @@ def apply_solver_decision(
         changed_hypothesis_ids=changed_hypothesis_ids,
     )
 
-    focus_ids = tuple(dict.fromkeys(decision.next_focus_work_item_ids))
-    if len(focus_ids) != len(decision.next_focus_work_item_ids):
-        raise ContractViolation("focus work item IDs must be unique")
-    for work_item_id in focus_ids:
-        focused_work_item = work_items.get(work_item_id)
-        if focused_work_item is None or focused_work_item.state != "open":
-            raise ContractViolation(
-                f"focus must reference an open work item: {work_item_id}"
-            )
-
     retained_ids = tuple(dict.fromkeys(decision.retain_evidence_ids))
     if len(retained_ids) != len(decision.retain_evidence_ids):
         raise ContractViolation("retained evidence IDs must be unique")
@@ -661,6 +651,16 @@ def apply_solver_decision(
                 "graph review selected Article count exceeds the remaining limit "
                 f"of {max_selected} items"
             )
+        has_fetchable_deferred = any(
+            item.action == "defer"
+            and item.frontier_item_id in selectable_frontiers
+            for item in graph_review.frontier_decisions
+        )
+        if max_selected > 0 and not selected_ids and has_fetchable_deferred:
+            raise ContractViolation(
+                "graph review deferred every relevant fetchable Article despite "
+                f"a remaining selection limit of {max_selected} items"
+            )
         if decision.tool_requests:
             raise ContractViolation(
                 "Graph candidate review returns selections only; AgentLoop executes "
@@ -884,6 +884,47 @@ def apply_solver_decision(
             raise ContractViolation(
                 f"{required_dependency_kind} decisions do not match required work items; "
                 f"missing={missing}, extra={extra}"
+            )
+
+    if decision.start_next_cycle:
+        has_open_work = any(
+            item.state == "open" for item in work_items.values()
+        )
+        has_deferred_followup = any(
+            item.action in {"fetch_next_cycle", "carry_forward"}
+            for item in deferred_resolutions
+        )
+        has_unreviewed_followup = (
+            unreviewed_resolution is not None
+            and unreviewed_resolution.action == "review_next_cycle"
+        )
+        has_dependency_followup = any(
+            item.status == "needs_action"
+            for item in dependency_by_key.values()
+            if item.work_item_id in work_items
+            and work_items[item.work_item_id].state == "open"
+        )
+        if not any(
+            (
+                has_open_work,
+                has_deferred_followup,
+                has_unreviewed_followup,
+                has_dependency_followup,
+            )
+        ):
+            raise ContractViolation(
+                "start_next_cycle requires an unresolved WorkItem or an explicit "
+                "Graph or dependency follow-up"
+            )
+
+    focus_ids = tuple(dict.fromkeys(decision.next_focus_work_item_ids))
+    if len(focus_ids) != len(decision.next_focus_work_item_ids):
+        raise ContractViolation("focus work item IDs must be unique")
+    for work_item_id in focus_ids:
+        focused_work_item = work_items.get(work_item_id)
+        if focused_work_item is None or focused_work_item.state != "open":
+            raise ContractViolation(
+                f"focus must reference an open work item: {work_item_id}"
             )
 
     if decision.answer is not None:
@@ -1345,7 +1386,13 @@ def _raise_preflight_contract_violations(
         for work_item_id in decision.next_focus_work_item_ids
         if projected_states.get(work_item_id) != "open"
     }
-    if invalid_focus_ids:
+    if invalid_focus_ids and not (
+        decision.start_next_cycle
+        and not any(
+            work_item_state == "open"
+            for work_item_state in projected_states.values()
+        )
+    ):
         violations.append(
             "focus must reference open WorkItem IDs: "
             f"{sorted(invalid_focus_ids)}"

@@ -8,7 +8,17 @@
 
 ## 手順
 
-`recent_tool_results`の有無で、今回行う処理を分けます。
+1. `required_dependency_work_item_ids`があれば、下位規範監査を最初に行います。
+2. 各WorkItemの`gaps`と、それを直接確認できる`material_evidence`のArticleを対応させます。
+3. 回答に影響する`gaps`の確認先Article本文がなければ、`needs_action`と次のToolRequestを返します。
+   - 確認先Articleが既知候補なら`fetch_articles`を選びます。
+   - 既知の上位Articleから委任先・具体化規定を探すなら、
+     `legal_graph_neighbors`の`semantic_assertion / IMPLEMENTS / from_subject`を選びます。
+   - 起点Articleも関係も分からない場合だけ`legal_search`を選びます。
+   この場合は`continue`とし、WorkItemの解決や`finalize`は行いません。
+4. 下位規範監査の後、取得本文をHypothesis・WorkItemへ反映し、次の行動または完了を判断します。
+
+`recent_tool_results`の有無は、本文反映と次の行動の判断に使います。
 
 - ある場合：新しいTool結果と本文を評価し、WorkItem、Hypothesis、DependencyDecisionを更新してから次の行動を選びます。
 - ない場合：前Cycleの評価をやり直さず、open WorkItemと未確認事項に対する次の行動だけを選びます。
@@ -22,6 +32,8 @@ OpenSearchの順に確認します。完了ルールを満たす場合だけ`fin
 ### 取得結果の評価
 
 - `material_evidence`本文とHypothesisのstatementを一件ずつ照合します。
+- `gaps`はそのHypothesisに残る未確認事項です。提示本文で確認した項目だけを解消し、
+  回答に影響する`gaps`が残る間はHypothesisやWorkItemを閉じず`finalize`しません。
 - `search_candidates`があれば、WorkItem・Hypothesisとの対応と`navigation_evidence_ids`が示す検索抜粋を確認します。
 - 同じEvidenceを複数のHypothesisへ使う場合も、各命題を本文が直接支える必要があります。
 - `graph_projection_updated=true`はGraph情報の保存完了だけを意味します。関連性、本文取得、Hypothesis支持を意味しません。
@@ -40,12 +52,12 @@ OpenSearchの順に確認します。完了ルールを満たす場合だけ`fin
 ### 下位規範監査
 
 - 質問に関係する範囲、要件、例外、手続について、取得本文中の委任を確認します。
-- 「政令で定める」「府令で定める」等の委任が残る場合は、対応WorkItemをopen、Hypothesisをunresolvedにします。
-- `needs_action`は委任元の本文を再取得する指示ではありません。委任元本文が提示済みなら、委任先Articleを
-  既知候補から取得するか、委任元Articleを起点にGraphをたどるか、委任先を別の検索表現で探します。
+- 「政令で定める」「府令で定める」等の委任先の内容が`gaps`に残り、委任先Article本文が
+  未提示なら`needs_action`です。`not_required`や`resolved`にせず、WorkItemはopen、Hypothesisはunresolvedのまま次のToolを選びます。
+- 委任先Articleが既知候補なら`fetch_articles`、不明でも起点Articleと関係・方向が分かるなら
+  `legal_graph_neighbors`、それらが分からない場合は`legal_search`を選びます。
+- Graphで得たArticle本文にさらなる委任があれば、そのArticleを次のGraph起点にできます。
 - 同じ法令の別Articleや一般条項を、委任事項を具体化するArticleの代用にしません。
-- 委任先Articleが既知なら`fetch_articles`、不明ならHypothesisに合うGraph selectorまたは`legal_search`を使います。
-- Graphで得た委任先がさらに委任している場合は、そのArticleを新しい起点にできます。
 - `required_dependency_work_item_ids`があれば、各IDへDependencyDecisionを1件返します。
 - `needs_action`は同じDecisionのToolRequestを`action_request_id`で参照します。
 

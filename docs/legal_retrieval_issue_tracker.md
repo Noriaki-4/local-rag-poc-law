@@ -62,7 +62,7 @@ Neo4jから指定条件の1ホップ候補を取得する
 |---|---|---|---|---|---|
 | `LR-001` | P0 | 対応中 | 質問から必要な検索仮説を漏れなく作る | v150〜v152で規定存在や質問の言い換えを再現した。v153の労働法fixtureではHaikuが要件・上限構造・手続行為を含む仮説を1回で生成した | 収録済みの別分野でもHypothesisと`gaps`の意味形を実モデル確認する |
 | `LR-002` | P0 | 対応中 | 法令検索表現を作り、同一Cycle内でOpenSearchを適切に再検索する | 同一scopeの成功済み検索は契約で検出できる。Profile v181では、その修復呼出しに限り`legal_search`を出力候補から外し、既知候補の本文取得またはGraph探索をLLMへ選ばせる | 本文観察後に、既知候補では不足すると判断した場合だけ検索表現を変える実モデルtraceを確認する |
-| `LR-003` | P0 | 検証待ち | Graph由来Articleを起点に連続1ホップ探索する | 固定selectorでは法律→施行令→府令へ到達でき、Graph由来Articleの再起点化も実装済み | OpenSearchだけでは末端Articleを発見できない条件で、実モデルが2回の1ホップを選ぶE2E試験を通す |
+| `LR-003` | P0 | 完了 | Graph由来Articleを起点に連続1ホップ探索する | `gpt-4o-mini`の実モデルtrace v7で、金商法27条の2→施行令7条、施行令7条→府令2条の5を別々の1ホップGraph要求として実行し、府令本文取得後にCycle 1で正常完了した | `lr_003_second_hop_integration_v1.json`、`lr_003_second_hop_graph_review_v1.json`、`lr_003_cycle_close_deferred_frontiers_v1.json`を回帰fixtureとして維持する |
 | `LR-004` | P0 | 対応中 | 複合問題の統合Decisionを成立させ、次の探索または完了へ進む | v157のHaiku実データE2Eは最初のTool観察後にAnthropicが共通strict schemaを大きすぎるとして400で拒否した。GPT-4o miniでは3 Article取得後のCycle Closeまで到達した | `LR-016`で観察統合とCycle Closeを単一責務化し、同じfixtureから両Providerの完成Prompt・schemaを確認する |
 | `LR-005` | P0 | 対応中 | `gpt-4o-mini`で新検索経路を実モデル評価する | Profile v183の実モデル評価で、未解決WorkItemしかない限定Finalizationは法的結論を断定せず引用も返さなかった。別実行ではArticle→Hypothesis対応から4 Hypothesisすべてへ本文Evidenceを保存できた。一方、主体不一致の27条の22の2を主根拠にしたため法的回答は不合格 | 完了した`LR-017`を反映して公開買付け総合問題を再評価する。Graphを要求しない問題は`LR-018`、要求後の連続探索は`LR-003`で確認する |
 | `LR-006` | P1 | 要設計 | 意味分類coverage不足時にも逆引き検索爆発と取りこぼしを両立させる | publish済み意味関係ならselectorで絞れるが、未分類範囲でraw `REFERENCES/to_subject`を使うと高fan-inになる | 限定fallbackの発動条件、scope上限、coverage不足の表示、限定回答条件を決める |
@@ -393,6 +393,13 @@ Programは既知ID、型、件数、参照整合、予算を検証する。Evide
 - 法律→施行令と施行令→府令が、別々のToolRequestとしてtraceへ残る。
 - Graph候補だけで回答せず、選択した両端Articleの全文をOpenSearchから取得する。
 - 同じArticleへ複数経路で到達しても本文取得は1回で、DiscoveryLinkは各経路を保持する。
+
+実モデルtrace `lr-003-live-loop-v7`では、`semantic_assertion / IMPLEMENTS / from_subject`を使い、
+金商法27条の2と施行令7条をそれぞれ起点にした2件のGraph要求が別々に記録された。2回目のGraph Reviewは
+府令2条の5を選び、AgentLoopが同Articleの全5項をOpenSearchから取得した。Graph候補の選別時に取得枠を
+空けたまま全件保留する矛盾と、Cycle境界で保留候補を未処理にする矛盾はfixture化し、Promptと共通遷移検証の
+双方で回帰防止している。候補の関連性と優先順位はLLMが判断し、Programは既知ID、取得枠、LLM自身が宣言した
+状態間の整合だけを検証する。
 
 ### LR-004 複合問題の完了判断
 

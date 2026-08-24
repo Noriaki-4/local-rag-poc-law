@@ -609,7 +609,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "197"
+    assert diagnostic_records[0]["profileVersion"] == "198"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -617,7 +617,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "197"
+    assert transport_input["profileVersion"] == "198"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -971,7 +971,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "197"
+    assert profile.version == "198"
     mode_prompts = {
         "research": profile.solver_research.system_prompt,
         "integration": profile.solver_integration.system_prompt,
@@ -1227,7 +1227,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "197"
+    assert profile.version == "198"
     assert prompt.rindex("## 出力前の確認") > prompt.rindex(
         "</solver_context>"
     )
@@ -1278,7 +1278,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "197"
+    assert profile.version == "198"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -3114,6 +3114,152 @@ def test_real_model_cycle2_repeated_search_fixture_keeps_replanning_options() ->
     } <= set(saved.fetchable_article_ids)
 
 
+def test_lr_003_second_hop_fixture_keeps_graph_replanning_actionable() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "lr_003_second_hop_integration_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    state = CaseState.model_validate(fixture["caseState"])
+    saved = SolverContext.model_validate(fixture["solverContext"])
+    expected = fixture["expectedBehavior"]
+    limits = AgentLimits(
+        max_research_cycles=(
+            saved.research_cycle_count + saved.remaining_research_cycles
+        ),
+        max_tool_requests_per_step=saved.max_tool_requests_per_step,
+        max_fetched_resources_per_cycle=saved.max_fetched_resources_per_cycle,
+        max_selected_frontier_per_step=saved.max_selected_frontier_per_step,
+        max_retained_evidence=saved.max_retained_evidence,
+        max_material_evidence_chars=saved.max_material_evidence_chars,
+        max_solver_input_chars=saved.max_solver_input_chars,
+        min_next_cycle_budget_sec=saved.min_next_cycle_budget_sec,
+        max_wall_time_sec=240,
+    )
+
+    rebuilt = build_solver_context(
+        state,
+        limits,
+        remaining_wall_time_sec=saved.remaining_wall_time_sec,
+        finalize_only=False,
+        required_dependency_kind=saved.required_dependency_kind,
+        required_dependency_work_item_ids=(
+            saved.required_dependency_work_item_ids
+        ),
+        available_tools=saved.available_tools,
+    )
+    assert rebuilt.model_dump(mode="json") == saved.model_dump(mode="json")
+    assert rebuilt.fetchable_article_ids == ()
+    assert rebuilt.graph_review_selection_limit == 1
+    assert any(
+        item.article_id == expected["graphOriginArticleId"]
+        and item.review_status == "selected"
+        and item.content_status == "succeeded"
+        for item in rebuilt.graph_review_ledger
+    )
+    assert any(
+        expected["graphOriginArticleId"]
+        == evidence.metadata.get("articleId")
+        for evidence in rebuilt.material_evidence
+    )
+    assert rebuilt.hypotheses[0].gaps
+
+    profile = legal_profiles.legal_agent_profile().solver_integration
+    prompt = _solver_prompt(
+        rebuilt,
+        profile.system_prompt,
+        completion_check_prompt=profile.completion_check_prompt,
+        compact_transport=True,
+    )
+    assert "`gaps`はそのHypothesisに残る未確認事項" in prompt
+    assert "そのArticleを次のGraph起点にできます" in prompt
+    assert "下位規範監査を最初に行います" in prompt
+    assert "WorkItemの解決や`finalize`は行いません" in prompt
+    assert (
+        "`semantic_assertion / IMPLEMENTS / from_subject`" in prompt
+    )
+
+    graph_request = ToolRequest(
+        request_id="graph-order-to-ordinance",
+        work_item_id="wi-exception",
+        tool_name="legal_graph_neighbors",
+        arguments={
+            "article_ids": [expected["graphOriginArticleId"]],
+            "mode": expected["graphMode"],
+            "predicate": expected["graphPredicate"],
+            "direction": expected["graphDirection"],
+            "max_relations": 20,
+        },
+        purpose="施行令第七条が委任する府令を1ホップ確認する",
+        hypothesis_ids=("h-exception",),
+    )
+    decision = SolverDecision(
+        next=expected["next"],
+        next_focus_work_item_ids=("wi-exception",),
+        dependency_decisions=(
+            DependencyDecision(
+                dependency_kind="lower_norm",
+                work_item_id="wi-exception",
+                status=expected["dependencyStatus"],
+                reason="府令の具体的なArticleと条件が未確認",
+                basis_evidence_ids=(
+                    "law-340CO0000000321-article-7-paragraph-1-item-9",
+                ),
+                action_request_id=graph_request.request_id,
+            ),
+        ),
+        tool_requests=(graph_request,),
+    )
+    updated = apply_solver_decision(
+        state,
+        decision,
+        limits=limits,
+        known_tool_names={item.name for item in rebuilt.available_tools},
+        material_evidence_ids=tuple(
+            item.evidence_id for item in rebuilt.material_evidence
+        ),
+        fetchable_article_ids=rebuilt.fetchable_article_ids,
+        graph_known_article_ids=tuple(
+            item.article_id for item in rebuilt.graph_review_ledger
+        ),
+        graph_review_fetch_tool_name="fetch_articles",
+        finalize_only=False,
+    )
+    assert updated.tool_requests[-1] == graph_request
+
+
+def test_lr_003_graph_review_fixture_exposes_one_effective_selection_slot() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "lr_003_second_hop_graph_review_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    context = SolverContext.model_validate(fixture["solverContext"])
+    expected = fixture["expectedBehavior"]
+
+    assert context.graph_review_selection_limit == expected[
+        "graphReviewSelectionLimit"
+    ]
+    assert {
+        item.article_id for item in context.graph_review_batch.candidates
+    } == set(expected["selectOneOfArticleIds"])
+
+    profile = legal_profiles.legal_agent_profile().solver_graph_review
+    assert profile is not None
+    prompt = _solver_prompt(
+        context,
+        profile.system_prompt,
+        completion_check_prompt=profile.completion_check_prompt,
+        compact_transport=True,
+    )
+    assert "`select`は候補本文を取得して確認する判断" in prompt
+    assert "先頭から`graph_review_selection_limit`件を`select`" in prompt
+
+
 def test_cycle2_carried_candidates_are_options_for_replanning() -> None:
     fixture_path = (
         Path(__file__).parent
@@ -3520,6 +3666,69 @@ def test_program_assigns_persistent_tool_ids_and_preserves_local_action_link() -
     assert normalized["dependency_decisions"][0]["action_request_id"] == assigned_id
 
 
+def test_program_relinks_stale_dependency_action_when_one_new_request_exists() -> None:
+    context = build_solver_context(
+        CaseState(
+            case_id="case-stale-dependency-action",
+            question="質問",
+            tool_requests=(
+                ToolRequest(
+                    request_id="old-fetch",
+                    work_item_id="w1",
+                    tool_name="fetch_articles",
+                    arguments={"article_ids": ["article-1"]},
+                    purpose="以前の本文取得",
+                    hypothesis_ids=("h1",),
+                ),
+                ToolRequest(
+                    request_id="old-graph",
+                    work_item_id="w1",
+                    tool_name="legal_graph_neighbors",
+                    arguments={"article_ids": ["article-1"]},
+                    purpose="以前のGraph探索",
+                    hypothesis_ids=("h1",),
+                ),
+            ),
+        ),
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+    )
+    normalized = {
+        "tool_requests": [
+            {
+                "request_id": "old-graph",
+                "work_item_id": "w1",
+                "tool_name": "legal_graph_neighbors",
+                "arguments": {
+                    "article_ids": ["article-2"],
+                    "mode": "semantic_assertion",
+                    "predicate": "IMPLEMENTS",
+                    "direction": "from_subject",
+                },
+                "purpose": "次の1ホップを確認する",
+                "hypothesis_ids": ["h1"],
+            }
+        ],
+        "dependency_decisions": [
+            {
+                "dependency_kind": "lower_norm",
+                "work_item_id": "w1",
+                "status": "needs_action",
+                "reason": "末端本文が未確認",
+                "basis_evidence_ids": ["e1"],
+                "action_request_id": "old-fetch",
+            }
+        ],
+    }
+
+    _assign_tool_request_ids(normalized, context)
+
+    assigned_id = normalized["tool_requests"][0]["request_id"]
+    assert assigned_id.startswith("solver-tool-")
+    assert normalized["dependency_decisions"][0]["action_request_id"] == assigned_id
+
+
 def test_duplicate_local_tool_ids_are_reassigned_from_fixture() -> None:
     fixture_path = (
         Path(__file__).parent
@@ -3570,6 +3779,45 @@ def test_cycle_close_fixture_preserves_the_unresolved_boundary_state() -> None:
         item.work_item_id for item in context.work_tree
     }
     assert state.final_answer is None
+
+
+def test_lr_003_cycle_close_fixture_requires_every_deferred_frontier_resolution() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "lr_003_cycle_close_deferred_frontiers_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    context = SolverContext.model_validate(fixture["solverContext"])
+    expected_ids = set(
+        fixture["expectedBehavior"]["activeDeferredFrontierIds"]
+    )
+    active_ids = {
+        item.frontier_item_id
+        for item in context.graph_review_ledger
+        if item.review_status == "relevant_deferred"
+        and item.content_status in {"not_requested", "failed", "timeout"}
+    }
+    assert active_ids == expected_ids
+
+    profile = legal_profiles.legal_agent_profile().solver_cycle_close
+    assert profile is not None
+    call = render_cycle_close_model_call(
+        context,
+        ObservationIntegrationDecision(decision_reason="取得本文を評価した"),
+        profile,
+    )
+    projected_ids = {
+        item["frontier_item_id"]
+        for item in call.input_payload["active_deferred_frontiers"]
+    }
+    assert projected_ids == expected_ids
+    assert call.output_schema["properties"][
+        "deferred_frontier_resolutions"
+    ]["maxItems"] == len(expected_ids)
+    assert "各候補について、次の扱いを1件ずつ" in call.request
+    assert "全IDを`deferred_frontier_resolutions`で1回ずつ" in call.request
 
 
 def test_gpt4o_mini_cycle_close_fixture_reproduces_unknown_retained_ids(

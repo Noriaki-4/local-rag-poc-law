@@ -1039,6 +1039,10 @@ def _solver_context_payload(
     """CaseStoreを変えず、用途に無関係な実行値をModel入力から除く。"""
 
     payload = context.model_dump(mode="json")
+    if context.graph_review_batch.candidates:
+        payload["graph_review_selection_limit"] = (
+            context.graph_review_selection_limit
+        )
     if projection in {"full", "finalization"}:
         return payload
     research_input = ResearchStepInput(
@@ -4725,7 +4729,10 @@ def _assign_tool_request_ids(
             dependency["action_request_id"] = id_map[action_request_id]
             continue
         matching_ids = requests_by_work_item.get(dependency.get("work_item_id"), [])
-        if action_request_id is None and len(matching_ids) == 1:
+        if (
+            action_request_id is None
+            or action_request_id in used_ids
+        ) and len(matching_ids) == 1:
             dependency["action_request_id"] = matching_ids[0]
 
 

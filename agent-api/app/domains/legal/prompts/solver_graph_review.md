@@ -16,12 +16,13 @@
 - `graph_review_ledger`：過去の評価結果です。再表示されない過去のLinkもCaseStoreには残っています。
 - `review_trigger`：`new_frontier`は新規候補、`re_adopted`は別Hypothesisへの再採用、`new_link`は既存候補への新しい経路です。
 - `content_status`：本文取得の状態です。`not_requested`は未要求、`pending`は処理中、`succeeded`は取得済み、`failed`は失敗、`timeout`は時間切れです。関連性を表す値ではありません。
+- `graph_review_selection_limit`：今回`select`できる残りArticle数です。`0`だけが取得枠なしを表し、`1`なら1件を`select`できます。
 
 ## 手順
 
 1. 質問、候補に対応するWorkItem・Hypothesis、Article情報、全`links`と`relations`を読みます。
 2. 各候補を`select / defer / reject`のいずれかにします。Relationは手掛かりであり、それだけで関連性を確定しません。
-3. 全候補を1回ずつ評価したこと、選択上限、出力IDを確認して返します。
+3. 全候補を1回ずつ評価したこと、`graph_review_selection_limit`、出力IDを確認して返します。
 
 `new_link`では以前の判断に固定せず、新しいLinkを含む表示済みの関係から判断し直します。
 
@@ -42,10 +43,13 @@
 
 ## 選択ルール
 
-- `select`は`max_selected_frontier_per_step`件以下、かつ`remaining_fetch_capacity`以内にします。同じArticleの重複は1件と数えます。
-- `content_status`が`pending`または`succeeded`の候補は`select`しません。関係するなら`defer`します。
-- 取得枠がない場合、関係する候補は`defer`します。枠外や未提示pageを`reject`しません。
-- `graph_review_ledger`の取得可能な保留候補は、必要なら空き枠で`select`できます。全ledger項目を再評価する必要はありません。
+1. 見出し、Relation、引用、説明を使い、候補をHypothesisとの関連性が高い順に並べます。
+2. 関連する候補の先頭から`graph_review_selection_limit`件を`select`し、残りを`defer`にします。
+3. 現在のWorkItem・Hypothesisに関係しない候補だけを`reject`にします。
+
+`select`は候補本文を取得して確認する判断であり、法的内容の確定ではありません。本文未確認を理由に`select`対象を`defer`へ変えません。`content_status`が`pending`または`succeeded`の候補は取得済み扱いなので、関係するなら`defer`にします。同じArticleの重複は1件と数えます。
+
+実効上限が1で候補A・Bがどちらも関係する場合は、優先する1件を`select`、残りを`defer`にします。実効上限が0の場合だけ、関係する候補をすべて`defer`にします。`graph_review_ledger`の取得可能な保留候補も、必要なら同じ上限内で`select`できます。
 
 ## 出力
 

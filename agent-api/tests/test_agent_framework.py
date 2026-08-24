@@ -2558,6 +2558,117 @@ def test_graph_review_persists_llm_selection_without_duplicate_fetch_request() -
         )
 
 
+def test_graph_review_cannot_defer_every_relevant_fetchable_candidate_with_capacity() -> None:
+    state = CaseState(
+        case_id="case-1",
+        question="質問",
+        work_items=(WorkItem(work_item_id="w1", question="下位法令を確認する"),),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h1",
+                work_item_id="w1",
+                statement="下位法令に具体化規定がある",
+            ),
+        ),
+    )
+    review = GraphCandidateReview(
+        graph_request_ids=("graph-request",),
+        reviewed_link_ids=("link-1",),
+        frontier_decisions=(
+            GraphFrontierDecision(
+                frontier_item_id="frontier-1",
+                article_id="law-ordinance-article-10",
+                work_item_id="w1",
+                hypothesis_id="h1",
+                action="defer",
+                reason="関連するが本文未確認なので保留する",
+            ),
+        ),
+        reason="関連候補を後続へ保留する",
+    )
+
+    with pytest.raises(
+        ContractViolation,
+        match="deferred every relevant fetchable Article",
+    ):
+        apply_solver_decision(
+            state,
+            SolverDecision(
+                next="continue",
+                next_focus_work_item_ids=("w1",),
+                graph_candidate_review=review,
+            ),
+            limits=AgentLimits(),
+            known_tool_names={"fetch_articles"},
+            material_evidence_ids=(),
+            fetchable_article_ids=("law-ordinance-article-10",),
+            required_graph_review_request_ids=("graph-request",),
+            graph_candidate_article_ids=("law-ordinance-article-10",),
+            graph_review_frontiers={
+                "frontier-1": ("law-ordinance-article-10", "w1", "h1")
+            },
+            graph_review_link_ids=("link-1",),
+            graph_selectable_frontiers={
+                "frontier-1": ("law-ordinance-article-10", "w1", "h1")
+            },
+            graph_review_fetch_tool_name="fetch_articles",
+            remaining_fetch_capacity=1,
+            finalize_only=False,
+        )
+
+
+def test_cycle_cannot_restart_after_every_declared_task_is_resolved() -> None:
+    state = CaseState(
+        case_id="case-1",
+        question="質問",
+        work_items=(
+            WorkItem(
+                work_item_id="w1",
+                question="根拠を確認する",
+                state="resolved",
+                resolution="確認済み",
+                basis_hypothesis_ids=("h1",),
+            ),
+        ),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h1",
+                work_item_id="w1",
+                statement="根拠がある",
+                judgment="supported",
+                evidence_ids=("e1",),
+            ),
+        ),
+        evidence=(
+            Evidence(
+                evidence_id="e1",
+                source_ref="fake://e1",
+                content="根拠本文",
+                created_cycle=1,
+            ),
+        ),
+    )
+
+    with pytest.raises(
+        ContractViolation,
+        match="start_next_cycle requires an unresolved WorkItem",
+    ):
+        apply_solver_decision(
+            state,
+            SolverDecision(
+                next="continue",
+                start_next_cycle=True,
+                decision_reason="全確認事項が解決済み",
+            ),
+            limits=AgentLimits(),
+            known_tool_names=set(),
+            material_evidence_ids=("e1",),
+            finalize_only=False,
+            cycle_close_required=True,
+            can_start_next_cycle=True,
+        )
+
+
 def test_finalize_requires_solver_declared_basis_evidence_in_citations() -> None:
     state = CaseState(
         case_id="case-1",
