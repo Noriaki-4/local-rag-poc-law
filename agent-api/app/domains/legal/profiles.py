@@ -25,19 +25,45 @@ def legal_agent_profile() -> AgentProfile:
     timeout_sec = settings.agent_framework_model_timeout_sec
     return AgentProfile(
         name="legal-default",
-        version="154",
+        version="156",
         provider=settings.llm_provider,
         solver_research=_model_profile(
             model=settings.agent_framework_research_model,
             max_tokens=settings.agent_framework_research_max_tokens,
             timeout_sec=timeout_sec,
-            context_projection="initial_research",
+            context_projection="research_decomposition",
             prompts=(
-                solver_identity_prompt,
-                _read_prompt("solver_research.md"),
-                common_solver_prompt,
+                _read_prompt("solver_question_decomposition.md"),
             ),
-            completion_check_prompt=_read_prompt("solver_research_check.md"),
+            completion_check_prompt=_read_prompt(
+                "solver_question_decomposition_check.md"
+            ),
+            available_tool_names=(),
+        ),
+        solver_hypothesis_generation=_model_profile(
+            model=settings.agent_framework_research_model,
+            max_tokens=settings.agent_framework_research_max_tokens,
+            timeout_sec=timeout_sec,
+            context_projection="research_hypothesis",
+            prompts=(
+                _read_prompt("solver_hypothesis_generation.md"),
+            ),
+            completion_check_prompt=_read_prompt(
+                "solver_hypothesis_generation_check.md"
+            ),
+            available_tool_names=(),
+        ),
+        solver_search_planning=_model_profile(
+            model=settings.agent_framework_research_model,
+            max_tokens=settings.agent_framework_research_max_tokens,
+            timeout_sec=timeout_sec,
+            context_projection="research_search",
+            prompts=(
+                _read_prompt("solver_search_planning.md"),
+            ),
+            completion_check_prompt=_read_prompt(
+                "solver_search_planning_check.md"
+            ),
             available_tool_names=("legal_search",),
         ),
         solver_integration=_model_profile(
@@ -192,7 +218,13 @@ def _model_profile(
     timeout_sec: float,
     prompts: tuple[str, ...],
     completion_check_prompt: str,
-    context_projection: Literal["full", "initial_research"] = "full",
+    context_projection: Literal[
+        "full",
+        "initial_research",
+        "research_decomposition",
+        "research_hypothesis",
+        "research_search",
+    ] = "full",
     available_tool_names: tuple[str, ...] | None = None,
 ) -> ModelCallProfile:
     return ModelCallProfile(

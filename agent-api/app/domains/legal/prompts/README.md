@@ -12,25 +12,24 @@ Programが法的関連性、根拠の十分性、候補の採否、次のToolを
 ### 合成関係
 
 ```text
-solver_identity.md
-       │
-       ▼
-用途別Prompt ──→ solver_common.md ──→ 必要時だけsolver_tools.md
-                                              │
-                                              ▼
-                                  solver_completion.md
-                               │
-                               ▼
-             入出力の入口だけを説明する契約用語集
-                               │
-                               ▼
-                  共通出力契約・輸送指示・SolverContext
-                               │
-                               ▼
-                    用途別の出力前完了確認
-                               │
-                               ▼
-                           LLM Provider
+初回Research（同じSolver・同じCycle）
+
+質問 ──→ Step 1 要求分解 ──→ WorkItemと残りの明示要求
+                              │
+                              ▼
+         Step 2 仮説立案 ──→ Hypothesis
+                              │
+                              ▼
+         Step 3 検索計画 ──→ legal_search要求
+
+各Step = 専用Prompt + 専用入力 + 専用schema + 専用完了確認
+初回3 Stepにはsolver_identity / solver_common / solver_toolsを連結しない
+
+Tool結果取得後
+
+solver_identity + 用途別Prompt + solver_common
+                         + 必要時solver_tools / solver_completion
+                         + 用途別完了確認
 ```
 
 用途別の完了確認は`*_check.md`に置きます。完了確認自体は既存の入力を削減・選別せず、
@@ -42,7 +41,9 @@ solver_identity.md
 
 | 呼出し用途 | 合成するPrompt | 役割 |
 |---|---|---|
-| `research` | identity + research + common | 質問を法令上の確認事項へ分解し、WorkItem、Hypothesis、今回の探索を決める。実行可能な`legal_search`の説明は`available_tools`から受け取る。 |
+| `research` | question_decompositionのみ | 質問の明示要求を、独立した法的結論を要するWorkItemと、それ以外の明示要求へ分ける。 |
+| `hypothesis_generation` | hypothesis_generationのみ | 入力済みの各WorkItemについて、検索前の暫定的な法的命題を作る。 |
+| `search_planning` | search_planningのみ | 入力済みHypothesisを検証する今回の`legal_search`要求を作る。 |
 | `integration` | identity + integration + common + tools + completion | ToolResultを評価し、状態を逐次更新して次の行動または完了を決める。次Cycle開始後の再計画もこの用途で扱う。 |
 | `cycle_close` | identity + cycle_close + common + completion | 現Cycleを評価して閉じ、未取得候補を処理し、完了または次Cycleへの引継ぎを決める。新しいToolは要求しない。 |
 | `finalization` | identity + finalization + common + completion | 実行上限時に追加Toolなしで、確認済み範囲と未確認範囲を分けた回答を作る。 |
@@ -61,11 +62,14 @@ solver_identity.md
 
 | ファイル | 内容 |
 |---|---|
-| `solver_identity.md` | Solver名と、冒頭の「現在の作業」に示す一つのモードだけを実行する指示。 |
+| `solver_identity.md` | Tool結果取得後の複数モードで共有するSolver名と役割。初回3 Stepには合成しない。 |
 | `solver_common.md` | 判断主体、WorkItem・Hypothesis・Evidence、ID、Cycleに関する全モード共通の不変条件。 |
 | `solver_tools.md` | OpenSearch候補の`search_candidates`投影、本文取得、1ホップGraph探索、RelationAssertionの意味と方向。Toolを使えるモードだけに合成する。 |
 | `solver_completion.md` | grounding Evidence、citation、下位規範、通常完了と上限時限定回答の共通条件。 |
-| `solver_research.md` | 初回の作業分解、仮説、今回実行する探索。 |
+| `solver_question_decomposition.md` | 初回Step 1。WorkItemと`non_work_item_requirements`への要求分解。 |
+| `solver_hypothesis_generation.md` | 初回Step 2。既知WorkItemに対する法的仮説の立案。 |
+| `solver_search_planning.md` | 初回Step 3。既知Hypothesisに対する`legal_search`要求の作成。 |
+| `solver_research.md` | v154以前の一括Research Prompt。現行Legal Profileでは使用しない。 |
 | `solver_integration.md` | 観察結果の評価、状態更新、下位規範監査、次の行動。 |
 | `solver_cycle_close.md` | Cycle終了と次Cycleへの構造化引継ぎ。 |
 | `solver_finalization.md` | `finalize_only=true`時の限定最終化。 |
@@ -74,6 +78,7 @@ solver_identity.md
 | `solver_search_reselection.md` | 検索抜粋を再掲せず、前段の短い自己要約一覧から本文取得候補を選ぶ。 |
 | `solver_graph_review.md` | Graph差分候補の`select / defer / reject`と本文取得順。 |
 | `solver_*_check.md` | 対応する処理の入力後に置く、短い出力前完了確認。処理本体の手順や新しい出力項目は定義しない。 |
+| `minimal_hypothesis_diagnostic.md` | 本番Promptを合成せず、質問分解・WorkItem・具体的な法的仮説だけを実モデルで切り分ける診断用Prompt。本番Profileでは使用しない。 |
 
 Search Reviewで保留した候補と、本文取得が未完了の選択候補は、次のStep / Cycleでも
 `search_candidates`へ再投影されます。新規未評価候補があるときは新規候補だけをSearch Reviewへ渡し、
@@ -89,7 +94,10 @@ Search Reviewで保留した候補と、本文取得が未完了の選択候補�
 3. Reviewer Findingがあるか
 4. `finalize_only=true`か
 5. `cycle_close_required=true`か
-6. すでにToolResultを得た後か
+6. 初回でWorkItemがまだないか
+7. WorkItemはあるがHypothesisがまだないか
+8. 初回HypothesisはあるがToolをまだ実行していないか
+9. すでにToolResultを得た後か
 
 法的意味を見てモードを選択したり、Programが検索方法を補完したりしません。
 実際に選ばれた用途は診断情報の`modelCalls[].purpose`で確認できます。
@@ -112,17 +120,16 @@ Search Reviewで保留した候補と、本文取得が未完了の選択候補�
 実行時入力は`input.json`、実送信内容は`request.txt`で確認します。
 
 CaseStoreと完全な`SolverContext`は正本として保持しますが、Providerへは用途別のread modelを渡せます。
-初回Researchは質問の分解と今回の探索だけを行うため、質問、Cycle番号、残りCycle、1 StepのTool要求上限、
-WorkItem、Hypothesis、利用可能Tool、契約修復情報だけを投影します。利用可能Toolは`legal_search`だけに絞り、
-本文取得枠やGraph・Evidence状態等の
-初回Researchに無関係な実行値は渡しません。Integration等は現在の完全な`SolverContext`を使います。
-この投影は値の省略だけであり、WorkItem数や法的観点をProgramが決める処理ではありません。
-初回ResearchのProvider schemaも、`next`、理由、初期WorkItem・Hypothesis、focus、ToolRequestだけに絞ります。
-Adapterは省略項目を正規`SolverDecision`の既定値で補い、完全なPydantic契約で検証します。
-正規契約を用途別に複製せず、Researchに無関係な空配列・null欄をLLMへ生成させません。
-質問分解の正本は`add_work_items`です。出力前に、元の質問と`add_work_items`をLLM自身が直接照合します。
-同じ確認事項を輸送専用欄や`decision_reason`へ重複させません。要求の意味やWorkItemへの対応内容は
-Programで補完せず、Programは正規`SolverDecision`の型と参照整合性を検証します。
+初回Researchは同じSolver・同じCycleで3回呼び出します。Step 1には質問だけ、Step 2には質問、WorkItem、
+`non_work_item_requirements`、Step 3には質問、WorkItem、Hypothesis、`legal_search`定義と今回の要求数上限だけを
+投影します。本文取得枠、Graph、Evidence、後続Cycleの状態は渡しません。各Provider schemaも、そのStepが
+判断する意味項目だけを要求します。
+
+Adapterは各Stepの出力へ永続化用IDと既定statusを機械的に付け、共通`SolverDecision`へ正規化します。
+Programは文字列の内容を補正せず、ID、件数、既知参照、WorkItemとHypothesisの所属だけを検証します。
+Step 1の不変条件は「質問の明示要求全体 = WorkItem + non_work_item_requirements」であり、元の質問は引き続き
+CaseStoreの正本です。`non_work_item_requirements`は重要度や全WorkItem共通性を表さず、独立した法的結論を
+要しない根拠・出典・引用・対象時点・地域・出力形式等の明示要求を欠落させず保持します。
 
 修復指示のassetは`app/agent_framework/prompts/`にあります。法令判断の手順はこのディレクトリ、
 Provider輸送と契約修復はFramework側へ分け、同じ規則を両方へ重複記載しません。

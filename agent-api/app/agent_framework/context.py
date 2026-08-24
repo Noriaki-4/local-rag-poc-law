@@ -256,6 +256,12 @@ class SolverContractFeedback(FrameworkModel):
 class SolverContext(FrameworkModel):
     case_id: str = Field(description="Programが管理する現在CaseのID。")
     question: str = Field(description="利用者が回答を求めている元の質問。")
+    non_work_item_requirements: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "質問の明示要求のうち、独立した法的結論を要するWorkItemにしなかった要求。"
+        ),
+    )
     research_cycle_count: int = Field(description="開始済みResearch Cycle数。")
     remaining_research_cycles: int = Field(description="開始可能な残りResearch Cycle数。")
     remaining_wall_time_sec: float = Field(description="Case全体の残り実行秒数。")
@@ -695,6 +701,7 @@ def build_solver_context(
     return SolverContext(
         case_id=state.case_id,
         question=state.question,
+        non_work_item_requirements=state.non_work_item_requirements,
         research_cycle_count=state.research_cycle_count,
         remaining_research_cycles=max(
             0, limits.max_research_cycles - state.research_cycle_count

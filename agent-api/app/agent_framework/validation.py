@@ -100,6 +100,22 @@ def apply_solver_decision(
     )
 
     _require_unique_state_ids(state)
+    non_work_item_requirements = state.non_work_item_requirements
+    requested_non_work_item_requirements = (
+        decision.update.set_non_work_item_requirements
+    )
+    if requested_non_work_item_requirements is not None:
+        if state.work_items or state.hypotheses or state.non_work_item_requirements:
+            raise ContractViolation(
+                "non-WorkItem requirements may be set only during initial decomposition"
+            )
+        if any(not item for item in requested_non_work_item_requirements):
+            raise ContractViolation("non-WorkItem requirements must not be empty")
+        if len(requested_non_work_item_requirements) != len(
+            set(requested_non_work_item_requirements)
+        ):
+            raise ContractViolation("non-WorkItem requirements must be unique")
+        non_work_item_requirements = requested_non_work_item_requirements
     work_items = {item.work_item_id: item for item in state.work_items}
     hypotheses = {item.hypothesis_id: item for item in state.hypotheses}
     evidence_by_id = {item.evidence_id: item for item in state.evidence}
@@ -960,6 +976,7 @@ def apply_solver_decision(
 
     return _validated_copy(
         state,
+        non_work_item_requirements=non_work_item_requirements,
         work_items=tuple(work_items.values()),
         hypotheses=tuple(hypotheses.values()),
         tool_requests=(*state.tool_requests, *decision.tool_requests),

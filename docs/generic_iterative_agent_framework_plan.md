@@ -1595,10 +1595,18 @@ solver:
   common_system_prompt: domains/legal/prompts/solver_common.md
   tool_prompt: domains/legal/prompts/solver_tools.md
   completion_prompt: domains/legal/prompts/solver_completion.md
-  research:
+  question_decomposition:
     model: claude-haiku-4-5-20251001
     max_output_tokens: 4096
-    system_prompt: domains/legal/prompts/solver_research.md
+    system_prompt: domains/legal/prompts/solver_question_decomposition.md
+  hypothesis_generation:
+    model: claude-haiku-4-5-20251001
+    max_output_tokens: 4096
+    system_prompt: domains/legal/prompts/solver_hypothesis_generation.md
+  search_planning:
+    model: claude-haiku-4-5-20251001
+    max_output_tokens: 4096
+    system_prompt: domains/legal/prompts/solver_search_planning.md
   integration:
     model: claude-haiku-4-5-20251001
     max_output_tokens: 4096
@@ -1945,7 +1953,9 @@ Graph Review差分処理やCycle境界処理を混入させず、IntegrationとG
 | `solver_tools.md` | ToolRequestの役割、Tool結果を受けた次step、既知ID、1ホップGraph selector、RelationAssertionの5 predicateと方向、`USES_DEFINITION`の確認方法を定義する。IntegrationとReviewer Revisionへ合成する。初回Researchは実行可能な`legal_search`の説明を`available_tools`から受け取る。 |
 | `solver_completion.md` | 直接Evidence、citation、下位規範、通常完了と上限時限定回答の共通完了条件を定義する。 |
 | `reviewer.md` | ReviewerViewの各状態、検査順序、`accept / revise`、Finding種別、既知IDの使い方を定義する。Reviewerは検索方法やToolRequestを決めない。 |
-| `solver_research.md` | 質問を法令上の確認事項へ分解し、WorkItem、検証可能なHypothesis、今回の探索を決める。 |
+| `solver_question_decomposition.md` | 初回Step 1。質問の明示要求を、独立した法的結論を要するWorkItemと`non_work_item_requirements`へ分ける。 |
+| `solver_hypothesis_generation.md` | 初回Step 2。既知WorkItemごとに、検索対象を選べる未確認の法的命題を作る。 |
+| `solver_search_planning.md` | 初回Step 3。既知Hypothesisに対する今回の`legal_search`要求を作る。 |
 | `solver_integration.md` | 新しいToolResultを評価して状態を逐次更新し、未確認事項に対する次の行動を選ぶ。Graphの関係種別を説明できなければ全種別を要求せず、OpenSearchで根拠または起点を発見する。 |
 | `solver_cycle_close.md` | 現Cycleの状態更新、active Frontier全件の処理、`finalize / start_next_cycle`だけを扱う。次Cycleの詳細なTool計画は作らない。 |
 | `solver_finalization.md` | `finalize_only=true`で追加Toolを要求せず、確認済み範囲と未確認範囲を分けた回答を作る。 |
@@ -2094,7 +2104,9 @@ agent-api/app/
 │           ├── solver_common.md
 │           ├── solver_tools.md
 │           ├── solver_completion.md
-│           ├── solver_research.md
+│           ├── solver_question_decomposition.md
+│           ├── solver_hypothesis_generation.md
+│           ├── solver_search_planning.md
 │           ├── solver_integration.md
 │           ├── solver_cycle_close.md
 │           ├── solver_finalization.md
@@ -2146,16 +2158,26 @@ Context Projectorは、全WorkTree案内、現Cycle、直前Step、Graph差分ba
 focusへ接続するNode・Link、直近ToolResult、新規・保持EvidenceをCaseStoreから決定的に投影する。
 全Graph履歴をPromptへ重複表示せず、関連性・優先度・再採用はSolverに判断させる。
 CaseStoreの正本や完全な`SolverContext`を削らず、Provider入力は用途別read modelへさらに決定的に投影できる。
-初回Researchでは質問、Cycle情報、1 StepのTool要求上限、WorkItem、Hypothesis、利用可能Tool、契約修復情報だけを渡す。
-利用可能Toolは、既知ArticleやEvidenceを必要としない`legal_search`だけに決定的に投影し、
-本文取得枠、Graph、Evidence等の未使用値は渡さない。本文取得枠の数値が質問分解数を暗黙に誘導しないためである。
+初回Researchは別Agentや別Cycleにせず、同じSolver・同じCycle内の3 Stepとして実行する。
+
+1. 質問だけを入力し、要求をWorkItemと`non_work_item_requirements`へ分ける。
+2. 質問、既知WorkItem、`non_work_item_requirements`を入力し、Hypothesisだけを作る。
+3. 質問、既知WorkItem、既知Hypothesis、`legal_search`定義と1 Stepの要求数上限を入力し、検索要求だけを作る。
+
+本文取得枠、Graph、Evidence、後続Cycleの状態は初回3 Stepへ渡さない。各StepのProvider schemaも、そのStepが判断する
+意味項目だけを要求する。Adapterは永続化用IDと既定statusを機械的に付与し、共通`SolverDecision`へ正規化する。
+ProgramはID、件数、既知参照、WorkItemとHypothesisの所属を検証するが、要求の仕分け、仮説、検索語を補正しない。
+
+質問分解は次を不変条件とする。
+
+```text
+質問が明示する要求全体 = work_items + non_work_item_requirements
+```
+
+`non_work_item_requirements`は重要でない要求や全WorkItem共通の要求を意味しない。独立した法的結論を要しない
+根拠・出典・引用・対象時点・地域・出力形式等を保持し、元質問を置き換えない。初回3 Stepは単一責務を保つため、
+後続処理用`solver_common.md`、Tool結果評価、Graph review、Cycle引継ぎ、Reviewer、最終回答の指示を合成しない。
 Integration等は完全な`SolverContext`を使う。用途別投影は項目の有無だけを決め、法的観点、関連性、WorkItem数は決めない。
-初回ResearchのProvider schemaは、継続、判断理由、初期WorkItem・Hypothesis、focus、ToolRequestだけを要求する。
-Graph review、Cycle引継ぎ、Reviewer、最終回答等の未使用欄はProvider schemaから省き、Adapterが既定値を補ってから
-共通`SolverDecision`で完全検証する。正規契約を用途別に複製せず、輸送表現だけを用途に合わせる。
-初回Researchの質問分解は`add_work_items`を正本とする。LLMは出力前に元の質問と`add_work_items`を直接照合し、
-漏れ、重複、不要なWorkItemがあれば修正する。同じ確認事項を輸送専用欄や`decision_reason`へ重複させない。
-Programは意味内容を補正せず、正規`SolverDecision`の型、ID、参照整合性等の決定的条件だけを検証する。
 
 ## 12. 実装Phase
 

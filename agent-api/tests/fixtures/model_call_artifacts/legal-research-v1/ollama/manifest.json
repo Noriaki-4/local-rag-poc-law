@@ -1,13 +1,13 @@
 {
-  "inputHash": "345b2694320824bed7f811087a4f72107299ac2ac808af4f2f21e03f63f9bbe8",
-  "instructionsHash": "95d901b742229d2f7d2a0040e414a6bb90ad1a9305bf0e100ea623dad30c2e3b",
+  "inputHash": "ac07718e1bdf15a5b16ee9a9f5870b844fb5efc54019546e80f1226daaebaa5b",
+  "instructionsHash": "c82b41d09e4a6cd212879893313a597653543b8ff4b265bd5fbf4b5167d01751",
   "model": "gpt-4o-mini",
-  "normalizedSchemaHash": "ec0892cb0658398f52a51ce011cb2ad901a4c5f41d05eb79bc7c14516213326f",
-  "outputSchemaHash": "3f5733c35f9209b0efd8fafa56dc105a779cf45e49f2988c7674c79644a530b3",
+  "normalizedSchemaHash": "318219243aee396dfd9dc49bbd3fb31d1b1d2559302fec8300df7c9d974db4da",
+  "outputSchemaHash": "a47cc547833622fe6a776dfaeed1bf333f6a4cb5794e94652935e5b38cb290cc",
   "profileName": "legal-default",
-  "profileVersion": "154",
+  "profileVersion": "156",
   "promptAssets": [],
   "provider": "ollama",
-  "requestHash": "af6afb3dff2b82a672b03f66d0c6e06342729b6e5a1684728fdbbc4fed358a4d",
-  "stage": "research"
+  "requestHash": "595229f0527c1047685e373deec4cdb20c1d86c297a00f37be089030d8105de1",
+  "stage": "research_research_decomposition"
 }

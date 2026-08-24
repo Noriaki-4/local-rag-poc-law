@@ -158,6 +158,13 @@ class SearchReselectionDecision(FrameworkModel):
 
 
 class CaseUpdate(FrameworkModel):
+    set_non_work_item_requirements: tuple[str, ...] | None = Field(
+        default=None,
+        description=(
+            "初回の質問分解で、独立した法的結論を要するWorkItem以外に残った"
+            "明示要求を設定する。nullは変更なし。"
+        ),
+    )
     add_work_items: tuple[WorkItem, ...] = Field(
         default=(),
         description="今回新しく作る、重複しない確認事項。",
@@ -262,6 +269,7 @@ class SolverDecision(FrameworkModel):
         if self.next == "continue":
             if (
                 not self.tool_requests
+                and self.update == CaseUpdate()
                 and self.graph_candidate_review is None
                 and self.search_candidate_review is None
                 and not self.frontier_re_adoptions
@@ -269,7 +277,7 @@ class SolverDecision(FrameworkModel):
                 and self.unreviewed_graph_resolution is None
                 and not self.start_next_cycle
             ):
-                raise ValueError("continue decision requires a tool request")
+                raise ValueError("continue decision requires a state update or action")
             if self.answer is not None:
                 raise ValueError("continue decision cannot contain an answer")
         else:

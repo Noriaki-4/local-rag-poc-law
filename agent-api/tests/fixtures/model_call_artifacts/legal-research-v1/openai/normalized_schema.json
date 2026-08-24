@@ -30,6 +30,22 @@
           "title": "Impact Decisions",
           "type": "array"
         },
+        "set_non_work_item_requirements": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "初回の質問分解で、独立した法的結論を要するWorkItem以外に残った明示要求を設定する。nullは変更なし。",
+          "title": "Set Non Work Item Requirements"
+        },
         "update_hypotheses": {
           "default": [],
           "description": "既存Hypothesisに対する今回の判定差分。",

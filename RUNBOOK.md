@@ -1207,6 +1207,29 @@ python3 scripts/replay_agent_checkpoint.py \
   --output eval-results/checkpoint-replay/tob-overview-openai.json
 ```
 
+現行Legal Profileの初回Researchは、同じSolver・同じCycle内で`research`（要求分解）、
+`hypothesis_generation`（法的仮説）、`search_planning`（検索要求）の順に実行する。
+各Stepは専用Prompt、専用入力、専用schemaを使い、前Stepの適用済み結果だけを次Stepへ渡す。
+要求分解では、質問の明示要求をWorkItemと`non_work_item_requirements`へ分ける。後者は重要度ではなく、
+根拠・出典・引用・対象時点・地域・出力形式等、独立した法的結論を要しない明示要求の保存先である。
+
+初回Researchの失敗がモデルの法的仮説立案能力か、本番Prompt・契約の複雑さかを切り分ける場合は、
+本番Promptを一切合成しない最小診断を実行する。出力はWorkItemと入れ子のHypothesisだけであり、
+Tool、status、gaps、Cycle、Evidence、ID契約、完了判定を含まない。結果ディレクトリには完成Prompt、
+Schema、実入力、応答、token数を保存する。
+
+```bash
+agent-api/.venv/bin/python scripts/run_minimal_legal_hypothesis_test.py \
+  --fixture agent-api/tests/fixtures/framework/tob_minimal_legal_hypothesis_v1.json \
+  --provider openai \
+  --model gpt-4o-mini \
+  --output eval-results/minimal-legal-hypothesis/gpt-4o-mini
+```
+
+同じfixtureを新規呼出しでHaikuへ渡す場合は、`--provider anthropic`と使用するHaikuのmodel IDへ
+変更する。両者ともAPI呼出しは会話履歴を渡さず、出力のJSON形状だけをProgramが検証する。
+WorkItemの漏れやHypothesisの具体性は意味判断であるため、自動keyword採点を行わず人間が比較する。
+
 各Solver呼出しは、内部思考の逐語記録ではなく、そのStepで`continue`または`finalize`を選ぶ直接の理由を
 `SolverDecision.decision_reason`へ一文で返す。構造契約を通過してCaseStateへ適用されたDecisionだけを
 診断JSONLの`decision_applied`へ保存し、契約修復前の不正なDecisionと区別する。API traceの
@@ -1244,7 +1267,7 @@ Legal Profileの1 Solver Decisionは検索系Toolを最大4要求、`fetch_artic
 合計上限は5要求である。本文取得量の4 Article上限とは別の制約である。
 Graph Reviewから1 stepで選ぶ候補は最大3件とし、残りの関連候補はdeferして後続stepまたは次Cycleへ残す。
 プログラムは超過分を選別せず契約違反として返す。
-`modelCalls[].purpose`は`research / integration / cycle_close / finalization /
+`modelCalls[].purpose`は`research / hypothesis_generation / search_planning / integration / cycle_close / finalization /
 reviewer_revision / search_selection / graph_selection`のいずれかになる。`cycle_close_required=true`では`cycle_close`、
 `finalize_only=true`では`finalization`、Reviewer差戻し時は`reviewer_revision`を使う。新しい1ホップ候補が
 投影された直後は、同一Solverを本文を再掲しない短い専用Promptの`graph_selection`モードで呼ぶ。これは任意の

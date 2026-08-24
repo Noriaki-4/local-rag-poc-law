@@ -1,251 +1,40 @@
 {
   "additionalProperties": false,
   "properties": {
-    "decision_reason": {
-      "description": "提示された根拠、未確認事項、上限に結び付けた今回の判断理由。隠れた思考過程ではなく短い監査説明。",
-      "minLength": 1,
-      "type": "string"
-    },
-    "next": {
-      "description": "追加のaction-observation stepまたは次Cycleが必要ならcontinue、根拠付き回答を返せるならfinalize。Solverが決める。",
-      "enum": [
-        "continue"
-      ],
-      "type": "string"
-    },
-    "next_focus_work_item_ids": {
-      "description": "次のstepで優先する、更新適用後もopenの既知WorkItem ID。",
+    "non_work_item_requirements": {
+      "description": "質問の明示要求のうち、独立した法的結論を要しない要求。根拠・出典・引用・対象時点・地域・出力形式等。",
       "items": {
+        "minLength": 1,
         "type": "string"
       },
+      "maxItems": 24,
       "type": "array"
     },
-    "start_next_cycle": {
-      "description": "現在Cycleを評価して閉じ、別の仮説・方針で次Cycleを開始する場合だけtrue。",
-      "enum": [
-        false
-      ],
-      "type": "boolean"
-    },
-    "tool_requests": {
-      "description": "未確認Hypothesisを検証するため、Solverが今回選ぶread-only Tool要求。",
+    "work_items": {
+      "description": "質問が求める独立した法的結論の一覧。",
       "items": {
         "additionalProperties": false,
         "properties": {
-          "arguments": {
-            "additionalProperties": false,
-            "description": "選んだToolのinput_schemaに完全一致する引数object。",
-            "properties": {
-              "doc_types": {
-                "description": "検索対象。法令本文はlaw、行政解釈やガイドはguideline。現在の検索に必要な値を配列で返す。",
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "document_ids": {
-                "description": "検索対象文書を限定する既知documentId。限定しない場合は空配列。",
-                "items": {
-                  "type": "string"
-                },
-                "maxItems": 12,
-                "type": "array"
-              },
-              "query": {
-                "description": "制度名と確認事項を法令に現れやすい表現へ言い換えた検索語。",
-                "maxLength": 1000,
-                "minLength": 1,
-                "type": "string"
-              }
-            },
-            "required": [
-              "query",
-              "doc_types",
-              "document_ids"
-            ],
-            "type": "object"
-          },
-          "hypothesis_ids": {
-            "description": "このTool結果で検証する既知Hypothesis ID。",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "purpose": {
-            "description": "何を確認するための要求かを示す短い説明。",
-            "type": "string"
-          },
-          "request_id": {
-            "description": "同じSolverDecision内で一意な短い局所ID。",
-            "type": "string"
-          },
-          "tool_name": {
-            "description": "available_toolsにある正規Tool名。 Article IDがまだ分からないとき、OpenSearchで法令またはガイドの候補を探す。質問をそのまま繰り返さず、確認事項を法令表現へ言い換えて使う。返す検索抜粋は候補選択用であり、回答やHypothesisの根拠にはしない。",
-            "enum": [
-              "legal_search"
-            ],
-            "type": "string"
-          },
-          "work_item_id": {
-            "description": "このTool結果を利用する主なopen WorkItem ID。",
+          "question": {
+            "description": "独立して法的結論を出し、完了判定できる1つの確認事項。",
+            "maxLength": 1000,
+            "minLength": 1,
             "type": "string"
           }
         },
         "required": [
-          "request_id",
-          "work_item_id",
-          "purpose",
-          "hypothesis_ids",
-          "tool_name",
-          "arguments"
+          "question"
         ],
         "type": "object"
       },
-      "maxItems": 5,
+      "maxItems": 24,
+      "minItems": 1,
       "type": "array"
-    },
-    "update": {
-      "additionalProperties": false,
-      "description": "CaseState全体ではなく、今回適用する意味上の差分。",
-      "properties": {
-        "add_hypotheses": {
-          "description": "新しいWorkItem等へ置く、本文で独立検証可能な命題。",
-          "items": {
-            "additionalProperties": false,
-            "properties": {
-              "evidence_ids": {
-                "description": "supportedまたはcontradictedの直接根拠となるgrounding Evidence ID。",
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "gaps": {
-                "description": "暫定回答のうち、本文で確認する必要がある具体的な法的内容。探す条文や検索作業ではない。",
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "hypothesis_id": {
-                "description": "Hypothesisを参照するためのCase内一意ID。",
-                "type": "string"
-              },
-              "judgment": {
-                "description": "unresolvedは未確認、supportedは本文が支持、contradictedは本文が否定。",
-                "enum": [
-                  "supported",
-                  "contradicted",
-                  "unresolved"
-                ],
-                "type": "string"
-              },
-              "statement": {
-                "description": "本文取得前の未確認で誤り得る暫定回答。確認対象となる要件、例外構造または手続行為の具体的候補を含み、取得本文で独立に支持または否定できる1つの命題。規定の存在や質問の言い換えだけを述べない。",
-                "type": "string"
-              },
-              "work_item_id": {
-                "description": "このHypothesisが検証するWorkItem ID。",
-                "type": "string"
-              }
-            },
-            "required": [
-              "hypothesis_id",
-              "work_item_id",
-              "statement",
-              "judgment",
-              "evidence_ids",
-              "gaps"
-            ],
-            "type": "object"
-          },
-          "minItems": 1,
-          "type": "array"
-        },
-        "add_work_items": {
-          "description": "今回新しく作る、重複しない確認事項。",
-          "items": {
-            "additionalProperties": false,
-            "properties": {
-              "basis_hypothesis_ids": {
-                "description": "openではWorkItemの作成・継続を前提づけるHypothesis ID、resolvedではresolutionを支える判定済みHypothesis ID。Hypothesis.work_item_idは所属先を表す別項目であり、単なる逆参照には使わない。元の質問から直接作るopen WorkItemでは通常は空。",
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "parent_work_item_id": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "description": "階層分解した場合の親WorkItem ID。最上位ではnull。"
-              },
-              "question": {
-                "description": "1つの完了判定で閉じられる1つの確認事項。",
-                "type": "string"
-              },
-              "replaces_work_item_id": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "description": "作業分解を修正した場合に、このWorkItemが置き換える旧WorkItem ID。"
-              },
-              "resolution": {
-                "description": "WorkItemをresolvedまたはdroppedへ閉じた理由・結論。",
-                "type": "null"
-              },
-              "state": {
-                "description": "openは未完了、resolvedは回答済み、droppedは不要と判断済み。",
-                "enum": [
-                  "open"
-                ],
-                "type": "string"
-              },
-              "work_item_id": {
-                "description": "WorkItemを参照するためのCase内一意ID。",
-                "type": "string"
-              }
-            },
-            "required": [
-              "work_item_id",
-              "parent_work_item_id",
-              "question",
-              "state",
-              "resolution",
-              "basis_hypothesis_ids",
-              "replaces_work_item_id"
-            ],
-            "type": "object"
-          },
-          "minItems": 1,
-          "type": "array"
-        }
-      },
-      "required": [
-        "add_work_items",
-        "add_hypotheses"
-      ],
-      "type": "object"
     }
   },
   "required": [
-    "next",
-    "decision_reason",
-    "start_next_cycle",
-    "update",
-    "next_focus_work_item_ids",
-    "tool_requests"
+    "work_items",
+    "non_work_item_requirements"
   ],
   "type": "object"
 }

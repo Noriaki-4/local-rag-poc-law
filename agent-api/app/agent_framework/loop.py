@@ -738,6 +738,21 @@ class AgentLoop:
             return self._profile.solver_cycle_close, "cycle_close"
         if integration_call or context.finalize_only:
             return self._profile.solver_integration, "integration"
+        if (
+            context.work_tree
+            and not context.hypotheses
+            and self._profile.solver_hypothesis_generation is not None
+        ):
+            return (
+                self._profile.solver_hypothesis_generation,
+                "hypothesis_generation",
+            )
+        if (
+            context.work_tree
+            and context.hypotheses
+            and self._profile.solver_search_planning is not None
+        ):
+            return self._profile.solver_search_planning, "search_planning"
         return self._profile.solver_research, "research"
 
     def _graph_review_fetch_request(

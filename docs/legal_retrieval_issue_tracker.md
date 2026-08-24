@@ -74,6 +74,52 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-012` | P0 | 完了 | LLMの固定指示、実行時入力、最終契約を分離し、レビュー可能な成果物として出力する | API送信・診断・成果物出力が同じ`RenderedModelCall`を使用し、snapshotでは呼出し別ファイルを出力する。代表research fixtureはOpenAI・Anthropic・Ollamaの基準成果物を持つ | 固定指示hash、動的入力hash、両schema、実送信hashの回帰テストと全887テストに合格 |
 | `LR-013` | P0 | 検証待ち | Provider共通の小さいSolver輸送契約へ統一する | v154で全Providerを同じ処理段階別schemaへ統一し、Anthropic専用sidecarを新規経路から外した。実行時IDはenumへ複製せず共通validatorで検証する。代表Cycle Close schemaは14,494文字から7,014文字へ減少し、全895テストに合格した | 同じcheckpointをHaikuで再生し、Integrationがgrammar complexityの400エラーにならないことを確認する |
 | `LR-014` | P1 | 検証待ち | Haikuで承認した中間状態から安価なモデルで後続処理を再生する | checkpointの明示承認をpromotion時に記録し、指定Provider・modelで1回のSolver処理を再生する`replay_agent_checkpoint.py`を実装した。APIを使わない単体テストは合格した | Haikuの正常中間状態を承認済みfixtureへ昇格し、`gpt-4o-mini`、同じcheckpointのHaikuの順に実モデル再生する |
+| `LR-015` | P0 | 検証待ち | 初回Researchを単一責務のStepへ分け、要求をWorkItemとそれ以外へ欠落なく分解する | Profile v156で同一Cycle内の要求分解、仮説立案、検索要求作成を実装した。各完成Promptは単独で読めるH1を持ち、処理順のStep番号を含めない。一時的な段階比較コードを整理した後の全900テストに合格した | 別分野fixtureと公開買付けE2Eを`gpt-4o-mini`で確認し、最終的にHaikuで品質確認する |
+
+### 3.1 LR-015 初回Researchの単一責務化で得た知見
+
+2026-08-24に、公開買付け総合質問と`gpt-4o-mini`を使い、初回ResearchのPrompt、入力、
+Provider schemaを段階的に変更した。各呼出しは新規API要求であり、過去応答の会話履歴を引き継いでいない。
+
+- 現行本番の一括Researchを3回実行すると、質問が求める4 WorkItemは毎回作成できたが、
+  Hypothesisは「特定の条件」「法令に基づく手続」等へ抽象化し、検索語も質問の言い換えに寄った。
+- WorkItemを入力済みにしてHypothesisだけを作る呼出しは、3回すべて人数、割合、証券種類、公告、
+  届出期限等の検証可能な判定軸を含んだ。WorkItemを固定したHypothesisと検索要求の同時生成も3回とも
+  同じ具体性を維持した。したがってモデルに仮説立案能力がないのではなく、質問分解を確定しながら
+  後続責務も同じ応答で行う負荷が主因である。
+- WorkItemだけを返すschemaでは、Promptで禁止しても「根拠となる条文」を5件目のWorkItemへ3回とも追加した。
+  これはユーザーの明示要求を格納する場所がWorkItem以外にない契約上の不足だった。
+- `non_work_item_requirements`相当の格納先を設けると、3回すべて法的確認事項4件と
+  「各回答に根拠条文を示す」という残りの要求へ分離できた。
+- 実際の前段出力を次段へ渡す「要求分解 → Hypothesis立案 → 検索要求作成」を3回連結すると、
+  毎回4 WorkItem、4 Hypothesis、4検索要求となった。3呼出しの合計input tokenは3,467〜3,496で、
+  同じ質問に対する現行本番一括Researchの6,582 input tokenより少なかった。
+- 旧完成Promptは、抽象的な役割説明、「現在の作業：Research」、初回には実行しないTool結果受領後の処理、
+  個別ルール、共通ルールを同じ呼出しへ連結していた。これでは今回実行する責務と将来の責務を区別しにくい。
+  新経路では各呼出しを`Step 1`、`Step 2`、`Step 3`として直接示し、そのStepの入力・手順・ルール・
+  出力確認だけを渡す。初回3 Stepへ全体用`solver_common.md`は連結しない。
+
+要求分解の正規契約は次の不変条件を持つ。
+
+```text
+質問が明示する要求全体
+= work_items
++ non_work_item_requirements
+
+work_items
+  独立して法令調査し、完了判定する要求
+
+non_work_item_requirements
+  明示要求のうち、独立したWorkItemとして完了判定しないもの
+```
+
+`non_work_item_requirements`は「重要でない要求」や「全WorkItemに必ず共通する要求」を意味しない。
+根拠提示、対象時点、地域、比較・表示方法等、質問が明示したが独立調査単位ではない要求を保持する。
+元質問は引き続きCaseStoreの正本とし、この欄で置き換えない。質問にない形式や詳しさを追加しない。
+
+Profile v156では同じSolver・同じResearch Cycleの中で3 Stepを順番に実行する。ProgramはCaseStoreへの保存、
+ID付与、既知ID・件数・参照整合の検証だけを担当する。要求の仕分け、WorkItemの意味、Hypothesis、
+検索語はLLMが判断する。別Agent、別Cycle、Providerの会話履歴またはProgramによる意味補正は導入しない。
 
 ## 4. 最優先分析: 複合問題の統合
 
@@ -215,6 +261,13 @@ Cycle引継ぎ、完了判断または構造化出力契約の失敗を含む。
   実施手続の4観点を保持した一方、「根拠となる条文」を余分な5件目のWorkItemにした。
   Profile v147では、同欄が`add_work_items`と意味上重複していたため削除し、`add_work_items`を質問分解の
   唯一の正本にした。LLMは出力前に元の質問と`add_work_items`を直接照合し、Programへ意味の補正を移さない。
+- 2026-08-24に本番Promptを合成せず、質問分解、WorkItem、入れ子のHypothesisだけを返す最小診断を追加した。
+  公開買付け質問への`gpt-4o-mini`の入力は380 tokenで、条件、対象範囲、例外、必要手続の4観点すべてに
+  質問の言い換えではない具体的な暫定回答を生成した。Haikuも同じ最小Promptで同じ4観点へ具体的な
+  暫定回答を生成した。両モデルとも出典指定を5件目のWorkItemにしたが、最小Promptには出典を独立作業から
+  除外する本番規則を意図的に含めていない。この結果から、`gpt-4o-mini`に一般的な仮説立案能力がないとは
+  いえず、本番での抽象化は法令Research Prompt・契約との相互作用として扱う。暫定回答の法的正確性は
+  この診断の合格条件ではなく、検索後に本文で支持、反証または修正する。
 
 この事実から、2/6だけを見てOpenSearchまたはGraphの取得不能と結論付けない。少なくとも直近実行では、
 Cycle 1の取得結果を統合して次の探索へ進む前に停止したため、残り4 Articleを探す機会自体が失われている。

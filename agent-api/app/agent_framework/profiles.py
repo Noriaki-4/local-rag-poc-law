@@ -17,7 +17,13 @@ class ModelCallProfile(FrameworkModel):
     followup_system_prompt: str | None = None
     completion_check_prompt: str | None = None
     followup_completion_check_prompt: str | None = None
-    context_projection: Literal["full", "initial_research"] = "full"
+    context_projection: Literal[
+        "full",
+        "initial_research",
+        "research_decomposition",
+        "research_hypothesis",
+        "research_search",
+    ] = "full"
     available_tool_names: tuple[str, ...] | None = None
 
 
@@ -163,6 +169,8 @@ class AgentProfile(FrameworkModel):
     version: str = Field(default="1", min_length=1, max_length=80)
     provider: str = Field(min_length=1, max_length=80)
     solver_research: ModelCallProfile
+    solver_hypothesis_generation: ModelCallProfile | None = None
+    solver_search_planning: ModelCallProfile | None = None
     solver_integration: ModelCallProfile = Field(
         validation_alias=AliasChoices("solver_integration", "solver_finalize")
     )

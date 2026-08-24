@@ -52,7 +52,7 @@ def test_dynamic_input_does_not_change_solver_instructions() -> None:
     assert "質問1" in first.request
 
 
-def test_initial_research_omits_irrelevant_execution_limits() -> None:
+def test_question_decomposition_uses_only_question_and_small_contract() -> None:
     fixture_path = (
         Path(__file__).parent
         / "fixtures"
@@ -70,39 +70,20 @@ def test_initial_research_omits_irrelevant_execution_limits() -> None:
         stage="research",
     )
 
-    assert set(rendered.input_payload) == {
-        "case_id",
-        "question",
-        "research_cycle_count",
-        "remaining_research_cycles",
-        "max_tool_requests_per_step",
-        "work_tree",
-        "hypotheses",
-        "available_tools",
-        "contract_feedback",
-    }
+    assert set(rendered.input_payload) == {"question"}
     assert "remaining_fetch_capacity" not in rendered.input_payload
     assert "max_fetched_resources_per_cycle" not in rendered.input_payload
     assert "remaining_fetch_capacity" not in rendered.instructions
     assert "最初の探索" not in rendered.instructions
-    assert "法令本文を根拠として回答するための調査" in rendered.instructions
-    assert "今回実行する探索" in rendered.instructions
+    assert "# 質問の要求分解" in rendered.instructions
+    assert "Tool結果を受け取った後" not in rendered.instructions
+    assert "共通ルール" not in rendered.instructions
     assert "Graph" not in rendered.instructions
-    assert [item["name"] for item in rendered.input_payload["available_tools"]] == [
-        "legal_search"
-    ]
     assert set(rendered.output_schema["properties"]) == {
-        "next",
-        "decision_reason",
-        "start_next_cycle",
-        "update",
-        "next_focus_work_item_ids",
-        "tool_requests",
+        "work_items",
+        "non_work_item_requirements",
     }
     assert "graph_candidate_review" in rendered.normalized_schema["properties"]
-    assert rendered.output_schema["properties"]["tool_requests"]["items"][
-        "properties"
-    ]["tool_name"]["enum"] == ["legal_search"]
 
 
 def test_real_model_v145_fixture_documents_duplicate_checklist() -> None:

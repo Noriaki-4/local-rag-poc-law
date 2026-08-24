@@ -640,6 +640,14 @@ class ReviewResult(FrameworkModel):
 class CaseState(FrameworkModel):
     case_id: str = Field(min_length=1, max_length=160)
     question: str = Field(min_length=1)
+    non_work_item_requirements: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "元の質問が明示する要求のうち、独立した法的結論を要するWorkItemには"
+            "しなかった要求。根拠・出典・引用・対象時点・地域・出力形式等を保持する。"
+            "重要度や適用範囲を表す分類ではなく、元の質問を正本とする。"
+        ),
+    )
     run_status: RunStatus = "running"
     research_cycle_count: int = Field(default=0, ge=0)
     work_items: tuple[WorkItem, ...] = ()

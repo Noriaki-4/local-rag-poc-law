@@ -145,7 +145,18 @@ class StructuredJSONModelAdapter:
                 )
             else:
                 try:
-                    normalized = _normalize_solver_payload(result.payload)
+                    if profile.context_projection in {
+                        "research_decomposition",
+                        "research_hypothesis",
+                        "research_search",
+                    }:
+                        normalized = _normalize_staged_research_payload(
+                            result.payload,
+                            projection=profile.context_projection,
+                            context=context,
+                        )
+                    else:
+                        normalized = _normalize_solver_payload(result.payload)
                     _assign_tool_request_ids(normalized, context)
                     _normalize_absent_context_branches(normalized, context)
                     if _preserve_previous_update_for_contract_repair(context):
@@ -187,12 +198,24 @@ class StructuredJSONModelAdapter:
                 )
 
             if repair_index == 0:
-                rendered = render_solver_transport_repair_model_call(
-                    context,
-                    base_call=rendered,
-                    payload=result.payload,
-                    error=last_error,
-                )
+                if profile.context_projection in {
+                    "research_decomposition",
+                    "research_hypothesis",
+                    "research_search",
+                }:
+                    rendered = _render_staged_research_repair_model_call(
+                        context,
+                        base_call=rendered,
+                        payload=result.payload,
+                        error=last_error,
+                    )
+                else:
+                    rendered = render_solver_transport_repair_model_call(
+                        context,
+                        base_call=rendered,
+                        payload=result.payload,
+                        error=last_error,
+                    )
                 prompt = rendered.request
                 _ensure_solver_prompt_capacity(prompt, context.max_solver_input_chars)
 
@@ -457,11 +480,21 @@ def render_solver_model_call(
 ) -> RenderedModelCall:
     """Providerへ送るSolver呼出しとレビュー成果物を同時に作る。"""
 
-    initial_research = profile.context_projection == "initial_research"
     projected_context = _project_available_tools(
         context,
         profile.available_tool_names,
     )
+    if profile.context_projection in {
+        "research_decomposition",
+        "research_hypothesis",
+        "research_search",
+    }:
+        return _render_staged_research_model_call(
+            projected_context,
+            profile,
+            stage=stage,
+        )
+    initial_research = profile.context_projection == "initial_research"
     output_schema = (
         _strip_runtime_id_enums(
             _initial_research_transport_schema(projected_context)
@@ -485,6 +518,34 @@ def render_solver_model_call(
         ),
         stage=stage,
     )
+
+
+def _render_staged_research_model_call(
+    context: SolverContext,
+    profile: ModelCallProfile,
+    *,
+    stage: str,
+) -> RenderedModelCall:
+    """初回Researchの各単一責務Stepへ、必要な入力と出力だけを渡す。"""
+
+    projection = profile.context_projection
+    input_payload = _solver_context_payload(context, projection=projection)
+    output_schema = _staged_research_transport_schema(context, projection)
+    instructions = (
+        f"{profile.system_prompt}\n\n"
+        f"{RUNTIME_INPUT_MARKER}"
+        f"{_post_context_completion_check(profile.completion_check_prompt)}"
+    )
+    rendered = build_rendered_model_call(
+        stage=f"{stage}_{projection}",
+        instructions=instructions,
+        input_tag="research_step_input",
+        input_payload=input_payload,
+        output_schema=output_schema,
+        normalized_schema=SolverDecision.model_json_schema(),
+    )
+    _ensure_solver_prompt_capacity(rendered.request, context.max_solver_input_chars)
+    return rendered
 
 
 def _render_solver_model_call(
@@ -567,6 +628,47 @@ def _solver_context_payload(
     payload = context.model_dump(mode="json")
     if projection == "full":
         return payload
+    if projection == "research_decomposition":
+        return {"question": payload["question"]}
+    if projection == "research_hypothesis":
+        return {
+            "question": payload["question"],
+            "work_items": [
+                {
+                    "work_item_id": item.work_item_id,
+                    "question": item.question,
+                }
+                for item in context.work_tree
+            ],
+            "non_work_item_requirements": payload[
+                "non_work_item_requirements"
+            ],
+        }
+    if projection == "research_search":
+        return {
+            "question": payload["question"],
+            "work_items": [
+                {
+                    "work_item_id": item.work_item_id,
+                    "question": item.question,
+                }
+                for item in context.work_tree
+            ],
+            "hypotheses": [
+                {
+                    "hypothesis_id": item.hypothesis_id,
+                    "work_item_id": item.work_item_id,
+                    "statement": item.statement,
+                    "gaps": list(item.gaps),
+                }
+                for item in context.hypotheses
+                if item.judgment == "unresolved"
+            ],
+            "available_tools": payload["available_tools"],
+            "max_tool_requests_per_step": payload[
+                "max_tool_requests_per_step"
+            ],
+        }
     if projection != "initial_research":
         raise ValueError(f"unknown solver context projection: {projection}")
     included_fields = (
@@ -581,6 +683,127 @@ def _solver_context_payload(
         "contract_feedback",
     )
     return {name: payload[name] for name in included_fields}
+
+
+def _staged_research_transport_schema(
+    context: SolverContext,
+    projection: str,
+) -> dict[str, Any]:
+    """単一責務StepごとのProvider向け出力契約。"""
+
+    if projection == "research_decomposition":
+        work_item = _strict_object(
+            {
+                "question": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000,
+                    "description": "独立して法的結論を出し、完了判定できる1つの確認事項。",
+                }
+            }
+        )
+        return _strict_object(
+            {
+                "work_items": {
+                    "type": "array",
+                    "items": work_item,
+                    "minItems": 1,
+                    "maxItems": 24,
+                    "description": "質問が求める独立した法的結論の一覧。",
+                },
+                "non_work_item_requirements": {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1},
+                    "maxItems": 24,
+                    "description": (
+                        "質問の明示要求のうち、独立した法的結論を要しない要求。"
+                        "根拠・出典・引用・対象時点・地域・出力形式等。"
+                    ),
+                },
+            }
+        )
+    work_item_ids = tuple(item.work_item_id for item in context.work_tree)
+    if projection == "research_hypothesis":
+        hypothesis = _strict_object(
+            {
+                "work_item_id": _enum_string(work_item_ids),
+                "statement": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000,
+                    "description": (
+                        "検索前の未確認で誤り得る暫定的な法的命題。"
+                        "WorkItemの言い換えではなく、検索対象を選べる具体性を持つ。"
+                    ),
+                },
+                "gaps": {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1},
+                    "maxItems": 8,
+                    "description": "命題のうち法令本文でまだ確認すべき具体的な法的内容。",
+                },
+            }
+        )
+        return _strict_object(
+            {
+                "hypotheses": {
+                    "type": "array",
+                    "items": hypothesis,
+                    "minItems": len(work_item_ids),
+                    "maxItems": max(len(work_item_ids), min(48, len(work_item_ids) * 4)),
+                    "description": "各WorkItemを検証するHypothesis。",
+                }
+            }
+        )
+    if projection == "research_search":
+        hypothesis_ids = tuple(
+            item.hypothesis_id
+            for item in context.hypotheses
+            if item.judgment == "unresolved"
+        )
+        search_request = _strict_object(
+            {
+                "work_item_id": _enum_string(work_item_ids),
+                "hypothesis_ids": {
+                    "type": "array",
+                    "items": _enum_string(hypothesis_ids),
+                    "minItems": 1,
+                    "maxItems": min(8, max(1, len(hypothesis_ids))),
+                    "description": "この検索で検証する既知Hypothesis ID。",
+                },
+                "purpose": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000,
+                    "description": "この検索で確認する法的内容。",
+                },
+                "query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000,
+                    "description": "制度名と判定軸を法令本文に現れやすい語で表した検索語。",
+                },
+                "doc_types": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": ["law", "guideline"]},
+                    "minItems": 1,
+                    "maxItems": 2,
+                    "description": "法令本文はlaw、行政解釈やガイドはguideline。",
+                },
+            }
+        )
+        return _strict_object(
+            {
+                "search_requests": {
+                    "type": "array",
+                    "items": search_request,
+                    "minItems": 1,
+                    "maxItems": context.max_tool_requests_per_step,
+                    "description": "今回実行するlegal_search要求。",
+                }
+            }
+        )
+    raise ValueError(f"unknown staged research projection: {projection}")
 
 
 def _initial_research_transport_schema(
@@ -937,6 +1160,38 @@ def render_solver_transport_repair_model_call(
         output_schema=base_call.output_schema,
         normalized_schema=base_call.normalized_schema,
         prompt_assets=prompt_assets,
+    )
+    _ensure_solver_prompt_capacity(rendered.request, context.max_solver_input_chars)
+    return rendered
+
+
+def _render_staged_research_repair_model_call(
+    context: SolverContext,
+    *,
+    base_call: RenderedModelCall,
+    payload: dict[str, Any] | None,
+    error: ModelProtocolError | ValidationError,
+) -> RenderedModelCall:
+    """単一責務Stepでは、そのStepの契約だけを使って再出力させる。"""
+
+    instructions = (
+        f"{base_call.instructions}\n\n"
+        "<contract_repair>\n"
+        "直前の出力は次の構造違反により未適用です。意味内容を保ちながら、"
+        "現在の出力schemaに一致する完全な出力を返してください。\n"
+        f"{_transport_error_detail(error)}\n"
+        "</contract_repair>"
+    )
+    input_payload = dict(base_call.input_payload)
+    input_payload["previous_invalid_output"] = payload
+    rendered = build_rendered_model_call(
+        stage=f"{base_call.stage}_contract_repair",
+        instructions=instructions,
+        input_tag=base_call.input_tag,
+        input_payload=input_payload,
+        output_schema=base_call.output_schema,
+        normalized_schema=base_call.normalized_schema,
+        prompt_assets=base_call.prompt_assets,
     )
     _ensure_solver_prompt_capacity(rendered.request, context.max_solver_input_chars)
     return rendered
@@ -2679,6 +2934,137 @@ def _normalize_solver_payload(payload: dict) -> dict:
         requests.append(request)
     normalized["tool_requests"] = requests
     return normalized
+
+
+def _normalize_staged_research_payload(
+    payload: dict[str, Any],
+    *,
+    projection: str,
+    context: SolverContext,
+) -> dict[str, Any]:
+    """段階別の意味出力を、意味を変えず共通SolverDecisionへ包む。"""
+
+    if projection == "research_decomposition":
+        raw_items = payload.get("work_items") or []
+        requirements = payload.get("non_work_item_requirements") or []
+        questions = [item.get("question") for item in raw_items]
+        if any(not isinstance(question, str) or not question for question in questions):
+            raise ModelProtocolError("all WorkItems require a non-empty question")
+        if len(questions) != len(set(questions)):
+            raise ModelProtocolError("WorkItem questions must be unique")
+        if any(not isinstance(item, str) or not item for item in requirements):
+            raise ModelProtocolError(
+                "all non-WorkItem requirements must be non-empty strings"
+            )
+        if len(requirements) != len(set(requirements)):
+            raise ModelProtocolError("non-WorkItem requirements must be unique")
+        work_items = [
+            WorkItem(
+                work_item_id=f"wi-{index}",
+                question=question,
+            ).model_dump(mode="json")
+            for index, question in enumerate(questions, start=1)
+        ]
+        return {
+            "next": "continue",
+            "start_next_cycle": False,
+            "update": {
+                "set_non_work_item_requirements": requirements,
+                "add_work_items": work_items,
+            },
+            "next_focus_work_item_ids": [
+                item["work_item_id"] for item in work_items
+            ],
+            "tool_requests": [],
+        }
+
+    known_work_item_ids = {
+        item.work_item_id for item in context.work_tree if item.state == "open"
+    }
+    if projection == "research_hypothesis":
+        raw_hypotheses = payload.get("hypotheses") or []
+        referenced_work_item_ids = [
+            item.get("work_item_id") for item in raw_hypotheses
+        ]
+        unknown = set(referenced_work_item_ids) - known_work_item_ids
+        if unknown:
+            raise ModelProtocolError(
+                f"hypotheses reference unknown WorkItem IDs: {sorted(unknown)}"
+            )
+        missing = known_work_item_ids - set(referenced_work_item_ids)
+        if missing:
+            raise ModelProtocolError(
+                f"open WorkItems require at least one Hypothesis: {sorted(missing)}"
+            )
+        hypotheses = [
+            Hypothesis(
+                hypothesis_id=f"h-{index}",
+                work_item_id=item["work_item_id"],
+                statement=item["statement"],
+                gaps=tuple(item.get("gaps") or ()),
+            ).model_dump(mode="json")
+            for index, item in enumerate(raw_hypotheses, start=1)
+        ]
+        return {
+            "next": "continue",
+            "start_next_cycle": False,
+            "update": {"add_hypotheses": hypotheses},
+            "next_focus_work_item_ids": sorted(known_work_item_ids),
+            "tool_requests": [],
+        }
+
+    if projection == "research_search":
+        known_hypotheses = {
+            item.hypothesis_id: item
+            for item in context.hypotheses
+            if item.judgment == "unresolved"
+        }
+        requests = []
+        for index, item in enumerate(payload.get("search_requests") or [], start=1):
+            work_item_id = item.get("work_item_id")
+            hypothesis_ids = item.get("hypothesis_ids") or []
+            unknown_hypotheses = set(hypothesis_ids) - set(known_hypotheses)
+            if unknown_hypotheses:
+                raise ModelProtocolError(
+                    "search request references unknown Hypothesis IDs: "
+                    f"{sorted(unknown_hypotheses)}"
+                )
+            mismatched = [
+                hypothesis_id
+                for hypothesis_id in hypothesis_ids
+                if known_hypotheses[hypothesis_id].work_item_id != work_item_id
+            ]
+            if mismatched:
+                raise ModelProtocolError(
+                    "search request Hypotheses must belong to its WorkItem: "
+                    f"{sorted(mismatched)}"
+                )
+            requests.append(
+                {
+                    "request_id": f"search-{index}",
+                    "work_item_id": work_item_id,
+                    "tool_name": "legal_search",
+                    "arguments": {
+                        "query": item["query"],
+                        "doc_types": list(dict.fromkeys(item["doc_types"])),
+                        "document_ids": [],
+                    },
+                    "purpose": item["purpose"],
+                    "hypothesis_ids": hypothesis_ids,
+                }
+            )
+        if not requests:
+            raise ModelProtocolError("search planning requires at least one request")
+        return {
+            "next": "continue",
+            "start_next_cycle": False,
+            "update": {},
+            "next_focus_work_item_ids": list(
+                dict.fromkeys(item["work_item_id"] for item in requests)
+            ),
+            "tool_requests": requests,
+        }
+    raise ModelProtocolError(f"unknown staged research projection: {projection}")
 
 
 def _assign_tool_request_ids(
