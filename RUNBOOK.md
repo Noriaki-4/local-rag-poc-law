@@ -1153,15 +1153,21 @@ agent-api/.venv/bin/python scripts/export_agent_model_call_artifacts.py \
   --fixture agent-api/tests/fixtures/framework/tob_overview_initial_research_decomposition_v1.json \
   --provider openai \
   --stage research \
-  --output eval-results/model-call-review/legal-research-openai
+  --output eval-results/model-call-review/step-1-question-decomposition/openai
 
 agent-api/.venv/bin/python scripts/export_agent_model_call_artifacts.py \
-  --fixture agent-api/tests/fixtures/framework/tob_overview_initial_research_decomposition_v1.json \
+  --fixture agent-api/tests/fixtures/framework/tob_overview_cycle1_after_search_v1.json \
   --provider openai \
-  --stage research \
-  --output eval-results/model-call-review/legal-research-openai \
+  --stage search_planning \
+  --output eval-results/model-call-review/step-3-search-planning/openai \
   --check
 ```
+
+初回Researchの固定成果物は`step-1-question-decomposition`、
+`step-2-hypothesis-generation`、`step-3-search-planning`の3段階を別々に生成する。
+各段階の`instructions.md`、`input.json`、`output_schema.json`、`request.txt`を一組として確認する。
+Step 3の`input.json.available_tools`には、本番の`ToolDefinition`から取得した正規名、用途、入力Schema、
+戻り値説明が含まれる。fixture内に古いTool定義が残っていても、成果物生成時は本番定義を正本とする。
 
 通常の整合レビューは`instructions.md`と`output_schema.json`を対にして行う。Provider輸送から
 共通契約への変換を疑う場合だけ`normalized_schema.json`、実際の直列化を疑う場合だけ`request.txt`を追加確認する。

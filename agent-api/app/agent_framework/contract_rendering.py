@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import get_args, get_origin
 
 from pydantic import BaseModel
 
-from .context import SolverContext
+from .context import ResearchStepInput, SolverContext
 from .contracts import SolverDecision
 
 
@@ -72,3 +73,49 @@ def contract_field_description(
             f"contract field lacks description: {model_type.__name__}.{field_name}"
         )
     return description
+
+
+@lru_cache(maxsize=8)
+def render_research_step_input_glossary(field_names: tuple[str, ...]) -> str:
+    """初回Researchの投影入力にある項目だけを説明する。"""
+
+    lines = [
+        "<input_contract>",
+        "以下は今回の入力項目と意味です。",
+    ]
+    for field_name in field_names:
+        field = ResearchStepInput.model_fields.get(field_name)
+        if field is None:
+            raise ValueError(f"unknown ResearchStepInput field: {field_name}")
+        description = (field.description or "").strip()
+        if not description:
+            raise ValueError(
+                f"LLM-visible input field lacks description: {field_name}"
+            )
+        lines.append(f"- `{field_name}`: {description}")
+        item_type = _collection_item_model(field.annotation)
+        if item_type is not None:
+            for item_name, item_field in item_type.model_fields.items():
+                item_description = (item_field.description or "").strip()
+                if not item_description:
+                    raise ValueError(
+                        "LLM-visible input item field lacks description: "
+                        f"{field_name}[].{item_name}"
+                    )
+                lines.append(
+                    f"  - `{field_name}[].{item_name}`: {item_description}"
+                )
+    lines.append("</input_contract>")
+    return "\n".join(lines)
+
+
+def _collection_item_model(annotation: object) -> type[BaseModel] | None:
+    if get_origin(annotation) not in {list, tuple}:
+        return None
+    arguments = get_args(annotation)
+    if not arguments:
+        return None
+    item_type = arguments[0]
+    if isinstance(item_type, type) and issubclass(item_type, BaseModel):
+        return item_type
+    return None

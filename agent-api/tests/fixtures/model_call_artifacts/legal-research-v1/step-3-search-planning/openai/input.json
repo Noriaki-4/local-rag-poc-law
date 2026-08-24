@@ -1,0 +1,97 @@
+{
+  "available_tools": [
+    {
+      "description": "Article IDがまだ分からないとき、OpenSearchで法令またはガイドの候補を探す。質問をそのまま繰り返さず、確認事項を法令表現へ言い換えて使う。返す検索抜粋は候補選択用であり、回答やHypothesisの根拠にはしない。",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "doc_types": {
+            "description": "検索対象。法令本文はlaw、行政解釈やガイドはguideline。現在の検索に必要な値を配列で返す。",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "document_ids": {
+            "description": "検索対象文書を限定する既知documentId。限定しない場合は空配列。",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 12,
+            "type": "array"
+          },
+          "query": {
+            "description": "制度名と確認事項を法令に現れやすい表現へ言い換えた検索語。",
+            "maxLength": 1000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "query",
+          "doc_types",
+          "document_ids"
+        ],
+        "type": "object"
+      },
+      "name": "legal_search",
+      "parallel_safe": true,
+      "read_only": true,
+      "result_description": "候補Articleの所在と短い検索抜粋をnavigation Evidenceとして返す。Article本文のgrounding Evidenceは返さない。"
+    }
+  ],
+  "hypotheses": [
+    {
+      "gaps": [
+        "具体的な条件を示す法令が未確認"
+      ],
+      "hypothesis_id": "hypothesis_1",
+      "statement": "公開買付けの手続が必要になるのは、特定の条件を満たす場合である。",
+      "work_item_id": "work_item_1"
+    },
+    {
+      "gaps": [
+        "対象となる株券等の範囲を示す法令が未確認"
+      ],
+      "hypothesis_id": "hypothesis_2",
+      "statement": "公開買付けの対象となる株券等は、特定の範囲に限定される。",
+      "work_item_id": "work_item_2"
+    },
+    {
+      "gaps": [
+        "例外を示す法令が未確認"
+      ],
+      "hypothesis_id": "hypothesis_3",
+      "statement": "公開買付けには主な例外が存在する。",
+      "work_item_id": "work_item_3"
+    },
+    {
+      "gaps": [
+        "必要な手続を示す法令が未確認"
+      ],
+      "hypothesis_id": "hypothesis_4",
+      "statement": "公開買付けに必要な手続は、特定の手続きに従う必要がある。",
+      "work_item_id": "work_item_4"
+    }
+  ],
+  "max_tool_requests_per_step": 5,
+  "question": "上場会社の株式を、市場を通さずに多数の株主から買い集めたいのですが、公開買付けの手続が必要になるのはどのような場合ですか。対象となる株券等の範囲、主な例外、必要な手続も含めて、根拠となる条文とともに説明してください。",
+  "work_items": [
+    {
+      "question": "公開買付けの手続が必要になる場合はどのような場合か？",
+      "work_item_id": "work_item_1"
+    },
+    {
+      "question": "公開買付けの対象となる株券等の範囲は？",
+      "work_item_id": "work_item_2"
+    },
+    {
+      "question": "公開買付けの主な例外は何か？",
+      "work_item_id": "work_item_3"
+    },
+    {
+      "question": "公開買付けに必要な手続は何か？",
+      "work_item_id": "work_item_4"
+    }
+  ]
+}

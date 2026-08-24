@@ -109,7 +109,8 @@ Search Reviewで保留した候補と、本文取得が未完了の選択候補�
 同じ処理モード、Provider輸送方式、契約versionでは、質問やEvidenceが変わっても固定指示のhashは変えません。
 固定指示には次を追加します。
 
-- Pydanticの`Field.description`から生成した、`SolverContext`と`SolverDecision`の入口だけの`contract_glossary`
+- Pydanticの`Field.description`から生成した、初回3 Stepの`input_contract`または
+  `SolverContext`と`SolverDecision`の入口だけの`contract_glossary`
 - 実行時に利用できる`available_tools`と各Toolの用途・入力Schema・戻り値説明
 - `SolverDecision`の共通出力原則と状態契約
 - Provider別の構造化出力・輸送指示
@@ -130,6 +131,10 @@ Programは文字列の内容を補正せず、ID、件数、既知参照、WorkI
 Step 1の不変条件は「質問の明示要求全体 = WorkItem + non_work_item_requirements」であり、元の質問は引き続き
 CaseStoreの正本です。`non_work_item_requirements`は重要度や全WorkItem共通性を表さず、独立した法的結論を
 要しない根拠・出典・引用・対象時点・地域・出力形式等の明示要求を欠落させず保持します。
+
+初回3 Stepの実行時入力は`ResearchStepInput`を正本とし、各Stepで実際に投影した項目だけを`input_contract`へ
+生成します。Step 3では`available_tools`の一覧全体の意味と、各Toolが持つ用途・入力Schema・戻り値説明を
+完成Promptと`input.json`の組で確認できます。
 
 修復指示のassetは`app/agent_framework/prompts/`にあります。法令判断の手順はこのディレクトリ、
 Provider輸送と契約修復はFramework側へ分け、同じ規則を両方へ重複記載しません。

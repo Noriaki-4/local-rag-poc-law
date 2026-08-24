@@ -1,0 +1,50 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "hypotheses": {
+      "description": "各WorkItemを検証するHypothesis。",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "gaps": {
+            "description": "命題のうち法令本文でまだ確認すべき具体的な法的内容。",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 8,
+            "type": "array"
+          },
+          "statement": {
+            "description": "検索前の未確認で誤り得る暫定的な法的命題。WorkItemの言い換えではなく、検索対象を選べる具体性を持つ。",
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "work_item_id": {
+            "enum": [
+              "work_item_1",
+              "work_item_2",
+              "work_item_3",
+              "work_item_4"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_item_id",
+          "statement",
+          "gaps"
+        ],
+        "type": "object"
+      },
+      "maxItems": 16,
+      "minItems": 4,
+      "type": "array"
+    }
+  },
+  "required": [
+    "hypotheses"
+  ],
+  "type": "object"
+}

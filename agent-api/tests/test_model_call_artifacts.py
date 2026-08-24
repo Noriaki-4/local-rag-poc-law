@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from app.adapters.models.structured_json import render_solver_model_call
+from app.adapters.tools.legal_search import LegalSearchTool
 from app.agent_framework.context import build_solver_context
 from app.agent_framework.context import SolverContext
 from app.agent_framework.contracts import SolverDecision
@@ -79,6 +80,10 @@ def test_question_decomposition_uses_only_question_and_small_contract() -> None:
     assert "Tool結果を受け取った後" not in rendered.instructions
     assert "共通ルール" not in rendered.instructions
     assert "Graph" not in rendered.instructions
+    assert "<input_contract>" in rendered.instructions
+    assert "`question`: 利用者が回答を求めている元の質問。" in (
+        rendered.instructions
+    )
     assert set(rendered.output_schema["properties"]) == {
         "work_items",
         "non_work_item_requirements",
@@ -211,23 +216,57 @@ def test_cycle_close_uses_small_provider_common_schema_without_runtime_id_enums(
     assert count_any_of(anthropic_schema) <= 16
 
 
-@pytest.mark.parametrize("provider", ["openai", "anthropic", "ollama"])
-def test_research_baseline_artifacts_are_current(provider: str) -> None:
-    fixture_path = (
-        Path(__file__).parent
-        / "fixtures/framework/tob_overview_initial_research_decomposition_v1.json"
-    )
+_INITIAL_RESEARCH_ARTIFACT_CASES = [
+    (
+        "research",
+        "solver_research",
+        "tob_overview_initial_research_decomposition_v1.json",
+        "step-1-question-decomposition",
+    ),
+    (
+        "hypothesis_generation",
+        "solver_hypothesis_generation",
+        "tob_overview_cycle1_after_search_v1.json",
+        "step-2-hypothesis-generation",
+    ),
+    (
+        "search_planning",
+        "solver_search_planning",
+        "tob_overview_cycle1_after_search_v1.json",
+        "step-3-search-planning",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("stage", "profile_name", "fixture_name", "artifact_stage"),
+    _INITIAL_RESEARCH_ARTIFACT_CASES,
+)
+def test_initial_research_artifacts_are_current(
+    stage: str,
+    profile_name: str,
+    fixture_name: str,
+    artifact_stage: str,
+) -> None:
+    provider = "openai"
+    fixture_path = Path(__file__).parent / "fixtures/framework" / fixture_name
     fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
     context = SolverContext.model_validate(fixture["solverContext"])
     agent_profile = legal_agent_profile()
-    profile = agent_profile.solver_research.model_copy(
+    profile = getattr(agent_profile, profile_name)
+    assert profile is not None
+    profile = profile.model_copy(
         update={"model": fixture["source"]["model"]}
     )
+    if profile.available_tool_names is not None:
+        context = context.model_copy(
+            update={"available_tools": (LegalSearchTool.definition,)}
+        )
     rendered = render_solver_model_call(
         context,
         profile,
         provider=provider,
-        stage="research",
+        stage=stage,
     )
     expected = model_call_artifact_contents(
         rendered,
@@ -238,9 +277,72 @@ def test_research_baseline_artifacts_are_current(provider: str) -> None:
     )
     artifact_dir = (
         Path(__file__).parent
-        / f"fixtures/model_call_artifacts/legal-research-v1/{provider}"
+        / "fixtures/model_call_artifacts/legal-research-v1"
+        / artifact_stage
+        / provider
     )
 
     assert {path.name for path in artifact_dir.iterdir()} == set(expected)
     for name, content in expected.items():
         assert (artifact_dir / name).read_text(encoding="utf-8") == content
+
+
+@pytest.mark.parametrize("provider", ["anthropic", "ollama"])
+@pytest.mark.parametrize(
+    ("stage", "profile_name", "fixture_name", "_artifact_stage"),
+    _INITIAL_RESEARCH_ARTIFACT_CASES,
+)
+def test_initial_research_provider_contracts_match_canonical(
+    provider: str,
+    stage: str,
+    profile_name: str,
+    fixture_name: str,
+    _artifact_stage: str,
+) -> None:
+    fixture_path = Path(__file__).parent / "fixtures/framework" / fixture_name
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    context = SolverContext.model_validate(fixture["solverContext"])
+    profile = getattr(legal_agent_profile(), profile_name)
+    assert profile is not None
+    if profile.available_tool_names is not None:
+        context = context.model_copy(
+            update={"available_tools": (LegalSearchTool.definition,)}
+        )
+
+    canonical = render_solver_model_call(
+        context,
+        profile,
+        provider="openai",
+        stage=stage,
+    )
+    rendered = render_solver_model_call(
+        context,
+        profile,
+        provider=provider,
+        stage=stage,
+    )
+
+    assert rendered == canonical
+
+
+def test_search_planning_artifact_explains_available_tools() -> None:
+    artifact_dir = (
+        Path(__file__).parent
+        / "fixtures/model_call_artifacts/legal-research-v1"
+        / "step-3-search-planning/openai"
+    )
+    instructions = (artifact_dir / "instructions.md").read_text(encoding="utf-8")
+    input_payload = json.loads(
+        (artifact_dir / "input.json").read_text(encoding="utf-8")
+    )
+
+    assert "`available_tools`: 現在のStepで要求できるTool一覧。" in instructions
+    assert "`available_tools[].description`" in instructions
+    assert "`available_tools[].input_schema`" in instructions
+    assert "`available_tools[].result_description`" in instructions
+    assert [item["name"] for item in input_payload["available_tools"]] == [
+        "legal_search"
+    ]
+    assert input_payload["available_tools"][0] == (
+        LegalSearchTool.definition.model_dump(mode="json")
+    )

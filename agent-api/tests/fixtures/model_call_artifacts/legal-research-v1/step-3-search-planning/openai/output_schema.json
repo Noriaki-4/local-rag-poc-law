@@ -1,0 +1,77 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "search_requests": {
+      "description": "今回実行するlegal_search要求。",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "doc_types": {
+            "description": "法令本文はlaw、行政解釈やガイドはguideline。",
+            "items": {
+              "enum": [
+                "law",
+                "guideline"
+              ],
+              "type": "string"
+            },
+            "maxItems": 2,
+            "minItems": 1,
+            "type": "array"
+          },
+          "hypothesis_ids": {
+            "description": "この検索で検証する既知Hypothesis ID。",
+            "items": {
+              "enum": [
+                "hypothesis_1",
+                "hypothesis_2",
+                "hypothesis_3",
+                "hypothesis_4"
+              ],
+              "type": "string"
+            },
+            "maxItems": 4,
+            "minItems": 1,
+            "type": "array"
+          },
+          "purpose": {
+            "description": "この検索で確認する法的内容。",
+            "maxLength": 1000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "query": {
+            "description": "制度名と判定軸を法令本文に現れやすい語で表した検索語。",
+            "maxLength": 1000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "work_item_id": {
+            "enum": [
+              "work_item_1",
+              "work_item_2",
+              "work_item_3",
+              "work_item_4"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_item_id",
+          "hypothesis_ids",
+          "purpose",
+          "query",
+          "doc_types"
+        ],
+        "type": "object"
+      },
+      "maxItems": 5,
+      "minItems": 1,
+      "type": "array"
+    }
+  },
+  "required": [
+    "search_requests"
+  ],
+  "type": "object"
+}

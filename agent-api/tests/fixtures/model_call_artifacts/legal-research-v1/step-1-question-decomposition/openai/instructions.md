@@ -21,6 +21,11 @@
 - 質問にない観点や要求は追加しません。
 - 仮説、検索語、Tool要求は作りません。
 
+<input_contract>
+以下は今回の入力項目と意味です。
+- `question`: 利用者が回答を求めている元の質問。
+</input_contract>
+
 {{runtime_input}}
 
 ## 出力前の確認

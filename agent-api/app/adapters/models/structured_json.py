@@ -11,9 +11,16 @@ from uuid import uuid4
 import requests
 from pydantic import BaseModel, ValidationError
 
-from app.agent_framework.context import ContextCapacityExceeded, SolverContext
+from app.agent_framework.context import (
+    ContextCapacityExceeded,
+    ResearchStepHypothesis,
+    ResearchStepInput,
+    ResearchStepWorkItem,
+    SolverContext,
+)
 from app.agent_framework.contract_rendering import (
     contract_field_description,
+    render_research_step_input_glossary,
     render_solver_contract_glossary,
 )
 from app.agent_framework.contracts import (
@@ -533,6 +540,7 @@ def _render_staged_research_model_call(
     output_schema = _staged_research_transport_schema(context, projection)
     instructions = (
         f"{profile.system_prompt}\n\n"
+        f"{render_research_step_input_glossary(tuple(input_payload))}\n\n"
         f"{RUNTIME_INPUT_MARKER}"
         f"{_post_context_completion_check(profile.completion_check_prompt)}"
     )
@@ -628,47 +636,51 @@ def _solver_context_payload(
     payload = context.model_dump(mode="json")
     if projection == "full":
         return payload
+    research_input = ResearchStepInput(
+        question=context.question,
+        work_items=tuple(
+            ResearchStepWorkItem(
+                work_item_id=item.work_item_id,
+                question=item.question,
+            )
+            for item in context.work_tree
+        ),
+        non_work_item_requirements=context.non_work_item_requirements,
+        hypotheses=tuple(
+            ResearchStepHypothesis(
+                hypothesis_id=item.hypothesis_id,
+                work_item_id=item.work_item_id,
+                statement=item.statement,
+                gaps=item.gaps,
+            )
+            for item in context.hypotheses
+            if item.judgment == "unresolved"
+        ),
+        available_tools=context.available_tools,
+        max_tool_requests_per_step=context.max_tool_requests_per_step,
+    )
     if projection == "research_decomposition":
-        return {"question": payload["question"]}
+        return research_input.model_dump(mode="json", include={"question"})
     if projection == "research_hypothesis":
-        return {
-            "question": payload["question"],
-            "work_items": [
-                {
-                    "work_item_id": item.work_item_id,
-                    "question": item.question,
-                }
-                for item in context.work_tree
-            ],
-            "non_work_item_requirements": payload[
-                "non_work_item_requirements"
-            ],
-        }
+        return research_input.model_dump(
+            mode="json",
+            include={
+                "question",
+                "work_items",
+                "non_work_item_requirements",
+            },
+        )
     if projection == "research_search":
-        return {
-            "question": payload["question"],
-            "work_items": [
-                {
-                    "work_item_id": item.work_item_id,
-                    "question": item.question,
-                }
-                for item in context.work_tree
-            ],
-            "hypotheses": [
-                {
-                    "hypothesis_id": item.hypothesis_id,
-                    "work_item_id": item.work_item_id,
-                    "statement": item.statement,
-                    "gaps": list(item.gaps),
-                }
-                for item in context.hypotheses
-                if item.judgment == "unresolved"
-            ],
-            "available_tools": payload["available_tools"],
-            "max_tool_requests_per_step": payload[
-                "max_tool_requests_per_step"
-            ],
-        }
+        return research_input.model_dump(
+            mode="json",
+            include={
+                "question",
+                "work_items",
+                "hypotheses",
+                "available_tools",
+                "max_tool_requests_per_step",
+            },
+        )
     if projection != "initial_research":
         raise ValueError(f"unknown solver context projection: {projection}")
     included_fields = (

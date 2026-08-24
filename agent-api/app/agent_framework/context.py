@@ -244,6 +244,52 @@ class SearchCandidateArticle(FrameworkModel):
     )
 
 
+class ResearchStepWorkItem(FrameworkModel):
+    work_item_id: str = Field(description="Programが付与した既知WorkItem ID。")
+    question: str = Field(description="このWorkItemで確認する1つの法的事項。")
+
+
+class ResearchStepHypothesis(FrameworkModel):
+    hypothesis_id: str = Field(description="Programが付与した既知Hypothesis ID。")
+    work_item_id: str = Field(description="このHypothesisが属する既知WorkItem ID。")
+    statement: str = Field(description="法令本文で検証する未確認の法的命題。")
+    gaps: tuple[str, ...] = Field(
+        description="命題のうち法令本文でまだ確認すべき具体的な法的内容。"
+    )
+
+
+class ResearchStepInput(FrameworkModel):
+    """初回Researchの各Stepへ必要な項目だけを渡すread model。"""
+
+    question: str = Field(description="利用者が回答を求めている元の質問。")
+    work_items: tuple[ResearchStepWorkItem, ...] = Field(
+        default=(),
+        description=(
+            "今回の質問から作成済みのWorkItem。各要素は既知IDと1つの確認事項を持つ。"
+        ),
+    )
+    non_work_item_requirements: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "質問の明示要求のうち、独立した法的結論を要するWorkItemにしなかった要求。"
+        ),
+    )
+    hypotheses: tuple[ResearchStepHypothesis, ...] = Field(
+        default=(),
+        description=(
+            "作成済みの未確認Hypothesis。各要素は所属WorkItem、命題、gapsを持つ。"
+        ),
+    )
+    available_tools: tuple[ToolDefinition, ...] = Field(
+        default=(),
+        description="現在のStepで要求できるTool一覧。",
+    )
+    max_tool_requests_per_step: int = Field(
+        ge=0,
+        description="今回のStepで返せるTool要求総数の上限。",
+    )
+
+
 class SolverContractFeedback(FrameworkModel):
     violation: str = Field(
         description="直前SolverDecisionを未適用にした決定的な契約違反。"

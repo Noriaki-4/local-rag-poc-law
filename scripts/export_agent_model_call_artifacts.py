@@ -18,6 +18,11 @@ from app.adapters.models.structured_json import (  # noqa: E402
     render_search_reselection_model_call,
     render_solver_model_call,
 )
+from app.adapters.tools.legal_search import (  # noqa: E402
+    LegalFetchArticlesTool,
+    LegalGraphNeighborsTool,
+    LegalSearchTool,
+)
 from app.agent_framework.context import SolverContext  # noqa: E402
 from app.agent_framework.model_call_artifacts import (  # noqa: E402
     model_call_artifact_contents,
@@ -29,11 +34,22 @@ from app.domains.legal.profiles import legal_agent_profile  # noqa: E402
 
 _SOLVER_STAGES = {
     "research": "solver_research",
+    "hypothesis_generation": "solver_hypothesis_generation",
+    "search_planning": "solver_search_planning",
     "integration": "solver_integration",
     "cycle_close": "solver_cycle_close",
     "finalization": "solver_finalization",
     "reviewer_revision": "solver_reviewer_revision",
     "graph_review": "solver_graph_review",
+}
+
+_LEGAL_TOOL_DEFINITIONS = {
+    definition.name: definition
+    for definition in (
+        LegalSearchTool.definition,
+        LegalFetchArticlesTool.definition,
+        LegalGraphNeighborsTool.definition,
+    )
 }
 
 
@@ -125,6 +141,19 @@ def _render(
     if not isinstance(context_value, dict):
         raise ValueError("fixture must contain solverContext")
     context = SolverContext.model_validate(context_value)
+    if profile.available_tool_names is not None:
+        fixture_definitions = {item.name: item for item in context.available_tools}
+        requested_definitions = []
+        for name in profile.available_tool_names:
+            definition = _LEGAL_TOOL_DEFINITIONS.get(name) or fixture_definitions.get(
+                name
+            )
+            if definition is None:
+                raise ValueError(f"fixture cannot resolve Tool definition: {name}")
+            requested_definitions.append(definition)
+        context = context.model_copy(
+            update={"available_tools": tuple(requested_definitions)}
+        )
     if stage == "search_assessment":
         rendered = render_search_assessment_model_call(context, profile)
     elif stage == "search_reselection":

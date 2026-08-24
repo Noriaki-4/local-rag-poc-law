@@ -31,11 +31,14 @@
   `gpt-4o-mini`で、`LLM_MODEL`により同一Runの探索・統合・回答・Reviewerを一括変更できる。
   `LLM_MODEL`未指定時は従来どおり役割別model設定を使う。同一Run内でproviderを統一する制約は維持する。
 - 現行経路では、主要な`SolverContext / SolverDecision / CaseUpdate / WorkItem / Hypothesis /
-  ToolRequest / DependencyDecision / FinalAnswer`の`Field.description`から`contract_glossary`を決定的に生成し、
-  全Solver呼出しへ合成する。Toolは`ToolDefinition`に正規名、用途、Provider非依存の入力Schema、
+  ToolRequest / DependencyDecision / FinalAnswer`の`Field.description`から`contract_glossary`を決定的に生成する。
+  初回Researchの3 Stepは小さい`ResearchStepInput`から、実際に投影した項目と入れ子要素だけの
+  `input_contract`を生成する。Toolは`ToolDefinition`に正規名、用途、Provider非依存の入力Schema、
   戻り値説明を持ち、利用可能な定義だけを`available_tools`へ投影する。v154では全Providerが
   `update`、構造化`tool_requests`、実Article / Evidence IDを同じ意味契約で返し、Provider別Adapterは
   API形式、schema方言、利用量、終了理由、エラーだけを吸収する。
+  v157では初回3 Stepの完成Prompt、入力、出力Schema、実送信内容を基準Providerの固定成果物として保持し、
+  本番生成結果との差分と、他Providerが同じ意味契約を生成することを自動テストする。
   ただし全statusのowner・遷移・永続化versionを1つの正本から生成するPhase 1全体は未完了である。
 - Reviewerの既定値は無効で、新経路のFeature Flagも既定では無効である。
 - 現行Legal Profileは本文取得後の自動Graph連動を持たず、`automatic_tools=()`である。
