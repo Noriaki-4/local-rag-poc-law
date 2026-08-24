@@ -4,13 +4,20 @@
 
 新しいTool結果と取得本文を現在の調査状態へ反映し、次の行動または調査完了を判断します。
 作業分解が不足・重複しているとEvidenceから分かった場合だけ、WorkItemとHypothesisも更新します。
+新しいTool結果がなく前Cycleの検索候補がある場合は、既知候補、Graph、再検索から次Cycleの行動を選びます。
 
 ## 手順
 
-1. 新しいToolResult、`search_candidates`、本文を評価します。
-2. WorkItem、Hypothesis、DependencyDecisionを更新します。
-3. 未確認事項に必要な次の行動を、次の手順で選びます。
-4. 完了ルールを満たす場合だけ`finalize`します。
+`recent_tool_results`の有無で、今回行う処理を分けます。
+
+- ある場合：新しいTool結果と本文を評価し、WorkItem、Hypothesis、DependencyDecisionを更新してから次の行動を選びます。
+- ない場合：前Cycleの評価をやり直さず、open WorkItemと未確認事項に対する次の行動だけを選びます。
+  このときの`search_candidates`は発見・評価済みで本文未取得の候補です。いずれかのgapを直接確認できる候補が
+  1件でもあれば、その候補の`article_id`を`fetch_articles`で取得します。別のgapに候補がないことを理由に、
+  取得可能な候補を残して`legal_search`を先に行いません。
+
+次の行動を選ぶときは、`search_candidates`の既知候補、既知ArticleからのGraph探索、異なる検索表現による
+OpenSearchの順に確認します。完了ルールを満たす場合だけ`finalize`します。
 
 ### 取得結果の評価
 
@@ -45,9 +52,12 @@
 ### 次の行動を決める手順
 
 1. open WorkItemとunresolved Hypothesisから、今回確認するgapを決めます。
-2. 本文が`material_evidence`にあれば評価し、`fetchable_article_ids`にArticle IDがあれば本文取得し、どちらにもなければGraphまたはOpenSearchで発見します。
-3. ToolRequestへ、同じDecision内で重複しない短い`request_id`を付けます。
-4. `needs_action`を返す場合は、同じToolRequestの`request_id`を`action_request_id`へそのままコピーします。
+2. `search_candidates`を全件確認し、gapを直接確認できる候補が`fetchable_article_ids`にあれば`fetch_articles`を選びます。
+3. 既知候補では確認できず、既知Articleと必要な関係・方向が分かる場合はGraphを選びます。
+4. 既知候補でもGraphでも確認できない場合だけ、成功済みと異なる検索表現でOpenSearchを選びます。
+5. 本文が`material_evidence`に提示済みなら再取得せず、その本文を評価します。
+6. ToolRequestへ、同じDecision内で重複しない短い`request_id`を付けます。
+7. `needs_action`を返す場合は、同じToolRequestの`request_id`を`action_request_id`へそのままコピーします。
 
 ### Tool選択ルール
 
@@ -55,8 +65,9 @@
   再検索が必要なら、未確認の内容に合わせて検索表現または対象を変えます。
 - `search_candidates`が空でなければ、新しい`legal_search`を考える前に全候補をWorkItem・Hypothesis・検索抜粋と照合します。
 - 関係する候補が1件以上あれば、`remaining_fetch_capacity`以内で今回確認するArticleを選び、1つの`fetch_articles`で本文取得します。
+- 関係する既知候補と、新たな発見が必要な別の未確認事項が同時にある場合は、既知候補の本文取得を先に行います。
 - 既存候補では検証できないと判断した場合だけ再検索できます。その場合は、候補で不足する確認事項を`decision_reason`に示し、成功済み検索と異なる検索表現を使います。
 - 複数のopen WorkItemがある場合は、各WorkItemを直接扱う候補を1件ずつ選んでから同じWorkItemの追加候補を選びます。
-- Article IDと必要な関係・方向が明確ならGraph、そうでなければ法令名と確認事項を含むOpenSearchを使います。
+- 起点Article IDと必要な関係・方向が明確ならGraph、どちらも不明なら法令名と確認事項を含むOpenSearchを使います。
 - 回答へ影響する未確認事項が残り、実行可能なら`continue`します。
 - 作業分解、仮説、探索方針を仕切り直す場合は、現Cycleの結果を更新して`start_next_cycle=true`にできます。

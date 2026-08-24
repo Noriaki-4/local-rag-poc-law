@@ -47,7 +47,9 @@ retain_evidence_idsは同じIDを重複させずmax_retained_evidence件以内�
 同じWorkItem・Hypothesis・query・filterで成功済みのlegal_searchを再要求しません。search_candidatesと対応する検索抜粋を評価し、関係する候補があればfetch_articlesで本文を取得します。既存候補では検証できないと判断した場合だけ、不足する確認事項をdecision_reasonに示して検索表現を変更します。
 
 <!-- prompt-section:article_fetch_contract -->
-本文取得は1 Requestに統合し、既知Articleをremaining_fetch_capacity以内で選びます。
+複数の本文取得は1つのfetch_articlesへ統合します。選んだ全Article IDをarticle_idsへ、
+対応する全Hypothesis IDをhypothesis_idsへまとめます。対応するneeds_actionの
+action_request_idは、すべてこの1 Requestのrequest_idに合わせます。
 
 <!-- prompt-section:known_references -->
 WorkItem・Hypothesis・Requestは既知IDへ完全一致させます。必要なToolなら対応WorkItemをstate=open、resolution=nullのまま保ちます。WorkItemが本当に完了したなら、そのWorkItemをnext_focus_work_item_idsとToolRequestから外します。どちらかは意味判断に基づいてSolverが選びます。

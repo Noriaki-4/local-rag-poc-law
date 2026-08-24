@@ -9,10 +9,12 @@ Toolの実行結果は次のSolver呼び出しで提示され、Solverはその�
 
 - `fetchable_article_ids`にあるArticle IDは、検索等で発見済みで本文取得に使える候補です。質問との関係を判断したうえで、本文未取得なら`fetch_articles`を使います。
 - `search_candidates`は、候補Article、発見元の検索要求・WorkItem・Hypothesis、検索抜粋Evidenceを対応付けた一覧です。発見元は来歴であり、意味上の採用先を限定しません。
-- Article IDが不明なら`legal_search`を使います。
+- 探索の起点となるArticle IDも関係も不明なら`legal_search`を使います。
 - manifestにだけある既知Evidence本文には`load_evidence`を使います。
 - ToolRequestは未確認のHypothesisとopen WorkItemへ結び付けます。
 - 同じDecisionの既知Articleは、上限内なら1つの`fetch_articles`へまとめます。上限は目標件数ではありません。
+- 複数のWorkItemに必要なArticleを同時取得する場合も、`fetch_articles`は1要求だけ返します。
+  `article_ids`へ全Article ID、`hypothesis_ids`へ本文で確認する全Hypothesis IDを入れ、`work_item_id`には主対象を1件指定します。
 - `fetch_articles.arguments.article_ids`は`fetchable_article_ids`から完全一致で選びます。
   Evidence ID、`basis_evidence_ids`、`metadata.articleId`、本文の条番号からArticle IDを作りません。
 - 検索候補、Graph候補、近接する別Articleを回答根拠として代用しません。
@@ -34,8 +36,10 @@ Toolの実行結果は次のSolver呼び出しで提示され、Solverはその�
 
 - 1要求は1ホップ、1 mode、1 directionです。
 - `semantic_assertion`では1 predicateだけを指定します。
-- Article ID、現在のHypothesis、必要な関係と方向を説明できる場合だけ使います。
+- 起点Article ID、現在のHypothesis、必要な関係と方向を説明できる場合に使います。
+  関係先のArticle IDが不明でもGraphで発見できます。
 - Graphから得たArticleも、必要なら後続Stepの新しい起点にできます。
+- 同じArticle、mode、predicate、directionを複数のHypothesisで使う場合は、1要求へまとめます。
 
 #### 関係と方向
 

@@ -776,32 +776,14 @@ def build_solver_context(
             for request_id in candidate.search_request_ids
         )
     )
-    carried_search_request_ids = tuple(
-        dict.fromkeys(
-            request_id
-            for candidate in carried_search_candidates
-            for request_id in candidate.search_request_ids
-        )
-    )
-    # Cycle開始時は、前Cycleで取得枠から保留した候補を専用Search Reviewへ
-    # 戻す。候補の採否はLLMが再判断し、Programは未取得候補と実行段階だけを
-    # 判定する。
-    carried_reselection_required = bool(
-        not finalize_only
-        and not recent_results
-        and remaining_fetch_capacity > 0
-        and carried_search_candidates
-        and carried_search_request_ids
-    )
+    # 専用Search Reviewは、新しいlegal_search結果だけを処理する。
+    # 前Cycleで評価済みの保留候補は通常のIntegrationへ引き継ぎ、Solverが
+    # 既知候補、Graph、再検索を比較して次Cycleの行動を選ぶ。
     required_search_review_request_ids = (
         fresh_search_request_ids
         if not finalize_only
         and fresh_search_request_ids
-        else (
-            carried_search_request_ids
-            if carried_reselection_required
-            else ()
-        )
+        else ()
     )
     # 新規候補のReview中は、その候補だけを提示する。Review済み候補は
     # 本文取得が完了するまでCycleをまたいでIntegrationへ引き継ぐ。

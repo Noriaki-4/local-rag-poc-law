@@ -329,6 +329,24 @@ def apply_solver_decision(
                 separators=(",", ":"),
             )
         )
+    execution_scopes = [
+        (
+            request.tool_name,
+            json.dumps(
+                request.arguments,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        )
+        for request in decision.tool_requests
+        if request.tool_name == "legal_graph_neighbors"
+    ]
+    if len(execution_scopes) != len(set(execution_scopes)):
+        raise ContractViolation(
+            "identical legal_graph_neighbors arguments must be consolidated "
+            "into one request"
+        )
     for request in decision.tool_requests:
         if request.request_id in request_ids or request.request_id in new_request_ids:
             raise ContractViolation(f"duplicate tool request ID: {request.request_id}")

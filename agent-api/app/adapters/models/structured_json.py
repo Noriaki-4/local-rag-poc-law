@@ -3898,10 +3898,29 @@ def _tool_requests_transport_schema(context: SolverContext) -> dict[str, Any]:
                 ),
             }
         )
+    max_items = context.max_tool_requests_per_step
+    if context.contract_feedback is not None:
+        previous_tool_names = {
+            request.tool_name
+            for request in context.contract_feedback.previous_decision.tool_requests
+        }
+        requires_single_request = any(
+            message in context.contract_feedback.violation
+            for message in (
+                "Article body fetches in one SolverDecision must be consolidated",
+                "identical legal_graph_neighbors arguments must be consolidated",
+            )
+        )
+        # A repair may reveal a second violation after consolidating fetches. Keep
+        # the already-correct single-request shape while that violation is fixed.
+        if previous_tool_names == {"fetch_articles"}:
+            requires_single_request = True
+        if requires_single_request:
+            max_items = 1
     return {
         "type": "array",
         "items": item_schema,
-        "maxItems": context.max_tool_requests_per_step,
+        "maxItems": max_items,
         "description": contract_field_description(SolverDecision, "tool_requests"),
     }
 
@@ -4369,8 +4388,154 @@ def _normalize_solver_payload(payload: dict) -> dict:
             raise ModelProtocolError("tool arguments must decode to an object")
         request["arguments"] = arguments
         requests.append(request)
-    normalized["tool_requests"] = requests
+    consolidated_requests = _consolidate_fetch_article_requests(
+        requests,
+        normalized["dependency_decisions"],
+    )
+    normalized["tool_requests"] = _consolidate_identical_graph_requests(
+        consolidated_requests,
+        normalized["dependency_decisions"],
+    )
     return normalized
+
+
+def _consolidate_fetch_article_requests(
+    requests: list[Any],
+    dependency_decisions: list[Any],
+) -> list[Any]:
+    """本文取得の選択内容を変えず、同じDecision内の1要求へ束ねる。"""
+
+    fetches = [
+        request
+        for request in requests
+        if isinstance(request, dict)
+        and request.get("tool_name") == "fetch_articles"
+    ]
+    if len(fetches) <= 1:
+        return requests
+
+    retained = dict(fetches[0])
+    retained_arguments = dict(retained["arguments"])
+    retained_arguments["article_ids"] = list(
+        dict.fromkeys(
+            article_id
+            for request in fetches
+            for article_id in request["arguments"].get("article_ids", ())
+        )
+    )
+    retained["arguments"] = retained_arguments
+    retained["hypothesis_ids"] = list(
+        dict.fromkeys(
+            hypothesis_id
+            for request in fetches
+            for hypothesis_id in request.get("hypothesis_ids", ())
+        )
+    )
+
+    old_request_ids = {
+        request.get("request_id")
+        for request in fetches
+        if isinstance(request.get("request_id"), str)
+    }
+    fetch_work_item_ids = {
+        request.get("work_item_id")
+        for request in fetches
+        if isinstance(request.get("work_item_id"), str)
+    }
+    retained_request_id = retained.get("request_id")
+    if isinstance(retained_request_id, str):
+        for dependency in dependency_decisions:
+            if (
+                isinstance(dependency, dict)
+                and dependency.get("status") == "needs_action"
+                and (
+                    dependency.get("action_request_id") in old_request_ids
+                    or dependency.get("work_item_id") in fetch_work_item_ids
+                )
+            ):
+                dependency["action_request_id"] = retained_request_id
+
+    fetch_ids = {id(request) for request in fetches}
+    consolidated: list[Any] = []
+    inserted = False
+    for request in requests:
+        if id(request) not in fetch_ids:
+            consolidated.append(request)
+        elif not inserted:
+            consolidated.append(retained)
+            inserted = True
+    return consolidated
+
+
+def _consolidate_identical_graph_requests(
+    requests: list[Any],
+    dependency_decisions: list[Any],
+) -> list[Any]:
+    """同じGraph探索を1回にし、Hypothesisとの対応を保持する。"""
+
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for request in requests:
+        if (
+            not isinstance(request, dict)
+            or request.get("tool_name") != "legal_graph_neighbors"
+            or not isinstance(request.get("arguments"), dict)
+        ):
+            continue
+        scope = (
+            str(request.get("tool_name")),
+            json.dumps(
+                request["arguments"],
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        )
+        groups.setdefault(scope, []).append(request)
+
+    replacements: dict[int, dict[str, Any]] = {}
+    removed_ids: set[int] = set()
+    for grouped in groups.values():
+        if len(grouped) <= 1:
+            continue
+        retained = dict(grouped[0])
+        retained["hypothesis_ids"] = list(
+            dict.fromkeys(
+                hypothesis_id
+                for request in grouped
+                for hypothesis_id in request.get("hypothesis_ids", ())
+            )
+        )
+        replacements[id(grouped[0])] = retained
+        removed_ids.update(id(request) for request in grouped[1:])
+
+        grouped_request_ids = {
+            request.get("request_id")
+            for request in grouped
+            if isinstance(request.get("request_id"), str)
+        }
+        grouped_work_item_ids = {
+            request.get("work_item_id")
+            for request in grouped
+            if isinstance(request.get("work_item_id"), str)
+        }
+        retained_request_id = retained.get("request_id")
+        if isinstance(retained_request_id, str):
+            for dependency in dependency_decisions:
+                if (
+                    isinstance(dependency, dict)
+                    and dependency.get("status") == "needs_action"
+                    and (
+                        dependency.get("action_request_id") in grouped_request_ids
+                        or dependency.get("work_item_id") in grouped_work_item_ids
+                    )
+                ):
+                    dependency["action_request_id"] = retained_request_id
+
+    return [
+        replacements.get(id(request), request)
+        for request in requests
+        if id(request) not in removed_ids
+    ]
 
 
 def _normalize_staged_research_payload(

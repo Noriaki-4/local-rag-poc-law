@@ -77,7 +77,7 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-015` | P0 | 検証待ち | 初回Researchを単一責務のStepへ分け、要求をWorkItemとそれ以外へ欠落なく分解する | Profile v156で同一Cycle内の要求分解、仮説立案、検索要求作成を実装した。各完成Promptは単独で読めるH1を持ち、処理順のStep番号を含めない。一時的な段階比較コードを整理した後の全900テストに合格した | 別分野fixtureと公開買付けE2Eを`gpt-4o-mini`で確認し、最終的にHaikuで品質確認する |
 | `LR-016` | P0 | 検証待ち | Tool観察の意味統合とCycle Closeを単一責務のStepへ分ける | v183でArticle→Hypothesis対応をObservationへ渡し、GPT-4o mini実モデルで4 Hypothesisへの本文Evidence保存を確認した。後続Stepの時間切れで成功済みObservationを失わないcheckpoint保存を追加した。対象WorkItemがない依存判定は呼び出さず、OpenAI schemaへ`null` enumを出す経路も除去した | 同じcheckpointをHaikuで再生し、本文の部分確認、意味更新、Cycle判断を確認する |
 | `LR-017` | P0 | 完了 | 検索候補の規律主体と行為対象を安定して区別する | Profile v197でWorkItem・Hypothesisに主体関係を保持し、内容評価と主体分類を別の単一タスクに分けた。両判断の共通Hypothesisだけを候補選択へ渡す | 公開買付けcheckpointを`gpt-4o-mini`の独立した2実行で再生し、両方で27条の2を選択、27条の22の2をdeferredとした。別分野fixtureを含む回帰テストにも合格 |
-| `LR-018` | P0 | 要設計 | Graph探索が必要な未解決事項があってもSolverがGraph検索を要求しない | 原因はGraph ToolやPromptの欠落ではない。次Cycle開始時に、Programが前Cycleの保留OpenSearch候補を自動でSearch Selectionへ戻し、Integrationより先に実行する。本文取得枠を使い切るとCycle Closeへ進むため、SolverがGraph・既知候補・再検索を比較して次の行動を選ぶ機会がない | Cycle Closeは現Cycleだけを閉じ、次Cycleの最初にIntegrationで再計画する。保留候補は選択肢として提示するが、専用Search Selectionを自動開始しないfixtureと回帰テストを先に用意する。ProgramにはGraph要否を判断させない |
+| `LR-018` | P0 | 完了 | Graph探索が必要な未解決事項があってもSolverがGraph検索を要求しない | 次Cycle開始時の保留OpenSearch候補を自動Search Selectionへ戻さず、Integrationで既知候補・Graph・再検索を比較するよう修正した。Graph selectorのmode・predicate・directionを分岐schemaで拘束し、同一Graph要求と本文取得要求は選択内容を保ったまま輸送時に統合する | Cycle 2 fixtureで府令10条を含む既知候補の本文取得へ進むこと、および候補を除いたGraph必須状態で`27条の2 / IMPLEMENTS / from_subject`の1要求を返し共通契約を通過することを`gpt-4o-mini-2024-07-18`で確認済み |
 
 ### 3.1 LR-016 Tool観察とCycle Closeの単一責務化
 
@@ -430,6 +430,21 @@ Programは既知ID、型、件数、参照整合、予算を検証する。Evide
 - Graphを使わない場合も、Solverが未解決事項に対する別の探索方法または不要と判断した理由を示す。
 - ProgramはGraph探索を一律に強制せず、既知ID、selectorの型、件数、重複scopeだけを検証する。
 - Graph要求が作られた後の複数1ホップ探索は`LR-003`の完了条件で検証する。
+
+2026-08-25の修正では、次Cycleへ持ち越した検索候補を`search_candidates`と
+`fetchable_article_ids`へ残しつつ、`required_search_review_request_ids`へ自動設定しないようにした。
+新規の検索結果だけを専用Search Selectionへ送り、次Cycle開始時はIntegrationが次の行動を選ぶ。
+保存済みCycle 2 fixtureでは、専用Selectionへ戻らず府令10条を含む3 Articleの本文取得へ進んだ。
+
+同fixtureから検索候補だけを除き、取得済みの金商法27条の2、施行令6条・7条を起点候補として残した
+Graph必須状態も`gpt-4o-mini-2024-07-18`で再生した。成功済みOpenSearchの再要求は既存契約が拒否し、
+次の判断で`legal_graph_neighbors(article-27_2, semantic_assertion, IMPLEMENTS, from_subject)`を返した。
+複数Hypothesisに対する同一Tool実行は1要求へ機械的に統合し、全Hypothesisとの対応を保持した。
+ProgramはGraph要否、predicate、方向または候補の法的関連性を決めていない。
+
+Graph Toolの入力schemaは、`semantic_assertion`では`from_subject / to_subject`とpredicateを、
+`explicit_reference / explains`では`outgoing / incoming`と`predicate=null`を許す分岐契約にした。
+これにより、LLMが選んだ意味をProgramが補正せず、無効なmode・directionの組合せをProvider出力時点で防ぐ。
 
 ### LR-012 Prompt・契約の最終成果物
 

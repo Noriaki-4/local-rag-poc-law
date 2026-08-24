@@ -1,5 +1,5 @@
 {
-  "fixtureId": "tob-overview-cycle2-carried-candidate-reselection-v1",
+  "fixtureId": "tob-overview-cycle2-replanning-v1",
   "questionId": "tob-overview",
   "source": {
     "diagnosticsMode": "snapshot",
@@ -9,15 +9,11 @@
     "model": "gpt-4o-mini-2024-07-18"
   },
   "observedFailure": {
-    "contractAttemptCount": 3,
-    "cause": "Cycle 2に未取得の検索候補があるのに、汎用Integrationが候補選別を飛ばして成功済み検索を再要求した。"
+    "cause": "次Cycle開始時に保留中のOpenSearch候補が専用Search Selectionへ自動的に戻され、Solverが既知候補、Graph、再検索を比較して再計画できなかった。"
   },
   "expectedBehavior": {
-    "purpose": "search_selection",
-    "requiredSearchReviewRequestIds": [
-      "search-exception",
-      "search-procedure"
-    ],
+    "purpose": "integration",
+    "requiredSearchReviewRequestIds": [],
     "candidateArticleIds": [
       "law-402M50000040038-article-2_5",
       "law-323AC0000000025-article-27_13"

@@ -244,9 +244,17 @@ def test_legal_tool_contracts_describe_input_and_result_semantics() -> None:
     for definition in definitions:
         assert definition.description
         assert definition.result_description
-        assert definition.input_schema["additionalProperties"] is False
-        for property_schema in definition.input_schema["properties"].values():
-            assert property_schema["description"]
+        schema_variants = definition.input_schema.get(
+            "anyOf",
+            [definition.input_schema],
+        )
+        assert all(
+            variant["additionalProperties"] is False
+            for variant in schema_variants
+        )
+        for variant in schema_variants:
+            for property_schema in variant["properties"].values():
+                assert property_schema["description"]
 
 
 class FakeStructuredLLM:
@@ -2669,6 +2677,223 @@ def test_compact_transport_structures_update_and_tool_arguments() -> None:
     assert normalized_dependencies[1]["basis_evidence_ids"] == ["body"]
 
 
+@pytest.mark.parametrize(
+    "violation",
+    [
+        (
+            "Article body fetches in one SolverDecision must be consolidated "
+            "into exactly one request"
+        ),
+        "dependency action must reference a ToolRequest in the same decision",
+    ],
+)
+def test_contract_repair_limits_consolidation_to_one_tool_request(
+    violation: str,
+) -> None:
+    previous = SolverDecision(
+        next="continue",
+        tool_requests=(
+            ToolRequest(
+                request_id="fetch-1",
+                work_item_id="w1",
+                tool_name="fetch_articles",
+                arguments={"article_ids": ["article-1"]},
+                purpose="本文を取得する",
+                hypothesis_ids=("h1",),
+            ),
+        ),
+    )
+    context = build_solver_context(
+        CaseState(case_id="case-repair", question="質問"),
+        AgentLimits(max_tool_requests_per_step=4),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+        contract_feedback=SolverContractFeedback(
+            violation=violation,
+            previous_decision=previous,
+        ),
+    )
+
+    schema = _solver_compact_transport_schema(context)
+
+    assert schema["properties"]["tool_requests"]["maxItems"] == 1
+
+
+def test_solver_payload_consolidates_fetch_transport_without_dropping_links() -> None:
+    normalized = _normalize_solver_payload(
+        {
+            "next": "continue",
+            "dependency_decisions": [
+                {
+                    "dependency_kind": "lower_norm",
+                    "work_item_id": "w1",
+                    "status": "needs_action",
+                    "reason": "下位規範を取得する",
+                    "basis_evidence_ids": ["e1"],
+                    "action_request_id": "fetch-1",
+                },
+                {
+                    "dependency_kind": "lower_norm",
+                    "work_item_id": "w2",
+                    "status": "needs_action",
+                    "reason": "下位規範を取得する",
+                    "basis_evidence_ids": ["e2"],
+                    "action_request_id": None,
+                },
+            ],
+            "tool_requests": [
+                {
+                    "request_id": "fetch-1",
+                    "work_item_id": "w1",
+                    "tool_name": "fetch_articles",
+                    "arguments": {"article_ids": ["article-1"]},
+                    "purpose": "第一の本文を取得する",
+                    "hypothesis_ids": ["h1"],
+                },
+                {
+                    "request_id": "fetch-2",
+                    "work_item_id": "w2",
+                    "tool_name": "fetch_articles",
+                    "arguments": {"article_ids": ["article-2", "article-1"]},
+                    "purpose": "第二の本文を取得する",
+                    "hypothesis_ids": ["h2"],
+                },
+            ],
+        }
+    )
+
+    assert len(normalized["tool_requests"]) == 1
+    request = normalized["tool_requests"][0]
+    assert request["arguments"]["article_ids"] == ["article-1", "article-2"]
+    assert request["hypothesis_ids"] == ["h1", "h2"]
+    assert {
+        item["action_request_id"]
+        for item in normalized["dependency_decisions"]
+    } == {"fetch-1"}
+
+
+def test_identical_tool_executions_must_be_consolidated() -> None:
+    state = CaseState(
+        case_id="case-duplicate-tool-scope",
+        question="質問",
+        work_items=(WorkItem(work_item_id="w1", question="確認する"),),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h1",
+                work_item_id="w1",
+                statement="条件を確認する",
+            ),
+            Hypothesis(
+                hypothesis_id="h2",
+                work_item_id="w1",
+                statement="例外を確認する",
+            ),
+        ),
+    )
+    graph_arguments = {
+        "article_ids": ["article-1"],
+        "mode": "semantic_assertion",
+        "predicate": "IMPLEMENTS",
+        "direction": "from_subject",
+        "max_relations": 20,
+    }
+    decision = SolverDecision(
+        next="continue",
+        tool_requests=(
+            ToolRequest(
+                request_id="graph-1",
+                work_item_id="w1",
+                tool_name="legal_graph_neighbors",
+                arguments=graph_arguments,
+                purpose="条件の下位規範を探す",
+                hypothesis_ids=("h1",),
+            ),
+            ToolRequest(
+                request_id="graph-2",
+                work_item_id="w1",
+                tool_name="legal_graph_neighbors",
+                arguments=graph_arguments,
+                purpose="例外の下位規範を探す",
+                hypothesis_ids=("h2",),
+            ),
+        ),
+    )
+
+    with pytest.raises(
+        ContractViolation,
+        match="identical legal_graph_neighbors arguments must be consolidated",
+    ):
+        apply_solver_decision(
+            state,
+            decision,
+            limits=AgentLimits(),
+            known_tool_names={"legal_graph_neighbors"},
+            material_evidence_ids=(),
+            graph_known_article_ids=("article-1",),
+            finalize_only=False,
+        )
+
+
+def test_solver_payload_consolidates_identical_graph_transport() -> None:
+    graph_arguments = {
+        "article_ids": ["article-1"],
+        "mode": "semantic_assertion",
+        "predicate": "IMPLEMENTS",
+        "direction": "from_subject",
+        "max_relations": 20,
+    }
+    normalized = _normalize_solver_payload(
+        {
+            "next": "continue",
+            "dependency_decisions": [
+                {
+                    "dependency_kind": "lower_norm",
+                    "work_item_id": "w1",
+                    "status": "needs_action",
+                    "reason": "下位規範を探す",
+                    "basis_evidence_ids": ["e1"],
+                    "action_request_id": "graph-1",
+                },
+                {
+                    "dependency_kind": "lower_norm",
+                    "work_item_id": "w2",
+                    "status": "needs_action",
+                    "reason": "下位規範を探す",
+                    "basis_evidence_ids": ["e2"],
+                    "action_request_id": None,
+                },
+            ],
+            "tool_requests": [
+                {
+                    "request_id": "graph-1",
+                    "work_item_id": "w1",
+                    "tool_name": "legal_graph_neighbors",
+                    "arguments": graph_arguments,
+                    "purpose": "条件を確認する",
+                    "hypothesis_ids": ["h1"],
+                },
+                {
+                    "request_id": "graph-2",
+                    "work_item_id": "w2",
+                    "tool_name": "legal_graph_neighbors",
+                    "arguments": graph_arguments,
+                    "purpose": "例外を確認する",
+                    "hypothesis_ids": ["h2"],
+                },
+            ],
+        }
+    )
+
+    assert len(normalized["tool_requests"]) == 1
+    request = normalized["tool_requests"][0]
+    assert request["arguments"] == graph_arguments
+    assert request["hypothesis_ids"] == ["h1", "h2"]
+    assert {
+        item["action_request_id"]
+        for item in normalized["dependency_decisions"]
+    } == {"graph-1"}
+
+
 def test_diagnostic_integration_fixture_rebuilds_the_same_solver_context() -> None:
     fixture_path = (
         Path(__file__).parent
@@ -2828,7 +3053,7 @@ def test_real_model_initial_research_decomposition_fixture_is_reproducible() -> 
     assert "法令本文に現れやすい語" in search_prompt.system_prompt
 
 
-def test_real_model_cycle2_repeated_search_fixture_routes_to_search_review() -> None:
+def test_real_model_cycle2_repeated_search_fixture_keeps_replanning_options() -> None:
     fixture_path = (
         Path(__file__).parent
         / "fixtures"
@@ -2864,9 +3089,6 @@ def test_real_model_cycle2_repeated_search_fixture_routes_to_search_review() -> 
         ),
         available_tools=saved.available_tools,
     )
-    profile = legal_profiles.legal_agent_profile().solver_search_review
-    assert profile is not None
-
     assert rebuilt.model_dump(mode="json") == saved.model_copy(
         update={
             "completed_legal_searches": rebuilt.completed_legal_searches,
@@ -2879,7 +3101,8 @@ def test_real_model_cycle2_repeated_search_fixture_routes_to_search_review() -> 
         }
     ).model_dump(mode="json")
     assert rebuilt.completed_legal_searches
-    assert rebuilt.required_search_review_request_ids
+    assert rebuilt.required_search_review_request_ids == ()
+    assert rebuilt.search_candidates
     assert fixture["source"]["model"] == "gpt-4o-mini"
     assert failure["violation"] == (
         "successful legal_search scope was already completed"
@@ -2891,12 +3114,12 @@ def test_real_model_cycle2_repeated_search_fixture_routes_to_search_review() -> 
     } <= set(saved.fetchable_article_ids)
 
 
-def test_cycle2_carried_candidates_return_to_dedicated_search_review() -> None:
+def test_cycle2_carried_candidates_are_options_for_replanning() -> None:
     fixture_path = (
         Path(__file__).parent
         / "fixtures"
         / "framework"
-        / "tob_overview_cycle2_carried_candidate_reselection_v1.json"
+        / "tob_overview_cycle2_replanning_v1.json"
     )
     fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
     state = CaseState.model_validate(fixture["caseState"])
@@ -2911,9 +3134,9 @@ def test_cycle2_carried_candidates_return_to_dedicated_search_review() -> None:
     )
 
     assert not context.recent_tool_results
-    assert set(context.required_search_review_request_ids) == set(
-        expected["requiredSearchReviewRequestIds"]
-    )
+    assert list(context.required_search_review_request_ids) == expected[
+        "requiredSearchReviewRequestIds"
+    ]
     assert {item.article_id for item in context.search_candidates} == set(
         expected["candidateArticleIds"]
     )
@@ -2921,53 +3144,22 @@ def test_cycle2_carried_candidates_return_to_dedicated_search_review() -> None:
         expected["candidateArticleIds"]
     )
 
-    decision = SolverDecision.model_validate(
-        {
-            "next": "continue",
-            "search_candidate_review": {
-                "search_request_ids": list(
-                    context.required_search_review_request_ids
-                ),
-                "selections": [
-                        {
-                            "article_id": "law-402M50000040038-article-2_5",
-                            "reason": "例外条件のHypothesisを直接確認する候補。",
-                            "matched_hypothesis_ids": ["h-exception"],
-                        },
-                        {
-                            "article_id": "law-323AC0000000025-article-27_13",
-                            "reason": "公告と報告書提出のHypothesisを直接確認する候補。",
-                            "matched_hypothesis_ids": ["h-procedure"],
-                        },
-                ],
-                "deferred_article_ids": [],
-                "reason": "未確認Hypothesisごとに本文候補を選ぶ。",
-            },
-        }
+    profile = legal_profiles.legal_agent_profile()
+    loop = AgentLoop(
+        store=InMemoryCaseStore(),
+        model=StructuredJSONModelAdapter(FakeStructuredLLM()),
+        tools=ToolRegistry(()),
+        profile=profile,
     )
-    updated = apply_solver_decision(
-        state,
-        decision,
-        limits=limits,
-        known_tool_names={"legal_search", "fetch_articles"},
-        material_evidence_ids=context.material_evidence_ids,
-        fetchable_article_ids=context.fetchable_article_ids,
-        required_search_review_request_ids=(
-            context.required_search_review_request_ids
-        ),
-        search_candidate_article_ids=tuple(
-            item.article_id for item in context.search_candidates
-        ),
-        remaining_fetch_capacity=context.remaining_fetch_capacity,
-        cycle_close_required=context.cycle_close_required,
-        can_start_next_cycle=context.can_start_next_cycle,
-        finalize_only=False,
+    _, purpose = loop._solver_profile_for_context(
+        context=context,
+        graph_review_call=False,
+        search_review_call=bool(context.required_search_review_request_ids),
+        integration_call=True,
+        has_reviewer_findings=False,
     )
-
-    assert updated.search_candidate_reviews[-1].selected_article_ids == (
-        "law-402M50000040038-article-2_5",
-        "law-323AC0000000025-article-27_13",
-    )
+    assert purpose == expected["purpose"]
+    assert profile.solver_integration.available_tool_names is None
 
 
 def test_cycle3_repeated_search_fixture_projects_completed_searches() -> None:
@@ -3137,7 +3329,7 @@ def _cross_cycle_search_state() -> CaseState:
     )
 
 
-def test_solver_context_reselects_unfetched_search_candidates_across_cycles() -> None:
+def test_solver_context_carries_search_candidates_into_cycle_replanning() -> None:
     state = _cross_cycle_search_state()
     navigation = state.evidence[0]
 
@@ -3150,7 +3342,7 @@ def test_solver_context_reselects_unfetched_search_candidates_across_cycles() ->
 
     assert context.recent_tool_requests == ()
     assert context.recent_tool_results == ()
-    assert context.required_search_review_request_ids == ("cycle-1-search",)
+    assert context.required_search_review_request_ids == ()
     assert context.fetchable_article_ids == ("law-test-article-2",)
     assert tuple(item.article_id for item in context.search_candidates) == (
         "law-test-article-2",

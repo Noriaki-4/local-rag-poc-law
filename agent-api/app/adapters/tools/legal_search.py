@@ -7,7 +7,7 @@ import json
 from time import perf_counter
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, RootModel, ValidationError
 
 from app.agent_framework.ports.tool import ToolDefinition, ToolExecution
 from app.agent_framework.state import Evidence, ToolRequest, ToolResult
@@ -64,26 +64,13 @@ class _FetchArticlesArguments(BaseModel):
     )
 
 
-class _GraphNeighborsArguments(BaseModel):
+class _GraphNeighborsArgumentsBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     article_ids: tuple[str, ...] = Field(
         min_length=1,
         max_length=_MAX_ARTICLES_PER_FETCH,
         description="1ホップの起点にする既知Article ID。",
-    )
-    mode: GraphSearchMode = Field(
-        description="物理参照または意味分類済み関係のどちらを探索するか。",
-    )
-    predicate: ProposedPredicate | None = Field(
-        default=None,
-        description=(
-            "semantic_assertionで探索する仮説に合う1つの意味関係。"
-            "それ以外のmodeではnull。"
-        ),
-    )
-    direction: Literal["from_subject", "to_subject", "outgoing", "incoming"] = Field(
-        description="起点Articleから見た関係の向き。",
     )
     max_relations: int = Field(
         default=50,
@@ -92,19 +79,76 @@ class _GraphNeighborsArguments(BaseModel):
         description="起点Articleごとに返すnavigation関係数の上限。",
     )
 
-    @model_validator(mode="after")
-    def validate_selector(self) -> "_GraphNeighborsArguments":
-        semantic_directions = {item.value for item in GraphDirection}
-        if self.mode is GraphSearchMode.SEMANTIC_ASSERTION:
-            if self.predicate is None or self.direction not in semantic_directions:
-                raise ValueError(
-                    "semantic_assertion requires one predicate and a semantic direction"
-                )
-        elif self.predicate is not None or self.direction in semantic_directions:
-            raise ValueError(
-                "physical graph modes forbid predicate and require outgoing/incoming"
-            )
-        return self
+
+class _SemanticGraphNeighborsArguments(_GraphNeighborsArgumentsBase):
+    mode: Literal[GraphSearchMode.SEMANTIC_ASSERTION] = Field(
+        description="意味分類済みRelationAssertionを探索する。",
+    )
+    predicate: ProposedPredicate = Field(
+        description="現在の仮説に合う1つの意味関係。",
+    )
+    direction: GraphDirection = Field(
+        description=(
+            "起点ArticleをSUBJECTまたはOBJECTのどちらとして探索するか。"
+        ),
+    )
+
+
+class _ExplicitReferenceGraphNeighborsArguments(_GraphNeighborsArgumentsBase):
+    mode: Literal[GraphSearchMode.EXPLICIT_REFERENCE] = Field(
+        description="本文に明示されたREFERENCESを探索する。",
+    )
+    predicate: None = Field(
+        default=None,
+        description="物理参照の探索ではnull。",
+    )
+    direction: Literal["outgoing", "incoming"] = Field(
+        description=(
+            "起点Articleを参照元または参照先のどちらとして探索するか。"
+        ),
+    )
+
+
+class _ExplainsGraphNeighborsArguments(_GraphNeighborsArgumentsBase):
+    mode: Literal[GraphSearchMode.EXPLAINS] = Field(
+        description="ガイドからArticleへのEXPLAINSを探索する。",
+    )
+    predicate: None = Field(
+        default=None,
+        description="EXPLAINSの探索ではnull。",
+    )
+    direction: Literal["outgoing", "incoming"] = Field(
+        description="起点を解説元または解説先のどちらとして探索するか。",
+    )
+
+
+class _GraphNeighborsArguments(
+    RootModel[
+        _SemanticGraphNeighborsArguments
+        | _ExplicitReferenceGraphNeighborsArguments
+        | _ExplainsGraphNeighborsArguments
+    ]
+):
+    @property
+    def article_ids(self) -> tuple[str, ...]:
+        return self.root.article_ids
+
+    @property
+    def mode(self) -> GraphSearchMode:
+        return GraphSearchMode(self.root.mode)
+
+    @property
+    def predicate(self) -> ProposedPredicate | None:
+        return self.root.predicate
+
+    @property
+    def direction(self) -> str:
+        value = self.root.direction
+        return value.value if isinstance(value, GraphDirection) else value
+
+    @property
+    def max_relations(self) -> int:
+        return self.root.max_relations
 
 
 class LegalSearchTool:
