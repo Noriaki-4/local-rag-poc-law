@@ -2711,6 +2711,55 @@ def test_cycle_close_fixture_preserves_the_unresolved_boundary_state() -> None:
     assert state.final_answer is None
 
 
+def test_gpt4o_mini_cycle_close_fixture_reproduces_unknown_retained_ids(
+) -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_overview_cycle1_three_articles_before_cycle_close_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    state = CaseState.model_validate(fixture["caseState"])
+    context = SolverContext.model_validate(fixture["solverContext"])
+    decision = SolverDecision.model_validate(fixture["observedSolverDecision"])
+
+    assert fixture["source"]["purpose"] == "cycle_close"
+    assert fixture["source"]["model"] == "gpt-4o-mini-2024-07-18"
+    assert context.cycle_close_required is True
+    assert context.remaining_fetch_capacity == 0
+    assert len(context.fetched_resource_ids_this_cycle) == 3
+
+    with pytest.raises(ContractViolation) as error:
+        apply_solver_decision(
+            state,
+            decision,
+            limits=AgentLimits(),
+            known_tool_names={item.name for item in context.available_tools},
+            material_evidence_ids=context.grounding_evidence_ids,
+            finalize_only=context.finalize_only,
+            fetchable_article_ids=context.fetchable_article_ids,
+            required_dependency_kind=context.required_dependency_kind,
+            required_dependency_work_item_ids=(
+                context.required_dependency_work_item_ids
+            ),
+            require_dependency_decisions=bool(
+                context.required_dependency_work_item_ids
+            ),
+            required_graph_review_request_ids=(
+                context.required_graph_review_request_ids
+            ),
+            required_search_review_request_ids=(
+                context.required_search_review_request_ids
+            ),
+            remaining_fetch_capacity=context.remaining_fetch_capacity,
+            cycle_close_required=context.cycle_close_required,
+            can_start_next_cycle=context.can_start_next_cycle,
+        )
+
+    assert str(error.value) == fixture["expectedViolation"]
+
+
 def test_real_model_cycle_close_fixture_reproduces_duplicate_retained_evidence(
 ) -> None:
     fixture_path = (
