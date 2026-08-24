@@ -57,6 +57,17 @@ class WorkTreeItem(FrameworkModel):
     )
 
 
+class EvidenceHypothesisCandidate(FrameworkModel):
+    article_id: str = Field(description="取得本文が属するArticle ID。")
+    hypothesis_ids: tuple[str, ...] = Field(
+        description=(
+            "本文取得前の候補評価で、このArticleに対応するとSolverが判断した"
+            "Hypothesis ID。支持・反証の確定結果ではない。"
+        ),
+    )
+    reason: str = Field(description="本文取得対象にした時点での短い選択理由。")
+
+
 class EvidenceManifestItem(FrameworkModel):
     evidence_id: str = Field(description="Caseで既知のEvidence ID。")
     source_ref: str = Field(description="Evidenceの取得元Resource参照。")
@@ -391,6 +402,15 @@ class SolverContext(FrameworkModel):
     )
     hypotheses: tuple[Hypothesis, ...] = Field(
         description="現在の全Hypothesisとその判定・gap。",
+    )
+    evidence_hypothesis_candidates: tuple[
+        EvidenceHypothesisCandidate, ...
+    ] = Field(
+        default=(),
+        description=(
+            "取得本文のArticleと、本文取得前に対応候補とされたHypothesisの来歴。"
+            "Programは既知IDを結合するだけで、支持・反証は判断しない。"
+        ),
     )
     focus_work_items: tuple[WorkItem, ...] = Field(
         description="現在stepで優先するopen WorkItem。全作業範囲を置き換えない。",
@@ -796,6 +816,10 @@ def build_solver_context(
         if request.tool_name == "legal_search"
         and request.request_id in succeeded_request_ids
     )
+    evidence_hypothesis_candidates = _evidence_hypothesis_candidates(
+        state,
+        material,
+    )
 
     return SolverContext(
         case_id=state.case_id,
@@ -836,6 +860,7 @@ def build_solver_context(
         search_candidates=search_candidates,
         work_tree=work_tree,
         hypotheses=state.hypotheses,
+        evidence_hypothesis_candidates=evidence_hypothesis_candidates,
         focus_work_items=tuple(
             item for item in state.work_items if item.work_item_id in focus_ids
         ),
@@ -863,6 +888,82 @@ def build_solver_context(
         dependency_decisions=state.dependency_decisions,
         reviewer_findings=reviewer_findings,
         contract_feedback=contract_feedback,
+    )
+
+
+def _evidence_hypothesis_candidates(
+    state: CaseState,
+    material_evidence: tuple[Evidence, ...],
+) -> tuple[EvidenceHypothesisCandidate, ...]:
+    """本文取得前にSolverが選んだArticleとHypothesisの対応を再投影する。"""
+
+    material_article_ids = {
+        article_id
+        for evidence in material_evidence
+        for article_id in _evidence_article_ids(evidence)
+    }
+    candidates: dict[str, dict[str, Any]] = {}
+
+    def merge(
+        article_id: str,
+        hypothesis_ids: tuple[str, ...],
+        reason: str,
+    ) -> None:
+        if article_id not in material_article_ids or not hypothesis_ids:
+            return
+        candidate = candidates.setdefault(
+            article_id,
+            {"hypothesis_ids": [], "reason": reason},
+        )
+        for hypothesis_id in hypothesis_ids:
+            if hypothesis_id not in candidate["hypothesis_ids"]:
+                candidate["hypothesis_ids"].append(hypothesis_id)
+
+    for review in state.search_candidate_reviews:
+        for selection in review.selections:
+            merge(
+                selection.article_id,
+                selection.matched_hypothesis_ids,
+                selection.reason,
+            )
+
+    for review in state.graph_candidate_reviews:
+        for decision in review.frontier_decisions:
+            if decision.action != "select" or decision.hypothesis_id is None:
+                continue
+            merge(
+                decision.article_id,
+                (decision.hypothesis_id,),
+                decision.reason,
+            )
+
+    succeeded_request_ids = {
+        result.request_id
+        for result in state.tool_results
+        if result.status == "succeeded"
+    }
+    for request in state.tool_requests:
+        if (
+            request.tool_name != "fetch_articles"
+            or request.request_id not in succeeded_request_ids
+            or not request.hypothesis_ids
+        ):
+            continue
+        article_ids = request.arguments.get("article_ids")
+        if not isinstance(article_ids, list):
+            continue
+        for article_id in article_ids:
+            if not isinstance(article_id, str) or article_id in candidates:
+                continue
+            merge(article_id, request.hypothesis_ids, request.purpose)
+
+    return tuple(
+        EvidenceHypothesisCandidate(
+            article_id=article_id,
+            hypothesis_ids=tuple(item["hypothesis_ids"]),
+            reason=item["reason"],
+        )
+        for article_id, item in candidates.items()
     )
 
 

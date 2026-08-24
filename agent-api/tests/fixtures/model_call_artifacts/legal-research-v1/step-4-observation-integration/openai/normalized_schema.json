@@ -5,7 +5,7 @@
       "properties": {
         "evidence_ids": {
           "default": [],
-          "description": "判定を直接支える取得済みgrounding Evidence ID。",
+          "description": "現在の判定とgapsの判断に使った取得済みgrounding Evidence ID。unresolvedでも本文で確認できた部分があれば保持できる。",
           "items": {
             "type": "string"
           },

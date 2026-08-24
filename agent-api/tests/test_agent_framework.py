@@ -23,6 +23,7 @@ from app.agent_framework.ports.model import (
     ReviewCallResult,
     ReviewContext,
     SolverCallResult,
+    SolverCheckpointTimeout,
 )
 from app.agent_framework.ports.tool import (
     ToolDefinition,
@@ -257,6 +258,7 @@ def test_one_cycle_passes_every_result_to_closing_solver_decision() -> None:
                             work_item_id="w1",
                             state="resolved",
                             resolution="本文を確認した",
+                            basis_hypothesis_ids=("h1",),
                         ),
                     ),
                     update_hypotheses=(
@@ -343,6 +345,7 @@ def test_solver_can_explicitly_start_three_research_cycles() -> None:
                         work_item_id="w1",
                         state="resolved",
                         resolution="3回の結果を評価した",
+                        basis_hypothesis_ids=("h1",),
                     ),
                 ),
                 update_hypotheses=(
@@ -408,6 +411,7 @@ def test_solver_can_start_second_cycle_without_forcing_a_third() -> None:
                             work_item_id="w1",
                             state="resolved",
                             resolution="2回で十分と判断した",
+                            basis_hypothesis_ids=("h1",),
                         ),
                     ),
                     update_hypotheses=(
@@ -570,6 +574,77 @@ def test_contract_repair_budget_exhaustion_returns_to_reserved_finalization() ->
     assert result.trace.failure_code is None
 
 
+def test_completed_observation_checkpoint_survives_later_model_timeout() -> None:
+    class CheckpointModel(FakeModel):
+        def solve(
+            self,
+            context: SolverContext,
+            profile: ModelCallProfile,
+        ) -> SolverCallResult:
+            self.solver_contexts.append(context)
+            self.solver_profiles.append(profile)
+            if len(self.solver_contexts) == 2:
+                raise SolverCheckpointTimeout(
+                    "cycle close transition timed out",
+                    partial_decision=SolverDecision(
+                        next="continue",
+                        decision_reason="取得本文の評価結果を保存する",
+                        update=CaseUpdate(
+                            update_hypotheses=(
+                                HypothesisUpdate(
+                                    hypothesis_id="h1",
+                                    judgment="supported",
+                                    evidence_ids=("e_r1",),
+                                ),
+                            ),
+                        ),
+                    ),
+                    completed_stage="observation_integration",
+                    input_tokens=11,
+                    output_tokens=7,
+                )
+            item = self.decisions.pop(0)
+            decision = item(context, profile) if callable(item) else item
+            return SolverCallResult(
+                decision=decision,
+                input_tokens=10,
+                output_tokens=20,
+            )
+
+    model = CheckpointModel(
+        [
+            _first_research((_request("r1"),)),
+            SolverDecision(
+                next="finalize",
+                update=CaseUpdate(
+                    update_work_items=(
+                        WorkItemUpdate(
+                            work_item_id="w1",
+                            state="resolved",
+                            resolution="取得本文で仮説を確認した",
+                            basis_hypothesis_ids=("h1",),
+                        ),
+                    ),
+                ),
+                answer=FinalAnswer(
+                    text="取得本文に基づく回答",
+                    citation_ids=("e_r1",),
+                ),
+            ),
+        ]
+    )
+
+    state, trace = _run(model, tools=(FakeReadTool(),))
+
+    hypothesis = next(item for item in state.hypotheses if item.hypothesis_id == "h1")
+    assert hypothesis.judgment == "supported"
+    assert hypothesis.evidence_ids == ("e_r1",)
+    assert state.final_answer is not None
+    assert state.final_answer.citation_ids == ("e_r1",)
+    assert model.solver_contexts[-1].cycle_step_timeout is True
+    assert any("checkpoint_timeout" in item.purpose for item in trace.model_calls)
+
+
 def test_parallel_safe_read_requests_run_in_parallel() -> None:
     tool = FakeReadTool(barrier=Barrier(2))
     model = FakeModel(
@@ -583,8 +658,16 @@ def test_parallel_safe_read_requests_run_in_parallel() -> None:
                             work_item_id="w1",
                             state="resolved",
                             resolution="並列結果を確認した",
+                            basis_hypothesis_ids=("h1",),
                         ),
-                    )
+                    ),
+                    update_hypotheses=(
+                        HypothesisUpdate(
+                            hypothesis_id="h1",
+                            judgment="supported",
+                            evidence_ids=("e_r1", "e_r2"),
+                        ),
+                    ),
                 ),
                 answer=FinalAnswer(
                     text="並列結果を確認",
@@ -1272,6 +1355,7 @@ def test_solver_can_repair_structural_contract() -> None:
                             work_item_id="w1",
                             state="resolved",
                             resolution="本文を確認した",
+                            basis_hypothesis_ids=("h1",),
                         ),
                     ),
                     update_hypotheses=(
@@ -1322,6 +1406,7 @@ def test_solver_can_use_second_contract_repair_without_program_rewriting() -> No
                             work_item_id="w1",
                             state="resolved",
                             resolution="本文を確認した",
+                            basis_hypothesis_ids=("h1",),
                         ),
                     ),
                     update_hypotheses=(
@@ -1360,6 +1445,13 @@ def test_dependency_repair_receives_only_work_items_bound_to_grounding_request()
                 WorkItem(work_item_id=work_item_id, question=f"確認{index}")
                 for index, work_item_id in enumerate(work_item_ids, start=1)
             ),
+            add_hypotheses=(
+                Hypothesis(
+                    hypothesis_id="h1",
+                    work_item_id="w1",
+                    statement="取得本文が回答を支える",
+                ),
+            ),
         ),
         next_focus_work_item_ids=work_item_ids,
         tool_requests=(
@@ -1377,9 +1469,17 @@ def test_dependency_repair_receives_only_work_items_bound_to_grounding_request()
                 work_item_id=work_item_id,
                 state="resolved",
                 resolution="確認済み",
+                basis_hypothesis_ids=("h1",) if work_item_id == "w1" else (),
             )
             for work_item_id in work_item_ids
-        )
+        ),
+        update_hypotheses=(
+            HypothesisUpdate(
+                hypothesis_id="h1",
+                judgment="supported",
+                evidence_ids=("e_r1",),
+            ),
+        ),
     )
     invalid = SolverDecision(
         next="finalize",
@@ -2802,30 +2902,30 @@ def test_required_dependency_decision_must_cover_open_work_and_reference_action(
             finalize_only=False,
         )
 
-    with pytest.raises(ContractViolation, match="requires basis evidence"):
-        apply_solver_decision(
-            state,
-            SolverDecision(
-                next="continue",
-                dependency_decisions=(
-                    DependencyDecision(
-                        dependency_kind="lower_law",
-                        work_item_id="w1",
-                        status="needs_action",
-                        reason="親Articleから接続先を調べる",
-                        action_request_id="graph-1",
-                    ),
+    missing_text_state = apply_solver_decision(
+        state,
+        SolverDecision(
+            next="continue",
+            dependency_decisions=(
+                DependencyDecision(
+                    dependency_kind="lower_law",
+                    work_item_id="w1",
+                    status="needs_action",
+                    reason="判断に使える委任元本文がなく、接続先を調べる",
+                    action_request_id="graph-1",
                 ),
-                tool_requests=(request,),
             ),
-            limits=AgentLimits(),
-            known_tool_names={"legal_graph_neighbors"},
-            material_evidence_ids=(source_evidence.evidence_id,),
-            fetchable_article_ids=("law-a-article-1",),
-            required_dependency_kind="lower_law",
-            require_dependency_decisions=True,
-            finalize_only=False,
-        )
+            tool_requests=(request,),
+        ),
+        limits=AgentLimits(),
+        known_tool_names={"legal_graph_neighbors"},
+        material_evidence_ids=(source_evidence.evidence_id,),
+        fetchable_article_ids=("law-a-article-1",),
+        required_dependency_kind="lower_law",
+        require_dependency_decisions=True,
+        finalize_only=False,
+    )
+    assert missing_text_state.dependency_decisions[0].basis_evidence_ids == ()
 
     updated = apply_solver_decision(
         state,
@@ -2881,6 +2981,76 @@ def test_required_dependency_decision_must_cover_open_work_and_reference_action(
     )
 
     assert cycle_boundary.dependency_decisions[0].action_request_id is None
+
+
+def test_unresolved_hypothesis_can_bind_only_presented_grounding_evidence() -> None:
+    state = CaseState(
+        case_id="case-unresolved-evidence",
+        question="質問",
+        work_items=(WorkItem(work_item_id="w1", question="確認事項"),),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h1",
+                work_item_id="w1",
+                statement="本文で一部を確認する命題",
+            ),
+        ),
+        evidence=(
+            Evidence(
+                evidence_id="e1",
+                source_ref="fixture:e1",
+                content="命題の一部を確認できる本文",
+                created_cycle=1,
+            ),
+        ),
+    )
+    decision = SolverDecision(
+        next="continue",
+        update=CaseUpdate(
+            update_hypotheses=(
+                HypothesisUpdate(
+                    hypothesis_id="h1",
+                    judgment="unresolved",
+                    evidence_ids=("e1",),
+                    gaps=("残る未確認事項",),
+                ),
+            ),
+        ),
+        tool_requests=(
+            ToolRequest(
+                request_id="search-1",
+                work_item_id="w1",
+                tool_name="search",
+                purpose="残る未確認事項を検索する",
+                hypothesis_ids=("h1",),
+            ),
+        ),
+    )
+
+    with pytest.raises(
+        ContractViolation,
+        match="hypothesis update uses evidence not shown in full",
+    ):
+        apply_solver_decision(
+            state,
+            decision,
+            limits=AgentLimits(),
+            known_tool_names={"search"},
+            material_evidence_ids=(),
+            finalize_only=False,
+        )
+
+    updated = apply_solver_decision(
+        state,
+        decision,
+        limits=AgentLimits(),
+        known_tool_names={"search"},
+        material_evidence_ids=("e1",),
+        finalize_only=False,
+    )
+    assert updated.hypotheses[0].judgment == "unresolved"
+    assert updated.hypotheses[0].evidence_ids == ("e1",)
+    assert updated.hypotheses[0].gaps == ("残る未確認事項",)
 
 
 def test_fetched_article_can_be_reused_as_a_graph_origin_but_not_refetched() -> None:
@@ -3443,6 +3613,7 @@ def test_builtin_load_evidence_reintroduces_known_full_text() -> None:
                             work_item_id="w1",
                             state="resolved",
                             resolution="本文を再確認した",
+                            basis_hypothesis_ids=("h1",),
                         ),
                     ),
                     update_hypotheses=(

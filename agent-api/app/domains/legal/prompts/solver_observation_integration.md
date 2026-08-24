@@ -9,22 +9,30 @@
 
 - `work_items`：今回評価する、現在openの確認事項です。
 - `hypotheses`：そのWorkItemに属する暫定命題と未確認事項です。
+- `evidence_hypothesis_candidates`：本文取得前に、各Articleが直接検証できると判断したHypothesisの候補対応です。
+  対応候補であり、支持・反証を確定するものではありません。
 - `grounding_evidence`：今回、法的判断の根拠に使える取得本文です。
 - `contract_feedback`：再試行時だけ提示される、直前出力の契約違反です。
 - `previous_observation`：再試行時だけ提示される、修正対象の直前出力です。
 
 ## 手順
 
-1. 入力された各Hypothesisの主体、行為、対象、条件を、それに関係する`grounding_evidence`と照合します。
+1. `evidence_hypothesis_candidates`を手掛かりに、各Hypothesisの主体、行為、対象、条件を、
+   対応Articleの`grounding_evidence`と照合します。
 2. 本文が命題を直接支持または否定する場合だけ、`supported`または`contradicted`へ更新します。
-3. 本文だけでは判定できない場合は`unresolved`とし、未確認の法的内容を`gaps`へ残します。
-4. Hypothesis更新後に、対応WorkItemを終了できるか評価します。
+3. 本文で一部だけ確認できた場合は`unresolved`を維持し、確認に使ったEvidence IDを残したうえで、
+   本文確認済みの内容を`gaps`から除き、残る未確認事項だけを書きます。
+4. 本文がHypothesisに関係しない場合は`unresolved`を維持し、Evidence IDを結び付けません。
+5. Hypothesis更新後に、対応WorkItemを終了できるか評価します。
 
 ## ルール
 
 - 検索候補やArticle IDではなく、`grounding_evidence`のEvidence IDだけを根拠に使います。
 - 同じ制度の本文でも、規律する主体または行為がHypothesisと異なる場合は直接根拠にしません。
+- 候補対応があっても、本文がHypothesisを直接支持または否定しなければ判定済みにしません。
 - `supported`と`contradicted`には直接根拠となるEvidence IDを指定します。
+- `unresolved`のEvidence IDは、本文で確認済みの部分を次Cycleへ引き継ぐために使います。
+  未確認の結論を支持する根拠として扱いません。
 - 回答へ影響するHypothesisが`unresolved`なら、WorkItemを`resolved`にしません。
 - 入力にない完了済みWorkItemとHypothesisは更新しません。
 - `contract_feedback`がある場合は`previous_observation`から違反箇所だけを直し、他の判断を維持します。

@@ -138,7 +138,11 @@ class Hypothesis(FrameworkModel):
     )
     evidence_ids: tuple[str, ...] = Field(
         default=(),
-        description="supportedまたはcontradictedの直接根拠となるgrounding Evidence ID。",
+        description=(
+            "現在のjudgmentとgapsの判断に使ったgrounding Evidence ID。"
+            "supportedまたはcontradictedでは直接根拠を必須とし、unresolvedでは"
+            "確認済み部分に使った本文がある場合だけ保持する。"
+        ),
     )
     gaps: tuple[str, ...] = Field(
         default=(),
@@ -402,6 +406,21 @@ class SearchCandidateSelection(FrameworkModel):
         max_length=1000,
         description="この候補がWorkItem・Hypothesisを直接検証できる理由。",
     )
+    matched_hypothesis_ids: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "検索候補評価で、このArticleが直接検証できるとSolverが判断した"
+            "Hypothesis ID。本文取得後の評価候補として引き継ぐ。"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def require_unique_hypotheses(self) -> SearchCandidateSelection:
+        if len(self.matched_hypothesis_ids) != len(
+            set(self.matched_hypothesis_ids)
+        ):
+            raise ValueError("search selection hypothesis IDs must be unique")
+        return self
 
 
 class SearchCandidateReview(FrameworkModel):

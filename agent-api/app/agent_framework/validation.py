@@ -699,6 +699,19 @@ def apply_solver_decision(
             raise ContractViolation(
                 "search review candidates must be selected or deferred exactly once"
             )
+        for selection in search_review.selections:
+            if not selection.matched_hypothesis_ids:
+                raise ContractViolation(
+                    "selected search candidate requires matched Hypothesis IDs"
+                )
+            unknown_matched_ids = set(
+                selection.matched_hypothesis_ids
+            ) - set(hypotheses)
+            if unknown_matched_ids:
+                raise ContractViolation(
+                    "search candidate references unknown Hypothesis IDs: "
+                    f"{sorted(unknown_matched_ids)}"
+                )
         max_selected = (
             effective_fetch_capacity
             if effective_fetch_capacity is not None
@@ -865,6 +878,28 @@ def apply_solver_decision(
         if navigation_citations:
             raise ContractViolation(
                 f"answer cites navigation-only evidence: {sorted(navigation_citations)}"
+            )
+        resolved_basis_evidence_ids = {
+            evidence_id
+            for item in work_items.values()
+            if item.state == "resolved"
+            for hypothesis_id in item.basis_hypothesis_ids
+            for evidence_id in hypotheses[hypothesis_id].evidence_ids
+        }
+        resolved_basis_evidence_ids.update(
+            evidence_id
+            for dependency in dependency_by_key.values()
+            if work_items[dependency.work_item_id].state == "resolved"
+            and dependency.status == "resolved"
+            for evidence_id in dependency.basis_evidence_ids
+        )
+        unsupported_citations = (
+            set(decision.answer.citation_ids) - resolved_basis_evidence_ids
+        )
+        if unsupported_citations:
+            raise ContractViolation(
+                "answer citations require resolved WorkItem basis: "
+                f"{sorted(unsupported_citations)}"
             )
         citation_article_ids = {
             str(evidence_by_id[evidence_id].metadata.get("articleId") or "")
@@ -1212,20 +1247,17 @@ def _validate_hypotheses(
             raise ContractViolation(
                 f"hypothesis has unknown evidence IDs: {sorted(unknown_evidence)}"
             )
-        if item.hypothesis_id in changed_hypothesis_ids and item.judgment in {
-            "supported",
-            "contradicted",
-        }:
+        if item.hypothesis_id in changed_hypothesis_ids and item.evidence_ids:
             unseen = set(item.evidence_ids) - material_evidence_ids
             if unseen:
                 raise ContractViolation(
-                    f"semantic judgment uses evidence not shown in full: "
+                    f"hypothesis update uses evidence not shown in full: "
                     f"{sorted(unseen)}"
                 )
             navigation_only = set(item.evidence_ids) - citable_evidence_ids
             if navigation_only:
                 raise ContractViolation(
-                    "semantic judgment uses navigation-only evidence: "
+                    "hypothesis update uses navigation-only evidence: "
                     f"{sorted(navigation_only)}"
                 )
 

@@ -50,6 +50,7 @@ from app.agent_framework.ports.model import (
     ReviewCallResult,
     ReviewerView,
     SolverCallResult,
+    SolverCheckpointTimeout,
 )
 from app.agent_framework.profiles import ModelCallProfile, ReviewerProfile
 from app.agent_framework.prompt_assets import (
@@ -312,80 +313,104 @@ class StructuredJSONModelAdapter:
                 f"{detail['msg']}"
             ) from exc
 
-        dependency_call = render_dependency_assessment_model_call(
-            context,
-            observation,
-            profile,
-        )
-        remaining_timeout = profile.timeout_sec - (monotonic() - started_at)
-        if remaining_timeout <= 1:
-            raise TimeoutError("dependency assessment time exhausted")
-        if self._diagnostics is not None:
-            self._diagnostics.record_transport_input(
-                context=context,
-                profile=profile,
-                rendered=dependency_call,
-                repair_index=0,
-                transport_stage="dependency_assessment",
-                provider=getattr(self._client, "provider", None),
+        dependency_input_tokens = 0
+        dependency_output_tokens = 0
+        dependency_retry_count = 0
+        completed_stage = "observation_integration"
+        if (
+            context.required_dependency_kind is not None
+            and context.required_dependency_work_item_ids
+        ):
+            dependency_call = render_dependency_assessment_model_call(
+                context,
+                observation,
+                profile,
             )
-        try:
-            dependency_result = self._client.generate_structured_json(
-                prompt=dependency_call.request,
-                schema=dependency_call.output_schema,
-                model=profile.model,
-                max_tokens=profile.max_output_tokens,
-                timeout_sec=max(1, round(remaining_timeout)),
-            )
-        except requests.Timeout as exc:
-            raise TimeoutError("dependency assessment timed out") from exc
-        dependency_error = dependency_result.validationError
-        if dependency_result.payload is None and dependency_error is None:
-            dependency_error = "empty"
-        if self._diagnostics is not None:
-            self._diagnostics.record_transport_output(
-                context=context,
-                repair_index=0,
-                payload=dependency_result.payload,
-                validation_error=dependency_error,
-                input_tokens=dependency_result.inputTokens,
-                output_tokens=dependency_result.outputTokens,
-                provider_retry_count=dependency_result.retryCount,
-                transport_stage="dependency_assessment",
-            )
-        if dependency_error is not None or dependency_result.payload is None:
-            raise ModelProtocolError(
-                "dependency assessment transport invalid: "
-                f"{dependency_error}"
-            )
-        try:
-            dependency = DependencyAssessmentDecision.model_validate(
-                _normalize_observation_integration_payload(
-                    dependency_result.payload
+            remaining_timeout = profile.timeout_sec - (monotonic() - started_at)
+            if remaining_timeout <= 1:
+                raise _cycle_close_checkpoint_timeout(
+                    "dependency assessment time exhausted",
+                    observation=observation,
+                    completed_stage=completed_stage,
+                    input_tokens=observation_result.inputTokens,
+                    output_tokens=observation_result.outputTokens,
                 )
-            )
-            dependency = _downgrade_unproven_dependency_confirmations(
-                dependency,
-                article_id_by_evidence={
-                    item.evidence_id: article_id
-                    for item in context.material_evidence
-                    if item.evidence_id in context.grounding_evidence_ids
-                    and isinstance(
-                        article_id := item.metadata.get("articleId"),
-                        str,
+            if self._diagnostics is not None:
+                self._diagnostics.record_transport_input(
+                    context=context,
+                    profile=profile,
+                    rendered=dependency_call,
+                    repair_index=0,
+                    transport_stage="dependency_assessment",
+                    provider=getattr(self._client, "provider", None),
+                )
+            try:
+                dependency_result = self._client.generate_structured_json(
+                    prompt=dependency_call.request,
+                    schema=dependency_call.output_schema,
+                    model=profile.model,
+                    max_tokens=profile.max_output_tokens,
+                    timeout_sec=max(1, round(remaining_timeout)),
+                )
+            except requests.Timeout as exc:
+                raise _cycle_close_checkpoint_timeout(
+                    "dependency assessment timed out",
+                    observation=observation,
+                    completed_stage=completed_stage,
+                    input_tokens=observation_result.inputTokens,
+                    output_tokens=observation_result.outputTokens,
+                ) from exc
+            dependency_error = dependency_result.validationError
+            if dependency_result.payload is None and dependency_error is None:
+                dependency_error = "empty"
+            if self._diagnostics is not None:
+                self._diagnostics.record_transport_output(
+                    context=context,
+                    repair_index=0,
+                    payload=dependency_result.payload,
+                    validation_error=dependency_error,
+                    input_tokens=dependency_result.inputTokens,
+                    output_tokens=dependency_result.outputTokens,
+                    provider_retry_count=dependency_result.retryCount,
+                    transport_stage="dependency_assessment",
+                )
+            if dependency_error is not None or dependency_result.payload is None:
+                raise ModelProtocolError(
+                    "dependency assessment transport invalid: "
+                    f"{dependency_error}"
+                )
+            try:
+                dependency = DependencyAssessmentDecision.model_validate(
+                    _normalize_observation_integration_payload(
+                        dependency_result.payload
                     )
-                },
+                )
+                dependency = _downgrade_unproven_dependency_confirmations(
+                    dependency,
+                    article_id_by_evidence={
+                        item.evidence_id: article_id
+                        for item in context.material_evidence
+                        if item.evidence_id in context.grounding_evidence_ids
+                        and isinstance(
+                            article_id := item.metadata.get("articleId"),
+                            str,
+                        )
+                    },
+                )
+            except ValidationError as exc:
+                detail = exc.errors(include_url=False, include_input=False)[0]
+                raise ModelProtocolError(
+                    "dependency assessment contract invalid: "
+                    f"{detail['msg']}"
+                ) from exc
+            observation = observation.model_copy(
+                update={"dependency_decisions": dependency.dependency_decisions}
             )
-        except ValidationError as exc:
-            detail = exc.errors(include_url=False, include_input=False)[0]
-            raise ModelProtocolError(
-                "dependency assessment contract invalid: "
-                f"{detail['msg']}"
-            ) from exc
-        observation = observation.model_copy(
-            update={"dependency_decisions": dependency.dependency_decisions}
-        )
-        observation = _align_observation_with_dependency_decisions(observation)
+            observation = _align_observation_with_dependency_decisions(observation)
+            dependency_input_tokens = dependency_result.inputTokens
+            dependency_output_tokens = dependency_result.outputTokens
+            dependency_retry_count = dependency_result.retryCount
+            completed_stage = "dependency_assessment"
 
         transition_call = render_cycle_close_model_call(
             context,
@@ -394,7 +419,19 @@ class StructuredJSONModelAdapter:
         )
         remaining_timeout = profile.timeout_sec - (monotonic() - started_at)
         if remaining_timeout <= 1:
-            raise TimeoutError("cycle close transition time exhausted")
+            raise _cycle_close_checkpoint_timeout(
+                "cycle close transition time exhausted",
+                observation=observation,
+                completed_stage=completed_stage,
+                input_tokens=_sum_optional_tokens(
+                    observation_result.inputTokens,
+                    dependency_input_tokens,
+                ),
+                output_tokens=_sum_optional_tokens(
+                    observation_result.outputTokens,
+                    dependency_output_tokens,
+                ),
+            )
         if self._diagnostics is not None:
             self._diagnostics.record_transport_input(
                 context=context,
@@ -413,7 +450,19 @@ class StructuredJSONModelAdapter:
                 timeout_sec=max(1, round(remaining_timeout)),
             )
         except requests.Timeout as exc:
-            raise TimeoutError("cycle close transition timed out") from exc
+            raise _cycle_close_checkpoint_timeout(
+                "cycle close transition timed out",
+                observation=observation,
+                completed_stage=completed_stage,
+                input_tokens=_sum_optional_tokens(
+                    observation_result.inputTokens,
+                    dependency_input_tokens,
+                ),
+                output_tokens=_sum_optional_tokens(
+                    observation_result.outputTokens,
+                    dependency_output_tokens,
+                ),
+            ) from exc
         transition_error = transition_result.validationError
         if transition_result.payload is None and transition_error is None:
             transition_error = "empty"
@@ -446,33 +495,26 @@ class StructuredJSONModelAdapter:
                 f"cycle close contract invalid: {detail['msg']}"
             ) from exc
 
-        input_tokens = (
-            observation_result.inputTokens
-            + dependency_result.inputTokens
-            + transition_result.inputTokens
-            if observation_result.inputTokens is not None
-            and dependency_result.inputTokens is not None
-            and transition_result.inputTokens is not None
-            else None
+        input_tokens = _sum_optional_tokens(
+            observation_result.inputTokens,
+            dependency_input_tokens,
+            transition_result.inputTokens,
         )
-        output_tokens = (
-            observation_result.outputTokens
-            + dependency_result.outputTokens
-            + transition_result.outputTokens
-            if observation_result.outputTokens is not None
-            and dependency_result.outputTokens is not None
-            and transition_result.outputTokens is not None
-            else None
+        output_tokens = _sum_optional_tokens(
+            observation_result.outputTokens,
+            dependency_output_tokens,
+            transition_result.outputTokens,
         )
         return SolverCallResult(
             decision=decision,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             attempt_count=(
-                3
+                2
                 + observation_result.retryCount
-                + dependency_result.retryCount
+                + dependency_retry_count
                 + transition_result.retryCount
+                + int(completed_stage == "dependency_assessment")
             ),
         )
 
@@ -731,6 +773,8 @@ def render_solver_model_call(
         context,
         profile.available_tool_names,
     )
+    if profile.context_projection == "finalization":
+        projected_context = _project_finalization_context(projected_context)
     if profile.context_projection == "cycle_close":
         return render_observation_integration_model_call(
             projected_context,
@@ -871,6 +915,65 @@ def _project_available_tools(
     return context.model_copy(update={"available_tools": available_tools})
 
 
+def _project_finalization_context(context: SolverContext) -> SolverContext:
+    """最終回答へ、解決済みWorkItemの根拠本文だけを投影する。"""
+
+    hypotheses_by_id = {
+        item.hypothesis_id: item for item in context.hypotheses
+    }
+    resolved_work_item_ids = {
+        item.work_item_id
+        for item in context.work_tree
+        if item.state == "resolved"
+    }
+    resolved_basis_evidence_ids = {
+        evidence_id
+        for work_item in context.work_tree
+        if work_item.work_item_id in resolved_work_item_ids
+        for hypothesis_id in work_item.basis_hypothesis_ids
+        for evidence_id in hypotheses_by_id[hypothesis_id].evidence_ids
+    }
+    resolved_basis_evidence_ids.update(
+        evidence_id
+        for decision in context.dependency_decisions
+        if decision.work_item_id in resolved_work_item_ids
+        and decision.status == "resolved"
+        for evidence_id in decision.basis_evidence_ids
+    )
+    visible_grounding_ids = tuple(
+        evidence_id
+        for evidence_id in context.grounding_evidence_ids
+        if evidence_id in resolved_basis_evidence_ids
+        and any(
+            item.evidence_id == evidence_id
+            for item in context.material_evidence
+        )
+    )
+    visible_grounding_id_set = set(visible_grounding_ids)
+    return context.model_copy(
+        update={
+            "available_tools": (),
+            "grounding_evidence_ids": visible_grounding_ids,
+            "navigation_evidence_ids": (),
+            "evidence_manifest": tuple(
+                item
+                for item in context.evidence_manifest
+                if item.evidence_id in visible_grounding_id_set
+            ),
+            "material_evidence": tuple(
+                item
+                for item in context.material_evidence
+                if item.evidence_id in visible_grounding_id_set
+            ),
+            "omitted_evidence_ids": (),
+            "fetchable_article_ids": (),
+            "search_candidates": (),
+            "evidence_hypothesis_candidates": (),
+            "required_search_review_request_ids": (),
+        }
+    )
+
+
 def _solver_context_payload(
     context: SolverContext,
     *,
@@ -879,7 +982,7 @@ def _solver_context_payload(
     """CaseStoreを変えず、用途に無関係な実行値をModel入力から除く。"""
 
     payload = context.model_dump(mode="json")
-    if projection == "full":
+    if projection in {"full", "finalization"}:
         return payload
     research_input = ResearchStepInput(
         question=context.question,
@@ -1289,6 +1392,13 @@ def _observation_integration_context_payload(
         ],
         "hypotheses": [
             item.model_dump(mode="json") for item in active_hypotheses
+        ],
+        "evidence_hypothesis_candidates": [
+            item.model_dump(mode="json")
+            for item in context.evidence_hypothesis_candidates
+            if set(item.hypothesis_ids).intersection(
+                hypothesis.hypothesis_id for hypothesis in active_hypotheses
+            )
         ],
         "grounding_evidence": [
             item.model_dump(mode="json")
@@ -1912,6 +2022,39 @@ def _normalize_cycle_close_decisions(
         unreviewed_graph_resolution=transition.unreviewed_graph_resolution,
         answer=transition.answer,
     )
+
+
+def _cycle_close_checkpoint_timeout(
+    message: str,
+    *,
+    observation: ObservationIntegrationDecision,
+    completed_stage: str,
+    input_tokens: int | None,
+    output_tokens: int | None,
+) -> SolverCheckpointTimeout:
+    return SolverCheckpointTimeout(
+        message,
+        partial_decision=SolverDecision(
+            next="continue",
+            decision_reason=(
+                f"{completed_stage}で確定した更新を保存し、後続処理の時間切れを"
+                "安全な最終化へ引き継ぐ。"
+            ),
+            update=CaseUpdate(
+                update_work_items=observation.update_work_items,
+                update_hypotheses=observation.update_hypotheses,
+            ),
+        ),
+        completed_stage=completed_stage,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+    )
+
+
+def _sum_optional_tokens(*values: int | None) -> int | None:
+    if any(value is None for value in values):
+        return None
+    return sum(value for value in values if value is not None)
 
 
 def render_search_assessment_model_call(
@@ -3143,6 +3286,15 @@ def _solver_common_transport_schema(context: SolverContext) -> dict[str, Any]:
         if properties["answer"].get("type") != "null":
             included.add("answer")
 
+    if context.finalize_only and "answer" in properties:
+        answer_schema = properties["answer"]
+        if answer_schema.get("type") == "object":
+            answer_schema["properties"]["citation_ids"] = _described(
+                _bounded_enum_array(context.grounding_evidence_ids),
+                FinalAnswer,
+                "citation_ids",
+            )
+
     schema["properties"] = {
         name: value
         for name, value in properties.items()
@@ -4214,9 +4366,25 @@ def _normalize_search_review_payload(
         for item in payload.get("selections") or []
         if isinstance(item, dict) and isinstance(item.get("article_id"), str)
     }
+    matched_by_article = {
+        item.get("article_id"): list(item.get("matched_hypothesis_ids") or ())
+        for item in payload.get("assessments") or []
+        if isinstance(item, dict) and isinstance(item.get("article_id"), str)
+    }
+    selections = [
+        {
+            **item,
+            "matched_hypothesis_ids": matched_by_article.get(
+                item.get("article_id"),
+                [],
+            ),
+        }
+        for item in payload.get("selections") or []
+        if isinstance(item, dict)
+    ]
     review = {
         "search_request_ids": payload.get("search_request_ids") or [],
-        "selections": payload.get("selections") or [],
+        "selections": selections,
         "reason": payload.get("reason") or "検索候補を選択した",
         "deferred_article_ids": [
             item.article_id

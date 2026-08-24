@@ -20,6 +20,7 @@ from app.adapters.models.structured_json import (
     _normalize_absent_context_branches,
     _normalize_observation_integration_payload,
     _normalize_search_assessment_transport_payload,
+    _normalize_search_review_payload,
     _normalize_staged_research_payload,
     _normalize_solver_payload,
     _search_reselection_prompt,
@@ -306,6 +307,7 @@ class FakeStructuredLLM:
                             "work_item_id": "wi-1",
                             "state": "resolved",
                             "resolution": "本文を確認した",
+                            "basis_hypothesis_ids": ["h-1"],
                         }
                     ],
                     "update_hypotheses": [
@@ -577,7 +579,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "182"
+    assert diagnostic_records[0]["profileVersion"] == "183"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -585,7 +587,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "182"
+    assert transport_input["profileVersion"] == "183"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -938,7 +940,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "182"
+    assert profile.version == "183"
     mode_prompts = {
         "research": profile.solver_research.system_prompt,
         "integration": profile.solver_integration.system_prompt,
@@ -1189,7 +1191,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "182"
+    assert profile.version == "183"
     assert prompt.rindex("## 出力前の確認") > prompt.rindex(
         "</solver_context>"
     )
@@ -1240,7 +1242,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "182"
+    assert profile.version == "183"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -2008,6 +2010,7 @@ def test_search_review_selects_and_defers_every_candidate_once() -> None:
             SearchCandidateSelection(
                 article_id="article-1",
                 reason="検索抜粋は意味上の採用先を直接扱う",
+                matched_hypothesis_ids=("h-meaning",),
             ),
         ),
         deferred_article_ids=("article-2",),
@@ -2029,7 +2032,162 @@ def test_search_review_selects_and_defers_every_candidate_once() -> None:
     assert updated.search_candidate_reviews[0].selected_article_ids == (
         "article-1",
     )
+    assert updated.search_candidate_reviews[0].selections[
+        0
+    ].matched_hypothesis_ids == ("h-meaning",)
     assert "assessments" not in updated.search_candidate_reviews[0].model_dump()
+
+
+def test_search_review_persists_assessed_hypothesis_matches() -> None:
+    context = build_solver_context(
+        CaseState(
+            case_id="case-search-match-provenance",
+            question="質問",
+            work_items=(WorkItem(work_item_id="wi-1", question="確認事項"),),
+            hypotheses=(
+                Hypothesis(
+                    hypothesis_id="h-1",
+                    work_item_id="wi-1",
+                    statement="検証する命題",
+                ),
+            ),
+        ),
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+    )
+
+    normalized = _normalize_search_review_payload(
+        {
+            "search_request_ids": ["search-1"],
+            "assessments": [
+                {
+                    "article_id": "article-1",
+                    "legal_function": "applicability",
+                    "summary": "命題を直接検証できる候補",
+                    "matched_hypothesis_ids": ["h-1"],
+                }
+            ],
+            "selections": [
+                {
+                    "article_id": "article-1",
+                    "reason": "本文を確認する",
+                }
+            ],
+            "reason": "候補を評価した",
+        },
+        context,
+    )
+
+    selection = normalized["search_candidate_review"]["selections"][0]
+    assert selection["matched_hypothesis_ids"] == ["h-1"]
+
+
+def test_observation_projects_article_to_hypothesis_candidate_links() -> None:
+    state = CaseState(
+        case_id="case-observation-hypothesis-links",
+        question="質問",
+        research_cycle_count=1,
+        work_items=(WorkItem(work_item_id="wi-1", question="確認事項"),),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h-1",
+                work_item_id="wi-1",
+                statement="検証する命題",
+            ),
+        ),
+        evidence=(
+            Evidence(
+                evidence_id="e-1",
+                source_ref="fixture:e-1",
+                content="取得した条文本文",
+                created_cycle=1,
+                metadata={
+                    "articleId": "article-1",
+                    "citationEligible": True,
+                },
+            ),
+        ),
+        tool_requests=(
+            ToolRequest(
+                request_id="fetch-1",
+                work_item_id="wi-1",
+                tool_name="fetch_articles",
+                arguments={"article_ids": ["article-1"]},
+                purpose="選択した候補本文を取得する",
+                hypothesis_ids=("h-1",),
+            ),
+        ),
+        tool_results=(
+            ToolResult(
+                request_id="fetch-1",
+                status="succeeded",
+                evidence_ids=("e-1",),
+                cycle_no=1,
+            ),
+        ),
+        search_candidate_reviews=(
+            SearchCandidateReview(
+                search_request_ids=("search-1",),
+                selections=(
+                    SearchCandidateSelection(
+                        article_id="article-1",
+                        reason="命題を直接検証できる候補",
+                        matched_hypothesis_ids=("h-1",),
+                    ),
+                ),
+                deferred_article_ids=(),
+                reason="候補を評価した",
+                reviewed_cycle=1,
+            ),
+        ),
+    )
+    context = build_solver_context(
+        state,
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+    )
+    profile = legal_profiles.legal_agent_profile().solver_cycle_close
+    assert profile is not None
+
+    rendered = render_observation_integration_model_call(context, profile)
+
+    assert rendered.input_payload["evidence_hypothesis_candidates"] == [
+        {
+            "article_id": "article-1",
+            "hypothesis_ids": ["h-1"],
+            "reason": "命題を直接検証できる候補",
+        }
+    ]
+    assert "対応候補であり、支持・反証を確定するものではありません" in (
+        rendered.instructions
+    )
+
+    observation = ObservationIntegrationDecision(
+        decision_reason="本文で命題の一部を確認した",
+        update_work_items=(
+            {
+                "work_item_id": "wi-1",
+                "state": "open",
+                "resolution": None,
+                "basis_hypothesis_ids": (),
+            },
+        ),
+        update_hypotheses=(
+            {
+                "hypothesis_id": "h-1",
+                "judgment": "unresolved",
+                "evidence_ids": ("e-1",),
+                "gaps": ("本文でまだ確認できない条件",),
+            },
+        ),
+    )
+    cycle_close = render_cycle_close_model_call(context, observation, profile)
+    projected = cycle_close.input_payload["hypotheses_after_observation"][0]
+    assert projected["judgment"] == "unresolved"
+    assert projected["evidence_ids"] == ["e-1"]
+    assert projected["gaps"] == ["本文でまだ確認できない条件"]
 
 def test_cycle_boundary_requires_a_structural_resolution_for_every_deferred_frontier(
 ) -> None:
@@ -2587,6 +2745,9 @@ def test_real_model_cycle2_repeated_search_fixture_routes_to_search_review() -> 
     assert rebuilt.model_dump(mode="json") == saved.model_copy(
         update={
             "completed_legal_searches": rebuilt.completed_legal_searches,
+            "evidence_hypothesis_candidates": (
+                rebuilt.evidence_hypothesis_candidates
+            ),
             "required_search_review_request_ids": (
                 rebuilt.required_search_review_request_ids
             ),
@@ -2643,14 +2804,16 @@ def test_cycle2_carried_candidates_return_to_dedicated_search_review() -> None:
                     context.required_search_review_request_ids
                 ),
                 "selections": [
-                    {
-                        "article_id": "law-402M50000040038-article-2_5",
-                        "reason": "例外条件のHypothesisを直接確認する候補。",
-                    },
-                    {
-                        "article_id": "law-323AC0000000025-article-27_13",
-                        "reason": "公告と報告書提出のHypothesisを直接確認する候補。",
-                    },
+                        {
+                            "article_id": "law-402M50000040038-article-2_5",
+                            "reason": "例外条件のHypothesisを直接確認する候補。",
+                            "matched_hypothesis_ids": ["h-exception"],
+                        },
+                        {
+                            "article_id": "law-323AC0000000025-article-27_13",
+                            "reason": "公告と報告書提出のHypothesisを直接確認する候補。",
+                            "matched_hypothesis_ids": ["h-procedure"],
+                        },
                 ],
                 "deferred_article_ids": [],
                 "reason": "未確認Hypothesisごとに本文候補を選ぶ。",
@@ -3162,6 +3325,7 @@ def test_cycle_close_fixture_projects_three_small_single_task_calls() -> None:
         "non_work_item_requirements",
         "work_items",
         "hypotheses",
+        "evidence_hypothesis_candidates",
         "grounding_evidence",
     }
     assert set(observation_call.output_schema["properties"]) == {
@@ -3378,6 +3542,104 @@ def test_cycle_close_adapter_combines_observation_and_transition() -> None:
     assert applied.retained_evidence_ids == (grounding_id,)
 
 
+def test_cycle_close_skips_dependency_call_when_no_work_item_requires_it() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_overview_cycle1_three_articles_before_cycle_close_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    context = SolverContext.model_validate(fixture["solverContext"]).model_copy(
+        update={
+            "required_dependency_kind": None,
+            "required_dependency_work_item_ids": (),
+        }
+    )
+
+    class CycleCloseWithoutDependencyLLM:
+        provider = "openai"
+
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+            self.payloads = [
+                {
+                    "decision_reason": "取得本文の評価を反映した",
+                    "update_work_items": [],
+                    "update_hypotheses": [],
+                },
+                {
+                    "outcome": "start_next_cycle",
+                    "decision_reason": "未確認事項を次Cycleへ引き継ぐ",
+                    "next_focus_work_item_ids": [
+                        context.work_tree[0].work_item_id
+                    ],
+                    "retain_evidence_ids": [],
+                    "answer": None,
+                },
+            ]
+
+        def generate_structured_json(self, **kwargs: Any) -> StructuredJSONResult:
+            self.calls.append(kwargs)
+            return StructuredJSONResult(
+                payload=self.payloads.pop(0),
+                provider="openai",
+                model=kwargs["model"],
+                latencyMs=1,
+                inputTokens=10,
+                outputTokens=10,
+            )
+
+    llm = CycleCloseWithoutDependencyLLM()
+    result = StructuredJSONModelAdapter(llm).solve(
+        context,
+        legal_profiles.legal_agent_profile().solver_cycle_close,
+    )
+
+    assert len(llm.calls) == 2
+    assert result.attempt_count == 2
+    assert result.decision.start_next_cycle is True
+    assert result.decision.dependency_decisions == ()
+
+
+def test_real_model_timeout_fixture_preserves_observation_grounding() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_cycle_close_observation_update_lost_on_timeout_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+
+    assert fixture["source"]["purpose"] == "cycle_close"
+    assert fixture["source"]["transportStage"] == "observation_integration"
+    candidates = fixture["observedTransportInput"]["inputPayload"][
+        "evidence_hypothesis_candidates"
+    ]
+    assert candidates == [
+        {
+            "article_id": "law-340CO0000000321-article-12",
+            "hypothesis_ids": ["h-1", "h-3", "h-4"],
+            "reason": (
+                "legal_function=exception; 公開買付けによらない買付けが可能な"
+                "場合として、特定の条件を満たす場合が列挙されている。"
+            ),
+        }
+    ]
+    updates = {
+        item["hypothesis_id"]: item
+        for item in fixture["observedTransportOutput"]["payload"][
+            "update_hypotheses"
+        ]
+    }
+    assert updates["h-3"]["evidence_ids"] == [
+        "law-340CO0000000321-article-12"
+    ]
+    assert updates["h-4"]["evidence_ids"] == [
+        "law-340CO0000000321-article-12"
+    ]
+
+
 def test_real_observation_output_projects_work_tree_for_cycle_close() -> None:
     fixture_path = (
         Path(__file__).parent
@@ -3407,6 +3669,37 @@ def test_real_observation_output_projects_work_tree_for_cycle_close() -> None:
     assert all("evidence_count" in item for item in projected_work_items)
     assert {item["state"] for item in projected_work_items} == {"open"}
     assert rendered.stage == "cycle_close"
+
+
+def test_real_observation_fixture_preserves_evidence_hypothesis_provenance(
+) -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_overview_cycle1_observation_projection_failure_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    context = build_solver_context(
+        CaseState.model_validate(fixture["caseState"]),
+        AgentLimits(),
+        remaining_wall_time_sec=120,
+        finalize_only=False,
+    )
+    profile = legal_profiles.legal_agent_profile().solver_cycle_close
+    assert profile is not None
+
+    rendered = render_observation_integration_model_call(context, profile)
+
+    candidates = {
+        item["article_id"]: item
+        for item in rendered.input_payload["evidence_hypothesis_candidates"]
+    }
+    assert candidates["law-323AC0000000025-article-27_22_2"][
+        "hypothesis_ids"
+    ] == ["h-1", "h-2", "h-4"]
+    assert "一部だけ確認できた場合" in rendered.instructions
+    assert "確認に使ったEvidence IDを残した" in rendered.instructions
 
 
 def test_observation_integration_projects_only_open_work() -> None:
@@ -5487,6 +5780,146 @@ def test_finalization_requires_all_open_scope_ids() -> None:
     assert answer["unresolved_hypothesis_ids"]["maxItems"] == len(
         hypothesis_ids
     )
+
+
+def test_finalization_projects_only_resolved_work_item_evidence() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_overview_finalization_asserts_unresolved_threshold_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    state = CaseState(
+        case_id="fixture-finalization-unsupported-threshold",
+        question="公開買付けの条件、範囲、例外、手続を確認する。",
+        research_cycle_count=4,
+        work_items=(
+            WorkItem(work_item_id="wi-1", question="成立条件"),
+            WorkItem(work_item_id="wi-2", question="対象範囲"),
+            WorkItem(work_item_id="wi-3", question="例外"),
+            WorkItem(work_item_id="wi-4", question="必要手続"),
+        ),
+        hypotheses=tuple(
+            Hypothesis(
+                hypothesis_id=f"h-{index}",
+                work_item_id=f"wi-{index}",
+                statement=f"未確認命題{index}",
+                gaps=(f"未確認事項{index}",),
+            )
+            for index in range(1, 5)
+        ),
+        evidence=(
+            Evidence(
+                evidence_id="search-nav-50-percent",
+                source_ref="fixture:search-nav-50-percent",
+                content="特別支配関係について議決権の百分の五十を超える場合。",
+                created_cycle=4,
+                metadata={
+                    "evidenceRole": "search_navigation",
+                    "articleId": "ordinance-article-2_3",
+                },
+            ),
+            Evidence(
+                evidence_id="unresolved-grounding",
+                source_ref="fixture:unresolved-grounding",
+                content="質問とは異なる規律の取得本文。",
+                created_cycle=4,
+                metadata={
+                    "evidenceRole": "retrieved_text",
+                    "articleId": "ordinance-article-63",
+                    "citationEligible": True,
+                },
+            ),
+        ),
+        retained_evidence_ids=(
+            "search-nav-50-percent",
+            "unresolved-grounding",
+        ),
+    )
+    context = build_solver_context(
+        state,
+        AgentLimits(max_research_cycles=4),
+        remaining_wall_time_sec=60,
+        finalize_only=True,
+    )
+    assert {item.evidence_id for item in context.material_evidence} == {
+        "search-nav-50-percent",
+        "unresolved-grounding",
+    }
+
+    profile = legal_profiles.legal_agent_profile().solver_finalization
+    assert profile is not None
+    rendered = render_solver_model_call(
+        context,
+        profile,
+        provider="openai",
+        stage="finalization",
+    )
+
+    expected = fixture["expectedBehavior"]
+    assert expected["excludeNavigationEvidence"] is True
+    assert rendered.input_payload["material_evidence"] == []
+    assert rendered.input_payload["grounding_evidence_ids"] == []
+    assert rendered.input_payload["navigation_evidence_ids"] == []
+    assert "確認済みのWorkItemが0件なら、法的結論を断定しません" in (
+        rendered.instructions
+    )
+    assert "limitationsで未確認とした内容を回答本文で断定していないか" in (
+        rendered.instructions
+    )
+    answer_schema = rendered.output_schema["properties"]["answer"]["properties"]
+    assert answer_schema["citation_ids"]["maxItems"] == 0
+
+
+def test_finalization_rejects_citations_without_resolved_work_item_basis() -> None:
+    state = CaseState(
+        case_id="fixture-finalization-no-resolved-basis",
+        question="公開買付けの成立条件を確認する。",
+        research_cycle_count=4,
+        work_items=(WorkItem(work_item_id="wi-1", question="成立条件"),),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h-1",
+                work_item_id="wi-1",
+                statement="取得割合が基準になる。",
+                gaps=("具体的な割合",),
+            ),
+        ),
+        evidence=(
+            Evidence(
+                evidence_id="e-unresolved",
+                source_ref="fixture:e-unresolved",
+                content="別の条件について百分の五十と定める。",
+                created_cycle=4,
+                metadata={"citationEligible": True},
+            ),
+        ),
+    )
+    decision = SolverDecision(
+        next="finalize",
+        answer=FinalAnswer(
+            text="取得割合は50%である。",
+            citation_ids=("e-unresolved",),
+            limitations=("具体的な取得割合は未確認。",),
+            unresolved_work_item_ids=("wi-1",),
+            unresolved_hypothesis_ids=("h-1",),
+        ),
+    )
+
+    with pytest.raises(
+        ContractViolation,
+        match="citations require resolved WorkItem basis",
+    ):
+        apply_solver_decision(
+            state,
+            decision,
+            limits=AgentLimits(max_research_cycles=4),
+            known_tool_names=set(),
+            material_evidence_ids=("e-unresolved",),
+            finalize_only=True,
+            can_start_next_cycle=False,
+        )
 
 
 def test_finalization_does_not_reaudit_saved_dependency_decisions() -> None:

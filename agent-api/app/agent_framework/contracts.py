@@ -56,7 +56,10 @@ class HypothesisUpdate(FrameworkModel):
     judgment: HypothesisJudgment = Field(description="本文評価後の判定。")
     evidence_ids: tuple[str, ...] = Field(
         default=(),
-        description="判定を直接支える取得済みgrounding Evidence ID。",
+        description=(
+            "現在の判定とgapsの判断に使った取得済みgrounding Evidence ID。"
+            "unresolvedでも本文で確認できた部分があれば保持できる。"
+        ),
     )
     gaps: tuple[str, ...] = Field(
         default=(),

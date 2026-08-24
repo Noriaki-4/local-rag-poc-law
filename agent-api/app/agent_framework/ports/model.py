@@ -24,6 +24,25 @@ class ModelProtocolError(ValueError):
     """Model応答が構造化契約を満たさない。"""
 
 
+class SolverCheckpointTimeout(TimeoutError):
+    """完了済みの意味更新を保持したまま、後続Model処理が時間切れになった。"""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        partial_decision: SolverDecision,
+        completed_stage: str,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.partial_decision = partial_decision
+        self.completed_stage = completed_stage
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+
+
 class SolverCallResult(FrameworkModel):
     decision: SolverDecision
     input_tokens: int | None = Field(default=None, ge=0)

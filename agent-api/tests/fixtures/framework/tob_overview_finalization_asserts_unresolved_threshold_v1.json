@@ -1,0 +1,29 @@
+{
+  "fixtureId": "tob-overview-finalization-asserts-unresolved-threshold-v1",
+  "questionId": "tob-overview",
+  "source": {
+    "diagnosticsMode": "snapshot",
+    "diagnosticCaseId": "legal-ab0d3cf3aabb400cb454e9dd359df6a1",
+    "finalizationInputSequence": 64,
+    "finalizationOutputSequence": 66,
+    "model": "gpt-4o-mini-2024-07-18",
+    "profileVersion": "182"
+  },
+  "observedFailure": {
+    "workItemStates": ["open", "open", "open", "open"],
+    "hypothesisJudgments": ["unresolved", "unresolved", "unresolved", "unresolved"],
+    "hypothesisEvidenceCounts": [0, 0, 0, 0],
+    "unsupportedClaim": "議決権の数の50%を超える株式を取得する場合に公開買付けが必要",
+    "contradictingLimitation": "公開買付けが必要となる株式の取得割合の具体的な数値。",
+    "cause": "Finalizationへsearch_navigationを含む未解決候補が投影され、確認済みWorkItemが0件の場合の回答方法も明示されていなかった。"
+  },
+  "expectedBehavior": {
+    "excludeNavigationEvidence": true,
+    "includeOnlyResolvedWorkItemEvidence": true,
+    "noResolvedWorkItems": {
+      "legalConclusionAllowed": false,
+      "citationIds": [],
+      "limitationsRequired": true
+    }
+  }
+}

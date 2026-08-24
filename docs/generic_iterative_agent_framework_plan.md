@@ -314,7 +314,14 @@ Reviewer無効時のSolver呼び出しは次の範囲になる。
 最終回答時間を別々予約する。残り時間が現actionの実行予算と予約の合計を下回る場合、
 新しいGraph ReviewやToolを開始せず、`cycle_close_required=true`をSolverへ渡す。
 Solverはまず専用のObservation Integrationで取得本文をWorkItem・Hypothesis・下位規範確認へ反映する。
+検索候補選別時にSolverが返したArticleとHypothesisの候補対応はCaseStateへ保存し、本文取得後の
+Observationへ再投影する。プログラムは既知IDを結合するだけで、本文がHypothesisを支持・反証するかは
+ObservationのSolverが判断する。本文で命題の一部だけ確認できた場合は`unresolved`を維持し、確認に使った
+Evidence IDと残る`gaps`を保持する。
 続く専用のCycle Closeで、`finalize`または次Cycleへの未解決事項・frontierの引継ぎだけを返す。
+Observation Integrationの出力が契約検証に合格した後で後続処理が時間切れになった場合、その意味更新を
+既存validatorで検証してCaseStoreへ保存する。後続処理の失敗を理由に、完了済みのObservationを破棄しない。
+依存確認対象がない場合はDependency Assessmentを呼び出さない。
 次Cycleを開始する場合は、その後の`start_cycle`呼出しでgoal・strategyを決める。
 予算によって短縮された中間LLM呼出しがtimeoutした場合は、実際のprovider障害と区別して
 `cycle_step_timeout`を保存し、予約時間でCycle終了判断へ進む。
@@ -1081,7 +1088,7 @@ Solverが決める意味status・action:
 | WorkItem `dropped` | 前提否定、重複、質問との無関係により対象外とし、`resolution`に理由を持つ |
 | Hypothesis `supported` | 今回提示されたgrounding Evidenceがstatementを支持する |
 | Hypothesis `contradicted` | 今回提示されたgrounding Evidenceがstatementを否定する |
-| Hypothesis `unresolved` | 根拠不足、両義的、未取得で真偽を確定していない |
+| Hypothesis `unresolved` | 根拠不足、両義的、未取得または部分確認で真偽を確定していない。部分確認に使ったEvidenceを保持できる |
 | Frontier `select` | この候補を次の仮説検証行動へ採用する |
 | Frontier `defer` | 現在の質問・Hypothesisに関連するが、今回の本文取得枠に入れず後続Cycle候補として保留する |
 | Frontier `reject` | 現在の質問・Hypothesisには関係しないと判断し、理由付きで候補から外す |

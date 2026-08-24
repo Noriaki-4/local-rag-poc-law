@@ -26,7 +26,12 @@ from .observability import (
     RunTrace,
     ToolCallTrace,
 )
-from .ports.model import ModelPort, ModelProtocolError, ReviewerView
+from .ports.model import (
+    ModelPort,
+    ModelProtocolError,
+    ReviewerView,
+    SolverCheckpointTimeout,
+)
 from .ports.tool import ToolDefinition, ToolExecution, ToolRegistry
 from .profiles import AgentProfile, ModelCallProfile, ReviewerProfile
 from .state import (
@@ -395,6 +400,74 @@ class AgentLoop:
                 call_started = self._clock()
                 try:
                     solver_call = self._model.solve(context, call_profile)
+                except SolverCheckpointTimeout as exc:
+                    partial_decision = exc.partial_decision
+                    if self._diagnostics is not None:
+                        self._diagnostics.record_solver_output(
+                            state=state,
+                            purpose=f"{purpose}_{exc.completed_stage}_checkpoint",
+                            contract_attempt=contract_attempt,
+                            decision=partial_decision,
+                        )
+                    try:
+                        checkpoint_state = apply_solver_decision(
+                            state,
+                            partial_decision,
+                            limits=self._profile.limits,
+                            known_tool_names=self._read_only_tool_names,
+                            material_evidence_ids=context.material_evidence_ids,
+                            finalize_only=False,
+                        )
+                    except ContractViolation as checkpoint_error:
+                        logger.warning(
+                            "Solver checkpoint was not applied: %s",
+                            checkpoint_error,
+                        )
+                        if self._diagnostics is not None:
+                            self._diagnostics.record_contract_violation(
+                                state=state,
+                                purpose=(
+                                    f"{purpose}_{exc.completed_stage}_checkpoint"
+                                ),
+                                contract_attempt=contract_attempt,
+                                decision=partial_decision,
+                                violation=str(checkpoint_error),
+                            )
+                        checkpoint_state = state
+                    else:
+                        if self._diagnostics is not None:
+                            self._diagnostics.record_decision_applied(
+                                state_before=state,
+                                state_after=checkpoint_state,
+                                context=context,
+                                purpose=(
+                                    f"{purpose}_{exc.completed_stage}_checkpoint"
+                                ),
+                                contract_attempt=contract_attempt,
+                                decision=partial_decision,
+                            )
+                    model_traces.append(
+                        ModelCallTrace(
+                            purpose=(
+                                f"{purpose}_{exc.completed_stage}_checkpoint_timeout"
+                            ),
+                            model=call_profile.model,
+                            latency_ms=self._elapsed_ms(call_started),
+                            input_tokens=exc.input_tokens,
+                            output_tokens=exc.output_tokens,
+                            attempt_count=1,
+                            finalize_only=False,
+                        )
+                    )
+                    state = self._replace_state(
+                        checkpoint_state,
+                        cycle_step_timeout=True,
+                        stop_reason="cycle_step_timeout",
+                        updated_at=utc_now(),
+                    )
+                    self._store.save(state)
+                    cycle_step_timed_out = True
+                    break
                 except TimeoutError:
                     if finalize_only or state.cycle_step_timeout:
                         raise
@@ -817,10 +890,18 @@ class AgentLoop:
         hypothesis_ids = tuple(
             dict.fromkeys(
                 hypothesis_id
-                for item in selected_candidates
-                for hypothesis_id in item.discovery_hypothesis_ids
+                for item in review.selections
+                for hypothesis_id in item.matched_hypothesis_ids
             )
         )
+        if not hypothesis_ids:
+            hypothesis_ids = tuple(
+                dict.fromkeys(
+                    hypothesis_id
+                    for item in selected_candidates
+                    for hypothesis_id in item.discovery_hypothesis_ids
+                )
+            )
         payload = json.dumps(
             {
                 "search_request_ids": review.search_request_ids,
