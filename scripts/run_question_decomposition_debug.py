@@ -59,6 +59,7 @@ def _load_question(args: argparse.Namespace) -> tuple[str, str | None]:
 def _result_payload(
     run: Any,
     *,
+    question: str,
     fixture_id: str | None,
     provider: str,
     model: str,
@@ -68,6 +69,7 @@ def _result_payload(
     return {
         "fixtureId": fixture_id,
         "stage": "question_decomposition",
+        "question": question,
         "provider": provider,
         "model": model,
         "callCount": 1,
@@ -117,6 +119,7 @@ def main() -> None:
     )
     payload = _result_payload(
         run,
+        question=question,
         fixture_id=fixture_id,
         provider=args.provider,
         model=args.model,

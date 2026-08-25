@@ -1,0 +1,82 @@
+{
+  "fixtureId": "legal-hypothesis-generation-v269-observed-v1",
+  "source": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "profileVersion": "269",
+    "callCountPerStage": 1,
+    "repairAttempted": false
+  },
+  "cases": [
+    {
+      "caseId": "announcement",
+      "question": "公開買付けを開始するときの公告には何を掲載する必要がありますか。根拠条文とともに説明してください。",
+      "workItems": [
+        {
+          "work_item_id": "wi-1",
+          "question": "公開買付けを開始するときの公告には何を掲載する必要がありますか。",
+          "action_actor": "質問者",
+          "target_actor": "公告の発行者",
+          "actor_relation": "different"
+        }
+      ],
+      "observedHypotheses": [
+        {
+          "work_item_id": "wi-1",
+          "statement": "公告の発行者が公開買付けを開始する際には、公告に必要な情報を掲載する義務があるが、具体的にどのような情報が必要かは法令により異なる。",
+          "gaps": [
+            "公告に掲載すべき具体的な情報の内容",
+            "公告の発行者の法的義務の詳細"
+          ]
+        }
+      ],
+      "observedProblems": [
+        "行為者をtarget_actorへ重複させ、Hypothesisでもtarget_actorを行為者として使った",
+        "statementが法令により異なるという非仮説で終わった"
+      ]
+    },
+    {
+      "caseId": "exceptions",
+      "question": "公開買付けによらずに株券等を買い付けられる主な場合と、株券等の所有者が少数である場合の具体的な条件を、根拠条文とともに説明してください。",
+      "workItems": [
+        {
+          "work_item_id": "wi-1",
+          "question": "公開買付けによらずに株券等を買い付けられる主な場合についての法的結論を出す。",
+          "action_actor": "質問者",
+          "target_actor": "該当なし",
+          "actor_relation": "unknown"
+        },
+        {
+          "work_item_id": "wi-2",
+          "question": "株券等の所有者が少数である場合の具体的な条件についての法的結論を出す。",
+          "action_actor": "質問者",
+          "target_actor": "該当なし",
+          "actor_relation": "unknown"
+        }
+      ],
+      "observedHypotheses": [
+        {
+          "work_item_id": "wi-1",
+          "statement": "質問者が公開買付けによらずに株券等を買い付ける場合は、特定の条件を満たす必要があるが、その条件は法令により異なる。",
+          "gaps": [
+            "公開買付けによらずに株券等を買い付けるための具体的な条件",
+            "適用される法令の条文"
+          ]
+        },
+        {
+          "work_item_id": "wi-2",
+          "statement": "質問者が株券等の所有者が少数である場合において、特定の条件を満たすときに株券等を買い付けることができるが、その条件は法令により異なる。",
+          "gaps": [
+            "株券等の所有者が少数である場合の具体的な条件",
+            "適用される法令の条文"
+          ]
+        }
+      ],
+      "observedProblems": [
+        "statementが特定の条件と法令により異なるだけで検証軸を示さなかった",
+        "gapsに法的内容ではなく条文探索を入れた",
+        "対象関連主体なしをunknownで表し、不存在と未確定を区別できなかった"
+      ]
+    }
+  ]
+}

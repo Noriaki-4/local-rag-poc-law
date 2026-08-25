@@ -41,13 +41,28 @@ def test_render_uses_only_production_question_decomposition_stage() -> None:
     assert rendered.input_payload == {"question": "許可が必要になる条件は何か。"}
     assert rendered.stage.endswith("research_decomposition")
     assert "# 法令調査Solver：質問の要求分解" in rendered.instructions
-    assert "## 出力前の確認" in rendered.instructions
-    assert "仮説、検索語、Tool要求は作りません" in rendered.instructions
+    assert "## 完了条件" in rendered.instructions
+    assert "## 出力" in rendered.instructions
+    assert "法令の解釈又は適用について個別に結論を出す問い" in rendered.instructions
+    assert "複数の法的論点がある場合は、WorkItemを分けます" in rendered.instructions
+    assert "明確でなければ`不明`" in rendered.instructions
+    assert "法的根拠の有無又は内容自体について結論を求める問い" in rendered.instructions
     assert "solver_hypothesis_generation" not in str(rendered.prompt_assets)
     assert set(rendered.output_schema["properties"]) == {
         "work_items",
         "non_work_item_requirements",
     }
+    work_item_properties = rendered.output_schema["properties"]["work_items"][
+        "items"
+    ]["properties"]
+    assert "1つの法的論点" in work_item_properties["question"]["description"]
+    assert "法的論点ではない要求" in rendered.output_schema["properties"][
+        "non_work_item_requirements"
+    ]["description"]
+    assert "action_actor" in work_item_properties
+    assert "target_actor" not in work_item_properties
+    assert "actor_relation" not in work_item_properties
+    assert "actor_scope" not in work_item_properties
 
 
 def test_run_calls_model_once_and_normalizes_with_production_contract() -> None:
@@ -56,8 +71,7 @@ def test_run_calls_model_once_and_normalizes_with_production_contract() -> None:
             "work_items": [
                 {
                     "question": "質問者が許可を要する条件は何か。",
-                    "actor_scope": "行為者＝質問者、対象関連主体＝不明",
-                    "actor_relation": "unknown",
+                    "action_actor": "質問者",
                 }
             ],
             "non_work_item_requirements": ["根拠条文を示す"],
@@ -79,6 +93,10 @@ def test_run_calls_model_once_and_normalizes_with_production_contract() -> None:
     assert [
         item.question for item in run.decision.update.add_work_items
     ] == ["質問者が許可を要する条件は何か。"]
+    work_item = run.decision.update.add_work_items[0]
+    assert work_item.action_actor == "質問者"
+    assert not hasattr(work_item, "target_actor")
+    assert not hasattr(work_item, "actor_relation")
     assert run.decision.update.set_non_work_item_requirements == (
         "根拠条文を示す",
     )

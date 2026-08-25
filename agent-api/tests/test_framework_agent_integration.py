@@ -311,7 +311,6 @@ class FakeStructuredLLM:
                 "roles": {
                     "law-test-article-2": {
                         "regulated_actor": "検証法の適用対象者",
-                        "regulated_actor_role": "hypothesis_actor",
                         "matched_hypothesis_ids": ["h-1"],
                         "reason": "仮説が確認する適用対象者を規律する",
                     }
@@ -655,7 +654,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "268"
+    assert diagnostic_records[0]["profileVersion"] == "277"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -663,7 +662,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "268"
+    assert transport_input["profileVersion"] == "277"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -1098,7 +1097,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "268"
+    assert profile.version == "277"
     mode_prompts = {
         "research": profile.solver_research.system_prompt,
         "integration": profile.solver_integration.system_prompt,
@@ -1143,31 +1142,15 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     assert profile.solver_cycle_close.context_projection == "cycle_close"
     assert "# 法令調査Solver：質問の要求分解" in research_prompt
     assert "non_work_item_requirements" in research_prompt
-    assert "他のWorkItemの結論について根拠法令・条文を示す要求" in (
-        research_prompt
-    )
-    assert "説明要求として`non_work_item_requirements`へ重複" in (
-        research_prompt
-    )
-    assert "Xの内容だけを`work_items`" in research_prompt
-    assert "法的根拠そのものが確認対象" in research_prompt
-    assert "省略されている場合は「質問者」と補い" in research_prompt
-    assert "質問者が行為する場合、行為者は質問者です" in (
-        research_prompt
-    )
-    assert "対象関連主体：対象の所有者・発行者・所属先等" in (
-        research_prompt
-    )
-    assert "対象関連主体が行為者と別に示されている場合" in research_prompt
-    assert "仮説、検索語、Tool要求は作りません" in research_prompt
+    assert "法令の解釈又は適用について個別に結論を出す問い" in research_prompt
+    assert "複数の法的論点がある場合は、WorkItemを分けます" in research_prompt
+    assert "法的結論を裏付ける根拠条文" in research_prompt
+    assert "明確でない場合は、推測せず`不明`" in research_prompt
     assert "# 法令調査Solver：法的仮説の立案" in hypothesis_prompt
-    assert "法令検索の対象を選べる暫定的な法的命題" in hypothesis_prompt
-    assert "行為者を名詞で書き" in hypothesis_prompt
-    assert "調査作業は書きません" in hypothesis_prompt
-    assert "行為対象に結び付く所有者・発行者・所属先等と区別" in (
-        hypothesis_prompt
-    )
-    assert "立場ごとのHypothesis" in hypothesis_prompt
+    assert "検索候補を評価するための暫定的な法的命題" in hypothesis_prompt
+    assert "行為者、行為、対象" in hypothesis_prompt
+    assert "法的立場によって適用が変わり" in hypothesis_prompt
+    assert "調査作業、検索語、根拠条文は書きません" in hypothesis_prompt
     assert "# 法令調査Solver：検索要求の作成" in search_prompt
     assert "legal_search" in search_prompt
     for prompt in (research_prompt, hypothesis_prompt, search_prompt):
@@ -1357,8 +1340,8 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "268"
-    assert prompt.rindex("## 出力前の確認") > prompt.rindex(
+    assert profile.version == "277"
+    assert prompt.rindex("## 出力") > prompt.rindex(
         "</solver_context>"
     )
     assert [item.work_item_id for item in updated.work_items] == [
@@ -1408,7 +1391,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "268"
+    assert profile.version == "277"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -1440,10 +1423,10 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     research_prompt = hypothesis_profile.system_prompt
     completion_prompt = hypothesis_profile.completion_check_prompt
     assert completion_prompt is not None
-    assert "未確認で誤り得る暫定回答" in research_prompt
-    assert "主体、行為、法的効果" in research_prompt
+    assert "暫定的な法的命題" in research_prompt
+    assert "行為者、行為、対象" in research_prompt
     assert "条文名、検索語、検索作業は書きません" in research_prompt
-    assert "質問の言い換えでなく" in completion_prompt
+    assert "質問にない観点、検索語、根拠条文" in completion_prompt
 
     update_schema = _case_update_transport_schema()
     hypothesis_schema = update_schema["properties"]["add_hypotheses"]["items"]
@@ -1507,10 +1490,10 @@ def test_real_research_failure_fixture_is_rebuilt_with_corrected_prompt() -> Non
     assert "対象となる株券等の範囲、主な例外、必要な手続" in (
         observed["workItems"][0]["question"]
     )
-    assert "1つのWorkItemでは1つの確認事項" in prompt
-    assert "質問の明示要求に漏れ、重複、追加がない" in prompt
+    assert "複数の法的論点がある場合は、WorkItemを分けます" in prompt
+    assert "元の質問に漏れ、重複、追加がない" in prompt
     assert "必要条件、対象範囲、例外、手続" not in prompt
-    assert prompt.rindex("## 出力前の確認") > prompt.rindex(
+    assert prompt.rindex("## 出力") > prompt.rindex(
         "</solver_context>"
     )
 
@@ -1538,9 +1521,9 @@ def test_research_missing_main_request_fixture_is_covered_by_prompt() -> None:
     assert observed["profileVersion"] == "127"
     assert len(observed["workItemQuestions"]) == 3
     assert observed["missingRequest"] not in observed["decisionReason"]
-    assert "質問の主文と" in prompt
-    assert "質問の明示要求をすべて含むか" in prompt
-    assert "質問の明示要求に漏れ、重複、追加がない" in prompt
+    assert "元の質問から、明示された要求を取り出します" in prompt
+    assert "法的論点が、1つのWorkItemに1件ずつ" in prompt
+    assert "元の質問に漏れ、重複、追加がない" in prompt
 
 
 def test_search_review_duplicate_fixture_uses_article_keyed_assessments() -> None:
@@ -1682,8 +1665,8 @@ def test_research_missing_procedure_fixture_distinguishes_condition_and_action(
     assert observed["profileVersion"] == "128"
     assert len(observed["workItemQuestions"]) == 3
     assert observed["missingRequest"] not in observed["decisionReason"]
-    assert "1つのWorkItemでは1つの確認事項" in prompt
-    assert "独立した法的結論" in prompt
+    assert "複数の法的論点がある場合は、WorkItemを分けます" in prompt
+    assert "法的論点を自然言語の問いとして1件" in prompt
 
 
 def test_search_reselection_underselect_fixture_checks_remaining_hypotheses(
@@ -1894,12 +1877,9 @@ def test_search_actor_classification_intersects_content_and_actor_matches() -> N
                 "regulated_actor": (
                     "発行者" if article_id == issuer_article_id else "買付者"
                 ),
-                "regulated_actor_role": (
-                    "target_associated_actor"
-                    if article_id == issuer_article_id
-                    else "hypothesis_actor"
+                "matched_hypothesis_ids": (
+                    [] if article_id == issuer_article_id else ["h-1"]
                 ),
-                "matched_hypothesis_ids": ["h-1"],
                 "reason": "主体だけを照合した",
             }
             for article_id in article_ids
@@ -2006,8 +1986,8 @@ def test_research_capacity_fixture_does_not_limit_work_decomposition() -> None:
     assert observed["profileVersion"] == "129"
     assert observed["remainingFetchCapacity"] == observed["workItemCount"]
     assert observed["missingRequest"] not in observed["decisionReason"]
-    assert "仮説、検索語、Tool要求は作りません" in prompt
-    assert "質問にない観点や要求は追加しません" in prompt
+    assert "法的論点ごとにWorkItemを作ります" in prompt
+    assert "法的論点ではない残りの明示要求" in prompt
 
 
 def test_integration_refetch_fixture_uses_only_fetchable_article_ids() -> None:
@@ -2185,7 +2165,6 @@ def test_search_reselection_uses_hypotheses_and_keeps_candidate_identity(
                     "legal_function": "procedure",
                     "summary": "公開買付開始公告の義務を定める。",
                     "matched_hypothesis_ids": ["h-1"],
-                    "regulated_actor_role": "hypothesis_actor",
                     "actor_match_reason": "公開買付者を規律する。",
                 }
             ]
@@ -2249,12 +2228,17 @@ def test_anthropic_search_review_keys_assessments_by_article() -> None:
         provider="anthropic",
     )
     assert actor_call.output_schema["properties"]["roles"]["type"] == "array"
+    actor_item_properties = actor_call.output_schema["properties"]["roles"][
+        "items"
+    ]["properties"]
+    assert "regulated_actor_role" not in actor_item_properties
+    assert "target_actor" not in actor_call.input_payload["hypotheses"][0]
+    assert "actor_relation" not in actor_call.input_payload["hypotheses"][0]
     actor_payload = {
         "roles": [
             {
                 "article_id": candidate.article_id,
                 "regulated_actor": "不明",
-                "regulated_actor_role": "unknown",
                 "matched_hypothesis_ids": [],
                 "reason": "主体を確定できない",
             }
@@ -2403,7 +2387,6 @@ def test_scope_search_candidate_keeps_content_match_without_actor_alignment() ->
                 WorkItem(
                     work_item_id="wi-1",
                     question="少数所有者の条件を確認する。",
-                    actor_relation="different",
                 ),
             ),
             hypotheses=(
@@ -2450,7 +2433,6 @@ def test_scope_search_candidate_keeps_content_match_without_actor_alignment() ->
             "roles": {
                 "article-scope": {
                     "regulated_actor": "株券等の所有者",
-                    "regulated_actor_role": "target_associated_actor",
                     "matched_hypothesis_ids": ["h-1"],
                     "reason": "所有者数を定める。",
                 }
@@ -2587,7 +2569,7 @@ def test_search_review_prompt_defines_evidence_join_and_limited_role() -> None:
     assert "規律主体の照合や候補選択をしません" in prompt
     assert "規律主体はいったん除き" in prompt
     assert search_prompt.actor_classification_system_prompt is not None
-    assert "候補の規律主体分類" in (
+    assert "候補の行為者照合" in (
         search_prompt.actor_classification_system_prompt
     )
     assert search_prompt.followup_system_prompt is not None
@@ -2708,7 +2690,6 @@ def test_deferred_search_candidate_keeps_llm_assessment_across_cycles() -> None:
                         legal_function="exception",
                         summary="このArticleは例外条件を定める",
                         matched_hypothesis_ids=("h1",),
-                        regulated_actor_role="actor_neutral",
                     ),
                 ),
                 deferred_article_ids=(article_id,),
@@ -3662,13 +3643,13 @@ def test_real_model_initial_research_decomposition_fixture_is_reproducible() -> 
         "law-402M50000040038-article-2_5",
         "law-402M50000040038-article-10",
     } == set(failure["downstreamObservation"]["reselectionDroppedArticleIds"])
-    assert "独立した法的結論を要する確認事項" in prompt
-    assert "仮説、検索語、Tool要求は作りません" in prompt
+    assert "法的論点を自然言語の問いとして1件" in prompt
+    assert "複数の法的論点がある場合は、WorkItemを分けます" in prompt
     hypothesis_prompt = legal_profiles.legal_agent_profile().solver_hypothesis_generation
     search_prompt = legal_profiles.legal_agent_profile().solver_search_planning
     assert hypothesis_prompt is not None
     assert search_prompt is not None
-    assert "未確認で誤り得る暫定回答" in hypothesis_prompt.system_prompt
+    assert "暫定的な法的命題" in hypothesis_prompt.system_prompt
     assert "条文名、検索語、検索作業は書きません" in (
         hypothesis_prompt.system_prompt
     )

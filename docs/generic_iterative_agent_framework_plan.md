@@ -419,8 +419,7 @@ class WorkItem:
     work_item_id: str
     parent_work_item_id: str | None
     question: str
-    actor_scope: str | None
-    actor_relation: Literal["same", "different", "unknown"]
+    action_actor: str | None
     state: Literal["open", "resolved", "dropped"]
     resolution: str | None
     basis_hypothesis_ids: list[str]
@@ -430,17 +429,16 @@ class Hypothesis:
     hypothesis_id: str
     work_item_id: str
     statement: str
-    actor_scope: str | None
-    actor_relation: Literal["same", "different", "unknown"]
     judgment: Literal["supported", "contradicted", "unresolved"]
     evidence_ids: list[str]
     gaps: list[str]
 ```
 
 - Hypothesisは必ず1つのWorkItemへ所属する。
-- `actor_scope`は質問または命題の行為者と対象側主体の関係を短く保持する。`actor_relation`は
-  両者が同一、別主体、不明のいずれかを表し、候補評価時の主体照合に使う。主体そのものはLLMが判断し、
-  Programは値、既知ID、対応結果間の矛盾だけを検証する。
+- `action_actor`は規制対象となる行為をする者を表す。主体そのものは質問分解LLMが判断する。
+  行為対象や関係主体は`question`に残し、別の分類項目へ推測で分解しない。WorkItemを正本とし、
+  Hypothesisには重複保存しない。検索計画と候補主体照合のread modelへProgramが所属WorkItemから
+  `action_actor`を決定的に結合する。
 - `Hypothesis.work_item_id`は、そのHypothesisが検証するWorkItemを表す。
 - `Hypothesis.statement`には本文取得前の未確認で誤り得る暫定回答を置き、本文で検証できる命題とする。
   要件、例外構造または手続行為の候補を含め、質問の言い換えだけを命題にしない。
@@ -2202,11 +2200,16 @@ ProgramはID、件数、既知参照、WorkItemとHypothesisの所属を検証�
 ```
 
 `non_work_item_requirements`は重要でない要求や全WorkItem共通の要求を意味しない。独立した法的結論を要しない
-根拠・出典・引用・対象時点・地域・表現・出力形式等を保持し、元質問を置き換えない。検索候補やEvidenceには
+根拠・出典・引用の提示や表現・出力形式等を保持し、元質問を置き換えない。対象時点、地域、主体、対象が
+法的結論を左右する場合は、該当WorkItemの確認事項に残す。検索候補やEvidenceには
 対応付けず、最終回答の生成とチェックで全件を適用する。検索と本文評価はWorkItem・Hypothesisを基準にし、
 回答要件を法的根拠や本文取得理由として扱わない。初回3 Stepは単一責務を保つため、
 後続処理用`solver_common.md`、Tool結果評価、Graph review、Cycle引継ぎ、Reviewer、最終回答の指示を合成しない。
 Integration等は完全な`SolverContext`を使う。用途別投影は項目の有無だけを決め、法的観点、関連性、WorkItem数は決めない。
+主体情報も同様に、質問分解LLMがWorkItemへ保存した`action_actor`を正本とする。行為対象はWorkItemの
+`question`から読み取る。ProgramはHypothesisの所属IDでこれらを後続Viewへ結合するだけで、主体の意味を
+補正しない。候補の規律主体との対応はLLMが直接判断し、Programは内容評価と主体照合が返した既知Hypothesis IDの
+積集合だけを検証する。
 
 ## 12. 実装Phase
 

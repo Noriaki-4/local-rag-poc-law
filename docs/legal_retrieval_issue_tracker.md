@@ -76,9 +76,10 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-014` | P1 | 検証待ち | Haikuで承認した中間状態から安価なモデルで後続処理を再生する | checkpointの明示承認をpromotion時に記録し、指定Provider・modelで1回のSolver処理を再生する`replay_agent_checkpoint.py`を実装した。APIを使わない単体テストは合格した | Haikuの正常中間状態を承認済みfixtureへ昇格し、`gpt-4o-mini`、同じcheckpointのHaikuの順に実モデル再生する |
 | `LR-015` | P0 | 検証待ち | 初回Researchを単一責務のStepへ分け、要求をWorkItemとそれ以外へ欠落なく分解する | Profile v156で同一Cycle内の要求分解、仮説立案、検索要求作成を実装した。各完成Promptは単独で読めるH1を持ち、処理順のStep番号を含めない。一時的な段階比較コードを整理した後の全900テストに合格した | 別分野fixtureと公開買付けE2Eを`gpt-4o-mini`で確認し、最終的にHaikuで品質確認する |
 | `LR-016` | P0 | 検証待ち | Tool観察の意味統合とCycle Closeを単一責務のStepへ分ける | v183でArticle→Hypothesis対応をObservationへ渡し、GPT-4o mini実モデルで4 Hypothesisへの本文Evidence保存を確認した。後続Stepの時間切れで成功済みObservationを失わないcheckpoint保存を追加した。対象WorkItemがない依存判定は呼び出さず、OpenAI schemaへ`null` enumを出す経路も除去した | 同じcheckpointをHaikuで再生し、本文の部分確認、意味更新、Cycle判断を確認する |
-| `LR-017` | P0 | 完了 | 検索候補の規律主体と行為対象を安定して区別する | Profile v197でWorkItem・Hypothesisに主体関係を保持し、内容評価と主体分類を別の単一タスクに分けた。両判断の共通Hypothesisだけを候補選択へ渡す | 公開買付けcheckpointを`gpt-4o-mini`の独立した2実行で再生し、両方で27条の2を選択、27条の22の2をdeferredとした。別分野fixtureを含む回帰テストにも合格 |
+| `LR-017` | P0 | 対応中 | 検索候補の規律主体と行為対象を安定して区別する | Profile v275でWorkItemを`action_actor`だけへ簡素化し、候補との対応をLLMの直接照合へ変更した。Programは内容評価と主体照合のHypothesis ID積集合だけを取る | 2候補の隔離診断は合格したが、公開買付け総合の実データ実行では発行者自身の27条の22の2を再び選択した。`tob_overview_issuer_actor_mismatch_v275.json`で再現する |
 | `LR-018` | P0 | 完了 | Graph探索が必要な未解決事項があってもSolverがGraph検索を要求しない | 次Cycle開始時の保留OpenSearch候補を自動Search Selectionへ戻さず、Integrationで既知候補・Graph・再検索を比較するよう修正した。Graph selectorのmode・predicate・directionを分岐schemaで拘束し、同一Graph要求と本文取得要求は選択内容を保ったまま輸送時に統合する | Cycle 2 fixtureで府令10条を含む既知候補の本文取得へ進むこと、および候補を除いたGraph必須状態で`27条の2 / IMPLEMENTS / from_subject`の1要求を返し共通契約を通過することを`gpt-4o-mini-2024-07-18`で確認済み |
 | `LR-019` | P0 | 対応中 | 統合の意味的な行動選択を違反別契約からSolver loopへ戻す | 成功済みと完全一致する検索・Graph要求は実行前に止めるが、違反別修復schemaでToolを禁止せず、通常の`action_feedback`としてSolverへ返す実装へ変更した。統合Promptと自己点検も固定順から判断基準中心へ簡素化した | 固定fixtureで全Toolが利用可能なまま別行動を選べることを確認し、Reviewer無効の総合問題でprotocol errorと反復回数を再評価する |
+| `LR-020` | P1 | 要設計 | 複数の解釈や規律主体が成立する質問を一方的に確定せず、利用者へ確認する | 質問分解時に主体を確定させると誤った候補を早期に除外する。主体を限定せず検索すれば、発行者自身と発行者以外等の異なる規律主体が候補本文から判明する | LLMが検索後に結論を変える主体分岐を検出し、既知情報で確定できなければ確認を求める。Programが確認待ちを保存し、回答後に同じCaseを再開する最小契約を設計する |
 
 ### 3.1 LR-016 Tool観察とCycle Closeの単一責務化
 
@@ -138,7 +139,8 @@ non_work_item_requirements
 ```
 
 `non_work_item_requirements`は「重要でない要求」や「全WorkItemに必ず共通する要求」を意味しない。
-根拠提示、対象時点、地域、比較・表示方法等、質問が明示したが独立調査単位ではない要求を保持する。
+根拠提示や比較・表示方法等、質問が明示したが独立調査単位ではない要求を保持する。
+対象時点、地域、主体、対象が法的結論を左右する場合は、該当WorkItemに残す。
 元質問は引き続きCaseStoreの正本とし、この欄で置き換えない。質問にない形式や詳しさを追加しない。
 
 Profile v156では同じSolver・同じResearch Cycleの中で3 Stepを順番に実行する。ProgramはCaseStoreへの保存、
@@ -161,14 +163,57 @@ Programで判定しない。
 [主体不一致候補fixture](../agent-api/tests/fixtures/framework/tob_overview_search_actor_mismatch_v1.json)へ保存した。
 公開買付け固有のPromptへ寄せない回帰確認として、土地所有者と開発行為者を区別する
 [別分野fixture](../agent-api/tests/fixtures/framework/cross_domain_actor_object_selection_v1.json)も使用する。
-前段のWorkItem・Hypothesisは`actor_scope`と`actor_relation`で質問の行為者と対象側主体の関係を保持する。
+Profile v269では、質問の行為者をWorkItemの`action_actor`、対象側主体を`target_actor`へ分離し、
+`actor_relation`で両者の関係を保持する。主体情報の正本はWorkItemだけとし、Hypothesisには重複保存しない。
+後続の検索計画と候補主体分類には、ProgramがHypothesisの所属WorkItemから三項目を決定的に結合する。
+Profile v270では、対象関連主体が存在しない状態を`actor_relation=not_applicable`で表せるようにし、
+物・文書・公告・手続自体を主体にしないルールを追加した。またHypothesisの`statement`が
+「特定の条件」「法令により異なる」だけで終わらず、質問に関係する法的判定軸を一つ以上示すよう明確化した。
 [主体関係checkpoint](../agent-api/tests/fixtures/framework/tob_actor_relation_search_v191.json)を
 `gpt-4o-mini-2024-07-18`の新規呼出しで2回再生し、両方で27条の2を選択し、27条の22の2を
 deferredとした。結果要約は
 [v197実モデル回帰fixture](../agent-api/tests/fixtures/framework/tob_actor_relation_selection_regression_v197.json)
 へ固定した。これにより本項の完了条件を満たした。
 
-### 3.4 2026-08-25 回帰確認
+Profile v275では、その後の切り分けで`target_actor`と`actor_relation`がなくても、WorkItemの質問、
+`action_actor`、Hypothesisを候補要約と直接比較すれば、公開買付けと別分野の主体不一致を識別できることを確認した。
+そのため三項目への事前分類は廃止し、WorkItemは`action_actor`だけを正本とする。行為対象は`question`に残し、
+候補の主体対応はLLMが`matched_hypothesis_ids`として直接返す。Programは内容評価とのID積集合だけを計算する。
+旧fixtureと保存状態の`target_actor`、`actor_relation`、`regulated_actor_role`は読込み時に破棄する。
+
+### 3.4 LR-020 曖昧な質問の確認
+
+同じ質問から複数の法的確認事項・主体関係が合理的に成立し、その違いが検索仮説や回答を変える場合は、
+Solverが一つへ決め打ちせず、解釈候補と相違点を利用者へ示して確認を求める必要がある。例えば
+「公開買付けによらずに買い付けられる主な場合と、所有者が少数である場合の条件」は、後半を
+買付けの例外条件として読むか、所有者数の条件を独立して問うかでWorkItemと主体が変わる。
+
+意味上の曖昧さと解釈候補はLLMが判断する。Programは候補の意味を選ばず、確認待ちとしての保存、利用者回答との
+対応、同じCaseからの再開だけを担当する。表現差にすぎず検索・回答が変わらない場合には確認を求めない。
+本項は未実装の設計課題として記録し、今回の主体分離実装には追加しない。
+
+主体は質問分解時に必ず確定させない。まず行為、対象、条件から主体を限定せず検索し、候補本文に現れた
+規律主体をLLMが整理する。主体の違いが法的結論を変える場合だけ、質問と既知情報で一つへ確定できるか判断する。
+
+```text
+主体を限定せず検索
+  → 候補本文の規律主体を整理
+  → 主体の違いで結論が変わらない: 処理を継続
+  → 主体の違いで結論が変わる
+      → 既知情報で確定できる: 該当するHypothesisで継続
+      → 確定できない: 利用者へ確認して確認待ちにする
+          → 回答をCaseへ追加し、該当するHypothesisから再開
+```
+
+利用者へ確認できない実行形態では、Solverが一方を選ばず、主体ごとの条件付き結果と未確定事項を返す。
+確認は主語の省略だけを理由に要求せず、主体の違いが検索経路または法的結論を実際に変える場合に限る。
+
+評価時の誤差と機能課題を混同しないため、`tob-exceptions`設問は、所有者が少数である場合を
+「公開買付けによらずに買い付けられる条件」と明示する文へ変更した。`gpt-4o-mini`の隔離実行では、
+後半のWorkItemとHypothesisが買付け条件、所有者数の基準、合意条件を維持した。これは評価設問の明確化であり、
+曖昧なエンドユーザー質問への確認機能を実装したものではない。
+
+### 3.5 2026-08-25 回帰確認
 
 Profile v250以降の統合・下位規範探索変更をfixture、全テスト、`gpt-4o-mini`実モデルで確認し、次の
 構造的なデグレードを修正した。
@@ -589,3 +634,16 @@ LR-010  必要性と費用を再評価して全件分類を再開
 | 2026-08-22 | OpenAI Provider | `gpt-4o-mini`への切替とStructured Outputs接続を実装。法令E2Eは未実施 | [RUNBOOK](../RUNBOOK.md) |
 | 2026-08-23 | LR-012 Prompt・契約成果物 | 固定指示、動的入力、Provider schema、正規化後schema、実送信内容を分離。3 Provider基準成果物と全887テストに合格 | [RUNBOOK](../RUNBOOK.md) |
 | 2026-08-24 | LR-013 / LR-014 共通小型契約・checkpoint再生 | Legal Profile v154。Provider共通schema、実行時IDの事後検証、承認済みcheckpoint再生コマンドを実装。代表Cycle Close schemaは14,494→7,014文字、全895テスト合格。実モデル再生は未実施 | [RUNBOOK](../RUNBOOK.md) |
+| 2026-08-25 | Profile v275・公開買付け3問・`gpt-4o-mini` | 公告は必要Article 2/2だが回答要点不足。例外は2/3取得後、総合は0/6取得後に、いずれもCycle 2の`finalize`とTool要求の矛盾で停止。総合では27条の22の2を誤選択 | `tob_announcement_final_answer_incomplete_v275.json`、`tob_exceptions_cycle2_finalize_tool_conflict_v275.json`、`tob_overview_issuer_actor_mismatch_v275.json`、`tob_overview_cycle2_finalize_tool_conflict_v275.json` |
+### 2026-08-25: 質問分解と仮説立案の主体表現を分離
+
+- WorkItemの主体情報を`action_actor`、`target_actor`、`actor_relation`へ分離し、Hypothesisには重複保存しない。
+- 対象関連主体がない場合を`not_applicable`で表せるようにし、`unknown`と区別する。
+- 一般的な制度質問で質問者を行為者と推測せず、文書・届出・通知・公告を主体として扱わない。
+- 仮説は質問の言い換えで終わらず、対象に応じた法的判定軸、例外類型、手続行為を少なくとも一つ示す。
+- v271の隔離実モデル診断では、根拠提示要求のWorkItem化と、主たる行為者・付随手続実施者の誤分離が残った。
+  v272では意味契約を増やさず、両方を質問分解の手順と完了確認へ移し、仮説の抽象表現には短い対比例を追加した。
+- v272の例外設問では、人数条件として登場する所有者を行為者と誤認した。v273では、分割後も主たる行為者を保持し、
+  人数・割合・属性の条件として登場するだけの者は対象関連主体とする一般ルールを追加した。
+- 上記の対象関連主体と関係ラベルはv275で廃止した。質問へ既に残る対象情報を再分類するより、
+  `question`、`action_actor`、Hypothesisを候補と直接照合する方が小さく、2分野の隔離診断で同じ選別結果を得たためである。

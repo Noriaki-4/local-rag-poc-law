@@ -438,31 +438,6 @@
     "Hypothesis": {
       "additionalProperties": false,
       "properties": {
-        "actor_relation": {
-          "default": "unknown",
-          "description": "行為者と行為対象に結び付く主体の関係。sameは同一主体、differentは別主体、unknownは未確定。",
-          "enum": [
-            "same",
-            "different",
-            "unknown"
-          ],
-          "title": "Actor Relation",
-          "type": "string"
-        },
-        "actor_scope": {
-          "anyOf": [
-            {
-              "maxLength": 1200,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "この命題で規律対象として想定する行為者と、行為対象に結び付く所有者・発行者・所属先等との関係。法的立場が不明なら不明と明記する。",
-          "title": "Actor Scope"
-        },
         "evidence_ids": {
           "default": [],
           "description": "現在のjudgmentとgapsの判断に使ったgrounding Evidence ID。supportedまたはcontradictedでは直接根拠を必須とし、unresolvedでは確認済み部分に使った本文がある場合だけ保持する。",
@@ -627,7 +602,7 @@
             }
           ],
           "default": null,
-          "description": "独立した主体照合でその役割を選んだ短い理由。",
+          "description": "候補の規律主体とWorkItemの行為者を照合した短い理由。",
           "title": "Actor Match Reason"
         },
         "article_id": {
@@ -663,19 +638,6 @@
           },
           "title": "Matched Non Work Item Requirements",
           "type": "array"
-        },
-        "regulated_actor_role": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "独立した主体照合で判断した質問内の役割。",
-          "title": "Regulated Actor Role"
         },
         "summary": {
           "description": "候補本文の取得要否を判断するための意味要約。",
@@ -908,21 +870,10 @@
     "WorkItem": {
       "additionalProperties": false,
       "properties": {
-        "actor_relation": {
-          "default": "unknown",
-          "description": "行為者と行為対象に結び付く主体の関係。sameは同一主体、differentは別主体、unknownは質問から確定できない。",
-          "enum": [
-            "same",
-            "different",
-            "unknown"
-          ],
-          "title": "Actor Relation",
-          "type": "string"
-        },
-        "actor_scope": {
+        "action_actor": {
           "anyOf": [
             {
-              "maxLength": 1200,
+              "maxLength": 600,
               "type": "string"
             },
             {
@@ -930,8 +881,8 @@
             }
           ],
           "default": null,
-          "description": "この確認事項の行為者と、行為対象に結び付く所有者・発行者・所属先等との関係。法的立場が不明なら不明と明記する。",
-          "title": "Actor Scope"
+          "description": "この確認事項で、規制対象となる行為をする者。質問から特定できなければ不明と明記する。",
+          "title": "Action Actor"
         },
         "basis_hypothesis_ids": {
           "default": [],

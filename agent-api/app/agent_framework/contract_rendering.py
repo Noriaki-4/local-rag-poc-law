@@ -76,13 +76,17 @@ def contract_field_description(
 
 
 @lru_cache(maxsize=8)
-def render_research_step_input_glossary(field_names: tuple[str, ...]) -> str:
+def render_research_step_input_glossary(
+    field_names: tuple[str, ...],
+    collection_item_fields: tuple[tuple[str, tuple[str, ...]], ...] = (),
+) -> str:
     """初回Researchの投影入力にある項目だけを説明する。"""
 
     lines = [
         "<input_contract>",
         "以下は今回の入力項目と意味です。",
     ]
+    selected_collection_fields = dict(collection_item_fields)
     for field_name in field_names:
         field = ResearchStepInput.model_fields.get(field_name)
         if field is None:
@@ -95,7 +99,16 @@ def render_research_step_input_glossary(field_names: tuple[str, ...]) -> str:
         lines.append(f"- `{field_name}`: {description}")
         item_type = _collection_item_model(field.annotation)
         if item_type is not None:
-            for item_name, item_field in item_type.model_fields.items():
+            selected_names = selected_collection_fields.get(field_name)
+            item_fields = (
+                item_type.model_fields.items()
+                if selected_names is None
+                else (
+                    (name, item_type.model_fields[name])
+                    for name in selected_names
+                )
+            )
+            for item_name, item_field in item_fields:
                 item_description = (item_field.description or "").strip()
                 if not item_description:
                     raise ValueError(

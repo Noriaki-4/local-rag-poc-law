@@ -1256,9 +1256,16 @@ def _render_staged_research_model_call(
     projection = profile.context_projection
     input_payload = _solver_context_payload(context, projection=projection)
     output_schema = _staged_research_transport_schema(context, projection)
+    collection_item_fields = tuple(
+        (field_name, tuple(value[0]))
+        for field_name, value in input_payload.items()
+        if isinstance(value, list)
+        and value
+        and isinstance(value[0], dict)
+    )
     instructions = (
         f"{profile.system_prompt}\n\n"
-        f"{render_research_step_input_glossary(tuple(input_payload))}\n\n"
+        f"{render_research_step_input_glossary(tuple(input_payload), collection_item_fields)}\n\n"
         f"{RUNTIME_INPUT_MARKER}"
         f"{_post_context_completion_check(profile.completion_check_prompt)}"
     )
@@ -1554,14 +1561,14 @@ def _solver_context_payload(
                 context.graph_review_selection_limit
             ),
         }
+    work_item_by_id = {item.work_item_id: item for item in context.work_tree}
     research_input = ResearchStepInput(
         question=context.question,
         work_items=tuple(
             ResearchStepWorkItem(
                 work_item_id=item.work_item_id,
                 question=item.question,
-                actor_scope=item.actor_scope,
-                actor_relation=item.actor_relation,
+                action_actor=item.action_actor,
             )
             for item in context.work_tree
         ),
@@ -1571,8 +1578,11 @@ def _solver_context_payload(
                 hypothesis_id=item.hypothesis_id,
                 work_item_id=item.work_item_id,
                 statement=item.statement,
-                actor_scope=item.actor_scope,
-                actor_relation=item.actor_relation,
+                action_actor=(
+                    work_item_by_id[item.work_item_id].action_actor
+                    if item.work_item_id in work_item_by_id
+                    else None
+                ),
                 gaps=item.gaps,
             )
             for item in context.hypotheses
@@ -1584,13 +1594,16 @@ def _solver_context_payload(
     if projection == "research_decomposition":
         return research_input.model_dump(mode="json", include={"question"})
     if projection == "research_hypothesis":
-        return research_input.model_dump(
-            mode="json",
-            include={
-                "question",
-                "work_items",
-            },
-        )
+        return {
+            "question": research_input.question,
+            "work_items": [
+                {
+                    "work_item_id": item.work_item_id,
+                    "question": item.question,
+                }
+                for item in research_input.work_items
+            ],
+        }
     if projection == "research_search":
         return research_input.model_dump(
             mode="json",
@@ -1633,27 +1646,17 @@ def _staged_research_transport_schema(
                     "minLength": 1,
                     "maxLength": 1000,
                     "description": (
-                        "独立して法的結論を出し、完了判定できる1つの確認事項。"
-                        "元の質問の省略主語を補い、行為者、行為、対象、"
-                        "限定条件を区別する。"
+                        "法令の解釈又は適用について個別に結論を出す"
+                        "1つの法的論点を、自然言語の問いで表したもの。"
                     ),
                 },
-                "actor_scope": {
+                "action_actor": {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 1200,
+                    "maxLength": 600,
                     "description": (
-                        "確認事項の行為者と、行為対象に結び付く所有者・発行者・"
-                        "所属先等との関係。別主体、同一主体、不明のいずれかが"
-                        "分かる形で具体的に書く。"
-                    ),
-                },
-                "actor_relation": {
-                    "type": "string",
-                    "enum": ["same", "different", "unknown"],
-                    "description": (
-                        "行為者と行為対象に結び付く主体の関係。sameは同一、"
-                        "differentは別、unknownは質問から確定できない。"
+                        "質問から行為者が明確な場合はその役割。"
+                        "明確でない場合は不明。"
                     ),
                 },
             }
@@ -1665,16 +1668,17 @@ def _staged_research_transport_schema(
                     "items": work_item,
                     "minItems": 1,
                     "maxItems": 24,
-                    "description": "質問が求める独立した法的結論の一覧。",
+                    "description": "質問に含まれる法的論点の一覧。",
                 },
                 "non_work_item_requirements": {
                     "type": "array",
                     "items": {"type": "string", "minLength": 1},
                     "maxItems": 24,
                     "description": (
-                        "質問の明示要求のうち、独立した法的結論を要しない要求。"
-                        "根拠・出典・引用・対象時点・地域・出力形式等。"
-                        "work_itemsに入れた確認事項や、その説明要求は重複させない。"
+                        "質問の明示要求のうち法的論点ではない要求。"
+                        "法的結論を裏付ける根拠条文・出典・引用の提示や"
+                        "出力形式等を含む。法的根拠自体が質問対象なら"
+                        "work_itemsに入れる。"
                     ),
                 },
             }
@@ -1691,25 +1695,8 @@ def _staged_research_transport_schema(
                     "description": (
                         "検索前の未確認で誤り得る暫定的な法的命題。"
                         "WorkItemの言い換えではなく、検索対象を選べる具体性を持つ。"
-                        "行為者を名詞で明記し、行為対象と区別する。"
-                    ),
-                },
-                "actor_scope": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 1200,
-                    "description": (
-                        "命題の行為者と、行為対象に結び付く所有者・発行者・"
-                        "所属先等との関係。別主体、同一主体、不明のいずれかが"
-                        "分かる形で具体的に書く。"
-                    ),
-                },
-                "actor_relation": {
-                    "type": "string",
-                    "enum": ["same", "different", "unknown"],
-                    "description": (
-                        "WorkItemの主体関係を保つ。sameは同一、differentは別、"
-                        "unknownは未確定。"
+                        "質問から読み取れる範囲で行為者の役割と行為を示し、"
+                        "未知の内容はgapsに残す。"
                     ),
                 },
                 "gaps": {
@@ -3237,16 +3224,6 @@ def render_search_actor_classification_model_call(
     role_item = _strict_object(
         {
             "regulated_actor": {"type": "string", "minLength": 1},
-            "regulated_actor_role": {
-                "type": "string",
-                "enum": [
-                    "hypothesis_actor",
-                    "target_associated_actor",
-                    "actor_neutral",
-                    "other",
-                    "unknown",
-                ],
-            },
             "matched_hypothesis_ids": _bounded_enum_array(hypothesis_ids),
             "reason": {"type": "string", "minLength": 1},
         }
@@ -3282,13 +3259,24 @@ def render_search_actor_classification_model_call(
             }
         )
         schema["$defs"] = {"actor_role": role_item}
+    work_item_by_id = {item.work_item_id: item for item in context.work_tree}
     input_payload = {
         "question": context.question,
         "hypotheses": [
             {
                 "hypothesis_id": item.hypothesis_id,
-                "actor_scope": item.actor_scope,
-                "actor_relation": item.actor_relation,
+                "action_actor": (
+                    work_item_by_id[item.work_item_id].action_actor
+                    if item.work_item_id in work_item_by_id
+                    else None
+                ),
+                "work_item_question": (
+                    work_item_by_id[item.work_item_id].question
+                    if item.work_item_id in work_item_by_id
+                    else None
+                ),
+                "statement": item.statement,
+                "gaps": list(item.gaps),
             }
             for item in context.hypotheses
         ],
@@ -5649,8 +5637,9 @@ def _normalize_staged_research_payload(
             WorkItem(
                 work_item_id=f"wi-{index}",
                 question=question,
-                actor_scope=item.get("actor_scope"),
-                actor_relation=item.get("actor_relation", "unknown"),
+                action_actor=(
+                    item.get("action_actor") or item.get("actor_scope")
+                ),
             ).model_dump(mode="json")
             for index, (item, question) in enumerate(
                 zip(raw_items, questions, strict=True),
@@ -5693,8 +5682,6 @@ def _normalize_staged_research_payload(
                 hypothesis_id=f"h-{index}",
                 work_item_id=item["work_item_id"],
                 statement=item["statement"],
-                actor_scope=item.get("actor_scope"),
-                actor_relation=item.get("actor_relation", "unknown"),
                 gaps=tuple(item.get("gaps") or ()),
             ).model_dump(mode="json")
             for index, item in enumerate(raw_hypotheses, start=1)
@@ -5929,9 +5916,6 @@ def _apply_search_actor_classification(
     if not isinstance(roles, dict):
         raise ModelProtocolError("search actor classification requires roles")
     expected_ids = {item.article_id for item in context.search_candidates}
-    actor_relation_by_hypothesis = {
-        item.hypothesis_id: item.actor_relation for item in context.hypotheses
-    }
     if set(roles) != expected_ids:
         raise ModelProtocolError(
             "search actor classification must cover every candidate"
@@ -5943,30 +5927,11 @@ def _apply_search_actor_classification(
         role = roles.get(assessment.get("article_id"))
         if not isinstance(role, dict):
             raise ModelProtocolError("search actor classification item invalid")
-        assessment["regulated_actor_role"] = role.get(
-            "regulated_actor_role",
-            "unknown",
-        )
         assessment["actor_match_reason"] = role.get("reason") or "主体照合結果"
-        regulated_actor_role = role.get("regulated_actor_role", "unknown")
         actor_matched_ids = {
             hypothesis_id
             for hypothesis_id in role.get("matched_hypothesis_ids") or ()
-            if regulated_actor_role in {
-                "hypothesis_actor",
-                "actor_neutral",
-            }
-            or (
-                regulated_actor_role == "target_associated_actor"
-                and actor_relation_by_hypothesis.get(hypothesis_id) == "same"
-            )
         }
-        if assessment.get("legal_function") == "scope":
-            # scopeは対象・数・用語の範囲を定める分類であり、行為主体の
-            # 一致を要求しない。内容対応は前段LLMの判断をそのまま使う。
-            actor_matched_ids.update(
-                assessment.get("matched_hypothesis_ids") or ()
-            )
         assessment["matched_hypothesis_ids"] = [
             hypothesis_id
             for hypothesis_id in assessment.get("matched_hypothesis_ids") or ()
@@ -5992,9 +5957,6 @@ def _validate_search_assessment_payload(
     known_hypothesis_ids = {
         item.hypothesis_id for item in context.hypotheses
     }
-    hypothesis_actor_relations = {
-        item.hypothesis_id: item.actor_relation for item in context.hypotheses
-    }
     for assessment in payload.get("assessments") or []:
         matched_ids = assessment.get("matched_hypothesis_ids") or []
         if len(matched_ids) != len(set(matched_ids)):
@@ -6004,19 +5966,6 @@ def _validate_search_assessment_payload(
         if not set(matched_ids).issubset(known_hypothesis_ids):
             raise ModelProtocolError(
                 "search assessment references unknown hypothesis IDs"
-            )
-        candidate_actor_role = assessment.get("regulated_actor_role", "unknown")
-        contradictory_ids = [
-            hypothesis_id
-            for hypothesis_id in matched_ids
-            if assessment.get("legal_function") != "scope"
-            and candidate_actor_role == "target_associated_actor"
-            and hypothesis_actor_relations.get(hypothesis_id) == "different"
-        ]
-        if contradictory_ids:
-            raise ModelProtocolError(
-                "search assessment actor relations contradict matched hypotheses: "
-                f"{sorted(contradictory_ids)}"
             )
     try:
         SearchAssessmentDecision.model_validate(payload)

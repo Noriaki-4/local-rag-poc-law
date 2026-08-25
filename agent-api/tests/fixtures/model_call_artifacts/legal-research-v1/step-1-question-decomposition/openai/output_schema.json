@@ -2,7 +2,7 @@
   "additionalProperties": false,
   "properties": {
     "non_work_item_requirements": {
-      "description": "質問の明示要求のうち、独立した法的結論を要しない要求。根拠・出典・引用・対象時点・地域・出力形式等。work_itemsに入れた確認事項や、その説明要求は重複させない。",
+      "description": "質問の明示要求のうち法的論点ではない要求。法的結論を裏付ける根拠条文・出典・引用の提示や出力形式等を含む。法的根拠自体が質問対象ならwork_itemsに入れる。",
       "items": {
         "minLength": 1,
         "type": "string"
@@ -11,27 +11,18 @@
       "type": "array"
     },
     "work_items": {
-      "description": "質問が求める独立した法的結論の一覧。",
+      "description": "質問に含まれる法的論点の一覧。",
       "items": {
         "additionalProperties": false,
         "properties": {
-          "actor_relation": {
-            "description": "行為者と行為対象に結び付く主体の関係。sameは同一、differentは別、unknownは質問から確定できない。",
-            "enum": [
-              "same",
-              "different",
-              "unknown"
-            ],
-            "type": "string"
-          },
-          "actor_scope": {
-            "description": "確認事項の行為者と、行為対象に結び付く所有者・発行者・所属先等との関係。別主体、同一主体、不明のいずれかが分かる形で具体的に書く。",
-            "maxLength": 1200,
+          "action_actor": {
+            "description": "質問から行為者が明確な場合はその役割。明確でない場合は不明。",
+            "maxLength": 600,
             "minLength": 1,
             "type": "string"
           },
           "question": {
-            "description": "独立して法的結論を出し、完了判定できる1つの確認事項。元の質問の省略主語を補い、行為者、行為、対象、限定条件を区別する。",
+            "description": "法令の解釈又は適用について個別に結論を出す1つの法的論点を、自然言語の問いで表したもの。",
             "maxLength": 1000,
             "minLength": 1,
             "type": "string"
@@ -39,8 +30,7 @@
         },
         "required": [
           "question",
-          "actor_scope",
-          "actor_relation"
+          "action_actor"
         ],
         "type": "object"
       },

@@ -96,11 +96,11 @@ def test_question_decomposition_uses_only_question_and_small_contract() -> None:
         "work_items",
         "non_work_item_requirements",
     }
-    assert "行為者、行為、対象、限定条件" in (
+    assert "1つの法的論点" in (
         rendered.output_schema["properties"]["work_items"]["items"]
         ["properties"]["question"]["description"]
     )
-    assert "重複させない" in (
+    assert "法的論点ではない要求" in (
         rendered.output_schema["properties"]["non_work_item_requirements"]
         ["description"]
     )

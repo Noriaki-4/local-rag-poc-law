@@ -158,9 +158,14 @@ Step 3には質問、WorkItem、Hypothesis、`legal_search`定義と今回の要
 
 Adapterは各Stepの出力へ永続化用IDと既定statusを機械的に付け、共通`SolverDecision`へ正規化します。
 Programは文字列の内容を補正せず、ID、件数、既知参照、WorkItemとHypothesisの所属だけを検証します。
+質問分解で判断した規制対象行為の行為者は、WorkItemの`action_actor`に保持します。行為対象や関係主体は
+WorkItemの`question`に残し、別の分類項目へ推測で分解しません。Hypothesisには主体を重複保存せず、
+検索計画・候補主体照合のread modelへ所属WorkItemから決定的に結合します。候補の規律主体との対応はLLMが
+`question`、`action_actor`、Hypothesisを直接比較し、Programは返された既知IDの積集合だけを検証します。
 Step 1の不変条件は「質問の明示要求全体 = WorkItem + non_work_item_requirements」であり、元の質問は引き続き
 CaseStoreの正本です。`non_work_item_requirements`は重要度や全WorkItem共通性を表さず、独立した法的結論を
-要しない根拠・出典・引用・対象時点・地域・表現・出力形式等の明示要求を欠落させず保持します。
+要しない根拠・出典・引用の提示や表現・出力形式等の明示要求を欠落させず保持します。
+法的結論を左右する対象時点、地域、主体、対象は、該当WorkItemに残します。
 検索候補には対応付けず、最終回答の生成とチェックで全件を適用します。
 
 初回3 Stepの実行時入力は`ResearchStepInput`を正本とし、各Stepで実際に投影した項目だけを`input_contract`へ

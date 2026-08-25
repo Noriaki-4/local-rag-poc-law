@@ -2,40 +2,20 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Protocol
-
 from app.adapters.models.structured_json import (
-    normalize_staged_research_decision,
     render_solver_model_call,
 )
 from app.agent_framework.context import SolverContext, build_solver_context
-from app.agent_framework.contracts import SolverDecision
 from app.agent_framework.model_call_artifacts import RenderedModelCall
 from app.agent_framework.state import CaseState
 from app.domains.legal.profiles import legal_agent_profile
+from app.domains.legal.staged_research_diagnostic import (
+    StagedResearchDiagnosticRun,
+    StructuredJSONClient,
+    run_staged_research_diagnostic,
+)
 
-
-class StructuredJSONClient(Protocol):
-    provider: str
-
-    def generate_structured_json(
-        self,
-        *,
-        prompt: str,
-        schema: dict[str, Any],
-        model: str,
-        max_tokens: int,
-        timeout_sec: int,
-    ) -> Any: ...
-
-
-@dataclass(frozen=True)
-class QuestionDecompositionDiagnosticRun:
-    rendered: RenderedModelCall
-    transport_result: Any
-    decision: SolverDecision | None
-    validation_error: str | None
+QuestionDecompositionDiagnosticRun = StagedResearchDiagnosticRun
 
 
 def build_question_decomposition_context(question: str) -> SolverContext:
@@ -92,36 +72,12 @@ def run_question_decomposition_diagnostic(
         provider=provider,
         model=model,
     )
-    result = client.generate_structured_json(
-        prompt=rendered.request,
-        schema=rendered.output_schema,
+    return run_staged_research_diagnostic(
+        rendered,
+        context,
+        projection="research_decomposition",
         model=model,
         max_tokens=max_tokens,
         timeout_sec=timeout_sec,
-    )
-    if result.validationError is not None or result.payload is None:
-        return QuestionDecompositionDiagnosticRun(
-            rendered=rendered,
-            transport_result=result,
-            decision=None,
-            validation_error=(result.validationError or "empty model output"),
-        )
-    try:
-        decision = normalize_staged_research_decision(
-            result.payload,
-            projection="research_decomposition",
-            context=context,
-        )
-    except (TypeError, ValueError) as exc:
-        return QuestionDecompositionDiagnosticRun(
-            rendered=rendered,
-            transport_result=result,
-            decision=None,
-            validation_error=str(exc),
-        )
-    return QuestionDecompositionDiagnosticRun(
-        rendered=rendered,
-        transport_result=result,
-        decision=decision,
-        validation_error=None,
+        client=client,
     )

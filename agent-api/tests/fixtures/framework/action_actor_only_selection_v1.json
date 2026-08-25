@@ -1,0 +1,39 @@
+{
+  "fixtureId": "action-actor-only-selection-v1",
+  "cases": [
+    {
+      "case_id": "tob-buyer-vs-issuer",
+      "question": "上場会社の株式を市場外で多数の株主から買い集める者について、公開買付けが必要となる条件は何か。",
+      "action_actor": "上場会社の株式を市場外で買い集める者",
+      "candidates": [
+        {
+          "article_id": "fiea-27-2",
+          "summary": "発行者以外の者が市場外で株券等を買い付ける場合の公開買付け義務を定める。"
+        },
+        {
+          "article_id": "fiea-27-22-2",
+          "summary": "上場株券等の発行者自身が自己の株券等を買い付ける場合の公開買付け義務を定める。"
+        }
+      ]
+    },
+    {
+      "case_id": "developer-vs-landowner",
+      "question": "土地所有者から借りた土地で開発行為を行う事業者に必要な許可条件は何か。",
+      "action_actor": "借地上で開発行為を行う事業者",
+      "candidates": [
+        {
+          "article_id": "developer-permit",
+          "summary": "開発行為を行おうとする事業者に、一定の場合の許可取得義務を課す。"
+        },
+        {
+          "article_id": "landowner-duty",
+          "summary": "土地所有者に、その土地を適正に管理する義務を課す。"
+        }
+      ]
+    }
+  ],
+  "expected": {
+    "tob-buyer-vs-issuer": ["fiea-27-2"],
+    "developer-vs-landowner": ["developer-permit"]
+  }
+}

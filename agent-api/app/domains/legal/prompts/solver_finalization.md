@@ -42,7 +42,7 @@
 - `resolved_work_item_ids=[]`なら、`citation_ids=[]`にします。
 - Tool失敗、timeout、候補不在を法的根拠の不存在として断定しません。
 - 回答は取得済み本文が示す範囲に限定します。
-- `non_work_item_requirements`は法的結論の根拠にせず、根拠・出典・対象時点・地域・表現・出力形式等の回答要件として適用します。
+- `non_work_item_requirements`は法的結論の根拠にせず、根拠・出典の提示や表現・出力形式等の回答要件として適用します。
 
 #### Graph候補
 

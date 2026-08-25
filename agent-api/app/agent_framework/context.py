@@ -6,12 +6,11 @@ import hashlib
 import json
 from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from .contracts import SolverDecision
 from .profiles import AgentLimits
 from .state import (
-    ActorRelation,
     CaseState,
     DeferredFrontierResolutionAction,
     DependencyDecision,
@@ -34,13 +33,9 @@ class WorkTreeItem(FrameworkModel):
         description="階層分解上の親WorkItem ID。最上位ではnull。"
     )
     question: str = Field(description="1つの完了判定で閉じる確認事項。")
-    actor_scope: str | None = Field(
+    action_actor: str | None = Field(
         default=None,
-        description="確認事項の行為者と、対象に結び付く主体との関係。未指定ならnull。"
-    )
-    actor_relation: ActorRelation = Field(
-        default="unknown",
-        description="sameは同一主体、differentは別主体、unknownは未確定。",
+        description="確認事項で規制対象となる行為をする者。未指定ならnull。"
     )
     state: str = Field(
         description="openは未完了、resolvedは回答済み、droppedは不要と判断済み。"
@@ -64,6 +59,21 @@ class WorkTreeItem(FrameworkModel):
         ge=0,
         description="このWorkItem所属Hypothesisが参照する重複なしEvidence件数。",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_actor_scope(cls, value: object) -> object:
+        """保存済みSolverContextの旧自由記述を読める状態に保つ。"""
+
+        if not isinstance(value, dict):
+            return value
+        migrated = dict(value)
+        legacy_scope = migrated.pop("actor_scope", None)
+        if legacy_scope is not None:
+            migrated.setdefault("action_actor", legacy_scope)
+        migrated.pop("target_actor", None)
+        migrated.pop("actor_relation", None)
+        return migrated
 
 
 class EvidenceHypothesisCandidate(FrameworkModel):
@@ -278,26 +288,29 @@ class SearchCandidateArticle(FrameworkModel):
         default=(),
         description="前Cycleで候補本文により満たせると判断された明示要求。",
     )
-    regulated_actor_role: str | None = Field(
-        default=None,
-        description="前Cycleの独立した主体照合結果。",
-    )
     actor_match_reason: str | None = Field(
         default=None,
         description="前Cycleの主体照合理由。",
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def discard_legacy_actor_role(cls, value: object) -> object:
+        """旧read modelの分類ラベルを直接照合へ移行する。"""
+
+        if not isinstance(value, dict):
+            return value
+        migrated = dict(value)
+        migrated.pop("regulated_actor_role", None)
+        return migrated
+
 
 class ResearchStepWorkItem(FrameworkModel):
     work_item_id: str = Field(description="Programが付与した既知WorkItem ID。")
     question: str = Field(description="このWorkItemで確認する1つの法的事項。")
-    actor_scope: str | None = Field(
+    action_actor: str | None = Field(
         default=None,
-        description="確認事項の行為者と、対象に結び付く主体との関係。未指定ならnull。"
-    )
-    actor_relation: ActorRelation = Field(
-        default="unknown",
-        description="sameは同一主体、differentは別主体、unknownは未確定。",
+        description="確認事項で規制対象となる行為をする者。未指定ならnull。"
     )
 
 
@@ -305,13 +318,9 @@ class ResearchStepHypothesis(FrameworkModel):
     hypothesis_id: str = Field(description="Programが付与した既知Hypothesis ID。")
     work_item_id: str = Field(description="このHypothesisが属する既知WorkItem ID。")
     statement: str = Field(description="法令本文で検証する未確認の法的命題。")
-    actor_scope: str | None = Field(
+    action_actor: str | None = Field(
         default=None,
-        description="命題の行為者と、対象に結び付く主体との関係。未指定ならnull。"
-    )
-    actor_relation: ActorRelation = Field(
-        default="unknown",
-        description="sameは同一主体、differentは別主体、unknownは未確定。",
+        description="所属WorkItemで確定した、規制対象となる行為をする者。"
     )
     gaps: tuple[str, ...] = Field(
         description="命題のうち法令本文でまだ確認すべき具体的な法的内容。"
@@ -630,8 +639,7 @@ def build_solver_context(
             work_item_id=item.work_item_id,
             parent_work_item_id=item.parent_work_item_id,
             question=item.question,
-            actor_scope=item.actor_scope,
-            actor_relation=item.actor_relation,
+            action_actor=item.action_actor,
             state=item.state,
             resolution=item.resolution,
             basis_hypothesis_ids=item.basis_hypothesis_ids,
@@ -1190,11 +1198,6 @@ def _search_candidate_projection(
                 ].matched_non_work_item_requirements
                 if article_id in assessment_by_article
                 else ()
-            ),
-            regulated_actor_role=(
-                assessment_by_article[article_id].regulated_actor_role
-                if article_id in assessment_by_article
-                else None
             ),
             actor_match_reason=(
                 assessment_by_article[article_id].actor_match_reason

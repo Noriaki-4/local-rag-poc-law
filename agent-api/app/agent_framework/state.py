@@ -9,7 +9,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 RunStatus = Literal["running", "completed", "failed", "cancelled"]
 WorkItemState = Literal["open", "resolved", "dropped"]
-ActorRelation = Literal["same", "different", "unknown"]
 HypothesisJudgment = Literal["supported", "contradicted", "unresolved"]
 ToolStatus = Literal["succeeded", "failed", "timeout"]
 ReviewVerdict = Literal["accept", "revise"]
@@ -74,19 +73,12 @@ class WorkItem(FrameworkModel):
             "質問の行為者、行為、対象を区別し、省略主語は補う。"
         ),
     )
-    actor_scope: str | None = Field(
+    action_actor: str | None = Field(
         default=None,
-        max_length=1200,
+        max_length=600,
         description=(
-            "この確認事項の行為者と、行為対象に結び付く所有者・発行者・"
-            "所属先等との関係。法的立場が不明なら不明と明記する。"
-        ),
-    )
-    actor_relation: ActorRelation = Field(
-        default="unknown",
-        description=(
-            "行為者と行為対象に結び付く主体の関係。sameは同一主体、"
-            "differentは別主体、unknownは質問から確定できない。"
+            "この確認事項で、規制対象となる行為をする者。"
+            "質問から特定できなければ不明と明記する。"
         ),
     )
     state: WorkItemState = Field(
@@ -127,6 +119,21 @@ class WorkItem(FrameworkModel):
             raise ValueError("closed work item requires a resolution")
         return self
 
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_actor_scope(cls, value: object) -> object:
+        """保存済みfixtureの旧自由記述を読める状態に保つ。"""
+
+        if not isinstance(value, dict):
+            return value
+        migrated = dict(value)
+        legacy_scope = migrated.pop("actor_scope", None)
+        if legacy_scope is not None:
+            migrated.setdefault("action_actor", legacy_scope)
+        migrated.pop("target_actor", None)
+        migrated.pop("actor_relation", None)
+        return migrated
+
 
 class Hypothesis(FrameworkModel):
     hypothesis_id: str = Field(
@@ -150,21 +157,6 @@ class Hypothesis(FrameworkModel):
             "規定の存在や質問の言い換えだけを述べない。"
         ),
     )
-    actor_scope: str | None = Field(
-        default=None,
-        max_length=1200,
-        description=(
-            "この命題で規律対象として想定する行為者と、行為対象に結び付く"
-            "所有者・発行者・所属先等との関係。法的立場が不明なら不明と明記する。"
-        ),
-    )
-    actor_relation: ActorRelation = Field(
-        default="unknown",
-        description=(
-            "行為者と行為対象に結び付く主体の関係。sameは同一主体、"
-            "differentは別主体、unknownは未確定。"
-        ),
-    )
     judgment: HypothesisJudgment = Field(
         default="unresolved",
         description=(
@@ -179,6 +171,7 @@ class Hypothesis(FrameworkModel):
             "確認済み部分に使った本文がある場合だけ保持する。"
         ),
     )
+
     gaps: tuple[str, ...] = Field(
         default=(),
         description=(
@@ -186,6 +179,18 @@ class Hypothesis(FrameworkModel):
             "探す条文や検索作業ではない。"
         ),
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def discard_legacy_actor_copy(cls, value: object) -> object:
+        """主体情報の正本をWorkItemへ一本化し、旧重複項目は読込み時に捨てる。"""
+
+        if not isinstance(value, dict):
+            return value
+        migrated = dict(value)
+        migrated.pop("actor_scope", None)
+        migrated.pop("actor_relation", None)
+        return migrated
 
     @model_validator(mode="after")
     def require_evidence_for_semantic_judgment(self) -> Hypothesis:
@@ -482,14 +487,21 @@ class SearchCandidateAssessmentRecord(FrameworkModel):
         default=(),
         description="候補本文の取得で満たせる回答全体の明示要求。",
     )
-    regulated_actor_role: str | None = Field(
-        default=None,
-        description="独立した主体照合で判断した質問内の役割。",
-    )
     actor_match_reason: str | None = Field(
         default=None,
-        description="独立した主体照合でその役割を選んだ短い理由。",
+        description="候補の規律主体とWorkItemの行為者を照合した短い理由。",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def discard_legacy_actor_role(cls, value: object) -> object:
+        """旧分類ラベルを捨て、直接照合の結果だけを引き継ぐ。"""
+
+        if not isinstance(value, dict):
+            return value
+        migrated = dict(value)
+        migrated.pop("regulated_actor_role", None)
+        return migrated
 
 
 class SearchCandidateReview(FrameworkModel):

@@ -6,21 +6,6 @@
       "items": {
         "additionalProperties": false,
         "properties": {
-          "actor_relation": {
-            "description": "WorkItemの主体関係を保つ。sameは同一、differentは別、unknownは未確定。",
-            "enum": [
-              "same",
-              "different",
-              "unknown"
-            ],
-            "type": "string"
-          },
-          "actor_scope": {
-            "description": "命題の行為者と、行為対象に結び付く所有者・発行者・所属先等との関係。別主体、同一主体、不明のいずれかが分かる形で具体的に書く。",
-            "maxLength": 1200,
-            "minLength": 1,
-            "type": "string"
-          },
           "gaps": {
             "description": "命題のうち法令本文でまだ確認すべき具体的な法的内容。",
             "items": {
@@ -31,7 +16,7 @@
             "type": "array"
           },
           "statement": {
-            "description": "検索前の未確認で誤り得る暫定的な法的命題。WorkItemの言い換えではなく、検索対象を選べる具体性を持つ。行為者を名詞で明記し、行為対象と区別する。",
+            "description": "検索前の未確認で誤り得る暫定的な法的命題。WorkItemの言い換えではなく、検索対象を選べる具体性を持つ。質問から読み取れる範囲で行為者の役割と行為を示し、未知の内容はgapsに残す。",
             "maxLength": 2000,
             "minLength": 1,
             "type": "string"
@@ -49,8 +34,6 @@
         "required": [
           "work_item_id",
           "statement",
-          "actor_scope",
-          "actor_relation",
           "gaps"
         ],
         "type": "object"

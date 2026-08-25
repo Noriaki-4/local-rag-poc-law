@@ -1302,6 +1302,24 @@ fixture直下の`question`または`solverContext.question`だけを読み、保
 修復再呼出しが混ざっていないことを確認できる。通信上の再試行は`providerRetryCount`で区別する。
 構造違反時も成果物を保存して終了コード1を返す。
 
+質問分解で確定したWorkItemから、Hypothesis生成だけを診断する場合は次を使う。
+本番の`solver_hypothesis_generation.md`、入力投影、出力schema、Provider adapterを使うが、
+質問分解の再実行、検索、Graph、修復は行わない。`--fixture`には質問分解診断の`result.json`、
+または`solverContext.work_tree`を持つFramework fixtureを指定できる。
+
+```bash
+agent-api/.venv/bin/python scripts/run_hypothesis_generation_debug.py \
+  --fixture eval-results/question-decomposition/20260825/overview/result.json \
+  --provider openai \
+  --model gpt-4o-mini-2024-07-18 \
+  --output eval-results/hypothesis-generation/overview
+```
+
+Hypothesis生成は新規のModel呼出し1回であり、前段の会話履歴を送らない。入力は元質問と確定済みWorkItemだけで、
+`non_work_item_requirements`、Tool、Evidence、Graphは送らない。主体情報はWorkItemの`action_actor`、
+`target_actor`、`actor_relation`を正本とし、Hypothesis出力へ重複させない。`result.json`の
+`callCount=1`、`repairAttempted=false`、`validationError`と、生成された完成Prompt・schema・生応答を確認する。
+
 初回Researchの失敗がモデルの法的仮説立案能力か、本番Prompt・契約の複雑さかを切り分ける場合は、
 本番Promptを一切合成しない最小診断を実行する。出力はWorkItemと入れ子のHypothesisだけであり、
 Tool、status、gaps、Cycle、Evidence、ID契約、完了判定を含まない。結果ディレクトリには完成Prompt、

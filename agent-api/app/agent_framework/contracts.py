@@ -142,26 +142,9 @@ class SearchCandidateAssessment(FrameworkModel):
         min_length=1,
         max_length=1200,
         description=(
-            "候補が規律する行為者とHypothesisの行為者を比較した結果。"
+            "候補が規律する行為者とWorkItemのaction_actorを比較した結果。"
             "一致するIDを挙げた場合は共通する行為者を、不一致で空にした場合は"
             "異なる二つの行為者を明記する。"
-        ),
-    )
-    regulated_actor_role: Literal[
-        "hypothesis_actor",
-        "target_associated_actor",
-        "actor_neutral",
-        "other",
-        "unknown",
-    ] = Field(
-        default="unknown",
-        description=(
-            "候補が規律する行為者の質問内での役割。hypothesis_actorは命題の"
-            "行為者、target_associated_actorは対象の所有者・発行者・所属先等、"
-            "actor_neutralは行為者を規律せず用語・数・対象範囲を定める候補、"
-            "otherはそれ以外、unknownは候補から確定できない。AのBをCする質問で"
-            "A自身によるCを規律する候補はtarget_associated_actor、A以外の者による"
-            "Cを規律する候補はhypothesis_actor。"
         ),
     )
     matched_hypothesis_ids: tuple[str, ...] = Field(
