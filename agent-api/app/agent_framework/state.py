@@ -282,14 +282,19 @@ class GraphFrontierDecision(FrameworkModel):
     )
     action: FrontierReviewAction = Field(
         description=(
-            "selectは関連すると判断して本文取得対象、deferは関連するが後続へ保留、"
-            "rejectは現在のWorkItem・Hypothesisには不要。"
+            "selectは現在の検証で使う関連候補、deferは関連するが後続へ保留、"
+            "rejectは現在のWorkItem・Hypothesisには不要。本文未取得のselectだけを"
+            "Programが取得する。"
         ),
     )
     reason: str = Field(
         min_length=1,
         max_length=1000,
-        description="Relationの種類・方向とHypothesisに基づくactionの理由。",
+        description=(
+            "候補の見出し・引用から読み取った法的な役割と、Hypothesisまたは"
+            "gapsの未確認事項に一致するかを具体的に示すactionの理由。"
+            "『関連性が高い』『優先度が低い』だけの理由は不可。"
+        ),
     )
 
 
@@ -398,7 +403,10 @@ class GraphCandidateReview(FrameworkModel):
     reason: str = Field(
         min_length=1,
         max_length=2000,
-        description="Graph候補batch全体の評価理由。",
+        description=(
+            "未確認事項と各候補の法的な役割を比較し、どの候補を優先したかを"
+            "示すbatch全体の評価理由。"
+        ),
     )
     reviewed_cycle: int | None = Field(
         default=None,
@@ -458,6 +466,32 @@ class SearchCandidateSelection(FrameworkModel):
         return self
 
 
+class SearchCandidateAssessmentRecord(FrameworkModel):
+    """Search Assessmentで確定した候補理解をCycle間で保持する。"""
+
+    article_id: str = Field(description="評価した候補Article ID。")
+    legal_function: Literal[
+        "applicability", "exception", "procedure", "scope"
+    ] = Field(description="Solverが判断した候補の法的機能。")
+    summary: str = Field(description="候補本文の取得要否を判断するための意味要約。")
+    matched_hypothesis_ids: tuple[str, ...] = Field(
+        default=(),
+        description="候補が直接検証できるとSolverが判断したHypothesis ID。",
+    )
+    matched_non_work_item_requirements: tuple[str, ...] = Field(
+        default=(),
+        description="候補本文の取得で満たせる回答全体の明示要求。",
+    )
+    regulated_actor_role: str | None = Field(
+        default=None,
+        description="独立した主体照合で判断した質問内の役割。",
+    )
+    actor_match_reason: str | None = Field(
+        default=None,
+        description="独立した主体照合でその役割を選んだ短い理由。",
+    )
+
+
 class SearchCandidateReview(FrameworkModel):
     """OpenSearch候補に対するSolver自身の意味判断。"""
 
@@ -466,6 +500,10 @@ class SearchCandidateReview(FrameworkModel):
     )
     selections: tuple[SearchCandidateSelection, ...] = Field(
         description="本文取得対象として選んだ候補と理由。",
+    )
+    assessments: tuple[SearchCandidateAssessmentRecord, ...] = Field(
+        default=(),
+        description="選択・保留を問わず、全候補についてSolverが行った意味評価。",
     )
     deferred_article_ids: tuple[str, ...] = Field(
         description="関連する可能性はあるが現在の取得枠では選ばなかった候補Article ID。",
@@ -488,6 +526,9 @@ class SearchCandidateReview(FrameworkModel):
         selected_ids = tuple(item.article_id for item in self.selections)
         if len(selected_ids) != len(set(selected_ids)):
             raise ValueError("search candidate selections must be unique")
+        assessment_ids = tuple(item.article_id for item in self.assessments)
+        if len(assessment_ids) != len(set(assessment_ids)):
+            raise ValueError("search candidate assessments must be unique")
         if len(self.deferred_article_ids) != len(
             set(self.deferred_article_ids)
         ):
@@ -715,6 +756,10 @@ class CaseState(FrameworkModel):
     deferred_frontier_resolutions: tuple[DeferredFrontierResolution, ...] = ()
     unreviewed_graph_resolutions: tuple[UnreviewedGraphResolution, ...] = ()
     tool_results: tuple[ToolResult, ...] = ()
+    integrated_tool_result_request_ids: tuple[str, ...] = Field(
+        default=(),
+        description="取得本文をWorkItem・Hypothesisへ反映済みのToolRequest ID。",
+    )
     focus_work_item_ids: tuple[str, ...] = ()
     retained_evidence_ids: tuple[str, ...] = ()
     final_answer: FinalAnswer | None = None

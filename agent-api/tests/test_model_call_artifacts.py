@@ -84,7 +84,7 @@ def test_question_decomposition_uses_only_question_and_small_contract() -> None:
     assert "max_fetched_resources_per_cycle" not in rendered.input_payload
     assert "remaining_fetch_capacity" not in rendered.instructions
     assert "最初の探索" not in rendered.instructions
-    assert "# 質問の要求分解" in rendered.instructions
+    assert "# 法令調査Solver：質問の要求分解" in rendered.instructions
     assert "Tool結果を受け取った後" not in rendered.instructions
     assert "共通ルール" not in rendered.instructions
     assert "Graph" not in rendered.instructions
@@ -156,7 +156,8 @@ def test_provider_transport_is_explicit_in_artifacts(tmp_path) -> None:
         stage="research",
     )
 
-    assert openai.output_schema == anthropic.output_schema
+    assert "decision_json" not in openai.output_schema["properties"]
+    assert set(anthropic.output_schema["properties"]) == {"decision_json"}
     assert "transport_values" not in openai.input_payload
     assert "transport_values" not in anthropic.input_payload
     assert openai.normalized_schema == anthropic.normalized_schema

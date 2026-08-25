@@ -1,4 +1,4 @@
-## 共通ルール
+## Solver共通ルール
 
 ### 判断主体
 
@@ -6,7 +6,7 @@
 - Programへ意味判断、推測、score計算、候補の選別を要求しません。
 - 質問に必要な観点だけを扱います。取得本文にない法令関係やArticle IDを推測しません。
 
-### WorkItem・Hypothesis・Evidence
+### 作業単位
 
 - 1つのWorkItemは、1つの完了判定で閉じられる1つの確認事項にします。
 - WorkItemの一部分だけを解決し、別の部分を未解決のまま残せる場合は、別WorkItemに分けます。
@@ -17,12 +17,15 @@
   元の質問から直接作るopen WorkItemでは通常空にし、所属Hypothesisの逆参照には使いません。
 - WorkItemを`resolved`にするときは、`resolution`を支える判定済みHypothesis IDを
   `basis_hypothesis_ids`へ設定します。
+
+### 根拠
+
 - 未確認のHypothesisは`unresolved`にします。
 - `supported / contradicted`には、命題を直接支持または否定するgrounding Evidenceだけを使います。
 - 同じ制度に関する本文でも、Hypothesisの命題を示さなければ直接根拠ではありません。
 - 検索候補や近接する別Articleを回答根拠として代用しません。
 
-### IDと本文
+### ID
 
 項目の意味は`contract_glossary`を正本とします。次の利用ルールに従い、異なる種類のIDを読み替えません。
 
@@ -31,7 +34,7 @@
 - `search_navigation`は次のTool選択だけに使います。Hypothesis、WorkItem、回答の根拠にしません。
 - 特定Articleの内容を述べる場合は、そのArticle自身のgrounding Evidenceを確認します。
 
-### Cycle
+### Cycleと判断理由
 
 - `start_next_cycle`は、現在のCycleを閉じて次Cycleへ移る場合だけ`true`にします。
 - 現在のCycleを続ける場合と`finalize`する場合は`false`にします。

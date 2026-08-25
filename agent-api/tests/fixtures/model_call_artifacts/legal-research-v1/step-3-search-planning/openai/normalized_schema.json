@@ -331,7 +331,7 @@
           "type": "array"
         },
         "reason": {
-          "description": "Graph候補batch全体の評価理由。",
+          "description": "未確認事項と各候補の法的な役割を比較し、どの候補を優先したかを示すbatch全体の評価理由。",
           "maxLength": 2000,
           "minLength": 1,
           "title": "Reason",
@@ -373,7 +373,7 @@
       "additionalProperties": false,
       "properties": {
         "action": {
-          "description": "selectは関連すると判断して本文取得対象、deferは関連するが後続へ保留、rejectは現在のWorkItem・Hypothesisには不要。",
+          "description": "selectは現在の検証で使う関連候補、deferは関連するが後続へ保留、rejectは現在のWorkItem・Hypothesisには不要。本文未取得のselectだけをProgramが取得する。",
           "enum": [
             "select",
             "defer",
@@ -411,7 +411,7 @@
           "title": "Hypothesis Id"
         },
         "reason": {
-          "description": "Relationの種類・方向とHypothesisに基づくactionの理由。",
+          "description": "候補の見出し・引用から読み取った法的な役割と、Hypothesisまたはgapsの未確認事項に一致するかを具体的に示すactionの理由。『関連性が高い』『優先度が低い』だけの理由は不可。",
           "maxLength": 1000,
           "minLength": 1,
           "title": "Reason",
@@ -527,7 +527,7 @@
       "properties": {
         "evidence_ids": {
           "default": [],
-          "description": "現在の判定とgapsの判断に使った取得済みgrounding Evidence ID。unresolvedでも本文で確認できた部分があれば保持できる。",
+          "description": "現在の判定とgapsの判断に直接必要な、最小集合の取得済みgrounding Evidence ID。関連するだけのParagraph・Itemを全件入れない。unresolvedでも本文で確認できた部分があれば保持できる。",
           "items": {
             "type": "string"
           },
@@ -613,10 +613,97 @@
       "title": "ReviewFindingResolution",
       "type": "object"
     },
+    "SearchCandidateAssessmentRecord": {
+      "additionalProperties": false,
+      "description": "Search Assessmentで確定した候補理解をCycle間で保持する。",
+      "properties": {
+        "actor_match_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "独立した主体照合でその役割を選んだ短い理由。",
+          "title": "Actor Match Reason"
+        },
+        "article_id": {
+          "description": "評価した候補Article ID。",
+          "title": "Article Id",
+          "type": "string"
+        },
+        "legal_function": {
+          "description": "Solverが判断した候補の法的機能。",
+          "enum": [
+            "applicability",
+            "exception",
+            "procedure",
+            "scope"
+          ],
+          "title": "Legal Function",
+          "type": "string"
+        },
+        "matched_hypothesis_ids": {
+          "default": [],
+          "description": "候補が直接検証できるとSolverが判断したHypothesis ID。",
+          "items": {
+            "type": "string"
+          },
+          "title": "Matched Hypothesis Ids",
+          "type": "array"
+        },
+        "matched_non_work_item_requirements": {
+          "default": [],
+          "description": "候補本文の取得で満たせる回答全体の明示要求。",
+          "items": {
+            "type": "string"
+          },
+          "title": "Matched Non Work Item Requirements",
+          "type": "array"
+        },
+        "regulated_actor_role": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "独立した主体照合で判断した質問内の役割。",
+          "title": "Regulated Actor Role"
+        },
+        "summary": {
+          "description": "候補本文の取得要否を判断するための意味要約。",
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "article_id",
+        "legal_function",
+        "summary"
+      ],
+      "title": "SearchCandidateAssessmentRecord",
+      "type": "object"
+    },
     "SearchCandidateReview": {
       "additionalProperties": false,
       "description": "OpenSearch候補に対するSolver自身の意味判断。",
       "properties": {
+        "assessments": {
+          "default": [],
+          "description": "選択・保留を問わず、全候補についてSolverが行った意味評価。",
+          "items": {
+            "$ref": "#/$defs/SearchCandidateAssessmentRecord"
+          },
+          "title": "Assessments",
+          "type": "array"
+        },
         "deferred_article_ids": {
           "description": "関連する可能性はあるが現在の取得枠では選ばなかった候補Article ID。",
           "items": {

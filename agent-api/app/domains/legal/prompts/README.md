@@ -30,7 +30,7 @@ Tool結果取得後
 通常時：solver_identity + integration + solver_common
                               + solver_tools / solver_completion
 
-Cycle境界：取得本文の評価 ──→ Cycleの終了判断
+Cycle境界：取得本文の評価 ──→ 下位規範依存の評価 ──→ Cycleの終了判断
            各処理 = 専用Prompt + 専用入力 + 専用schema + 専用完了確認
 ```
 
@@ -38,16 +38,18 @@ Cycle境界：取得本文の評価 ──→ Cycleの終了判断
 `SolverContext`または候補一覧の後ろへ短く追加します。長い本文を読んだ後でも、
 現在の処理が満たすべき条件を出力直前に確認できるようにするためです。
 完了確認は新しい意味判断をProgramへ移さず、同じSolverへDecisionの自己点検を要求します。
+通常はその処理の成功条件に直結する3〜5項目に絞り、Tool引数schemaや別処理の手順を重複記載しません。
 
 実際の組み合わせは次のとおりです。
 
-| 呼出し用途 | 合成するPrompt | 役割 |
+| 呼出し用途 | 合成するPrompt | この呼出しの目的 |
 |---|---|---|
 | `research` | question_decompositionのみ | 質問の明示要求を、独立した法的結論を要するWorkItemと、それ以外の明示要求へ分ける。 |
 | `hypothesis_generation` | hypothesis_generationのみ | 入力済みの各WorkItemについて、検索前の暫定的な法的命題を作る。 |
 | `search_planning` | search_planningのみ | 入力済みHypothesisを検証する今回の`legal_search`要求を作る。 |
-| `integration` | identity + integration + common + tools + completion | ToolResultを評価し、状態を逐次更新して次の行動または完了を決める。次Cycle開始後の再計画もこの用途で扱う。 |
-| `observation_integration` | observation_integrationのみ | 取得本文を既存Hypothesis・WorkItem・下位規範確認状態へ反映する。次の行動は決めない。 |
+| `integration` | identity + integrationまたはdependency_action + common + tools + completion | 通常はToolResultを評価して次の行動または完了を決める。未解決の下位規範依存がある場合は、その依存に対する次の行動だけを決める。 |
+| `observation_integration` | observation_integrationのみ | 取得本文を既存Hypothesis・WorkItemへ反映する。次の行動は決めない。 |
+| `dependency_assessment` | dependency_assessmentのみ | 本文評価後に、下位規範確認が不要・追加探索が必要・確認済みのいずれかを判断する。 |
 | `cycle_close` | cycle_closeのみ | 直前の本文評価を前提に、完了または次Cycleへの引継ぎだけを決める。 |
 | `finalization` | identity + finalization + common + completion | 実行上限時に追加Toolなしで、確認済み範囲と未確認範囲を分けた回答を作る。 |
 | `reviewer_revision` | identity + reviewer_revision + common + tools + completion | Reviewer Findingを全件処理し、回答修正または追加調査を決める。 |
@@ -57,13 +59,30 @@ Cycle境界：取得本文の評価 ──→ Cycleの終了判断
 `search_selection`と`graph_selection`は同じSolverの処理モードです。任意実行のReviewer Agentではありません。
 両モードは入力と出力が他モードより限定されるため、共通fragmentを合成しない独立Promptにしています。
 
-### 各ファイルの役割
+### 役割と目的の書き分け
 
-担当する判断が切り替わる用途別Promptには、そのモードの役割を明記します。
+- 役割は「どのAgentが何を担当するか」です。完成PromptのH1で一度だけ示します。
+- 目的は「今回の呼出しで何を完了させるか」です。処理別Promptの冒頭に示します。
+- 同じ内容を「役割」と「目的」の両方へ重複記載しません。
+
+単独で使う処理別Promptは、H1を`法令調査Solver：処理名`として役割と処理を示します。
+共通Identityと合成するPromptは、`solver_identity.md`のH1の下に処理名を置きます。
+いずれも完成Promptでは、Agentの役割が一度、その呼出しの目的が一度だけ現れます。
+
+各処理別Promptは、目的、出力、完了条件を示してから、手順とルールを記載します。
+ルールが複数の判断対象を扱う場合は小見出しで分け、最後に「この処理ではしないこと」をまとめます。
 共通ルール、Toolルール、完了ルール、出力前チェック、修復断片は独立した担当者ではなく、
-合成先の役割を補足するため、重複する役割説明を置きません。
+合成先を補足する断片なので、役割や目的を重複記載しません。
 
-| ファイル | 内容 |
+この構成は、OpenAIの「役割を短く定義し、目標・成功条件・制約・出力を分ける」という指針と、
+Anthropicの「明確で直接的な指示、必要時だけ順序付き手順、指示・文脈・入力の一貫した区分」という指針に合わせます。
+
+- [OpenAI Model prompting guidance](https://developers.openai.com/api/docs/guides/latest-model)
+- [Anthropic prompting best practices](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices)
+
+### 各ファイルの目的
+
+| ファイル | 目的 |
 |---|---|
 | `solver_identity.md` | Tool結果取得後の複数モードで共有するSolver名と役割。初回3 Stepには合成しない。 |
 | `solver_common.md` | 判断主体、WorkItem・Hypothesis・Evidence、ID、Cycleに関する全モード共通の不変条件。 |
@@ -72,9 +91,10 @@ Cycle境界：取得本文の評価 ──→ Cycleの終了判断
 | `solver_question_decomposition.md` | 初回Step 1。WorkItemと`non_work_item_requirements`への要求分解。 |
 | `solver_hypothesis_generation.md` | 初回Step 2。既知WorkItemに対する法的仮説の立案。 |
 | `solver_search_planning.md` | 初回Step 3。既知Hypothesisに対する`legal_search`要求の作成。 |
-| `solver_research.md` | v154以前の一括Research Prompt。現行Legal Profileでは使用しない。 |
 | `solver_integration.md` | 観察結果の評価、状態更新、下位規範監査、次の行動。 |
 | `solver_observation_integration.md` | Cycle境界で、取得本文を既存状態へ反映する単一責務の判断。 |
+| `solver_dependency_assessment.md` | 本文評価を前提に、下位規範依存の状態だけを判断する。 |
+| `solver_dependency_action.md` | `needs_action`の下位規範依存について、再利用・検索・Graph探索・本文取得の次の行動だけを決める。 |
 | `solver_cycle_close.md` | Cycle終了と次Cycleへの構造化引継ぎ。 |
 | `solver_finalization.md` | `finalize_only=true`時の限定最終化。 |
 | `solver_reviewer_revision.md` | Reviewer Findingの受領、反映、反論、再調査。 |
@@ -98,7 +118,7 @@ Search Reviewで保留した候補と、本文取得が未完了の選択候補�
 2. 未評価OpenSearch候補があるか
 3. Reviewer Findingがあるか
 4. `finalize_only=true`か
-5. `cycle_close_required=true`か。この場合は取得本文の評価、Cycle終了判断の順に2回呼び出す
+5. `cycle_close_required=true`か。この場合は取得本文の評価、下位規範依存の評価、Cycle終了判断の順に呼び出す
 6. 初回でWorkItemがまだないか
 7. WorkItemはあるがHypothesisがまだないか
 8. 初回HypothesisはあるがToolをまだ実行していないか
@@ -125,6 +145,11 @@ Search Reviewで保留した候補と、本文取得が未完了の選択候補�
 `validation_error`を分離します。レビュー時は、生成された`instructions.md`と`output_schema.json`を対にして確認し、
 実行時入力は`input.json`、実送信内容は`request.txt`で確認します。
 
+成功済みと完全一致する検索・Graph要求はProgramが実行前に棄却しますが、契約違反の修復にはしません。
+`action_feedback`として、実行しなかった理由と直前のToolRequestだけを同じSolverへ返します。
+利用可能Toolはschemaから削除せず、既存結果の利用、条件を変えた同種Tool、別Toolのどれが妥当かを
+Solverが未確認事項に基づいて判断します。ID、引数、成功履歴の完全一致だけをProgramが検証します。
+
 CaseStoreと完全な`SolverContext`は正本として保持しますが、Providerへは用途別のread modelを渡せます。
 初回Researchは同じSolver・同じCycleで3回呼び出します。Step 1には質問だけ、Step 2には質問、WorkItem、
 `non_work_item_requirements`、Step 3には質問、WorkItem、Hypothesis、`legal_search`定義と今回の要求数上限だけを
@@ -141,8 +166,8 @@ CaseStoreの正本です。`non_work_item_requirements`は重要度や全WorkIte
 生成します。Step 3では`available_tools`の一覧全体の意味と、各Toolが持つ用途・入力Schema・戻り値説明を
 完成Promptと`input.json`の組で確認できます。
 
-Cycle境界でも同じ方式を使います。取得本文の評価には既存WorkItem、Hypothesis、grounding Evidence、
-下位規範確認対象だけを投影します。続くCycle終了判断には、その評価結果、構造上の残りCycle、
+Cycle境界でも同じ方式を使います。取得本文の評価には既存WorkItem、Hypothesis、grounding Evidenceを投影し、
+続く下位規範依存の評価には対象WorkItemとその根拠だけを投影します。Cycle終了判断には、その評価結果、構造上の残りCycle、
 引継ぎ可能なEvidenceを投影します。`fetchable_article_ids`、検索・Graph候補、Tool定義は両方へ渡さず、
 Article IDを`retain_evidence_ids`へ混入させない専用契約にします。
 前段の意味差分はProgramが機械的に更新後のread modelへ投影します。2つのLLM出力は共通`SolverDecision`へ
@@ -182,6 +207,8 @@ Toolの種類、引数、対象WorkItem・Hypothesisは変更しません。
 - 例は契約項目の必須要素にしません。`description`とルールで解消できない誤解を
   fixtureで確認した場合だけ、契約と分けた例セクションに、固定件数を誘導しない複数例を追加します。
 - 出力前完了確認は対応する処理の`*_check.md`へ置き、長い入力の前にだけ記載しません。
+- 出力前完了確認は成功条件に直結する少数項目にし、入力schemaや処理手順を再掲しません。
+- 出力前確認は5項目以内を原則とし、処理本体のルールを言い換えて全件再掲しません。
 - 完了確認fragmentを理由に入力を削除しません。用途別入力投影はModel Profileで明示し、契約テストで固定します。
 - モード固有の例外を`solver_common.md`へ追加しません。
 - Promptだけでschema違反を隠さず、出力形状は型・schema・validatorで検証します。

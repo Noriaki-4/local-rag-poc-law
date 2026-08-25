@@ -26,6 +26,20 @@ class ContractViolation(ValueError):
     pass
 
 
+class ActionRejected(ContractViolation):
+    """意味判断を伴わず、実行前に棄却できるTool行動。"""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        rejected_requests: tuple[ToolRequest, ...],
+    ) -> None:
+        super().__init__(message)
+        self.code = "already_completed"
+        self.rejected_requests = rejected_requests
+
+
 def apply_solver_decision(
     state: CaseState,
     decision: SolverDecision,
@@ -60,6 +74,7 @@ def apply_solver_decision(
     remaining_fetch_capacity: int | None = None,
     cycle_close_required: bool = False,
     can_start_next_cycle: bool = True,
+    allow_dependency_action_without_tool: bool = False,
 ) -> CaseState:
     if state.run_status != "running":
         raise ContractViolation("solver can update only a running case")
@@ -291,6 +306,16 @@ def apply_solver_decision(
             for result in state.tool_results
         )
     }
+    completed_graph_scopes = {
+        _tool_request_scope(request)
+        for request in state.tool_requests
+        if request.tool_name == "legal_graph_neighbors"
+        and any(
+            result.request_id == request.request_id
+            and result.status == "succeeded"
+            for result in state.tool_results
+        )
+    }
     new_request_ids: set[str] = set()
     new_requests_by_id = {
         item.request_id: item for item in decision.tool_requests
@@ -310,14 +335,40 @@ def apply_solver_decision(
             }
             for request in duplicate_search_scopes
         ]
-        raise ContractViolation(
+        raise ActionRejected(
             "successful legal_search scope was already completed: "
             + json.dumps(
                 duplicate_details,
                 ensure_ascii=False,
                 sort_keys=True,
                 separators=(",", ":"),
-            )
+            ),
+            rejected_requests=tuple(duplicate_search_scopes),
+        )
+    duplicate_graph_scopes = [
+        request
+        for request in decision.tool_requests
+        if request.tool_name == "legal_graph_neighbors"
+        and _tool_request_scope(request) in completed_graph_scopes
+    ]
+    if duplicate_graph_scopes:
+        duplicate_details = [
+            {
+                "work_item_id": request.work_item_id,
+                "hypothesis_ids": list(request.hypothesis_ids),
+                "arguments": request.arguments,
+            }
+            for request in duplicate_graph_scopes
+        ]
+        raise ActionRejected(
+            "successful legal_graph_neighbors scope was already completed: "
+            + json.dumps(
+                duplicate_details,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            rejected_requests=tuple(duplicate_graph_scopes),
         )
     execution_scopes = [
         (
@@ -622,13 +673,6 @@ def apply_solver_decision(
                 and item.action != "select"
             ):
                 raise ContractViolation("ledger-only Frontier may only be selected")
-            if (
-                item.action == "select"
-                and item.frontier_item_id not in selectable_frontiers
-            ):
-                raise ContractViolation(
-                    "graph review selected a pending or already fetched Frontier"
-                )
             actual = (item.article_id, item.work_item_id, item.hypothesis_id)
             if actual != expected:
                 raise ContractViolation(
@@ -640,13 +684,21 @@ def apply_solver_decision(
                 "graph review Link IDs do not match the current batch"
             )
         selected_ids = tuple(graph_review.selected_article_ids)
+        fetchable_selected_ids = tuple(
+            dict.fromkeys(
+                item.article_id
+                for item in graph_review.frontier_decisions
+                if item.action == "select"
+                and item.frontier_item_id in selectable_frontiers
+            )
+        )
         max_selected = min(
             limits.max_selected_frontier_per_step,
             effective_fetch_capacity
             if effective_fetch_capacity is not None
             else limits.max_selected_frontier_per_step,
         )
-        if len(selected_ids) > max_selected:
+        if len(fetchable_selected_ids) > max_selected:
             raise ContractViolation(
                 "graph review selected Article count exceeds the remaining limit "
                 f"of {max_selected} items"
@@ -824,7 +876,12 @@ def apply_solver_decision(
                 f"{sorted(unknown_dependency_evidence)}"
             )
         if dependency.status == "needs_action":
-            if decision.start_next_cycle:
+            if (
+                allow_dependency_action_without_tool
+                and dependency.action_request_id is None
+            ):
+                pass
+            elif decision.start_next_cycle:
                 if dependency.action_request_id is not None:
                     raise ContractViolation(
                         "cycle-boundary dependency action cannot reference a "
@@ -1005,10 +1062,6 @@ def apply_solver_decision(
                 "answer limitations and unresolved_work_item_ids must either both "
                 "be present or both be empty"
             )
-        if unresolved_work_item_ids and not unresolved_hypothesis_ids:
-            raise ContractViolation(
-                "limited answer requires unresolved_hypothesis_ids"
-            )
         for hypothesis_id in unresolved_hypothesis_ids:
             hypothesis = hypotheses[hypothesis_id]
             if hypothesis.judgment != "unresolved":
@@ -1025,12 +1078,20 @@ def apply_solver_decision(
             hypotheses[hypothesis_id].work_item_id
             for hypothesis_id in unresolved_hypothesis_ids
         }
+        unresolved_dependency_work_items = {
+            dependency.work_item_id
+            for dependency in dependency_by_key.values()
+            if dependency.status == "needs_action"
+        }
         missing_unresolved_hypotheses = (
-            unresolved_work_item_ids - unresolved_hypothesis_work_items
+            unresolved_work_item_ids
+            - unresolved_hypothesis_work_items
+            - unresolved_dependency_work_items
         )
         if missing_unresolved_hypotheses:
             raise ContractViolation(
-                "each unresolved WorkItem requires an unresolved Hypothesis: "
+                "each unresolved WorkItem requires an unresolved Hypothesis or "
+                "needs_action dependency: "
                 f"{sorted(missing_unresolved_hypotheses)}"
             )
 

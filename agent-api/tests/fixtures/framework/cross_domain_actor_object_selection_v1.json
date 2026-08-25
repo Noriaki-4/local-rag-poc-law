@@ -30,7 +30,10 @@
     "selections": [
       {
         "article_id": "article-developer-permit",
-        "reason": "質問の行為者である開発事業者の許可取得義務を直接検証できる。"
+        "reason": "質問の行為者である開発事業者の許可取得義務を直接検証できる。",
+        "matched_hypothesis_ids": [
+          "h-developer-permit"
+        ]
       }
     ]
   },

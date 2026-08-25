@@ -262,6 +262,30 @@ class SearchCandidateArticle(FrameworkModel):
     navigation_evidence_ids: tuple[str, ...] = Field(
         description="候補選択にだけ使える検索抜粋Evidence ID。回答根拠には使わない。"
     )
+    legal_function: str | None = Field(
+        default=None,
+        description="前CycleのSearch Assessmentで判断済みの法的機能。",
+    )
+    assessment_summary: str | None = Field(
+        default=None,
+        description="前CycleでSolverが作成した候補の意味要約。",
+    )
+    matched_hypothesis_ids: tuple[str, ...] = Field(
+        default=(),
+        description="前Cycleで候補が直接検証できると判断されたHypothesis ID。",
+    )
+    matched_non_work_item_requirements: tuple[str, ...] = Field(
+        default=(),
+        description="前Cycleで候補本文により満たせると判断された明示要求。",
+    )
+    regulated_actor_role: str | None = Field(
+        default=None,
+        description="前Cycleの独立した主体照合結果。",
+    )
+    actor_match_reason: str | None = Field(
+        default=None,
+        description="前Cycleの主体照合理由。",
+    )
 
 
 class ResearchStepWorkItem(FrameworkModel):
@@ -335,6 +359,21 @@ class SolverContractFeedback(FrameworkModel):
     )
 
 
+class SolverActionFeedback(FrameworkModel):
+    code: Literal["already_completed"] = Field(
+        description="実行しなかった行動の理由を表す機械判定コード。"
+    )
+    message: str = Field(
+        description=(
+            "直前の行動を実行しなかった理由。法的意味の判断ではなく、"
+            "成功済み要求との完全一致などの決定的事実を示す。"
+        )
+    )
+    rejected_tool_requests: tuple[ToolRequest, ...] = Field(
+        description="実行されずCaseStateへ保存されなかった直前のToolRequest。"
+    )
+
+
 class CompletedLegalSearch(FrameworkModel):
     work_item_id: str = Field(
         description="成功済みlegal_searchが対象にした既知WorkItem ID。",
@@ -344,6 +383,21 @@ class CompletedLegalSearch(FrameworkModel):
     )
     arguments: dict[str, Any] = Field(
         description="成功済みlegal_searchへ渡した入力引数。完全一致する再要求は禁止。",
+    )
+
+
+class CompletedGraphSearch(FrameworkModel):
+    work_item_id: str = Field(
+        description="成功済みlegal_graph_neighborsが対象にした既知WorkItem ID。",
+    )
+    hypothesis_ids: tuple[str, ...] = Field(
+        description="成功済みlegal_graph_neighborsが検証対象にした既知Hypothesis ID。",
+    )
+    arguments: dict[str, Any] = Field(
+        description=(
+            "成功済みlegal_graph_neighborsへ渡した入力引数。候補0件の場合も含み、"
+            "完全一致する再要求は禁止。"
+        ),
     )
 
 
@@ -465,6 +519,13 @@ class SolverContext(FrameworkModel):
             "同じ3要素の完全一致を再要求しないための履歴。"
         ),
     )
+    completed_graph_searches: tuple[CompletedGraphSearch, ...] = Field(
+        default=(),
+        description=(
+            "過去Cycleを含む成功済みlegal_graph_neighborsのWorkItem、Hypothesis、"
+            "入力引数。候補0件も履歴に含み、同じ3要素の完全一致を再要求しない。"
+        ),
+    )
     evidence_manifest: tuple[EvidenceManifestItem, ...] = Field(
         description="Caseで既知のEvidenceと、今回本文が提示されているかの一覧。",
     )
@@ -508,6 +569,13 @@ class SolverContext(FrameworkModel):
         default=None,
         description="直前Decisionが未適用になった構造違反と、その未適用Decision。",
     )
+    action_feedback: SolverActionFeedback | None = Field(
+        default=None,
+        description=(
+            "直前ToolRequestを実行しなかった決定的理由。契約修復ではなく、"
+            "既存結果を評価して次の行動を選ぶための観察情報。"
+        ),
+    )
 
     @property
     def material_evidence_ids(self) -> frozenset[str]:
@@ -522,6 +590,7 @@ def build_solver_context(
     finalize_only: bool,
     reviewer_findings: tuple[ReviewFinding, ...] = (),
     contract_feedback: SolverContractFeedback | None = None,
+    action_feedback: SolverActionFeedback | None = None,
     required_dependency_kind: str | None = None,
     required_dependency_work_item_ids: tuple[str, ...] = (),
     available_tools: tuple[ToolDefinition, ...] = (),
@@ -586,6 +655,7 @@ def build_solver_context(
         item
         for item in state.tool_results
         if item.cycle_no == state.research_cycle_count
+        and item.request_id not in state.integrated_tool_result_request_ids
     )
     recent_request_ids = {item.request_id for item in recent_results}
     recent_requests = tuple(
@@ -616,6 +686,34 @@ def build_solver_context(
         if hypothesis.hypothesis_id in work_item.basis_hypothesis_ids
         for evidence_id in hypothesis.evidence_ids
     )
+    active_hypothesis_evidence_ids = tuple(
+        evidence_id
+        for work_item in state.work_items
+        if work_item.state != "dropped"
+        for hypothesis in hypotheses_by_work.get(work_item.work_item_id, ())
+        for evidence_id in hypothesis.evidence_ids
+    )
+    active_hypothesis_article_ids = {
+        article_id
+        for evidence_id in active_hypothesis_evidence_ids
+        for evidence in (evidence_by_id.get(evidence_id),)
+        if evidence is not None
+        for article_id in _evidence_article_ids(evidence)
+    }
+    active_hypothesis_article_evidence_ids = tuple(
+        evidence.evidence_id
+        for evidence in state.evidence
+        if evidence.metadata.get("citationEligible") is not False
+        and any(
+            article_id in active_hypothesis_article_ids
+            for article_id in _evidence_article_ids(evidence)
+        )
+    )
+    dependency_basis_evidence_ids = tuple(
+        evidence_id
+        for decision in state.dependency_decisions
+        for evidence_id in decision.basis_evidence_ids
+    )
     reviewer_basis_evidence_ids = tuple(
         evidence_id
         for finding in reviewer_findings
@@ -624,11 +722,14 @@ def build_solver_context(
     material_ids = tuple(
         dict.fromkeys(
             [
-                *new_evidence_ids,
-                *carried_search_evidence_ids,
-                *state.retained_evidence_ids,
+                *active_hypothesis_evidence_ids,
+                *active_hypothesis_article_evidence_ids,
+                *dependency_basis_evidence_ids,
                 *declared_basis_evidence_ids,
                 *reviewer_basis_evidence_ids,
+                *state.retained_evidence_ids,
+                *new_evidence_ids,
+                *carried_search_evidence_ids,
             ]
         )
     )
@@ -678,9 +779,7 @@ def build_solver_context(
         graph_candidate_catalog,
         max_candidates=limits.max_graph_candidates_per_review_batch,
     )
-    if (
-        (remaining_fetch_capacity == 0 or time_requires_cycle_close)
-    ):
+    if remaining_fetch_capacity == 0 or time_requires_cycle_close:
         graph_review_batch = GraphReviewBatch(
             remaining_unreviewed_count=(
                 graph_review_batch.remaining_unreviewed_count
@@ -833,6 +932,16 @@ def build_solver_context(
         if request.tool_name == "legal_search"
         and request.request_id in succeeded_request_ids
     )
+    completed_graph_searches = tuple(
+        CompletedGraphSearch(
+            work_item_id=request.work_item_id,
+            hypothesis_ids=request.hypothesis_ids,
+            arguments=request.arguments,
+        )
+        for request in state.tool_requests
+        if request.tool_name == "legal_graph_neighbors"
+        and request.request_id in succeeded_request_ids
+    )
     evidence_hypothesis_candidates = _evidence_hypothesis_candidates(
         state,
         material,
@@ -888,6 +997,7 @@ def build_solver_context(
         recent_tool_requests=recent_requests,
         recent_tool_results=solver_recent_results,
         completed_legal_searches=completed_legal_searches,
+        completed_graph_searches=completed_graph_searches,
         evidence_manifest=manifest,
         graph_review_batch=graph_review_batch,
         graph_review_ledger=graph_review_ledger,
@@ -905,6 +1015,7 @@ def build_solver_context(
         dependency_decisions=state.dependency_decisions,
         reviewer_findings=reviewer_findings,
         contract_feedback=contract_feedback,
+        action_feedback=action_feedback,
     )
 
 
@@ -994,6 +1105,7 @@ def _search_candidate_projection(
     recent_requests_by_id: dict[str, ToolRequest],
     evidence_by_id: dict[str, Evidence],
     fetchable_article_ids: tuple[str, ...],
+    assessment_by_article: dict[str, Any] | None = None,
 ) -> tuple[SearchCandidateArticle, ...]:
     """検索要求と候補Articleの既存参照だけをArticle単位にまとめる。"""
 
@@ -1044,6 +1156,7 @@ def _search_candidate_projection(
                     (evidence_id,),
                 )
 
+    assessment_by_article = assessment_by_article or {}
     return tuple(
         SearchCandidateArticle(
             article_id=article_id,
@@ -1056,6 +1169,38 @@ def _search_candidate_projection(
             ),
             search_request_ids=tuple(item["search_request_ids"]),
             navigation_evidence_ids=tuple(item["navigation_evidence_ids"]),
+            legal_function=(
+                assessment_by_article[article_id].legal_function
+                if article_id in assessment_by_article
+                else None
+            ),
+            assessment_summary=(
+                assessment_by_article[article_id].summary
+                if article_id in assessment_by_article
+                else None
+            ),
+            matched_hypothesis_ids=(
+                assessment_by_article[article_id].matched_hypothesis_ids
+                if article_id in assessment_by_article
+                else ()
+            ),
+            matched_non_work_item_requirements=(
+                assessment_by_article[
+                    article_id
+                ].matched_non_work_item_requirements
+                if article_id in assessment_by_article
+                else ()
+            ),
+            regulated_actor_role=(
+                assessment_by_article[article_id].regulated_actor_role
+                if article_id in assessment_by_article
+                else None
+            ),
+            actor_match_reason=(
+                assessment_by_article[article_id].actor_match_reason
+                if article_id in assessment_by_article
+                else None
+            ),
         )
         for article_id, item in candidates.items()
     )
@@ -1100,11 +1245,17 @@ def _carried_search_candidate_projection(
         for result in state.tool_results
         if result.request_id in reviewed_request_id_set
     )
+    assessment_by_article = {
+        assessment.article_id: assessment
+        for review in state.search_candidate_reviews
+        for assessment in review.assessments
+    }
     return _search_candidate_projection(
         recent_results=reviewed_results,
         recent_requests_by_id=requests_by_id,
         evidence_by_id=evidence_by_id,
         fetchable_article_ids=carried_article_ids,
+        assessment_by_article=assessment_by_article,
     )
 
 

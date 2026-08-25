@@ -1,0 +1,2373 @@
+{
+  "fixtureId": "tob-exceptions-integration-article-alias-v1",
+  "questionId": "tob-exceptions",
+  "source": {
+    "diagnosticsMode": "snapshot",
+    "diagnosticCaseId": "legal-34a216fd98e74e638dbae42eb7a983b7",
+    "sequence": 25,
+    "purpose": "integration",
+    "model": "gpt-4o-mini-2024-07-18",
+    "profileName": "legal-default",
+    "profileVersion": "206"
+  },
+  "checkpoint": {
+    "resumeFrom": "integration",
+    "approved": true,
+    "approvedBy": "codex-regression",
+    "sourceProvider": "openai",
+    "sourceModel": "gpt-4o-mini-2024-07-18"
+  },
+  "expectations": {
+    "researchCycleCount": 1,
+    "remainingFetchCapacity": 1,
+    "workItemCount": 2,
+    "hypothesisCount": 2,
+    "materialEvidenceCount": 29,
+    "recentToolResultCount": 3,
+    "fetchableArticleCount": 8,
+    "fetchedResourceCount": 2,
+    "evidenceRoleCounts": {
+      "search_navigation": 13,
+      "retrieved_text": 16
+    }
+  },
+  "caseState": {
+    "case_id": "fixture-tob-exceptions-integration-article-alias-v1",
+    "question": "公開買付けによらずに株券等を買い付けられる主な場合と、株券等の所有者が少数である場合の具体的な条件を、根拠条文とともに説明してください。",
+    "non_work_item_requirements": [
+      "根拠条文を提示すること。"
+    ],
+    "run_status": "running",
+    "research_cycle_count": 1,
+    "work_items": [
+      {
+        "work_item_id": "wi-1",
+        "parent_work_item_id": null,
+        "question": "公開買付けによらずに株券等を買い付けられる主な場合についての法的結論を出す。",
+        "actor_scope": "質問者は公開買付けを行わない行為者",
+        "actor_relation": "different",
+        "state": "open",
+        "resolution": null,
+        "basis_hypothesis_ids": [],
+        "replaces_work_item_id": null
+      },
+      {
+        "work_item_id": "wi-2",
+        "parent_work_item_id": null,
+        "question": "株券等の所有者が少数である場合の具体的な条件についての法的結論を出す。",
+        "actor_scope": "質問者は株券等の所有者が少数である状況に関与する行為者",
+        "actor_relation": "different",
+        "state": "open",
+        "resolution": null,
+        "basis_hypothesis_ids": [],
+        "replaces_work_item_id": null
+      }
+    ],
+    "hypotheses": [
+      {
+        "hypothesis_id": "h-1",
+        "work_item_id": "wi-1",
+        "statement": "質問者は公開買付けを行わない行為者が、公開買付けによらずに株券等を買い付ける主な場合についての法的条件を満たす。",
+        "actor_scope": "質問者は公開買付けを行わない行為者",
+        "actor_relation": "different",
+        "judgment": "unresolved",
+        "evidence_ids": [],
+        "gaps": [
+          "公開買付けによらずに株券等を買い付けられる主な場合の具体的な条件。"
+        ]
+      },
+      {
+        "hypothesis_id": "h-2",
+        "work_item_id": "wi-2",
+        "statement": "質問者は株券等の所有者が少数である状況に関与する行為者が、株券等の所有者が少数である場合の具体的な条件を満たす。",
+        "actor_scope": "質問者は株券等の所有者が少数である状況に関与する行為者",
+        "actor_relation": "different",
+        "judgment": "unresolved",
+        "evidence_ids": [],
+        "gaps": [
+          "株券等の所有者が少数である場合の具体的な条件。"
+        ]
+      }
+    ],
+    "tool_requests": [
+      {
+        "request_id": "solver-tool-927531f635c14f23a12e762cf48932d4",
+        "work_item_id": "wi-1",
+        "tool_name": "legal_search",
+        "arguments": {
+          "query": "公開買付けを行わない行為者が株券等を買い付ける条件",
+          "doc_types": [
+            "law"
+          ],
+          "document_ids": []
+        },
+        "purpose": "公開買付けによらずに株券等を買い付けられる主な場合についての法的条件を確認する。",
+        "hypothesis_ids": [
+          "h-1"
+        ]
+      },
+      {
+        "request_id": "solver-tool-ce12bbbeb7074664b14079e399537ebf",
+        "work_item_id": "wi-2",
+        "tool_name": "legal_search",
+        "arguments": {
+          "query": "株券等の所有者が少数である場合の条件",
+          "doc_types": [
+            "law"
+          ],
+          "document_ids": []
+        },
+        "purpose": "株券等の所有者が少数である場合の具体的な条件を確認する。",
+        "hypothesis_ids": [
+          "h-2"
+        ]
+      },
+      {
+        "request_id": "search-review-fetch-fa199ade56065412650d2c31",
+        "work_item_id": "wi-1",
+        "tool_name": "fetch_articles",
+        "arguments": {
+          "article_ids": [
+            "law-323AC0000000025-article-27_2",
+            "law-402M50000040038-article-2_5"
+          ]
+        },
+        "purpose": "Solverが選んだ検索候補Article本文を取得する",
+        "hypothesis_ids": [
+          "h-1",
+          "h-2"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_2-paragraph-4:70b62759dc047ae9",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-4",
+        "content": "[一致箇所1] 第二十七条の二 （発行者以外の者による株券等の公開買付け） 第4項\n４第一項本文に規定する公開買付けによる株券等の買付け等を行う場合には、株券等の管理、買付け等の代金の支払その他の政令で定める事務については、金融商品取引業者（第二十八条第一項に規定する第一種金融商品取引業を行う者に限る。第二十七条の十二第三項において同じ。）又は銀行等（銀行、協同組織金融機関その他政令で定める金融機関をいう。第二十七条の十二第三項において同じ。）に行わせなければならない。\n\n[一致箇所2] 第二十七条の二 （発行者以外の者による株券等の公開買付け） 第3項\n３第一項本文に規定する公開買付けによる株券等の買付け等を行う場合には、買付け等の価格（買付け以外の場合にあつては、買付けの価格に準ずるものとして政令で定めるものとする。以下この節において同じ。）については、政令で定めるところにより、均一の条件によらなければならない。\n\n[一致箇所3] 第二十七条の二 （発行者以外の者による株券等の公開買付け） 第1項\n1その株券、新株予約権付社債券その他の有価証券で政令で定めるもの（以下この章及び第二十七条の三十の十一（第五項を除く。）において「株券等」という。）について有価証券報告書を提出しなければならない発行者又は特定上場有価証券（流通状況がこれに準ずるものとして政令で定めるものを含み、株券等に限る。）の発行者の株券等につき、当該発行者以外の者が行う買付け等（株券等の買付けその他の有償の譲受けをいい、これに類するものとして政令で定めるものを含む。以下この節において同じ。）であつて次のいずれかに該当するものは、公開買付けによらなければならない。ただし、適用除外買付け等（新株予約権（会社法第二百七十七条の規定により割り当てられるものであつて、当該新株予約権が行使されることが確保されることにより公開買付けによらないで取得されても投資者の保護のため支障を生ずることがないと認められるものとして内閣府令で定めるものを除く。以下この項において同じ。）を有する者が当該新株予約権を行使することにより行う株券等の買付け等、株券等の買付け等を行う者がその者の特別関係者（第七項第一号に掲げる者のうち内閣府令で定めるものに限る。）から行う株券等の買付け等その他政令で定める株券等の買付け等をいう。）は、この限りでない。\n\n[一致箇所4] 第二十七条の二 （発行者以外の者による株券等の公開買付け） 第5項\n５第一項本文に規定する公開買付けによる株券等の買付け等を行う場合には、前三項の規定その他この節に定めるところによるほか、政令で定める条件及び方法によらなければならない。\n\n[一致箇所5] 第二十七条の二 （発行者以外の者による株券等の公開買付け） 第6項\n６この条において「公開買付け」とは、不特定かつ多数の者に対し、公告により株券等の買付け等の申込み又は売付け等（売付けその他の有償の譲渡をいう。以下この章において同じ。）の申込みの勧誘を行い、取引所金融商品市場外で株券等の買付け等を行うことをいう。\n\n[一致箇所6] 第二十七条の二 （発行者以外の者による株券等の公開買付け） 第1項第1号\nその株券、新株予約権付社債券その他の有価証券で政令で定めるもの（以下この章及び第二十七条の三十の十一（第五項を除く。）において「株券等」という。）について有価証券報告書を提出しなければならない発行者又は特定上場有価証券（流通状況がこれに準ずるものとして政令で定めるものを含み、株券等に限る。）の発行者の株券等につき、当該発行者以外の者が行う買付け等（株券等の買付けその他の有償の譲受けをいい、これに類するものとして政令で定めるものを含む。以下この節において同じ。）であつて次のいずれかに該当するものは、公開買付けによらなければならない。ただし、適用除外買付け等（新株予約権（会社法第二百七十七条の規定\n第1号　株券等の買付け等の後におけるその者の所有（これに準ずるものとして政令で定める場合を含む。以下この節において同じ。）に係る株券等の株券等所有割合（その者に特別関係者（第七項第一号に掲げる者については、内閣府令で定める者を除く。）がある場合にあつては、その株券等所有割合を加算したもの。以下この項において同じ。）が百分の三十を超えることとなる場合又は株券等の買付け等の前におけるその者の所有に係る株券等の株券等所有割合が既に百分の三十を超えている場合における当該株券等の買付け等（株券等の買付け等の前におけるその者の所有に係る株券等の株券等所有割合が既に百分の三十を超えている場合における株券等の買付け等のうち、買付け等を行う株券等の数又は買付け等の価格の総額が著しく少ない場合として政令で定める場合に該当し、かつ、当該株券等の買付け等の後におけるその者の所有に係る株券等の株券等所有割合が政令で定める割合以上とならないもの（次号に規定する特定市場外買付け等に該当しないものに限る。）を除く。）\n\n[一致箇所7] 第二十七条の二 （発行者以外の者による株券等の公開買付け） 第2項\n２前項本文に規定する公開買付けによる株券等の買付け等は、政令で定める期間の範囲内で買付け等の期間を定めて、行わなければならない。\n\n[一致箇所8] 第二十七条の二 （発行者以外の者による株券等の公開買付け） 第7項\n７第一項の「特別関係者」とは、次に掲げる者をいう。株券等の買付け等を行う者と、株式の所有関係その他の政令で定める特別の関係にある者株券等の買付け等を行う者との間で、共同して当該株券等を取得し、若しくは譲渡し、若しくは当該株券等の発行者の株主としての議決権その他の権利を行使すること又は当該株券等の買付け等の後に相互に当該株券等を譲渡し、若しくは譲り受けることを合意している者\n\n[一致箇所9] 第二十七条の二 （発行者以外の者による株券等の公開買付け） 第8項\n８第一項の「株券等所有割合」とは、次に掲げる割合をいう。株券等の買付け等を行う者にあつては、内閣府令で定めるところにより、その者の所有に係る当該株券等（その所有の態様その他の事情を勘案して内閣府令で定めるものを除く。以下この項において同じ。）に係る議決権の数（株券については内閣府令で定めるところにより計算した株式に係る議決権の数を、その他のものについては内閣府令で定める議決権の数をいう。以下この項において同じ。）の合計を、当該発行者の総議決権の数にその者及びその者の特別関係者の所有に係る当該発行者の発行する新株予約権付社債券その他の政令で定める有価証券に係る議決権の数を加算した数で除して得た割合前項の特別関係者（同項第二号に掲げる者で当該株券等の発行者の株券等の買付け等を行うものを除く。）にあつては、内閣府令で定めるところにより、その者の所有に係る当該株券等に係る議決権の数の合計を、当該発行者の総議決権の数にその者及び前号に掲げる株券等の買付け等を行う者の所有に係る当該発行者の発行する新株予約権付社債券その他の政令で定める有価証券に係る議決権の数を加算した数で除して得た割合\n\n[一致箇所10] 第二十七条の二 （発行者以外の者による株券等の公開買付け） 第1項第2号\nその株券、新株予約権付社債券その他の有価証券で政令で定めるもの（以下この章及び第二十七条の三十の十一（第五項を除く。）において「株券等」という。）について有価証券報告書を提出しなければならない発行者又は特定上場有価証券（流通状況がこれに準ずるものとして政令で定めるものを含み、株券等に限る。）の発行者の株券等につき、当該発行者以外の者が行う買付け等（株券等の買付けその他の有償の譲受けをいい、これに類するものとして政令で定めるものを含む。以下この節において同じ。）であつて次のいずれかに該当するものは、公開買付けによらなければならない。ただし、適用除外買付け等（新株予約権（会社法第二百七十七条の規定\n第2号　特定市場外買付け等（取引所金融商品市場外における株券等の買付け等（取引所金融商品市場における有価証券の売買等に準ずるものとして政令で定める取引による株券等の買付け等及び著しく少数の者から買付け等を行うものとして政令で定める場合における株券等の買付け等を除く。）をいう。以下この号において同じ。）の後におけるその者の所有に係る株券等の株券等所有割合が百分の五を超えることとなる場合又は特定市場外買付け等の前におけるその者の所有に係る株券等の株券等所有割合が既に百分の五を超えている場合であつて、当該特定市場外買付け等の後におけるその者の所有に係る株券等の株券等所有割合が百分の三十以下となるときにおける当該特定市場外買付け等\n\n[一致箇所11] 第二十七条の二 （発行者以外の者による株券等の公開買付け） 第1項第3号\nその株券、新株予約権付社債券その他の有価証券で政令で定めるもの（以下この章及び第二十七条の三十の十一（第五項を除く。）において「株券等」という。）について有価証券報告書を提出しなければならない発行者又は特定上場有価証券（流通状況がこれに準ずるものとして政令で定めるものを含み、株券等に限る。）の発行者の株券等につき、当該発行者以外の者が行う買付け等（株券等の買付けその他の有償の譲受けをいい、これに類するものとして政令で定めるものを含む。以下この節において同じ。）であつて次のいずれかに該当するものは、公開買付けによらなければならない。ただし、適用除外買付け等（新株予約権（会社法第二百七十七条の規定\n第3号　その他前二号に掲げる株券等の買付け等に準ずるものとして政令で定める株券等の買付け等",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_2-paragraph-4",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第4項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": 11,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-7-paragraph-1-item-9",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-9",
+        "content": "法第二十七条の二第一項ただし書に規定する政令で定める株券等の買付け等は、次に掲げる株券等の買付け等（同項に規定する買付け等をいう。以下この節において同じ。）とする。ただし、第七号及び第八号に掲げる株券等の買付け等にあつては、同項第二号に規定する特定市場外買付け等を除く。\n第9号　株券等の所有者が少数である場合として内閣府令で定める場合であつて、当該株券等の買付け等を公開買付けによらないで行うことにつき、当該株券等の全ての所有者が同意している場合として内閣府令で定める場合における当該株券等の買付け等",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "sourceContentUnitId": "law-340CO0000000321-article-7-paragraph-1-item-9",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第七条 （公開買付けの適用除外となる買付け等） 第1項第9号",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_4-paragraph-1",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_4-paragraph-1",
+        "content": "公開買付者等は、次項に規定する場合を除き、その公開買付けにつき有価証券をもつてその買付け等の対価とする場合において、当該有価証券がその募集又は売出しにつき第四条第一項本文、第二項本文又は第三項本文の規定の適用を受けるものであるときは、公開買付届出書又は訂正届出書の提出と同時に当該有価証券の発行者が内閣総理大臣にこれらの規定による届出を行つていなければ、売付け等の申込みの勧誘その他の当該公開買付けに係る内閣府令で定める行為をしてはならない。",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_4",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_4-paragraph-1",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十七条の四 （有価証券をもつて対価とする買付け等） 第1項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-2_5-paragraph-1",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-1",
+        "content": "令第七条第一項第九号に規定する株券等の所有者が少数である場合として内閣府令で定める場合は、当該株券等の所有者が二十五名未満である場合とする。",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_5",
+          "sourceContentUnitId": "law-402M50000040038-article-2_5-paragraph-1",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二条の五 （株券等の所有者が少数である場合） 第1項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-6-paragraph-1",
+        "source_ref": "opensearch:law-340CO0000000321-article-6-paragraph-1",
+        "content": "法第二十七条の二第一項に規定する有価証券で政令で定めるものは、次に掲げる有価証券（株主総会において決議をすることができる事項の全部につき議決権（社債、株式等の振替に関する法律第百四十七条第一項又は第百四十八条第一項（これらの規定を同法第二百二十八条第一項において準用する場合を含む。）の規定により発行者に対抗することができない有価証券に係る議決権を含む。）を行使することができない株式（第十四条の五の二において「議決権のない株式」という。）に係る株券その他の内閣府令で定めるものを除く。以下この節において「株券等」という。）とする。株券、新株予約権証券及び新株予約権付社債券外国の者の発行する証券又は証書で前号に掲げる有価証券の性質を有するもの投資証券等及び新投資口予約権証券等有価証券信託受益証券で、受託有価証券が前三号に掲げる有価証券であるもの法第二条第一項第二十号に掲げる有価証券で、第一号から",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-6",
+          "sourceContentUnitId": "law-340CO0000000321-article-6-paragraph-1",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第六条 （公開買付けによらなければならない有価証券等） 第1項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": true
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-11",
+        "source_ref": "opensearch:law-402M50000040038-article-11",
+        "content": "（公開買付者が非居住者である場合の代理人）\n第十一条\n非居住者（外国為替及び外国貿易法（昭和二十四年法律第二百二十八号）第六条第一項第六号に規定する非居住者をいう。以下同じ。）である公開買付者が、法第二十七条の三第二項の規定により公開買付届出書を提出する場合には、本邦内に住所又は事務所を有する者であって、当該公開買付けに係る書類の提出に関する一切の行為につき、当該公開買付者を代理する権限を有するものを定めなければならない。",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-11",
+          "sourceContentUnitId": "law-402M50000040038-article-11",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第十一条 （公開買付者が非居住者である場合の代理人）",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_3-paragraph-3",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_3-paragraph-3",
+        "content": "３公開買付者、その特別関係者（第二十七条の二第七項に規定する特別関係者をいう。以下この節において同じ。）その他政令で定める関係者（以下この節において「公開買付者等」という。）は、その公開買付けにつき公開買付開始公告が行われた日の翌日以後は、当該公開買付者が公開買付届出書を内閣総理大臣に提出していなければ、売付け等の申込みの勧誘その他の当該公開買付けに係る内閣府令で定める行為をしてはならない。",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_3",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_3-paragraph-3",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十七条の三 （公開買付開始公告及び公開買付届出書の提出） 第3項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-2_5-paragraph-1:a48f6f61cd208480",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-1",
+        "content": "[一致箇所1] 第二条の五 （株券等の所有者が少数である場合） 第1項\n令第七条第一項第九号に規定する株券等の所有者が少数である場合として内閣府令で定める場合は、当該株券等の所有者が二十五名未満である場合とする。\n\n[一致箇所2] 第二条の五 （株券等の所有者が少数である場合） 第2項\n２令第七条第一項第九号に規定する全ての所有者が同意している場合として内閣府令で定める場合は、次の各号に掲げる区分に応じ、当該各号に定める場合とする。当該株券等の買付け等の後における当該株券等の買付け等を行う者の所有に係る株券等の株券等所有割合とその者の特別関係者（法第二十七条の二第一項第一号に規定する特別関係者をいう。）の株券等所有割合を合計した割合が三分の二以上となる場合であって、当該株券等の買付け等の対象とならない株券等（以下この号において「買付け等対象外株券等」という。）があるとき当該株券等の買付け等の対象となる株券等に係る買付け等を公開買付けによらないで行うことに同意する旨を記載した書面が当該株券等の買付け等の対象となる株券等の全ての所有者から提出され、かつ、買付け等対象外株券等についてイ又はロの条件が満たされている場合当該株券等の買付け等を公開買付けによらないで行うことに同意することにつき、当該買付け等対象外株券等に係る種類株主総会（会社法第二条第十四号に規定する種類株主総会をいう。第五条第三項第一号において同じ。）の決議が行われていること。買付け等対象外株券等の所有者が二十五名未満である場合であって、当該株券等の買付け等を公開買付けによらないで行うことにつき、当該買付け等対象外株券等の全ての所有者が同意し、その旨を記載した書面を提出していること。前号に掲げる場合以外の場合当該株券等の買付け等の対象となる株券等に係る買付け等を公開買付けによらないで行うことに同意する旨を記載した書面が当該株券等の買付け等の対象となる株券等の全ての所有者から提出された場合\n\n[一致箇所3] 第二条の五 （株券等の所有者が少数である場合） 第3項\n３株券等の所有者（以下この条において「所有者」という。）は、前項第一号本文及び同号ロ又は同項第二号の規定による書面の提出に代えて、同項の規定により書面に記載する事項（以下この項において「記載事項」という。）を電子情報処理組織を使用する方法その他の情報通信の技術を利用する方法であって次に掲げるものにより提供することができる。この場合において、当該所有者は、当該書面を提出したものとみなす。電子情報処理組織を使用する方法のうちイ又はロに掲げるもの所有者の使用に係る電子計算機と株券等の買付け等を行う者の使用に係る電子計算機とを接続する電気通信回線を通じて送信し、受信者の使用に係る電子計算機に備えられたファイルに記録する方法所有者の使用に係る電子計算機に備えられたファイルに記録された記載事項を電気通信回線を通じて株券等の買付け等を行う者の閲覧に供し、当該株券等の買付け等を行う者の使用に係る電子計算機に備えられたファイルに記載事項を記録する方法電磁的記録媒体（法第十三条第五項に規定する電磁的記録に係る記録媒体をいう。第五条第八項第二号及び第三十三条の三第二項第二号において同じ。）をもって調製するファイルに記載事項を記録したものを交付する方法\n\n[一致箇所4] 第二条の五 （株券等の所有者が少数である場合） 第4項\n４前項各号に掲げる方法は、株券等の買付け等を行う者がファイルへの記録を出力することにより書面を作成することができるものでなければならない。\n\n[一致箇所5] 第二条の五 （株券等の所有者が少数である場合） 第5項\n５第三項の「電子情報処理組織」とは、所有者の使用に係る電子計算機と、株券等の買付け等を行う者の使用に係る電子計算機とを電気通信回線で接続した電子情報処理組織をいう。",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_5",
+          "sourceContentUnitId": "law-402M50000040038-article-2_5-paragraph-1",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二条の五 （株券等の所有者が少数である場合） 第1項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": 5,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_2-paragraph-8",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-8",
+        "content": "８第一項の「株券等所有割合」とは、次に掲げる割合をいう。株券等の買付け等を行う者にあつては、内閣府令で定めるところにより、その者の所有に係る当該株券等（その所有の態様その他の事情を勘案して内閣府令で定めるものを除く。以下この項において同じ。）に係る議決権の数（株券については内閣府令で定めるところにより計算した株式に係る議決権の数を、その他のものについては内閣府令で定める議決権の数をいう。以下この項において同じ。）の合計を、当該発行者の総議決権の数にその者及びその者の特別関係者の所有に係る当該発行者の発行する新株予約権付社債券その他の政令で定める有価証券に係る議決権の数を加算した数で除して得た割合前項の特別関係者（同項第二号に掲げる者で当該株券等の発行者の株券等の買付け等を行うものを除く。）にあつては、内閣府令で定めるところにより、その者の所有に係る当該株券等に係る議決権の数の合計を、当該発",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_2-paragraph-8",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第8項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": true
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-7-paragraph-3",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-3",
+        "content": "３法第二十七条の二第一項第一号に規定する買付け等を行う株券等の数又は買付け等の価格の総額が著しく少ない場合として政令で定める場合は、当該株券等の買付け等により増加する当該株券等の買付け等を行う者の所有に係る株券等の株券等所有割合（同号に規定する株券等所有割合をいう。次条第五項第三号及び第十四条第一項第二号イにおいて同じ。）が千分の五未満である場合（当該株券等の買付け等を行う者が当該株券等の買付け等を行う日前六月間において当該株券等の発行者が発行する株券等の買付け等（公開買付けによる買付け等及び法第二十七条の二第一項ただし書に規定する適用除外買付け等を除く。）を行つている場合を除く。）とする。",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "sourceContentUnitId": "law-340CO0000000321-article-7-paragraph-3",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第七条 （公開買付けの適用除外となる買付け等） 第3項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-2_4-paragraph-2",
+        "source_ref": "opensearch:law-402M50000040038-article-2_4-paragraph-2",
+        "content": "２令第七条第一項第八号に規定する内閣府令で定める者は、当該株券等の買付け等を行う日以前一年間継続して前項各号に掲げる者に該当していた者（当該株券等の買付け等が、前条第一項各号に掲げる有価証券のいずれかに該当する株券等に係る買付け等である場合であって、その者が当該株券等の発行者である場合を除く。）以外の者とする。",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_4",
+          "sourceContentUnitId": "law-402M50000040038-article-2_4-paragraph-2",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二条の四 （関係法人等） 第2項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-2_6",
+        "source_ref": "opensearch:law-402M50000040038-article-2_6",
+        "content": "（適用除外となる買付け等）\n第二条の六\n令第七条第一項第十一号に規定する内閣府令で定める場合は、次に掲げる場合とする。株券等の発行者の役員（令第七条第一項第十一号に規定する役員をいう。以下同じ。）又は従業員が当該発行者の他の役員又は従業員と共同して当該発行者の株券等の買付け等を行う場合（当該発行者が会社法第百五十六条第一項（同法第百六十五条第三項の規定により読み替えて適用する場合を含む。第七条第一項第十号において同じ。）の規定に基づき買付け等を行った株券以外の株券等の買付け等を行うときは、金融商品取引業者等（法第三十四条に規定する金融商品取引業者等をいう。第三条第二項第二号及び第七条第一項第十号において同じ。）に委託して行う場合に限る。）であって、当該株券等の買付け等が一定の計画に従い、個別の投資判断に基づかず、継続的に行われる場合（各役員又は従業員の一回当たりの拠出金額が二百万円に満たな",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_6",
+          "sourceContentUnitId": "law-402M50000040038-article-2_6",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二条の六 （適用除外となる買付け等）",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": true
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-8-paragraph-3",
+        "source_ref": "opensearch:law-340CO0000000321-article-8-paragraph-3",
+        "content": "３公開買付けによる株券等の買付け等を行う場合には、買付け等の価格は、当該株券等の種類及び内容に応じ、全ての応募株主等（法第二十七条の十二第一項に規定する応募株主等をいう。以下この節において同じ。）について均一にしなければならない。ただし、公開買付者が応募株主等に複数の種類の対価を選択させる場合には、選択することができる対価の種類を全ての応募株主等につき同一とし、かつ、それぞれの種類ごとに当該種類の対価を選択した応募株主等について均一にしなければならない。",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-8",
+          "sourceContentUnitId": "law-340CO0000000321-article-8-paragraph-3",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第八条 （買付け等の期間等） 第3項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-1",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-1",
+        "content": "1その株券、新株予約権付社債券その他の有価証券で政令で定めるもの（以下この章及び第二十七条の三十の十一（第五項を除く。）において「株券等」という。）について有価証券報告書を提出しなければならない発行者又は特定上場有価証券（流通状況がこれに準ずるものとして政令で定めるものを含み、株券等に限る。）の発行者の株券等につき、当該発行者以外の者が行う買付け等（株券等の買付けその他の有償の譲受けをいい、これに類するものとして政令で定めるものを含む。以下この節において同じ。）であつて次のいずれかに該当するものは、公開買付けによらなければならない。ただし、適用除外買付け等（新株予約権（会社法第二百七十七条の規定により割り当てられるものであつて、当該新株予約権が行使されることが確保されることにより公開買付けによらないで取得されても投資者の保護のため支障を生ずることがないと認められるものとして内閣府令で定めるものを除く。以下この項において同じ。）を有する者が当該新株予約権を行使することにより行う株券等の買付け等、株券等の買付け等を行う者がその者の特別関係者（第七項第一号に掲げる者のうち内閣府令で定めるものに限る。）から行う株券等の買付け等その他政令で定める株券等の買付け等をいう。）は、この限りでない。",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_2-paragraph-1",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第1項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-1-item-1",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-1-item-1",
+        "content": "その株券、新株予約権付社債券その他の有価証券で政令で定めるもの（以下この章及び第二十七条の三十の十一（第五項を除く。）において「株券等」という。）について有価証券報告書を提出しなければならない発行者又は特定上場有価証券（流通状況がこれに準ずるものとして政令で定めるものを含み、株券等に限る。）の発行者の株券等につき、当該発行者以外の者が行う買付け等（株券等の買付けその他の有償の譲受けをいい、これに類するものとして政令で定めるものを含む。以下この節において同じ。）であつて次のいずれかに該当するものは、公開買付けによらなければならない。ただし、適用除外買付け等（新株予約権（会社法第二百七十七条の規定\n第1号　株券等の買付け等の後におけるその者の所有（これに準ずるものとして政令で定める場合を含む。以下この節において同じ。）に係る株券等の株券等所有割合（その者に特別関係者（第七項第一号に掲げる者については、内閣府令で定める者を除く。）がある場合にあつては、その株券等所有割合を加算したもの。以下この項において同じ。）が百分の三十を超えることとなる場合又は株券等の買付け等の前におけるその者の所有に係る株券等の株券等所有割合が既に百分の三十を超えている場合における当該株券等の買付け等（株券等の買付け等の前におけるその者の所有に係る株券等の株券等所有割合が既に百分の三十を超えている場合における株券等の買付け等のうち、買付け等を行う株券等の数又は買付け等の価格の総額が著しく少ない場合として政令で定める場合に該当し、かつ、当該株券等の買付け等の後におけるその者の所有に係る株券等の株券等所有割合が政令で定める割合以上とならないもの（次号に規定する特定市場外買付け等に該当しないものに限る。）を除く。）",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_2-paragraph-1-item-1",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第1項第1号",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-1-item-2",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-1-item-2",
+        "content": "その株券、新株予約権付社債券その他の有価証券で政令で定めるもの（以下この章及び第二十七条の三十の十一（第五項を除く。）において「株券等」という。）について有価証券報告書を提出しなければならない発行者又は特定上場有価証券（流通状況がこれに準ずるものとして政令で定めるものを含み、株券等に限る。）の発行者の株券等につき、当該発行者以外の者が行う買付け等（株券等の買付けその他の有償の譲受けをいい、これに類するものとして政令で定めるものを含む。以下この節において同じ。）であつて次のいずれかに該当するものは、公開買付けによらなければならない。ただし、適用除外買付け等（新株予約権（会社法第二百七十七条の規定\n第2号　特定市場外買付け等（取引所金融商品市場外における株券等の買付け等（取引所金融商品市場における有価証券の売買等に準ずるものとして政令で定める取引による株券等の買付け等及び著しく少数の者から買付け等を行うものとして政令で定める場合における株券等の買付け等を除く。）をいう。以下この号において同じ。）の後におけるその者の所有に係る株券等の株券等所有割合が百分の五を超えることとなる場合又は特定市場外買付け等の前におけるその者の所有に係る株券等の株券等所有割合が既に百分の五を超えている場合であつて、当該特定市場外買付け等の後におけるその者の所有に係る株券等の株券等所有割合が百分の三十以下となるときにおける当該特定市場外買付け等",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_2-paragraph-1-item-2",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第1項第2号",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-1-item-3",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-1-item-3",
+        "content": "その株券、新株予約権付社債券その他の有価証券で政令で定めるもの（以下この章及び第二十七条の三十の十一（第五項を除く。）において「株券等」という。）について有価証券報告書を提出しなければならない発行者又は特定上場有価証券（流通状況がこれに準ずるものとして政令で定めるものを含み、株券等に限る。）の発行者の株券等につき、当該発行者以外の者が行う買付け等（株券等の買付けその他の有償の譲受けをいい、これに類するものとして政令で定めるものを含む。以下この節において同じ。）であつて次のいずれかに該当するものは、公開買付けによらなければならない。ただし、適用除外買付け等（新株予約権（会社法第二百七十七条の規定\n第3号　その他前二号に掲げる株券等の買付け等に準ずるものとして政令で定める株券等の買付け等",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_2-paragraph-1-item-3",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第1項第3号",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-2",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-2",
+        "content": "２前項本文に規定する公開買付けによる株券等の買付け等は、政令で定める期間の範囲内で買付け等の期間を定めて、行わなければならない。",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_2-paragraph-2",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第2項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-3",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-3",
+        "content": "３第一項本文に規定する公開買付けによる株券等の買付け等を行う場合には、買付け等の価格（買付け以外の場合にあつては、買付けの価格に準ずるものとして政令で定めるものとする。以下この節において同じ。）については、政令で定めるところにより、均一の条件によらなければならない。",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_2-paragraph-3",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第3項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-4",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-4",
+        "content": "４第一項本文に規定する公開買付けによる株券等の買付け等を行う場合には、株券等の管理、買付け等の代金の支払その他の政令で定める事務については、金融商品取引業者（第二十八条第一項に規定する第一種金融商品取引業を行う者に限る。第二十七条の十二第三項において同じ。）又は銀行等（銀行、協同組織金融機関その他政令で定める金融機関をいう。第二十七条の十二第三項において同じ。）に行わせなければならない。",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_2-paragraph-4",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第4項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-5",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-5",
+        "content": "５第一項本文に規定する公開買付けによる株券等の買付け等を行う場合には、前三項の規定その他この節に定めるところによるほか、政令で定める条件及び方法によらなければならない。",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_2-paragraph-5",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第5項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-6",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-6",
+        "content": "６この条において「公開買付け」とは、不特定かつ多数の者に対し、公告により株券等の買付け等の申込み又は売付け等（売付けその他の有償の譲渡をいう。以下この章において同じ。）の申込みの勧誘を行い、取引所金融商品市場外で株券等の買付け等を行うことをいう。",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_2-paragraph-6",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第6項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-7",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-7",
+        "content": "７第一項の「特別関係者」とは、次に掲げる者をいう。株券等の買付け等を行う者と、株式の所有関係その他の政令で定める特別の関係にある者株券等の買付け等を行う者との間で、共同して当該株券等を取得し、若しくは譲渡し、若しくは当該株券等の発行者の株主としての議決権その他の権利を行使すること又は当該株券等の買付け等の後に相互に当該株券等を譲渡し、若しくは譲り受けることを合意している者",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_2-paragraph-7",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第7項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-8",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-8",
+        "content": "８第一項の「株券等所有割合」とは、次に掲げる割合をいう。株券等の買付け等を行う者にあつては、内閣府令で定めるところにより、その者の所有に係る当該株券等（その所有の態様その他の事情を勘案して内閣府令で定めるものを除く。以下この項において同じ。）に係る議決権の数（株券については内閣府令で定めるところにより計算した株式に係る議決権の数を、その他のものについては内閣府令で定める議決権の数をいう。以下この項において同じ。）の合計を、当該発行者の総議決権の数にその者及びその者の特別関係者の所有に係る当該発行者の発行する新株予約権付社債券その他の政令で定める有価証券に係る議決権の数を加算した数で除して得た割合前項の特別関係者（同項第二号に掲げる者で当該株券等の発行者の株券等の買付け等を行うものを除く。）にあつては、内閣府令で定めるところにより、その者の所有に係る当該株券等に係る議決権の数の合計を、当該発行者の総議決権の数にその者及び前号に掲げる株券等の買付け等を行う者の所有に係る当該発行者の発行する新株予約権付社債券その他の政令で定める有価証券に係る議決権の数を加算した数で除して得た割合",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_2-paragraph-8",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第8項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-1",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-1",
+        "content": "令第七条第一項第九号に規定する株券等の所有者が少数である場合として内閣府令で定める場合は、当該株券等の所有者が二十五名未満である場合とする。",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_5",
+          "sourceContentUnitId": "law-402M50000040038-article-2_5-paragraph-1",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二条の五 （株券等の所有者が少数である場合） 第1項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-2",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-2",
+        "content": "２令第七条第一項第九号に規定する全ての所有者が同意している場合として内閣府令で定める場合は、次の各号に掲げる区分に応じ、当該各号に定める場合とする。当該株券等の買付け等の後における当該株券等の買付け等を行う者の所有に係る株券等の株券等所有割合とその者の特別関係者（法第二十七条の二第一項第一号に規定する特別関係者をいう。）の株券等所有割合を合計した割合が三分の二以上となる場合であって、当該株券等の買付け等の対象とならない株券等（以下この号において「買付け等対象外株券等」という。）があるとき当該株券等の買付け等の対象となる株券等に係る買付け等を公開買付けによらないで行うことに同意する旨を記載した書面が当該株券等の買付け等の対象となる株券等の全ての所有者から提出され、かつ、買付け等対象外株券等についてイ又はロの条件が満たされている場合当該株券等の買付け等を公開買付けによらないで行うことに同意することにつき、当該買付け等対象外株券等に係る種類株主総会（会社法第二条第十四号に規定する種類株主総会をいう。第五条第三項第一号において同じ。）の決議が行われていること。買付け等対象外株券等の所有者が二十五名未満である場合であって、当該株券等の買付け等を公開買付けによらないで行うことにつき、当該買付け等対象外株券等の全ての所有者が同意し、その旨を記載した書面を提出していること。前号に掲げる場合以外の場合当該株券等の買付け等の対象となる株券等に係る買付け等を公開買付けによらないで行うことに同意する旨を記載した書面が当該株券等の買付け等の対象となる株券等の全ての所有者から提出された場合",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_5",
+          "sourceContentUnitId": "law-402M50000040038-article-2_5-paragraph-2",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二条の五 （株券等の所有者が少数である場合） 第2項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-3",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-3",
+        "content": "３株券等の所有者（以下この条において「所有者」という。）は、前項第一号本文及び同号ロ又は同項第二号の規定による書面の提出に代えて、同項の規定により書面に記載する事項（以下この項において「記載事項」という。）を電子情報処理組織を使用する方法その他の情報通信の技術を利用する方法であって次に掲げるものにより提供することができる。この場合において、当該所有者は、当該書面を提出したものとみなす。電子情報処理組織を使用する方法のうちイ又はロに掲げるもの所有者の使用に係る電子計算機と株券等の買付け等を行う者の使用に係る電子計算機とを接続する電気通信回線を通じて送信し、受信者の使用に係る電子計算機に備えられたファイルに記録する方法所有者の使用に係る電子計算機に備えられたファイルに記録された記載事項を電気通信回線を通じて株券等の買付け等を行う者の閲覧に供し、当該株券等の買付け等を行う者の使用に係る電子計算機に備えられたファイルに記載事項を記録する方法電磁的記録媒体（法第十三条第五項に規定する電磁的記録に係る記録媒体をいう。第五条第八項第二号及び第三十三条の三第二項第二号において同じ。）をもって調製するファイルに記載事項を記録したものを交付する方法",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_5",
+          "sourceContentUnitId": "law-402M50000040038-article-2_5-paragraph-3",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二条の五 （株券等の所有者が少数である場合） 第3項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-4",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-4",
+        "content": "４前項各号に掲げる方法は、株券等の買付け等を行う者がファイルへの記録を出力することにより書面を作成することができるものでなければならない。",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_5",
+          "sourceContentUnitId": "law-402M50000040038-article-2_5-paragraph-4",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二条の五 （株券等の所有者が少数である場合） 第4項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-5",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-5",
+        "content": "５第三項の「電子情報処理組織」とは、所有者の使用に係る電子計算機と、株券等の買付け等を行う者の使用に係る電子計算機とを電気通信回線で接続した電子情報処理組織をいう。",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_5",
+          "sourceContentUnitId": "law-402M50000040038-article-2_5-paragraph-5",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二条の五 （株券等の所有者が少数である場合） 第5項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      }
+    ],
+    "dependency_decisions": [],
+    "graph_candidate_reviews": [],
+    "search_candidate_reviews": [
+      {
+        "search_request_ids": [
+          "solver-tool-927531f635c14f23a12e762cf48932d4",
+          "solver-tool-ce12bbbeb7074664b14079e399537ebf"
+        ],
+        "selections": [
+          {
+            "article_id": "law-323AC0000000025-article-27_2",
+            "reason": "legal_function=exception; 公開買付けによらずに株券等を買い付ける主な条件を示すため。",
+            "matched_hypothesis_ids": [
+              "h-1"
+            ]
+          },
+          {
+            "article_id": "law-402M50000040038-article-2_5",
+            "reason": "legal_function=scope; 株券等の所有者が少数である場合の具体的な条件を示すため。",
+            "matched_hypothesis_ids": [
+              "h-2"
+            ]
+          }
+        ],
+        "deferred_article_ids": [
+          "law-340CO0000000321-article-7",
+          "law-323AC0000000025-article-27_4",
+          "law-340CO0000000321-article-6",
+          "law-402M50000040038-article-11",
+          "law-323AC0000000025-article-27_3",
+          "law-402M50000040038-article-2_4",
+          "law-402M50000040038-article-2_6",
+          "law-340CO0000000321-article-8"
+        ],
+        "reason": "公開買付けによらずに株券等を買い付ける条件と、株券等の所有者が少数である場合の条件をそれぞれ明示する法令を選択しました。",
+        "reviewed_cycle": 1
+      }
+    ],
+    "frontier_re_adoptions": [],
+    "deferred_frontier_resolutions": [],
+    "unreviewed_graph_resolutions": [],
+    "tool_results": [
+      {
+        "request_id": "solver-tool-927531f635c14f23a12e762cf48932d4",
+        "status": "succeeded",
+        "evidence_ids": [
+          "search-nav-law-323AC0000000025-article-27_2-paragraph-4:70b62759dc047ae9",
+          "search-nav-law-340CO0000000321-article-7-paragraph-1-item-9",
+          "search-nav-law-323AC0000000025-article-27_4-paragraph-1",
+          "search-nav-law-402M50000040038-article-2_5-paragraph-1",
+          "search-nav-law-340CO0000000321-article-6-paragraph-1",
+          "search-nav-law-402M50000040038-article-11",
+          "search-nav-law-323AC0000000025-article-27_3-paragraph-3"
+        ],
+        "error_code": null,
+        "elapsed_ms": 160,
+        "cycle_no": 1
+      },
+      {
+        "request_id": "solver-tool-ce12bbbeb7074664b14079e399537ebf",
+        "status": "succeeded",
+        "evidence_ids": [
+          "search-nav-law-402M50000040038-article-2_5-paragraph-1:a48f6f61cd208480",
+          "search-nav-law-323AC0000000025-article-27_2-paragraph-8",
+          "search-nav-law-340CO0000000321-article-7-paragraph-3",
+          "search-nav-law-402M50000040038-article-2_4-paragraph-2",
+          "search-nav-law-402M50000040038-article-2_6",
+          "search-nav-law-340CO0000000321-article-8-paragraph-3",
+          "search-nav-law-340CO0000000321-article-6-paragraph-1",
+          "search-nav-law-402M50000040038-article-11"
+        ],
+        "error_code": null,
+        "elapsed_ms": 162,
+        "cycle_no": 1
+      },
+      {
+        "request_id": "search-review-fetch-fa199ade56065412650d2c31",
+        "status": "succeeded",
+        "evidence_ids": [
+          "law-323AC0000000025-article-27_2-paragraph-1",
+          "law-323AC0000000025-article-27_2-paragraph-1-item-1",
+          "law-323AC0000000025-article-27_2-paragraph-1-item-2",
+          "law-323AC0000000025-article-27_2-paragraph-1-item-3",
+          "law-323AC0000000025-article-27_2-paragraph-2",
+          "law-323AC0000000025-article-27_2-paragraph-3",
+          "law-323AC0000000025-article-27_2-paragraph-4",
+          "law-323AC0000000025-article-27_2-paragraph-5",
+          "law-323AC0000000025-article-27_2-paragraph-6",
+          "law-323AC0000000025-article-27_2-paragraph-7",
+          "law-323AC0000000025-article-27_2-paragraph-8",
+          "law-402M50000040038-article-2_5-paragraph-1",
+          "law-402M50000040038-article-2_5-paragraph-2",
+          "law-402M50000040038-article-2_5-paragraph-3",
+          "law-402M50000040038-article-2_5-paragraph-4",
+          "law-402M50000040038-article-2_5-paragraph-5"
+        ],
+        "error_code": null,
+        "elapsed_ms": 40,
+        "cycle_no": 1
+      }
+    ],
+    "focus_work_item_ids": [],
+    "retained_evidence_ids": [],
+    "final_answer": null,
+    "review": null,
+    "review_finding_resolutions": [],
+    "stop_reason": null,
+    "cycle_step_timeout": false,
+    "created_at": "2026-08-24T17:38:16.116246Z",
+    "updated_at": "2026-08-24T17:38:46.993104Z"
+  },
+  "solverContext": {
+    "case_id": "fixture-tob-exceptions-integration-article-alias-v1",
+    "question": "公開買付けによらずに株券等を買い付けられる主な場合と、株券等の所有者が少数である場合の具体的な条件を、根拠条文とともに説明してください。",
+    "non_work_item_requirements": [
+      "根拠条文を提示すること。"
+    ],
+    "research_cycle_count": 1,
+    "remaining_research_cycles": 3,
+    "remaining_wall_time_sec": 209.12318915200012,
+    "min_next_cycle_budget_sec": 25.0,
+    "can_start_next_cycle": true,
+    "max_tool_requests_per_step": 5,
+    "max_fetched_resources_per_cycle": 3,
+    "fetched_resource_ids_this_cycle": [
+      "law-323AC0000000025-article-27_2",
+      "law-402M50000040038-article-2_5"
+    ],
+    "remaining_fetch_capacity": 1,
+    "max_selected_frontier_per_step": 3,
+    "cycle_budget_reached": false,
+    "cycle_close_required": false,
+    "cycle_step_timeout": false,
+    "max_retained_evidence": 12,
+    "max_material_evidence_chars": 50000,
+    "max_solver_input_chars": 240000,
+    "finalize_only": false,
+    "available_tools": [
+      {
+        "name": "legal_search",
+        "description": "Article IDがまだ分からないとき、OpenSearchで法令またはガイドの候補を探す。質問をそのまま繰り返さず、確認事項を法令表現へ言い換えて使う。返す検索抜粋は候補選択用であり、回答やHypothesisの根拠にはしない。",
+        "input_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "description": "制度名と確認事項を法令に現れやすい表現へ言い換えた検索語。",
+              "maxLength": 1000,
+              "minLength": 1,
+              "type": "string"
+            },
+            "doc_types": {
+              "description": "検索対象。法令本文はlaw、行政解釈やガイドはguideline。現在の検索に必要な値を配列で返す。",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "document_ids": {
+              "description": "検索対象文書を限定する既知documentId。限定しない場合は空配列。",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 12,
+              "type": "array"
+            }
+          },
+          "required": [
+            "query",
+            "doc_types",
+            "document_ids"
+          ],
+          "type": "object"
+        },
+        "result_description": "候補Articleの所在と短い検索抜粋をnavigation Evidenceとして返す。Article本文のgrounding Evidenceは返さない。",
+        "read_only": true,
+        "parallel_safe": true
+      },
+      {
+        "name": "fetch_articles",
+        "description": "発見済みArticleの本文をOpenSearchから取得する。fetchable_article_idsにある既知IDから、質問とHypothesisに必要なものを選んで使う。検索やGraph展開は行わず、未知IDや取得済みEvidence IDは受け付けない。",
+        "input_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "article_ids": {
+              "description": "本文を取得する既知Article ID。SolverContext.fetchable_article_idsの完全一致だけを指定する。",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 4,
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "article_ids"
+          ],
+          "type": "object"
+        },
+        "result_description": "指定Articleに属するArticle・Paragraph・Itemの本文をgrounding Evidenceとして返す。",
+        "read_only": true,
+        "parallel_safe": true
+      },
+      {
+        "name": "legal_graph_neighbors",
+        "description": "既知Articleを起点に、仮説に合う法令関係を1ホップだけ探索する。関係のmode、意味predicate、向きを説明できる場合に使う。返す候補は本文ではなくnavigation情報であり、関連性と次の取得対象はSolverが判断する。",
+        "input_schema": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "article_ids": {
+                  "description": "1ホップの起点にする既知Article ID。",
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 4,
+                  "minItems": 1,
+                  "type": "array"
+                },
+                "max_relations": {
+                  "description": "起点Articleごとに返すnavigation関係数の上限。",
+                  "maximum": 50,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "mode": {
+                  "const": "semantic_assertion",
+                  "description": "意味分類済みRelationAssertionを探索する。",
+                  "type": "string"
+                },
+                "predicate": {
+                  "description": "現在の仮説に合う1つの意味関係。",
+                  "enum": [
+                    "IMPLEMENTS",
+                    "INCORPORATES",
+                    "USES_DEFINITION",
+                    "EXCEPTION_TO",
+                    "OVERRIDES"
+                  ],
+                  "type": "string"
+                },
+                "direction": {
+                  "description": "起点ArticleをSUBJECTまたはOBJECTのどちらとして探索するか。",
+                  "enum": [
+                    "from_subject",
+                    "to_subject"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "article_ids",
+                "max_relations",
+                "mode",
+                "predicate",
+                "direction"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "article_ids": {
+                  "description": "1ホップの起点にする既知Article ID。",
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 4,
+                  "minItems": 1,
+                  "type": "array"
+                },
+                "max_relations": {
+                  "description": "起点Articleごとに返すnavigation関係数の上限。",
+                  "maximum": 50,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "mode": {
+                  "const": "explicit_reference",
+                  "description": "本文に明示されたREFERENCESを探索する。",
+                  "type": "string"
+                },
+                "predicate": {
+                  "description": "物理参照の探索ではnull。",
+                  "type": "null"
+                },
+                "direction": {
+                  "description": "起点Articleを参照元または参照先のどちらとして探索するか。",
+                  "enum": [
+                    "outgoing",
+                    "incoming"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "article_ids",
+                "max_relations",
+                "mode",
+                "predicate",
+                "direction"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "article_ids": {
+                  "description": "1ホップの起点にする既知Article ID。",
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 4,
+                  "minItems": 1,
+                  "type": "array"
+                },
+                "max_relations": {
+                  "description": "起点Articleごとに返すnavigation関係数の上限。",
+                  "maximum": 50,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "mode": {
+                  "const": "explains",
+                  "description": "ガイドからArticleへのEXPLAINSを探索する。",
+                  "type": "string"
+                },
+                "predicate": {
+                  "description": "EXPLAINSの探索ではnull。",
+                  "type": "null"
+                },
+                "direction": {
+                  "description": "起点を解説元または解説先のどちらとして探索するか。",
+                  "enum": [
+                    "outgoing",
+                    "incoming"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "article_ids",
+                "max_relations",
+                "mode",
+                "predicate",
+                "direction"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "result_description": "起点と隣接Articleの関係、向き、根拠所在をGraph navigation Evidenceとして返す。隣接Articleの本文は返さない。",
+        "read_only": true,
+        "parallel_safe": true
+      },
+      {
+        "name": "load_evidence",
+        "description": "Caseでは取得済みだが現在のPromptから省略されたEvidence本文を再表示する。omitted_evidence_idsにある既知IDだけを指定する。新しい検索、Article本文取得、Graph探索は行わない。",
+        "input_schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "evidence_ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "description": "今回再表示するomitted_evidence_idsの完全一致。"
+            }
+          },
+          "required": [
+            "evidence_ids"
+          ]
+        },
+        "result_description": "指定した既知Evidenceの本文をmaterial_evidenceへ再投影する。",
+        "read_only": true,
+        "parallel_safe": true
+      }
+    ],
+    "grounding_evidence_ids": [
+      "law-323AC0000000025-article-27_2-paragraph-1",
+      "law-323AC0000000025-article-27_2-paragraph-1-item-1",
+      "law-323AC0000000025-article-27_2-paragraph-1-item-2",
+      "law-323AC0000000025-article-27_2-paragraph-1-item-3",
+      "law-323AC0000000025-article-27_2-paragraph-2",
+      "law-323AC0000000025-article-27_2-paragraph-3",
+      "law-323AC0000000025-article-27_2-paragraph-4",
+      "law-323AC0000000025-article-27_2-paragraph-5",
+      "law-323AC0000000025-article-27_2-paragraph-6",
+      "law-323AC0000000025-article-27_2-paragraph-7",
+      "law-323AC0000000025-article-27_2-paragraph-8",
+      "law-402M50000040038-article-2_5-paragraph-1",
+      "law-402M50000040038-article-2_5-paragraph-2",
+      "law-402M50000040038-article-2_5-paragraph-3",
+      "law-402M50000040038-article-2_5-paragraph-4",
+      "law-402M50000040038-article-2_5-paragraph-5"
+    ],
+    "navigation_evidence_ids": [
+      "search-nav-law-323AC0000000025-article-27_2-paragraph-4:70b62759dc047ae9",
+      "search-nav-law-402M50000040038-article-2_5-paragraph-1:a48f6f61cd208480",
+      "search-nav-law-340CO0000000321-article-7-paragraph-1-item-9",
+      "search-nav-law-323AC0000000025-article-27_2-paragraph-8",
+      "search-nav-law-323AC0000000025-article-27_4-paragraph-1",
+      "search-nav-law-340CO0000000321-article-7-paragraph-3",
+      "search-nav-law-402M50000040038-article-2_5-paragraph-1",
+      "search-nav-law-402M50000040038-article-2_4-paragraph-2",
+      "search-nav-law-340CO0000000321-article-6-paragraph-1",
+      "search-nav-law-402M50000040038-article-2_6",
+      "search-nav-law-402M50000040038-article-11",
+      "search-nav-law-340CO0000000321-article-8-paragraph-3",
+      "search-nav-law-323AC0000000025-article-27_3-paragraph-3"
+    ],
+    "fetchable_article_ids": [
+      "law-340CO0000000321-article-7",
+      "law-323AC0000000025-article-27_4",
+      "law-402M50000040038-article-2_4",
+      "law-340CO0000000321-article-6",
+      "law-402M50000040038-article-2_6",
+      "law-402M50000040038-article-11",
+      "law-340CO0000000321-article-8",
+      "law-323AC0000000025-article-27_3"
+    ],
+    "search_candidates": [
+      {
+        "article_id": "law-340CO0000000321-article-7",
+        "document_id": "law-340CO0000000321",
+        "title": "金融商品取引法施行令",
+        "headings": [
+          "第七条 （公開買付けの適用除外となる買付け等） 第1項第9号",
+          "第七条 （公開買付けの適用除外となる買付け等） 第3項"
+        ],
+        "discovery_work_item_ids": [
+          "wi-1",
+          "wi-2"
+        ],
+        "discovery_hypothesis_ids": [
+          "h-1",
+          "h-2"
+        ],
+        "search_request_ids": [
+          "solver-tool-927531f635c14f23a12e762cf48932d4",
+          "solver-tool-ce12bbbeb7074664b14079e399537ebf"
+        ],
+        "navigation_evidence_ids": [
+          "search-nav-law-340CO0000000321-article-7-paragraph-1-item-9",
+          "search-nav-law-340CO0000000321-article-7-paragraph-3"
+        ]
+      },
+      {
+        "article_id": "law-323AC0000000025-article-27_4",
+        "document_id": "law-323AC0000000025",
+        "title": "金融商品取引法",
+        "headings": [
+          "第二十七条の四 （有価証券をもつて対価とする買付け等） 第1項"
+        ],
+        "discovery_work_item_ids": [
+          "wi-1"
+        ],
+        "discovery_hypothesis_ids": [
+          "h-1"
+        ],
+        "search_request_ids": [
+          "solver-tool-927531f635c14f23a12e762cf48932d4"
+        ],
+        "navigation_evidence_ids": [
+          "search-nav-law-323AC0000000025-article-27_4-paragraph-1"
+        ]
+      },
+      {
+        "article_id": "law-340CO0000000321-article-6",
+        "document_id": "law-340CO0000000321",
+        "title": "金融商品取引法施行令",
+        "headings": [
+          "第六条 （公開買付けによらなければならない有価証券等） 第1項"
+        ],
+        "discovery_work_item_ids": [
+          "wi-1",
+          "wi-2"
+        ],
+        "discovery_hypothesis_ids": [
+          "h-1",
+          "h-2"
+        ],
+        "search_request_ids": [
+          "solver-tool-927531f635c14f23a12e762cf48932d4",
+          "solver-tool-ce12bbbeb7074664b14079e399537ebf"
+        ],
+        "navigation_evidence_ids": [
+          "search-nav-law-340CO0000000321-article-6-paragraph-1"
+        ]
+      },
+      {
+        "article_id": "law-402M50000040038-article-11",
+        "document_id": "law-402M50000040038",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "headings": [
+          "第十一条 （公開買付者が非居住者である場合の代理人）"
+        ],
+        "discovery_work_item_ids": [
+          "wi-1",
+          "wi-2"
+        ],
+        "discovery_hypothesis_ids": [
+          "h-1",
+          "h-2"
+        ],
+        "search_request_ids": [
+          "solver-tool-927531f635c14f23a12e762cf48932d4",
+          "solver-tool-ce12bbbeb7074664b14079e399537ebf"
+        ],
+        "navigation_evidence_ids": [
+          "search-nav-law-402M50000040038-article-11"
+        ]
+      },
+      {
+        "article_id": "law-323AC0000000025-article-27_3",
+        "document_id": "law-323AC0000000025",
+        "title": "金融商品取引法",
+        "headings": [
+          "第二十七条の三 （公開買付開始公告及び公開買付届出書の提出） 第3項"
+        ],
+        "discovery_work_item_ids": [
+          "wi-1"
+        ],
+        "discovery_hypothesis_ids": [
+          "h-1"
+        ],
+        "search_request_ids": [
+          "solver-tool-927531f635c14f23a12e762cf48932d4"
+        ],
+        "navigation_evidence_ids": [
+          "search-nav-law-323AC0000000025-article-27_3-paragraph-3"
+        ]
+      },
+      {
+        "article_id": "law-402M50000040038-article-2_4",
+        "document_id": "law-402M50000040038",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "headings": [
+          "第二条の四 （関係法人等） 第2項"
+        ],
+        "discovery_work_item_ids": [
+          "wi-2"
+        ],
+        "discovery_hypothesis_ids": [
+          "h-2"
+        ],
+        "search_request_ids": [
+          "solver-tool-ce12bbbeb7074664b14079e399537ebf"
+        ],
+        "navigation_evidence_ids": [
+          "search-nav-law-402M50000040038-article-2_4-paragraph-2"
+        ]
+      },
+      {
+        "article_id": "law-402M50000040038-article-2_6",
+        "document_id": "law-402M50000040038",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "headings": [
+          "第二条の六 （適用除外となる買付け等）"
+        ],
+        "discovery_work_item_ids": [
+          "wi-2"
+        ],
+        "discovery_hypothesis_ids": [
+          "h-2"
+        ],
+        "search_request_ids": [
+          "solver-tool-ce12bbbeb7074664b14079e399537ebf"
+        ],
+        "navigation_evidence_ids": [
+          "search-nav-law-402M50000040038-article-2_6"
+        ]
+      },
+      {
+        "article_id": "law-340CO0000000321-article-8",
+        "document_id": "law-340CO0000000321",
+        "title": "金融商品取引法施行令",
+        "headings": [
+          "第八条 （買付け等の期間等） 第3項"
+        ],
+        "discovery_work_item_ids": [
+          "wi-2"
+        ],
+        "discovery_hypothesis_ids": [
+          "h-2"
+        ],
+        "search_request_ids": [
+          "solver-tool-ce12bbbeb7074664b14079e399537ebf"
+        ],
+        "navigation_evidence_ids": [
+          "search-nav-law-340CO0000000321-article-8-paragraph-3"
+        ]
+      }
+    ],
+    "work_tree": [
+      {
+        "work_item_id": "wi-1",
+        "parent_work_item_id": null,
+        "question": "公開買付けによらずに株券等を買い付けられる主な場合についての法的結論を出す。",
+        "actor_scope": "質問者は公開買付けを行わない行為者",
+        "actor_relation": "different",
+        "state": "open",
+        "resolution": null,
+        "basis_hypothesis_ids": [],
+        "replaces_work_item_id": null,
+        "hypothesis_ids": [
+          "h-1"
+        ],
+        "evidence_count": 0
+      },
+      {
+        "work_item_id": "wi-2",
+        "parent_work_item_id": null,
+        "question": "株券等の所有者が少数である場合の具体的な条件についての法的結論を出す。",
+        "actor_scope": "質問者は株券等の所有者が少数である状況に関与する行為者",
+        "actor_relation": "different",
+        "state": "open",
+        "resolution": null,
+        "basis_hypothesis_ids": [],
+        "replaces_work_item_id": null,
+        "hypothesis_ids": [
+          "h-2"
+        ],
+        "evidence_count": 0
+      }
+    ],
+    "hypotheses": [
+      {
+        "hypothesis_id": "h-1",
+        "work_item_id": "wi-1",
+        "statement": "質問者は公開買付けを行わない行為者が、公開買付けによらずに株券等を買い付ける主な場合についての法的条件を満たす。",
+        "actor_scope": "質問者は公開買付けを行わない行為者",
+        "actor_relation": "different",
+        "judgment": "unresolved",
+        "evidence_ids": [],
+        "gaps": [
+          "公開買付けによらずに株券等を買い付けられる主な場合の具体的な条件。"
+        ]
+      },
+      {
+        "hypothesis_id": "h-2",
+        "work_item_id": "wi-2",
+        "statement": "質問者は株券等の所有者が少数である状況に関与する行為者が、株券等の所有者が少数である場合の具体的な条件を満たす。",
+        "actor_scope": "質問者は株券等の所有者が少数である状況に関与する行為者",
+        "actor_relation": "different",
+        "judgment": "unresolved",
+        "evidence_ids": [],
+        "gaps": [
+          "株券等の所有者が少数である場合の具体的な条件。"
+        ]
+      }
+    ],
+    "evidence_hypothesis_candidates": [
+      {
+        "article_id": "law-323AC0000000025-article-27_2",
+        "hypothesis_ids": [
+          "h-1"
+        ],
+        "reason": "legal_function=exception; 公開買付けによらずに株券等を買い付ける主な条件を示すため。"
+      },
+      {
+        "article_id": "law-402M50000040038-article-2_5",
+        "hypothesis_ids": [
+          "h-2"
+        ],
+        "reason": "legal_function=scope; 株券等の所有者が少数である場合の具体的な条件を示すため。"
+      }
+    ],
+    "focus_work_items": [],
+    "affected_work_items": [],
+    "recent_tool_requests": [
+      {
+        "request_id": "solver-tool-927531f635c14f23a12e762cf48932d4",
+        "work_item_id": "wi-1",
+        "tool_name": "legal_search",
+        "arguments": {
+          "query": "公開買付けを行わない行為者が株券等を買い付ける条件",
+          "doc_types": [
+            "law"
+          ],
+          "document_ids": []
+        },
+        "purpose": "公開買付けによらずに株券等を買い付けられる主な場合についての法的条件を確認する。",
+        "hypothesis_ids": [
+          "h-1"
+        ]
+      },
+      {
+        "request_id": "solver-tool-ce12bbbeb7074664b14079e399537ebf",
+        "work_item_id": "wi-2",
+        "tool_name": "legal_search",
+        "arguments": {
+          "query": "株券等の所有者が少数である場合の条件",
+          "doc_types": [
+            "law"
+          ],
+          "document_ids": []
+        },
+        "purpose": "株券等の所有者が少数である場合の具体的な条件を確認する。",
+        "hypothesis_ids": [
+          "h-2"
+        ]
+      },
+      {
+        "request_id": "search-review-fetch-fa199ade56065412650d2c31",
+        "work_item_id": "wi-1",
+        "tool_name": "fetch_articles",
+        "arguments": {
+          "article_ids": [
+            "law-323AC0000000025-article-27_2",
+            "law-402M50000040038-article-2_5"
+          ]
+        },
+        "purpose": "Solverが選んだ検索候補Article本文を取得する",
+        "hypothesis_ids": [
+          "h-1",
+          "h-2"
+        ]
+      }
+    ],
+    "recent_tool_results": [
+      {
+        "request_id": "solver-tool-927531f635c14f23a12e762cf48932d4",
+        "status": "succeeded",
+        "evidence_ids": [
+          "search-nav-law-323AC0000000025-article-27_2-paragraph-4:70b62759dc047ae9",
+          "search-nav-law-340CO0000000321-article-7-paragraph-1-item-9",
+          "search-nav-law-323AC0000000025-article-27_4-paragraph-1",
+          "search-nav-law-402M50000040038-article-2_5-paragraph-1",
+          "search-nav-law-340CO0000000321-article-6-paragraph-1",
+          "search-nav-law-402M50000040038-article-11",
+          "search-nav-law-323AC0000000025-article-27_3-paragraph-3"
+        ],
+        "evidence_count": 7,
+        "graph_projection_updated": false,
+        "error_code": null,
+        "elapsed_ms": 160,
+        "cycle_no": 1
+      },
+      {
+        "request_id": "solver-tool-ce12bbbeb7074664b14079e399537ebf",
+        "status": "succeeded",
+        "evidence_ids": [
+          "search-nav-law-402M50000040038-article-2_5-paragraph-1:a48f6f61cd208480",
+          "search-nav-law-323AC0000000025-article-27_2-paragraph-8",
+          "search-nav-law-340CO0000000321-article-7-paragraph-3",
+          "search-nav-law-402M50000040038-article-2_4-paragraph-2",
+          "search-nav-law-402M50000040038-article-2_6",
+          "search-nav-law-340CO0000000321-article-8-paragraph-3",
+          "search-nav-law-340CO0000000321-article-6-paragraph-1",
+          "search-nav-law-402M50000040038-article-11"
+        ],
+        "evidence_count": 8,
+        "graph_projection_updated": false,
+        "error_code": null,
+        "elapsed_ms": 162,
+        "cycle_no": 1
+      },
+      {
+        "request_id": "search-review-fetch-fa199ade56065412650d2c31",
+        "status": "succeeded",
+        "evidence_ids": [
+          "law-323AC0000000025-article-27_2-paragraph-1",
+          "law-323AC0000000025-article-27_2-paragraph-1-item-1",
+          "law-323AC0000000025-article-27_2-paragraph-1-item-2",
+          "law-323AC0000000025-article-27_2-paragraph-1-item-3",
+          "law-323AC0000000025-article-27_2-paragraph-2",
+          "law-323AC0000000025-article-27_2-paragraph-3",
+          "law-323AC0000000025-article-27_2-paragraph-4",
+          "law-323AC0000000025-article-27_2-paragraph-5",
+          "law-323AC0000000025-article-27_2-paragraph-6",
+          "law-323AC0000000025-article-27_2-paragraph-7",
+          "law-323AC0000000025-article-27_2-paragraph-8",
+          "law-402M50000040038-article-2_5-paragraph-1",
+          "law-402M50000040038-article-2_5-paragraph-2",
+          "law-402M50000040038-article-2_5-paragraph-3",
+          "law-402M50000040038-article-2_5-paragraph-4",
+          "law-402M50000040038-article-2_5-paragraph-5"
+        ],
+        "evidence_count": 16,
+        "graph_projection_updated": false,
+        "error_code": null,
+        "elapsed_ms": 40,
+        "cycle_no": 1
+      }
+    ],
+    "completed_legal_searches": [
+      {
+        "work_item_id": "wi-1",
+        "hypothesis_ids": [
+          "h-1"
+        ],
+        "arguments": {
+          "query": "公開買付けを行わない行為者が株券等を買い付ける条件",
+          "doc_types": [
+            "law"
+          ],
+          "document_ids": []
+        }
+      },
+      {
+        "work_item_id": "wi-2",
+        "hypothesis_ids": [
+          "h-2"
+        ],
+        "arguments": {
+          "query": "株券等の所有者が少数である場合の条件",
+          "doc_types": [
+            "law"
+          ],
+          "document_ids": []
+        }
+      }
+    ],
+    "evidence_manifest": [
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_2-paragraph-4:70b62759dc047ae9",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-4",
+        "title": "金融商品取引法",
+        "content_chars": 4034,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-7-paragraph-1-item-9",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-9",
+        "title": "金融商品取引法施行令",
+        "content_chars": 251,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_4-paragraph-1",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_4-paragraph-1",
+        "title": "金融商品取引法",
+        "content_chars": 221,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-2_5-paragraph-1",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-1",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "content_chars": 70,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-6-paragraph-1",
+        "source_ref": "opensearch:law-340CO0000000321-article-6-paragraph-1",
+        "title": "金融商品取引法施行令",
+        "content_chars": 400,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-11",
+        "source_ref": "opensearch:law-402M50000040038-article-11",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "content_chars": 213,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_3-paragraph-3",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_3-paragraph-3",
+        "title": "金融商品取引法",
+        "content_chars": 197,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-2_5-paragraph-1:a48f6f61cd208480",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-1",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "content_chars": 1623,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_2-paragraph-8",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-8",
+        "title": "金融商品取引法",
+        "content_chars": 400,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-7-paragraph-3",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-3",
+        "title": "金融商品取引法施行令",
+        "content_chars": 299,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-2_4-paragraph-2",
+        "source_ref": "opensearch:law-402M50000040038-article-2_4-paragraph-2",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "content_chars": 156,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-2_6",
+        "source_ref": "opensearch:law-402M50000040038-article-2_6",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "content_chars": 400,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-8-paragraph-3",
+        "source_ref": "opensearch:law-340CO0000000321-article-8-paragraph-3",
+        "title": "金融商品取引法施行令",
+        "content_chars": 229,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-1",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-1",
+        "title": "金融商品取引法",
+        "content_chars": 549,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-1-item-1",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-1-item-1",
+        "title": "金融商品取引法",
+        "content_chars": 750,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-1-item-2",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-1-item-2",
+        "title": "金融商品取引法",
+        "content_chars": 616,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-1-item-3",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-1-item-3",
+        "title": "金融商品取引法",
+        "content_chars": 346,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-2",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-2",
+        "title": "金融商品取引法",
+        "content_chars": 64,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-3",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-3",
+        "title": "金融商品取引法",
+        "content_chars": 133,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-4",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-4",
+        "title": "金融商品取引法",
+        "content_chars": 195,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-5",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-5",
+        "title": "金融商品取引法",
+        "content_chars": 84,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-6",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-6",
+        "title": "金融商品取引法",
+        "content_chars": 123,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-7",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-7",
+        "title": "金融商品取引法",
+        "content_chars": 187,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-8",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-8",
+        "title": "金融商品取引法",
+        "content_chars": 494,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-1",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-1",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "content_chars": 70,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-2",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-2",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "content_chars": 692,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-3",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-3",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "content_chars": 522,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-4",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-4",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "content_chars": 69,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-5",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-5",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "content_chars": 82,
+        "created_cycle": 1,
+        "material_included": true
+      }
+    ],
+    "graph_review_batch": {
+      "candidates": [],
+      "remaining_unreviewed_count": 0
+    },
+    "graph_review_ledger": [],
+    "required_graph_review_request_ids": [],
+    "required_search_review_request_ids": [],
+    "material_evidence": [
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_2-paragraph-4:70b62759dc047ae9",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-4",
+        "content": "[一致箇所1] 第二十七条の二 （発行者以外の者による株券等の公開買付け） 第4項\n４第一項本文に規定する公開買付けによる株券等の買付け等を行う場合には、株券等の管理、買付け等の代金の支払その他の政令で定める事務については、金融商品取引業者（第二十八条第一項に規定する第一種金融商品取引業を行う者に限る。第二十七条の十二第三項において同じ。）又は銀行等（銀行、協同組織金融機関その他政令で定める金融機関をいう。第二十七条の十二第三項において同じ。）に行わせなければならない。\n\n[一致箇所2] 第二十七条の二 （発行者以外の者による株券等の公開買付け） 第3項\n３第一項本文に規定する公開買付けによる株券等の買付け等を行う場合には、買付け等の価格（買付け以外の場合にあつては、買付けの価格に準ずるものとして政令で定めるものとする。以下この節において同じ。）については、政令で定めるところにより、均一の条件によらなければならない。\n\n[一致箇所3] 第二十七条の二 （発行者以外の者による株券等の公開買付け） 第1項\n1その株券、新株予約権付社債券その他の有価証券で政令で定めるもの（以下この章及び第二十七条の三十の十一（第五項を除く。）において「株券等」という。）について有価証券報告書を提出しなければならない発行者又は特定上場有価証券（流通状況がこれに準ずるものとして政令で定めるものを含み、株券等に限る。）の発行者の株券等につき、当該発行者以外の者が行う買付け等（株券等の買付けその他の有償の譲受けをいい、これに類するものとして政令で定めるものを含む。以下この節において同じ。）であつて次のいずれかに該当するものは、公開買付けによらなければならない。ただし、適用除外買付け等（新株予約権（会社法第二百七十七条の規定により割り当てられるものであつて、当該新株予約権が行使されることが確保されることにより公開買付けによらないで取得されても投資者の保護のため支障を生ずることがないと認められるものとして内閣府令で定めるものを除く。以下この項において同じ。）を有する者が当該新株予約権を行使することにより行う株券等の買付け等、株券等の買付け等を行う者がその者の特別関係者（第七項第一号に掲げる者のうち内閣府令で定めるものに限る。）から行う株券等の買付け等その他政令で定める株券等の買付け等をいう。）は、この限りでない。\n\n[一致箇所4] 第二十七条の二 （発行者以外の者による株券等の公開買付け） 第5項\n５第一項本文に規定する公開買付けによる株券等の買付け等を行う場合には、前三項の規定その他この節に定めるところによるほか、政令で定める条件及び方法によらなければならない。\n\n[一致箇所5] 第二十七条の二 （発行者以外の者による株券等の公開買付け） 第6項\n６この条において「公開買付け」とは、不特定かつ多数の者に対し、公告により株券等の買付け等の申込み又は売付け等（売付けその他の有償の譲渡をいう。以下この章において同じ。）の申込みの勧誘を行い、取引所金融商品市場外で株券等の買付け等を行うことをいう。\n\n[一致箇所6] 第二十七条の二 （発行者以外の者による株券等の公開買付け） 第1項第1号\nその株券、新株予約権付社債券その他の有価証券で政令で定めるもの（以下この章及び第二十七条の三十の十一（第五項を除く。）において「株券等」という。）について有価証券報告書を提出しなければならない発行者又は特定上場有価証券（流通状況がこれに準ずるものとして政令で定めるものを含み、株券等に限る。）の発行者の株券等につき、当該発行者以外の者が行う買付け等（株券等の買付けその他の有償の譲受けをいい、これに類するものとして政令で定めるものを含む。以下この節において同じ。）であつて次のいずれかに該当するものは、公開買付けによらなければならない。ただし、適用除外買付け等（新株予約権（会社法第二百七十七条の規定\n第1号　株券等の買付け等の後におけるその者の所有（これに準ずるものとして政令で定める場合を含む。以下この節において同じ。）に係る株券等の株券等所有割合（その者に特別関係者（第七項第一号に掲げる者については、内閣府令で定める者を除く。）がある場合にあつては、その株券等所有割合を加算したもの。以下この項において同じ。）が百分の三十を超えることとなる場合又は株券等の買付け等の前におけるその者の所有に係る株券等の株券等所有割合が既に百分の三十を超えている場合における当該株券等の買付け等（株券等の買付け等の前におけるその者の所有に係る株券等の株券等所有割合が既に百分の三十を超えている場合における株券等の買付け等のうち、買付け等を行う株券等の数又は買付け等の価格の総額が著しく少ない場合として政令で定める場合に該当し、かつ、当該株券等の買付け等の後におけるその者の所有に係る株券等の株券等所有割合が政令で定める割合以上とならないもの（次号に規定する特定市場外買付け等に該当しないものに限る。）を除く。）\n\n[一致箇所7] 第二十七条の二 （発行者以外の者による株券等の公開買付け） 第2項\n２前項本文に規定する公開買付けによる株券等の買付け等は、政令で定める期間の範囲内で買付け等の期間を定めて、行わなければならない。\n\n[一致箇所8] 第二十七条の二 （発行者以外の者による株券等の公開買付け） 第7項\n７第一項の「特別関係者」とは、次に掲げる者をいう。株券等の買付け等を行う者と、株式の所有関係その他の政令で定める特別の関係にある者株券等の買付け等を行う者との間で、共同して当該株券等を取得し、若しくは譲渡し、若しくは当該株券等の発行者の株主としての議決権その他の権利を行使すること又は当該株券等の買付け等の後に相互に当該株券等を譲渡し、若しくは譲り受けることを合意している者\n\n[一致箇所9] 第二十七条の二 （発行者以外の者による株券等の公開買付け） 第8項\n８第一項の「株券等所有割合」とは、次に掲げる割合をいう。株券等の買付け等を行う者にあつては、内閣府令で定めるところにより、その者の所有に係る当該株券等（その所有の態様その他の事情を勘案して内閣府令で定めるものを除く。以下この項において同じ。）に係る議決権の数（株券については内閣府令で定めるところにより計算した株式に係る議決権の数を、その他のものについては内閣府令で定める議決権の数をいう。以下この項において同じ。）の合計を、当該発行者の総議決権の数にその者及びその者の特別関係者の所有に係る当該発行者の発行する新株予約権付社債券その他の政令で定める有価証券に係る議決権の数を加算した数で除して得た割合前項の特別関係者（同項第二号に掲げる者で当該株券等の発行者の株券等の買付け等を行うものを除く。）にあつては、内閣府令で定めるところにより、その者の所有に係る当該株券等に係る議決権の数の合計を、当該発行者の総議決権の数にその者及び前号に掲げる株券等の買付け等を行う者の所有に係る当該発行者の発行する新株予約権付社債券その他の政令で定める有価証券に係る議決権の数を加算した数で除して得た割合\n\n[一致箇所10] 第二十七条の二 （発行者以外の者による株券等の公開買付け） 第1項第2号\nその株券、新株予約権付社債券その他の有価証券で政令で定めるもの（以下この章及び第二十七条の三十の十一（第五項を除く。）において「株券等」という。）について有価証券報告書を提出しなければならない発行者又は特定上場有価証券（流通状況がこれに準ずるものとして政令で定めるものを含み、株券等に限る。）の発行者の株券等につき、当該発行者以外の者が行う買付け等（株券等の買付けその他の有償の譲受けをいい、これに類するものとして政令で定めるものを含む。以下この節において同じ。）であつて次のいずれかに該当するものは、公開買付けによらなければならない。ただし、適用除外買付け等（新株予約権（会社法第二百七十七条の規定\n第2号　特定市場外買付け等（取引所金融商品市場外における株券等の買付け等（取引所金融商品市場における有価証券の売買等に準ずるものとして政令で定める取引による株券等の買付け等及び著しく少数の者から買付け等を行うものとして政令で定める場合における株券等の買付け等を除く。）をいう。以下この号において同じ。）の後におけるその者の所有に係る株券等の株券等所有割合が百分の五を超えることとなる場合又は特定市場外買付け等の前におけるその者の所有に係る株券等の株券等所有割合が既に百分の五を超えている場合であつて、当該特定市場外買付け等の後におけるその者の所有に係る株券等の株券等所有割合が百分の三十以下となるときにおける当該特定市場外買付け等\n\n[一致箇所11] 第二十七条の二 （発行者以外の者による株券等の公開買付け） 第1項第3号\nその株券、新株予約権付社債券その他の有価証券で政令で定めるもの（以下この章及び第二十七条の三十の十一（第五項を除く。）において「株券等」という。）について有価証券報告書を提出しなければならない発行者又は特定上場有価証券（流通状況がこれに準ずるものとして政令で定めるものを含み、株券等に限る。）の発行者の株券等につき、当該発行者以外の者が行う買付け等（株券等の買付けその他の有償の譲受けをいい、これに類するものとして政令で定めるものを含む。以下この節において同じ。）であつて次のいずれかに該当するものは、公開買付けによらなければならない。ただし、適用除外買付け等（新株予約権（会社法第二百七十七条の規定\n第3号　その他前二号に掲げる株券等の買付け等に準ずるものとして政令で定める株券等の買付け等",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_2-paragraph-4",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第4項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": 11,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-2_5-paragraph-1:a48f6f61cd208480",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-1",
+        "content": "[一致箇所1] 第二条の五 （株券等の所有者が少数である場合） 第1項\n令第七条第一項第九号に規定する株券等の所有者が少数である場合として内閣府令で定める場合は、当該株券等の所有者が二十五名未満である場合とする。\n\n[一致箇所2] 第二条の五 （株券等の所有者が少数である場合） 第2項\n２令第七条第一項第九号に規定する全ての所有者が同意している場合として内閣府令で定める場合は、次の各号に掲げる区分に応じ、当該各号に定める場合とする。当該株券等の買付け等の後における当該株券等の買付け等を行う者の所有に係る株券等の株券等所有割合とその者の特別関係者（法第二十七条の二第一項第一号に規定する特別関係者をいう。）の株券等所有割合を合計した割合が三分の二以上となる場合であって、当該株券等の買付け等の対象とならない株券等（以下この号において「買付け等対象外株券等」という。）があるとき当該株券等の買付け等の対象となる株券等に係る買付け等を公開買付けによらないで行うことに同意する旨を記載した書面が当該株券等の買付け等の対象となる株券等の全ての所有者から提出され、かつ、買付け等対象外株券等についてイ又はロの条件が満たされている場合当該株券等の買付け等を公開買付けによらないで行うことに同意することにつき、当該買付け等対象外株券等に係る種類株主総会（会社法第二条第十四号に規定する種類株主総会をいう。第五条第三項第一号において同じ。）の決議が行われていること。買付け等対象外株券等の所有者が二十五名未満である場合であって、当該株券等の買付け等を公開買付けによらないで行うことにつき、当該買付け等対象外株券等の全ての所有者が同意し、その旨を記載した書面を提出していること。前号に掲げる場合以外の場合当該株券等の買付け等の対象となる株券等に係る買付け等を公開買付けによらないで行うことに同意する旨を記載した書面が当該株券等の買付け等の対象となる株券等の全ての所有者から提出された場合\n\n[一致箇所3] 第二条の五 （株券等の所有者が少数である場合） 第3項\n３株券等の所有者（以下この条において「所有者」という。）は、前項第一号本文及び同号ロ又は同項第二号の規定による書面の提出に代えて、同項の規定により書面に記載する事項（以下この項において「記載事項」という。）を電子情報処理組織を使用する方法その他の情報通信の技術を利用する方法であって次に掲げるものにより提供することができる。この場合において、当該所有者は、当該書面を提出したものとみなす。電子情報処理組織を使用する方法のうちイ又はロに掲げるもの所有者の使用に係る電子計算機と株券等の買付け等を行う者の使用に係る電子計算機とを接続する電気通信回線を通じて送信し、受信者の使用に係る電子計算機に備えられたファイルに記録する方法所有者の使用に係る電子計算機に備えられたファイルに記録された記載事項を電気通信回線を通じて株券等の買付け等を行う者の閲覧に供し、当該株券等の買付け等を行う者の使用に係る電子計算機に備えられたファイルに記載事項を記録する方法電磁的記録媒体（法第十三条第五項に規定する電磁的記録に係る記録媒体をいう。第五条第八項第二号及び第三十三条の三第二項第二号において同じ。）をもって調製するファイルに記載事項を記録したものを交付する方法\n\n[一致箇所4] 第二条の五 （株券等の所有者が少数である場合） 第4項\n４前項各号に掲げる方法は、株券等の買付け等を行う者がファイルへの記録を出力することにより書面を作成することができるものでなければならない。\n\n[一致箇所5] 第二条の五 （株券等の所有者が少数である場合） 第5項\n５第三項の「電子情報処理組織」とは、所有者の使用に係る電子計算機と、株券等の買付け等を行う者の使用に係る電子計算機とを電気通信回線で接続した電子情報処理組織をいう。",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_5",
+          "sourceContentUnitId": "law-402M50000040038-article-2_5-paragraph-1",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二条の五 （株券等の所有者が少数である場合） 第1項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": 5,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-1",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-1",
+        "content": "1その株券、新株予約権付社債券その他の有価証券で政令で定めるもの（以下この章及び第二十七条の三十の十一（第五項を除く。）において「株券等」という。）について有価証券報告書を提出しなければならない発行者又は特定上場有価証券（流通状況がこれに準ずるものとして政令で定めるものを含み、株券等に限る。）の発行者の株券等につき、当該発行者以外の者が行う買付け等（株券等の買付けその他の有償の譲受けをいい、これに類するものとして政令で定めるものを含む。以下この節において同じ。）であつて次のいずれかに該当するものは、公開買付けによらなければならない。ただし、適用除外買付け等（新株予約権（会社法第二百七十七条の規定により割り当てられるものであつて、当該新株予約権が行使されることが確保されることにより公開買付けによらないで取得されても投資者の保護のため支障を生ずることがないと認められるものとして内閣府令で定めるものを除く。以下この項において同じ。）を有する者が当該新株予約権を行使することにより行う株券等の買付け等、株券等の買付け等を行う者がその者の特別関係者（第七項第一号に掲げる者のうち内閣府令で定めるものに限る。）から行う株券等の買付け等その他政令で定める株券等の買付け等をいう。）は、この限りでない。",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_2-paragraph-1",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第1項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-7-paragraph-1-item-9",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-1-item-9",
+        "content": "法第二十七条の二第一項ただし書に規定する政令で定める株券等の買付け等は、次に掲げる株券等の買付け等（同項に規定する買付け等をいう。以下この節において同じ。）とする。ただし、第七号及び第八号に掲げる株券等の買付け等にあつては、同項第二号に規定する特定市場外買付け等を除く。\n第9号　株券等の所有者が少数である場合として内閣府令で定める場合であつて、当該株券等の買付け等を公開買付けによらないで行うことにつき、当該株券等の全ての所有者が同意している場合として内閣府令で定める場合における当該株券等の買付け等",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "sourceContentUnitId": "law-340CO0000000321-article-7-paragraph-1-item-9",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第七条 （公開買付けの適用除外となる買付け等） 第1項第9号",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_2-paragraph-8",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-8",
+        "content": "８第一項の「株券等所有割合」とは、次に掲げる割合をいう。株券等の買付け等を行う者にあつては、内閣府令で定めるところにより、その者の所有に係る当該株券等（その所有の態様その他の事情を勘案して内閣府令で定めるものを除く。以下この項において同じ。）に係る議決権の数（株券については内閣府令で定めるところにより計算した株式に係る議決権の数を、その他のものについては内閣府令で定める議決権の数をいう。以下この項において同じ。）の合計を、当該発行者の総議決権の数にその者及びその者の特別関係者の所有に係る当該発行者の発行する新株予約権付社債券その他の政令で定める有価証券に係る議決権の数を加算した数で除して得た割合前項の特別関係者（同項第二号に掲げる者で当該株券等の発行者の株券等の買付け等を行うものを除く。）にあつては、内閣府令で定めるところにより、その者の所有に係る当該株券等に係る議決権の数の合計を、当該発",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_2-paragraph-8",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第8項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": true
+        }
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-1-item-1",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-1-item-1",
+        "content": "その株券、新株予約権付社債券その他の有価証券で政令で定めるもの（以下この章及び第二十七条の三十の十一（第五項を除く。）において「株券等」という。）について有価証券報告書を提出しなければならない発行者又は特定上場有価証券（流通状況がこれに準ずるものとして政令で定めるものを含み、株券等に限る。）の発行者の株券等につき、当該発行者以外の者が行う買付け等（株券等の買付けその他の有償の譲受けをいい、これに類するものとして政令で定めるものを含む。以下この節において同じ。）であつて次のいずれかに該当するものは、公開買付けによらなければならない。ただし、適用除外買付け等（新株予約権（会社法第二百七十七条の規定\n第1号　株券等の買付け等の後におけるその者の所有（これに準ずるものとして政令で定める場合を含む。以下この節において同じ。）に係る株券等の株券等所有割合（その者に特別関係者（第七項第一号に掲げる者については、内閣府令で定める者を除く。）がある場合にあつては、その株券等所有割合を加算したもの。以下この項において同じ。）が百分の三十を超えることとなる場合又は株券等の買付け等の前におけるその者の所有に係る株券等の株券等所有割合が既に百分の三十を超えている場合における当該株券等の買付け等（株券等の買付け等の前におけるその者の所有に係る株券等の株券等所有割合が既に百分の三十を超えている場合における株券等の買付け等のうち、買付け等を行う株券等の数又は買付け等の価格の総額が著しく少ない場合として政令で定める場合に該当し、かつ、当該株券等の買付け等の後におけるその者の所有に係る株券等の株券等所有割合が政令で定める割合以上とならないもの（次号に規定する特定市場外買付け等に該当しないものに限る。）を除く。）",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_2-paragraph-1-item-1",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第1項第1号",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_4-paragraph-1",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_4-paragraph-1",
+        "content": "公開買付者等は、次項に規定する場合を除き、その公開買付けにつき有価証券をもつてその買付け等の対価とする場合において、当該有価証券がその募集又は売出しにつき第四条第一項本文、第二項本文又は第三項本文の規定の適用を受けるものであるときは、公開買付届出書又は訂正届出書の提出と同時に当該有価証券の発行者が内閣総理大臣にこれらの規定による届出を行つていなければ、売付け等の申込みの勧誘その他の当該公開買付けに係る内閣府令で定める行為をしてはならない。",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_4",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_4-paragraph-1",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十七条の四 （有価証券をもつて対価とする買付け等） 第1項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-7-paragraph-3",
+        "source_ref": "opensearch:law-340CO0000000321-article-7-paragraph-3",
+        "content": "３法第二十七条の二第一項第一号に規定する買付け等を行う株券等の数又は買付け等の価格の総額が著しく少ない場合として政令で定める場合は、当該株券等の買付け等により増加する当該株券等の買付け等を行う者の所有に係る株券等の株券等所有割合（同号に規定する株券等所有割合をいう。次条第五項第三号及び第十四条第一項第二号イにおいて同じ。）が千分の五未満である場合（当該株券等の買付け等を行う者が当該株券等の買付け等を行う日前六月間において当該株券等の発行者が発行する株券等の買付け等（公開買付けによる買付け等及び法第二十七条の二第一項ただし書に規定する適用除外買付け等を除く。）を行つている場合を除く。）とする。",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-7",
+          "sourceContentUnitId": "law-340CO0000000321-article-7-paragraph-3",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第七条 （公開買付けの適用除外となる買付け等） 第3項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-1-item-2",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-1-item-2",
+        "content": "その株券、新株予約権付社債券その他の有価証券で政令で定めるもの（以下この章及び第二十七条の三十の十一（第五項を除く。）において「株券等」という。）について有価証券報告書を提出しなければならない発行者又は特定上場有価証券（流通状況がこれに準ずるものとして政令で定めるものを含み、株券等に限る。）の発行者の株券等につき、当該発行者以外の者が行う買付け等（株券等の買付けその他の有償の譲受けをいい、これに類するものとして政令で定めるものを含む。以下この節において同じ。）であつて次のいずれかに該当するものは、公開買付けによらなければならない。ただし、適用除外買付け等（新株予約権（会社法第二百七十七条の規定\n第2号　特定市場外買付け等（取引所金融商品市場外における株券等の買付け等（取引所金融商品市場における有価証券の売買等に準ずるものとして政令で定める取引による株券等の買付け等及び著しく少数の者から買付け等を行うものとして政令で定める場合における株券等の買付け等を除く。）をいう。以下この号において同じ。）の後におけるその者の所有に係る株券等の株券等所有割合が百分の五を超えることとなる場合又は特定市場外買付け等の前におけるその者の所有に係る株券等の株券等所有割合が既に百分の五を超えている場合であつて、当該特定市場外買付け等の後におけるその者の所有に係る株券等の株券等所有割合が百分の三十以下となるときにおける当該特定市場外買付け等",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_2-paragraph-1-item-2",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第1項第2号",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-2_5-paragraph-1",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-1",
+        "content": "令第七条第一項第九号に規定する株券等の所有者が少数である場合として内閣府令で定める場合は、当該株券等の所有者が二十五名未満である場合とする。",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_5",
+          "sourceContentUnitId": "law-402M50000040038-article-2_5-paragraph-1",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二条の五 （株券等の所有者が少数である場合） 第1項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-2_4-paragraph-2",
+        "source_ref": "opensearch:law-402M50000040038-article-2_4-paragraph-2",
+        "content": "２令第七条第一項第八号に規定する内閣府令で定める者は、当該株券等の買付け等を行う日以前一年間継続して前項各号に掲げる者に該当していた者（当該株券等の買付け等が、前条第一項各号に掲げる有価証券のいずれかに該当する株券等に係る買付け等である場合であって、その者が当該株券等の発行者である場合を除く。）以外の者とする。",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_4",
+          "sourceContentUnitId": "law-402M50000040038-article-2_4-paragraph-2",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二条の四 （関係法人等） 第2項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-1-item-3",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-1-item-3",
+        "content": "その株券、新株予約権付社債券その他の有価証券で政令で定めるもの（以下この章及び第二十七条の三十の十一（第五項を除く。）において「株券等」という。）について有価証券報告書を提出しなければならない発行者又は特定上場有価証券（流通状況がこれに準ずるものとして政令で定めるものを含み、株券等に限る。）の発行者の株券等につき、当該発行者以外の者が行う買付け等（株券等の買付けその他の有償の譲受けをいい、これに類するものとして政令で定めるものを含む。以下この節において同じ。）であつて次のいずれかに該当するものは、公開買付けによらなければならない。ただし、適用除外買付け等（新株予約権（会社法第二百七十七条の規定\n第3号　その他前二号に掲げる株券等の買付け等に準ずるものとして政令で定める株券等の買付け等",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_2-paragraph-1-item-3",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第1項第3号",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-6-paragraph-1",
+        "source_ref": "opensearch:law-340CO0000000321-article-6-paragraph-1",
+        "content": "法第二十七条の二第一項に規定する有価証券で政令で定めるものは、次に掲げる有価証券（株主総会において決議をすることができる事項の全部につき議決権（社債、株式等の振替に関する法律第百四十七条第一項又は第百四十八条第一項（これらの規定を同法第二百二十八条第一項において準用する場合を含む。）の規定により発行者に対抗することができない有価証券に係る議決権を含む。）を行使することができない株式（第十四条の五の二において「議決権のない株式」という。）に係る株券その他の内閣府令で定めるものを除く。以下この節において「株券等」という。）とする。株券、新株予約権証券及び新株予約権付社債券外国の者の発行する証券又は証書で前号に掲げる有価証券の性質を有するもの投資証券等及び新投資口予約権証券等有価証券信託受益証券で、受託有価証券が前三号に掲げる有価証券であるもの法第二条第一項第二十号に掲げる有価証券で、第一号から",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-6",
+          "sourceContentUnitId": "law-340CO0000000321-article-6-paragraph-1",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第六条 （公開買付けによらなければならない有価証券等） 第1項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": true
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-2_6",
+        "source_ref": "opensearch:law-402M50000040038-article-2_6",
+        "content": "（適用除外となる買付け等）\n第二条の六\n令第七条第一項第十一号に規定する内閣府令で定める場合は、次に掲げる場合とする。株券等の発行者の役員（令第七条第一項第十一号に規定する役員をいう。以下同じ。）又は従業員が当該発行者の他の役員又は従業員と共同して当該発行者の株券等の買付け等を行う場合（当該発行者が会社法第百五十六条第一項（同法第百六十五条第三項の規定により読み替えて適用する場合を含む。第七条第一項第十号において同じ。）の規定に基づき買付け等を行った株券以外の株券等の買付け等を行うときは、金融商品取引業者等（法第三十四条に規定する金融商品取引業者等をいう。第三条第二項第二号及び第七条第一項第十号において同じ。）に委託して行う場合に限る。）であって、当該株券等の買付け等が一定の計画に従い、個別の投資判断に基づかず、継続的に行われる場合（各役員又は従業員の一回当たりの拠出金額が二百万円に満たな",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_6",
+          "sourceContentUnitId": "law-402M50000040038-article-2_6",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二条の六 （適用除外となる買付け等）",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": true
+        }
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-2",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-2",
+        "content": "２前項本文に規定する公開買付けによる株券等の買付け等は、政令で定める期間の範囲内で買付け等の期間を定めて、行わなければならない。",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_2-paragraph-2",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第2項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-402M50000040038-article-11",
+        "source_ref": "opensearch:law-402M50000040038-article-11",
+        "content": "（公開買付者が非居住者である場合の代理人）\n第十一条\n非居住者（外国為替及び外国貿易法（昭和二十四年法律第二百二十八号）第六条第一項第六号に規定する非居住者をいう。以下同じ。）である公開買付者が、法第二十七条の三第二項の規定により公開買付届出書を提出する場合には、本邦内に住所又は事務所を有する者であって、当該公開買付けに係る書類の提出に関する一切の行為につき、当該公開買付者を代理する権限を有するものを定めなければならない。",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-11",
+          "sourceContentUnitId": "law-402M50000040038-article-11",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第十一条 （公開買付者が非居住者である場合の代理人）",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-340CO0000000321-article-8-paragraph-3",
+        "source_ref": "opensearch:law-340CO0000000321-article-8-paragraph-3",
+        "content": "３公開買付けによる株券等の買付け等を行う場合には、買付け等の価格は、当該株券等の種類及び内容に応じ、全ての応募株主等（法第二十七条の十二第一項に規定する応募株主等をいう。以下この節において同じ。）について均一にしなければならない。ただし、公開買付者が応募株主等に複数の種類の対価を選択させる場合には、選択することができる対価の種類を全ての応募株主等につき同一とし、かつ、それぞれの種類ごとに当該種類の対価を選択した応募株主等について均一にしなければならない。",
+        "title": "金融商品取引法施行令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-340CO0000000321-article-8",
+          "sourceContentUnitId": "law-340CO0000000321-article-8-paragraph-3",
+          "documentId": "law-340CO0000000321",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第八条 （買付け等の期間等） 第3項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/340CO0000000321",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-3",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-3",
+        "content": "３第一項本文に規定する公開買付けによる株券等の買付け等を行う場合には、買付け等の価格（買付け以外の場合にあつては、買付けの価格に準ずるものとして政令で定めるものとする。以下この節において同じ。）については、政令で定めるところにより、均一の条件によらなければならない。",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_2-paragraph-3",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第3項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "search-nav-law-323AC0000000025-article-27_3-paragraph-3",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_3-paragraph-3",
+        "content": "３公開買付者、その特別関係者（第二十七条の二第七項に規定する特別関係者をいう。以下この節において同じ。）その他政令で定める関係者（以下この節において「公開買付者等」という。）は、その公開買付けにつき公開買付開始公告が行われた日の翌日以後は、当該公開買付者が公開買付届出書を内閣総理大臣に提出していなければ、売付け等の申込みの勧誘その他の当該公開買付けに係る内閣府令で定める行為をしてはならない。",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_3",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_3-paragraph-3",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": false,
+          "evidenceRole": "search_navigation",
+          "heading": "第二十七条の三 （公開買付開始公告及び公開買付届出書の提出） 第3項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-4",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-4",
+        "content": "４第一項本文に規定する公開買付けによる株券等の買付け等を行う場合には、株券等の管理、買付け等の代金の支払その他の政令で定める事務については、金融商品取引業者（第二十八条第一項に規定する第一種金融商品取引業を行う者に限る。第二十七条の十二第三項において同じ。）又は銀行等（銀行、協同組織金融機関その他政令で定める金融機関をいう。第二十七条の十二第三項において同じ。）に行わせなければならない。",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_2-paragraph-4",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第4項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-5",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-5",
+        "content": "５第一項本文に規定する公開買付けによる株券等の買付け等を行う場合には、前三項の規定その他この節に定めるところによるほか、政令で定める条件及び方法によらなければならない。",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_2-paragraph-5",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第5項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-6",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-6",
+        "content": "６この条において「公開買付け」とは、不特定かつ多数の者に対し、公告により株券等の買付け等の申込み又は売付け等（売付けその他の有償の譲渡をいう。以下この章において同じ。）の申込みの勧誘を行い、取引所金融商品市場外で株券等の買付け等を行うことをいう。",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_2-paragraph-6",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第6項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-7",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-7",
+        "content": "７第一項の「特別関係者」とは、次に掲げる者をいう。株券等の買付け等を行う者と、株式の所有関係その他の政令で定める特別の関係にある者株券等の買付け等を行う者との間で、共同して当該株券等を取得し、若しくは譲渡し、若しくは当該株券等の発行者の株主としての議決権その他の権利を行使すること又は当該株券等の買付け等の後に相互に当該株券等を譲渡し、若しくは譲り受けることを合意している者",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_2-paragraph-7",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第7項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-323AC0000000025-article-27_2-paragraph-8",
+        "source_ref": "opensearch:law-323AC0000000025-article-27_2-paragraph-8",
+        "content": "８第一項の「株券等所有割合」とは、次に掲げる割合をいう。株券等の買付け等を行う者にあつては、内閣府令で定めるところにより、その者の所有に係る当該株券等（その所有の態様その他の事情を勘案して内閣府令で定めるものを除く。以下この項において同じ。）に係る議決権の数（株券については内閣府令で定めるところにより計算した株式に係る議決権の数を、その他のものについては内閣府令で定める議決権の数をいう。以下この項において同じ。）の合計を、当該発行者の総議決権の数にその者及びその者の特別関係者の所有に係る当該発行者の発行する新株予約権付社債券その他の政令で定める有価証券に係る議決権の数を加算した数で除して得た割合前項の特別関係者（同項第二号に掲げる者で当該株券等の発行者の株券等の買付け等を行うものを除く。）にあつては、内閣府令で定めるところにより、その者の所有に係る当該株券等に係る議決権の数の合計を、当該発行者の総議決権の数にその者及び前号に掲げる株券等の買付け等を行う者の所有に係る当該発行者の発行する新株予約権付社債券その他の政令で定める有価証券に係る議決権の数を加算した数で除して得た割合",
+        "title": "金融商品取引法",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-323AC0000000025-article-27_2",
+          "sourceContentUnitId": "law-323AC0000000025-article-27_2-paragraph-8",
+          "documentId": "law-323AC0000000025",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二十七条の二 （発行者以外の者による株券等の公開買付け） 第8項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/323AC0000000025",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-1",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-1",
+        "content": "令第七条第一項第九号に規定する株券等の所有者が少数である場合として内閣府令で定める場合は、当該株券等の所有者が二十五名未満である場合とする。",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_5",
+          "sourceContentUnitId": "law-402M50000040038-article-2_5-paragraph-1",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二条の五 （株券等の所有者が少数である場合） 第1項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-2",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-2",
+        "content": "２令第七条第一項第九号に規定する全ての所有者が同意している場合として内閣府令で定める場合は、次の各号に掲げる区分に応じ、当該各号に定める場合とする。当該株券等の買付け等の後における当該株券等の買付け等を行う者の所有に係る株券等の株券等所有割合とその者の特別関係者（法第二十七条の二第一項第一号に規定する特別関係者をいう。）の株券等所有割合を合計した割合が三分の二以上となる場合であって、当該株券等の買付け等の対象とならない株券等（以下この号において「買付け等対象外株券等」という。）があるとき当該株券等の買付け等の対象となる株券等に係る買付け等を公開買付けによらないで行うことに同意する旨を記載した書面が当該株券等の買付け等の対象となる株券等の全ての所有者から提出され、かつ、買付け等対象外株券等についてイ又はロの条件が満たされている場合当該株券等の買付け等を公開買付けによらないで行うことに同意することにつき、当該買付け等対象外株券等に係る種類株主総会（会社法第二条第十四号に規定する種類株主総会をいう。第五条第三項第一号において同じ。）の決議が行われていること。買付け等対象外株券等の所有者が二十五名未満である場合であって、当該株券等の買付け等を公開買付けによらないで行うことにつき、当該買付け等対象外株券等の全ての所有者が同意し、その旨を記載した書面を提出していること。前号に掲げる場合以外の場合当該株券等の買付け等の対象となる株券等に係る買付け等を公開買付けによらないで行うことに同意する旨を記載した書面が当該株券等の買付け等の対象となる株券等の全ての所有者から提出された場合",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_5",
+          "sourceContentUnitId": "law-402M50000040038-article-2_5-paragraph-2",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二条の五 （株券等の所有者が少数である場合） 第2項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-3",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-3",
+        "content": "３株券等の所有者（以下この条において「所有者」という。）は、前項第一号本文及び同号ロ又は同項第二号の規定による書面の提出に代えて、同項の規定により書面に記載する事項（以下この項において「記載事項」という。）を電子情報処理組織を使用する方法その他の情報通信の技術を利用する方法であって次に掲げるものにより提供することができる。この場合において、当該所有者は、当該書面を提出したものとみなす。電子情報処理組織を使用する方法のうちイ又はロに掲げるもの所有者の使用に係る電子計算機と株券等の買付け等を行う者の使用に係る電子計算機とを接続する電気通信回線を通じて送信し、受信者の使用に係る電子計算機に備えられたファイルに記録する方法所有者の使用に係る電子計算機に備えられたファイルに記録された記載事項を電気通信回線を通じて株券等の買付け等を行う者の閲覧に供し、当該株券等の買付け等を行う者の使用に係る電子計算機に備えられたファイルに記載事項を記録する方法電磁的記録媒体（法第十三条第五項に規定する電磁的記録に係る記録媒体をいう。第五条第八項第二号及び第三十三条の三第二項第二号において同じ。）をもって調製するファイルに記載事項を記録したものを交付する方法",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_5",
+          "sourceContentUnitId": "law-402M50000040038-article-2_5-paragraph-3",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二条の五 （株券等の所有者が少数である場合） 第3項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-4",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-4",
+        "content": "４前項各号に掲げる方法は、株券等の買付け等を行う者がファイルへの記録を出力することにより書面を作成することができるものでなければならない。",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_5",
+          "sourceContentUnitId": "law-402M50000040038-article-2_5-paragraph-4",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二条の五 （株券等の所有者が少数である場合） 第4項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-5",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-5",
+        "content": "５第三項の「電子情報処理組織」とは、所有者の使用に係る電子計算機と、株券等の買付け等を行う者の使用に係る電子計算機とを電気通信回線で接続した電子情報処理組織をいう。",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_5",
+          "sourceContentUnitId": "law-402M50000040038-article-2_5-paragraph-5",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二条の五 （株券等の所有者が少数である場合） 第5項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      }
+    ],
+    "omitted_evidence_ids": [],
+    "required_dependency_kind": "lower_norm",
+    "required_dependency_work_item_ids": [
+      "wi-1",
+      "wi-2"
+    ],
+    "dependency_decisions": [],
+    "reviewer_findings": [],
+    "contract_feedback": null
+  }
+}

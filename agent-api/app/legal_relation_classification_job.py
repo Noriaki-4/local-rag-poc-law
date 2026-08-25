@@ -50,7 +50,7 @@ from .legal_relation_classifier import (
     without_repeated_parent_context_with_offset,
 )
 
-RELATION_CLASSIFICATION_PROMPT_VERSION = "legal-relation-5predicate-v21-pair"
+RELATION_CLASSIFICATION_PROMPT_VERSION = "legal-relation-5predicate-v22-pair"
 RELATION_ADJUDICATION_PROMPT_VERSION = "legal-relation-5predicate-v23-pair"
 logger = logging.getLogger(__name__)
 

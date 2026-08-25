@@ -30,12 +30,12 @@ Solverに選ばせる。どのHypothesisが結論を十分に支えるかは意�
 
 | 項目 | 契約上の意味 | Programが行うこと | LLMが行うこと | 主なPrompt |
 |---|---|---|---|---|
-| `WorkItem.question` | 1つの完了判定で閉じられる確認事項 | ID、一意性、親子循環、状態整合を検証 | 質問を重複しない確認事項へ分解 | `solver_common.md`、`solver_research.md` |
-| `Hypothesis.work_item_id` | Hypothesisが検証する所属WorkItem | 既知WorkItemとの完全一致を検証 | WorkItemごとに本文で支持・否定できる命題を置く | `solver_common.md`、`solver_research.md` |
+| `WorkItem.question` | 1つの完了判定で閉じられる確認事項 | ID、一意性、親子循環、状態整合を検証 | 質問を重複しない確認事項へ分解 | `solver_common.md`、`solver_question_decomposition.md` |
+| `Hypothesis.work_item_id` | Hypothesisが検証する所属WorkItem | 既知WorkItemとの完全一致を検証 | WorkItemごとに本文で支持・否定できる命題を置く | `solver_common.md`、`solver_hypothesis_generation.md` |
 | `WorkItem.basis_hypothesis_ids` | openでは作業の作成・継続を前提づけるHypothesis、resolvedではresolutionを支える判定済みHypothesis | 値がある場合の既知ID、反証時の影響対象、resolved時の未判定basis、最終引用を検証する。十分なHypothesisをProgramが選ぶことはしない | openの前提、またはresolvedの判断根拠を選ぶ | `solver_common.md`、`solver_cycle_close.md`、`solver_completion.md` |
 | `Hypothesis.judgment` | `unresolved`は未確認、`supported`は本文が支持、`contradicted`は本文が否定 | 判定済みならEvidence必須、既知ID、反証時の影響処理を検証 | 提示されたgrounding本文から判定 | `solver_common.md`、`solver_integration.md` |
 | `Hypothesis.evidence_ids` | 現在の判定と`gaps`の判断に使った取得本文 | 既知かつ提示済みのgrounding Evidence IDを検証。判定済みでは1件以上必須 | `unresolved`でも一部確認に使った本文を残し、未確認の結論を支持したことにはしない | `solver_observation_integration.md` |
-| `Hypothesis.gaps` | 命題を判定するため本文でまだ確認すべき情報 | 文字列として保存・引継ぎ | 未確認事項を具体化し、次の探索へ使う | `solver_research.md`、`solver_integration.md` |
+| `Hypothesis.gaps` | 命題を判定するため本文でまだ確認すべき情報 | 文字列として保存・引継ぎ | 未確認事項を具体化し、次の探索へ使う | `solver_hypothesis_generation.md`、`solver_integration.md` |
 | `Evidence` | Toolから得た保存済み情報 | 来歴、本文提示有無、引用可能性を投影 | `material_evidence`に本文があるgrounding Evidenceだけで意味判断 | `solver_common.md`、`solver_integration.md` |
 | `evidence_hypothesis_candidates` | 取得Articleと、本文取得前に対応候補と判断されたHypothesisの来歴 | 保存済みArticle・Hypothesis IDを結合してObservationへ投影 | 手掛かりとして本文を再評価し、支持・反証または部分確認を判断する | `solver_observation_integration.md` |
 | `ToolRequest` | open WorkItem・Hypothesisを検証するread-only Tool要求 | Tool名、引数Schema、既知ID、件数、重複scopeを検証して実行 | gapに応じてToolと引数を選ぶ | `solver_tools.md`、各モードPrompt |

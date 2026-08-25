@@ -13,7 +13,7 @@
         "additionalProperties": false,
         "properties": {
           "evidence_ids": {
-            "description": "現在の判定とgapsの判断に使った取得済みgrounding Evidence ID。unresolvedでも本文で確認できた部分があれば保持できる。",
+            "description": "現在の判定とgapsの判断に直接必要な、最小集合の取得済みgrounding Evidence ID。関連するだけのParagraph・Itemを全件入れない。unresolvedでも本文で確認できた部分があれば保持できる。",
             "items": {
               "type": "string"
             },

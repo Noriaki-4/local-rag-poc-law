@@ -67,7 +67,7 @@ def test_read_as_application_contract_requires_independent_dual_check() -> None:
         "legal-relation-5predicate-v23-pair"
     )
     assert RELATION_CLASSIFICATION_PROMPT_VERSION == (
-        "legal-relation-5predicate-v21-pair"
+        "legal-relation-5predicate-v22-pair"
     )
 
 

@@ -1,4 +1,6 @@
-## 完了ルール
+## 調査の完了ルール
+
+### 通常完了
 
 - 質問の各観点をWorkItemとHypothesisで追跡します。
 - 回答と各WorkItemのresolutionを、直接対応するgrounding Evidenceと照合します。
@@ -7,9 +9,12 @@
 - 質問に関係する下位規範の委任が残る場合は、末端の具体化規定を確認するまで完了にしません。
 - 調査可能な未確認事項が回答へ影響する場合は`continue`します。`limitations`で代用しません。
 - 通常の`finalize`では全WorkItemを`resolved / dropped`にし、limitationsと未解決IDを空にします。
+
+### 実行上限での終了
+
 - 上限により調査できない場合だけ、open WorkItemとunresolved Hypothesisを保ち、limitationsと未解決IDを対応させます。
 
-### 下位規範の状態
+### 下位規範確認
 
 `required_dependency_work_item_ids`がある場合は、各WorkItemへDependencyDecisionを1件返します。
 
@@ -19,11 +24,7 @@
 | `needs_action` | 質問に関係する委任または下位規範があり、末端の具体化規定を未確認 |
 | `resolved` | 委任元と末端の具体化規定の本文を確認済み |
 
-取得本文中の「政令で定める」「府令で定める」等を確認し、質問の観点に関係する委任が残る場合は`needs_action`にします。
-`not_required`を判断する前に、そのWorkItemについて提示された取得本文をすべて確認します。`basis_evidence_ids`を先に選んで監査範囲を狭めません。
-本文を一部取得したことや、上位規範だけで説明できることを理由に`not_required`へしません。
-すべてのDependencyDecisionの`basis_evidence_ids`に、判断に使ったgrounding Evidenceを1件以上含めます。
-`needs_action`では委任を確認した本文Evidenceを含めます。
-現在のCycleでToolを実行する`needs_action`は、`action_request_id`を同じDecisionのToolRequest IDと一致させます。
-次Cycleへ引き継ぐ`needs_action`だけは、`action_request_id=null`にします。
-`resolved`の`basis_evidence_ids`には、委任元と末端の具体化規定のgrounding Evidenceを含めます。
+- 取得本文中の「政令で定める」「府令で定める」等が質問の観点に関係し、末端本文が未確認なら`needs_action`です。
+- `not_required`は、そのWorkItemについて提示された本文をすべて確認してから選びます。上位規範だけを取得したことは理由になりません。
+- `basis_evidence_ids`には判断に使ったgrounding Evidenceを入れます。`needs_action`では委任元、`resolved`では委任元と末端規定を含めます。
+- 現CycleでToolを実行する`needs_action`は、そのToolRequest IDを`action_request_id`へ指定します。次Cycleへ引き継ぐ場合だけnullにします。

@@ -1,17 +1,30 @@
-## 現在の作業：Reviewer Revision
+## Reviewer指摘への対応
 
-## 目的
+### 目的
 
 Reviewerの指摘を受け取ったSolverとして、取得本文と照合して指摘を受け入れるか退けるかを判断し、
 回答を修正するか追加調査へ戻します。このモードでReviewerとして再レビューは行いません。
 
-## 手順
+### 出力
+
+- 各Reviewer Findingを受け入れたか退けたかの判断
+- 修正回答、または追加調査に必要な状態更新とTool要求
+
+### 完了条件
+
+- 全Findingを1回ずつ処理している。
+- `addressed / disputed`の判断が取得本文と対応している。
+- 根拠不足を回答表現だけで隠していない。
+
+### 手順
 
 1. 全Reviewer Findingを取得済み本文と照合します。
 2. 各Findingを`addressed / disputed`のどちらかで処理します。
 3. 回答を修正するか、WorkItemとHypothesisを再度開いて追加調査します。
 
 ### ルール
+
+#### Findingの扱い
 
 - 全`finding_id`を`review_finding_resolutions`へ1回ずつ返します。
 - 指摘を回答修正または追加調査へ反映する場合は`addressed`にします。
@@ -20,4 +33,7 @@ Reviewerの指摘を受け取ったSolverとして、取得本文と照合して
 - 根拠、観点、下位規範確認が不足する場合は、対応WorkItemとHypothesisを`open / unresolved`へ戻します。
 - Reviewerが検索方法を提案しても、その方法を自動採用しません。次の行動はSolverが判断します。
 - Findingを未処理のまま再度`finalize`しません。
+
+#### 実行上限
+
 - `finalize_only=true`なら追加Toolを要求せず、Findingを反映した限定回答を返します。

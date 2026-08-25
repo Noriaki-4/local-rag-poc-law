@@ -25,7 +25,7 @@ def legal_agent_profile() -> AgentProfile:
     timeout_sec = settings.agent_framework_model_timeout_sec
     return AgentProfile(
         name="legal-default",
-        version="198",
+        version="267",
         provider=settings.llm_provider,
         solver_research=_model_profile(
             model=settings.agent_framework_research_model,
@@ -78,6 +78,14 @@ def legal_agent_profile() -> AgentProfile:
                 completion_prompt,
             ),
             completion_check_prompt=_read_prompt("solver_integration_check.md"),
+            dependency_action_system_prompt=_join_prompts(
+                solver_identity_prompt,
+                _read_prompt("solver_dependency_action.md"),
+                tool_prompt,
+            ),
+            dependency_action_completion_check_prompt=_read_prompt(
+                "solver_dependency_action_check.md"
+            ),
         ),
         solver_cycle_close=ModelCallProfile(
             model=integration_model,
@@ -96,6 +104,12 @@ def legal_agent_profile() -> AgentProfile:
             ),
             dependency_completion_check_prompt=_read_prompt(
                 "solver_dependency_assessment_check.md"
+            ),
+            final_answer_check_system_prompt=_read_prompt(
+                "solver_final_answer_check.md"
+            ),
+            final_answer_check_completion_prompt=_read_prompt(
+                "solver_final_answer_check_completion.md"
             ),
             context_projection="cycle_close",
             available_tool_names=(),
@@ -161,6 +175,7 @@ def legal_agent_profile() -> AgentProfile:
             completion_check_prompt=_read_prompt(
                 "solver_graph_review_check.md"
             ),
+            context_projection="graph_review",
         ),
         reviewer=ReviewerProfile(
             enabled=settings.agent_framework_reviewer_enabled,
@@ -241,10 +256,14 @@ def _model_profile(
         "research_decomposition",
         "research_hypothesis",
         "research_search",
+        "graph_review",
+        "observation_integration",
         "cycle_close",
         "finalization",
     ] = "full",
     available_tool_names: tuple[str, ...] | None = None,
+    dependency_action_system_prompt: str | None = None,
+    dependency_action_completion_check_prompt: str | None = None,
 ) -> ModelCallProfile:
     return ModelCallProfile(
         model=model,
@@ -254,4 +273,8 @@ def _model_profile(
         completion_check_prompt=completion_check_prompt,
         context_projection=context_projection,
         available_tool_names=available_tool_names,
+        dependency_action_system_prompt=dependency_action_system_prompt,
+        dependency_action_completion_check_prompt=(
+            dependency_action_completion_check_prompt
+        ),
     )

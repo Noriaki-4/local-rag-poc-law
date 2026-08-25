@@ -76,6 +76,9 @@ from app.agent_framework.state import (
 from app.llm import LLMClient
 
 
+_SEARCH_REVIEW_BATCH_SIZE = 8
+
+
 class StructuredJSONModelAdapter:
     def __init__(
         self,
@@ -97,6 +100,14 @@ class StructuredJSONModelAdapter:
             and not context.finalize_only
         ):
             return self._solve_search_review(context, profile)
+        if (
+            profile.context_projection == "graph_review"
+            and context.graph_review_batch.candidates
+            and not context.finalize_only
+        ):
+            return self._solve_graph_review(context, profile)
+        if profile.context_projection == "observation_integration":
+            return self._solve_observation_only(context, profile)
         if profile.context_projection == "cycle_close":
             return self._solve_cycle_close(context, profile)
         rendered = render_solver_model_call(context, profile, provider=provider)
@@ -250,6 +261,252 @@ class StructuredJSONModelAdapter:
             raise last_error
         raise ModelProtocolError("solver decision is unavailable")
 
+    def _solve_graph_review(
+        self,
+        context: SolverContext,
+        profile: ModelCallProfile,
+    ) -> SolverCallResult:
+        """Graph候補の意味選別だけを専用の小さい契約で実行する。"""
+
+        rendered = render_graph_review_model_call(context, profile)
+        provider = getattr(self._client, "provider", None)
+        if self._diagnostics is not None:
+            self._diagnostics.record_transport_input(
+                context=context,
+                profile=profile,
+                rendered=rendered,
+                repair_index=0,
+                transport_stage="graph_review",
+                provider=provider,
+            )
+        try:
+            result = self._client.generate_structured_json(
+                prompt=rendered.request,
+                schema=rendered.output_schema,
+                model=profile.model,
+                max_tokens=profile.max_output_tokens,
+                timeout_sec=max(1, round(profile.timeout_sec)),
+            )
+        except requests.Timeout as exc:
+            if self._diagnostics is not None:
+                self._diagnostics.record_transport_timeout(
+                    context=context,
+                    repair_index=0,
+                    reason="graph review timed out",
+                    transport_stage="graph_review",
+                )
+            raise TimeoutError("graph review timed out") from exc
+
+        validation_error = result.validationError
+        review: GraphCandidateReview | None = None
+        if validation_error is None and result.payload is not None:
+            try:
+                review = GraphCandidateReview.model_validate(result.payload)
+            except ValidationError as exc:
+                validation_error = str(exc)
+        elif validation_error is None:
+            validation_error = "empty"
+
+        if self._diagnostics is not None:
+            self._diagnostics.record_transport_output(
+                context=context,
+                repair_index=0,
+                payload=result.payload,
+                validation_error=validation_error,
+                input_tokens=result.inputTokens,
+                output_tokens=result.outputTokens,
+                provider_retry_count=result.retryCount,
+                transport_stage="graph_review",
+            )
+        if validation_error is not None or review is None:
+            raise ModelProtocolError(
+                f"graph review transport invalid: {validation_error}"
+            )
+
+        decision = SolverDecision(
+            next="continue",
+            decision_reason=review.reason,
+            graph_candidate_review=review,
+        )
+        return SolverCallResult(
+            decision=decision,
+            input_tokens=result.inputTokens,
+            output_tokens=result.outputTokens,
+            attempt_count=1 + result.retryCount,
+        )
+
+    def _solve_observation_only(
+        self,
+        context: SolverContext,
+        profile: ModelCallProfile,
+    ) -> SolverCallResult:
+        """Persist new Tool observations before asking for another action."""
+
+        started_at = monotonic()
+        observation, input_tokens, output_tokens, attempt_count = (
+            self._solve_observation_integrations(
+                context,
+                profile,
+                started_at=started_at,
+            )
+        )
+        (
+            observation,
+            dependency_input_tokens,
+            dependency_output_tokens,
+            dependency_retry_count,
+            dependency_assessed,
+        ) = self._solve_dependency_assessment(
+            context,
+            observation,
+            profile,
+            started_at=started_at,
+            prior_input_tokens=input_tokens,
+            prior_output_tokens=output_tokens,
+        )
+        return SolverCallResult(
+            decision=SolverDecision(
+                next="continue",
+                decision_reason=observation.decision_reason,
+                update=CaseUpdate(
+                    update_hypotheses=observation.update_hypotheses,
+                ),
+                dependency_decisions=observation.dependency_decisions,
+            ),
+            input_tokens=_sum_optional_tokens(
+                input_tokens,
+                dependency_input_tokens,
+            ),
+            output_tokens=_sum_optional_tokens(
+                output_tokens,
+                dependency_output_tokens,
+            ),
+            attempt_count=(
+                attempt_count
+                + dependency_retry_count
+                + int(dependency_assessed)
+            ),
+        )
+
+    def _solve_dependency_assessment(
+        self,
+        context: SolverContext,
+        observation: ObservationIntegrationDecision,
+        profile: ModelCallProfile,
+        *,
+        started_at: float,
+        prior_input_tokens: int | None,
+        prior_output_tokens: int | None,
+    ) -> tuple[
+        ObservationIntegrationDecision,
+        int | None,
+        int | None,
+        int,
+        bool,
+    ]:
+        """Evaluate lower-norm status after each new full-text observation."""
+
+        if (
+            context.required_dependency_kind is None
+            or not context.required_dependency_work_item_ids
+        ):
+            return observation, 0, 0, 0, False
+
+        dependency_call = render_dependency_assessment_model_call(
+            context,
+            observation,
+            profile,
+        )
+        remaining_timeout = profile.timeout_sec - (monotonic() - started_at)
+        if remaining_timeout <= 1:
+            raise _cycle_close_checkpoint_timeout(
+                "dependency assessment time exhausted",
+                observation=observation,
+                completed_stage="observation_integration",
+                input_tokens=prior_input_tokens,
+                output_tokens=prior_output_tokens,
+            )
+        if self._diagnostics is not None:
+            self._diagnostics.record_transport_input(
+                context=context,
+                profile=profile,
+                rendered=dependency_call,
+                repair_index=0,
+                transport_stage="dependency_assessment",
+                provider=getattr(self._client, "provider", None),
+            )
+        try:
+            dependency_result = self._client.generate_structured_json(
+                prompt=dependency_call.request,
+                schema=dependency_call.output_schema,
+                model=profile.model,
+                max_tokens=profile.max_output_tokens,
+                timeout_sec=max(1, round(remaining_timeout)),
+            )
+        except requests.Timeout as exc:
+            raise _cycle_close_checkpoint_timeout(
+                "dependency assessment timed out",
+                observation=observation,
+                completed_stage="observation_integration",
+                input_tokens=prior_input_tokens,
+                output_tokens=prior_output_tokens,
+            ) from exc
+        dependency_error = dependency_result.validationError
+        if dependency_result.payload is None and dependency_error is None:
+            dependency_error = "empty"
+        if self._diagnostics is not None:
+            self._diagnostics.record_transport_output(
+                context=context,
+                repair_index=0,
+                payload=dependency_result.payload,
+                validation_error=dependency_error,
+                input_tokens=dependency_result.inputTokens,
+                output_tokens=dependency_result.outputTokens,
+                provider_retry_count=dependency_result.retryCount,
+                transport_stage="dependency_assessment",
+            )
+        if dependency_error is not None or dependency_result.payload is None:
+            raise ModelProtocolError(
+                "dependency assessment transport invalid: "
+                f"{dependency_error}"
+            )
+        try:
+            dependency = DependencyAssessmentDecision.model_validate(
+                _normalize_observation_integration_payload(
+                    dependency_result.payload,
+                    context=context,
+                )
+            )
+            dependency = _downgrade_unproven_dependency_confirmations(
+                dependency,
+                article_id_by_evidence={
+                    item.evidence_id: article_id
+                    for item in context.material_evidence
+                    if item.evidence_id in context.grounding_evidence_ids
+                    and isinstance(
+                        article_id := item.metadata.get("articleId"),
+                        str,
+                    )
+                },
+            )
+        except ValidationError as exc:
+            detail = exc.errors(include_url=False, include_input=False)[0]
+            raise ModelProtocolError(
+                "dependency assessment contract invalid: "
+                f"{detail['msg']}"
+            ) from exc
+        observation = observation.model_copy(
+            update={"dependency_decisions": dependency.dependency_decisions}
+        )
+        observation = _align_observation_with_dependency_decisions(observation)
+        return (
+            observation,
+            dependency_result.inputTokens,
+            dependency_result.outputTokens,
+            dependency_result.retryCount,
+            True,
+        )
+
     def _solve_cycle_close(
         self,
         context: SolverContext,
@@ -257,160 +514,37 @@ class StructuredJSONModelAdapter:
     ) -> SolverCallResult:
         """取得本文の意味統合とCycle境界判断を別コンテキストで実行する。"""
 
-        observation_call = render_observation_integration_model_call(
+        started_at = monotonic()
+        (
+            observation,
+            observation_input_tokens,
+            observation_output_tokens,
+            observation_attempt_count,
+        ) = self._solve_observation_integrations(
             context,
             profile,
+            started_at=started_at,
         )
-        if self._diagnostics is not None:
-            self._diagnostics.record_transport_input(
-                context=context,
-                profile=profile,
-                rendered=observation_call,
-                repair_index=0,
-                transport_stage="observation_integration",
-                provider=getattr(self._client, "provider", None),
-            )
-        started_at = monotonic()
-        try:
-            observation_result = self._client.generate_structured_json(
-                prompt=observation_call.request,
-                schema=observation_call.output_schema,
-                model=profile.model,
-                max_tokens=profile.max_output_tokens,
-                timeout_sec=max(1, round(profile.timeout_sec)),
-            )
-        except requests.Timeout as exc:
-            raise TimeoutError("observation integration timed out") from exc
-        observation_error = observation_result.validationError
-        if observation_result.payload is None and observation_error is None:
-            observation_error = "empty"
-        if self._diagnostics is not None:
-            self._diagnostics.record_transport_output(
-                context=context,
-                repair_index=0,
-                payload=observation_result.payload,
-                validation_error=observation_error,
-                input_tokens=observation_result.inputTokens,
-                output_tokens=observation_result.outputTokens,
-                provider_retry_count=observation_result.retryCount,
-                transport_stage="observation_integration",
-            )
-        if observation_error is not None or observation_result.payload is None:
-            raise ModelProtocolError(
-                "observation integration transport invalid: "
-                f"{observation_error}"
-            )
-        try:
-            observation = ObservationIntegrationDecision.model_validate(
-                _normalize_observation_integration_payload(
-                    observation_result.payload
-                )
-            )
-        except ValidationError as exc:
-            detail = exc.errors(include_url=False, include_input=False)[0]
-            raise ModelProtocolError(
-                "observation integration contract invalid: "
-                f"{detail['msg']}"
-            ) from exc
 
-        dependency_input_tokens = 0
-        dependency_output_tokens = 0
-        dependency_retry_count = 0
-        completed_stage = "observation_integration"
-        if (
-            context.required_dependency_kind is not None
-            and context.required_dependency_work_item_ids
-        ):
-            dependency_call = render_dependency_assessment_model_call(
-                context,
-                observation,
-                profile,
-            )
-            remaining_timeout = profile.timeout_sec - (monotonic() - started_at)
-            if remaining_timeout <= 1:
-                raise _cycle_close_checkpoint_timeout(
-                    "dependency assessment time exhausted",
-                    observation=observation,
-                    completed_stage=completed_stage,
-                    input_tokens=observation_result.inputTokens,
-                    output_tokens=observation_result.outputTokens,
-                )
-            if self._diagnostics is not None:
-                self._diagnostics.record_transport_input(
-                    context=context,
-                    profile=profile,
-                    rendered=dependency_call,
-                    repair_index=0,
-                    transport_stage="dependency_assessment",
-                    provider=getattr(self._client, "provider", None),
-                )
-            try:
-                dependency_result = self._client.generate_structured_json(
-                    prompt=dependency_call.request,
-                    schema=dependency_call.output_schema,
-                    model=profile.model,
-                    max_tokens=profile.max_output_tokens,
-                    timeout_sec=max(1, round(remaining_timeout)),
-                )
-            except requests.Timeout as exc:
-                raise _cycle_close_checkpoint_timeout(
-                    "dependency assessment timed out",
-                    observation=observation,
-                    completed_stage=completed_stage,
-                    input_tokens=observation_result.inputTokens,
-                    output_tokens=observation_result.outputTokens,
-                ) from exc
-            dependency_error = dependency_result.validationError
-            if dependency_result.payload is None and dependency_error is None:
-                dependency_error = "empty"
-            if self._diagnostics is not None:
-                self._diagnostics.record_transport_output(
-                    context=context,
-                    repair_index=0,
-                    payload=dependency_result.payload,
-                    validation_error=dependency_error,
-                    input_tokens=dependency_result.inputTokens,
-                    output_tokens=dependency_result.outputTokens,
-                    provider_retry_count=dependency_result.retryCount,
-                    transport_stage="dependency_assessment",
-                )
-            if dependency_error is not None or dependency_result.payload is None:
-                raise ModelProtocolError(
-                    "dependency assessment transport invalid: "
-                    f"{dependency_error}"
-                )
-            try:
-                dependency = DependencyAssessmentDecision.model_validate(
-                    _normalize_observation_integration_payload(
-                        dependency_result.payload
-                    )
-                )
-                dependency = _downgrade_unproven_dependency_confirmations(
-                    dependency,
-                    article_id_by_evidence={
-                        item.evidence_id: article_id
-                        for item in context.material_evidence
-                        if item.evidence_id in context.grounding_evidence_ids
-                        and isinstance(
-                            article_id := item.metadata.get("articleId"),
-                            str,
-                        )
-                    },
-                )
-            except ValidationError as exc:
-                detail = exc.errors(include_url=False, include_input=False)[0]
-                raise ModelProtocolError(
-                    "dependency assessment contract invalid: "
-                    f"{detail['msg']}"
-                ) from exc
-            observation = observation.model_copy(
-                update={"dependency_decisions": dependency.dependency_decisions}
-            )
-            observation = _align_observation_with_dependency_decisions(observation)
-            dependency_input_tokens = dependency_result.inputTokens
-            dependency_output_tokens = dependency_result.outputTokens
-            dependency_retry_count = dependency_result.retryCount
-            completed_stage = "dependency_assessment"
+        (
+            observation,
+            dependency_input_tokens,
+            dependency_output_tokens,
+            dependency_retry_count,
+            dependency_assessed,
+        ) = self._solve_dependency_assessment(
+            context,
+            observation,
+            profile,
+            started_at=started_at,
+            prior_input_tokens=observation_input_tokens,
+            prior_output_tokens=observation_output_tokens,
+        )
+        completed_stage = (
+            "dependency_assessment"
+            if dependency_assessed
+            else "observation_integration"
+        )
 
         transition_call = render_cycle_close_model_call(
             context,
@@ -424,11 +558,11 @@ class StructuredJSONModelAdapter:
                 observation=observation,
                 completed_stage=completed_stage,
                 input_tokens=_sum_optional_tokens(
-                    observation_result.inputTokens,
+                    observation_input_tokens,
                     dependency_input_tokens,
                 ),
                 output_tokens=_sum_optional_tokens(
-                    observation_result.outputTokens,
+                    observation_output_tokens,
                     dependency_output_tokens,
                 ),
             )
@@ -455,11 +589,11 @@ class StructuredJSONModelAdapter:
                 observation=observation,
                 completed_stage=completed_stage,
                 input_tokens=_sum_optional_tokens(
-                    observation_result.inputTokens,
+                    observation_input_tokens,
                     dependency_input_tokens,
                 ),
                 output_tokens=_sum_optional_tokens(
-                    observation_result.outputTokens,
+                    observation_output_tokens,
                     dependency_output_tokens,
                 ),
             ) from exc
@@ -481,13 +615,13 @@ class StructuredJSONModelAdapter:
             raise ModelProtocolError(
                 f"cycle close transport invalid: {transition_error}"
             )
+        answer_check_input_tokens = 0
+        answer_check_output_tokens = 0
+        answer_check_retry_count = 0
+        answer_check_attempted = False
         try:
             transition = CycleCloseDecision.model_validate(
                 transition_result.payload
-            )
-            decision = _normalize_cycle_close_decisions(
-                observation,
-                transition,
             )
         except ValidationError as exc:
             detail = exc.errors(include_url=False, include_input=False)[0]
@@ -495,27 +629,218 @@ class StructuredJSONModelAdapter:
                 f"cycle close contract invalid: {detail['msg']}"
             ) from exc
 
+        if transition.answer is not None:
+            answer_check_call = render_final_answer_check_model_call(
+                context,
+                observation,
+                transition.answer,
+                profile,
+            )
+            remaining_timeout = profile.timeout_sec - (monotonic() - started_at)
+            if remaining_timeout <= 1:
+                raise _cycle_close_checkpoint_timeout(
+                    "final answer check time exhausted",
+                    observation=observation,
+                    completed_stage="cycle_close",
+                    input_tokens=_sum_optional_tokens(
+                        observation_input_tokens,
+                        dependency_input_tokens,
+                        transition_result.inputTokens,
+                    ),
+                    output_tokens=_sum_optional_tokens(
+                        observation_output_tokens,
+                        dependency_output_tokens,
+                        transition_result.outputTokens,
+                    ),
+                )
+            if self._diagnostics is not None:
+                self._diagnostics.record_transport_input(
+                    context=context,
+                    profile=profile,
+                    rendered=answer_check_call,
+                    repair_index=0,
+                    transport_stage="final_answer_check",
+                    provider=getattr(self._client, "provider", None),
+                )
+            try:
+                answer_check_result = self._client.generate_structured_json(
+                    prompt=answer_check_call.request,
+                    schema=answer_check_call.output_schema,
+                    model=profile.model,
+                    max_tokens=profile.max_output_tokens,
+                    timeout_sec=max(1, round(remaining_timeout)),
+                )
+            except requests.Timeout as exc:
+                raise _cycle_close_checkpoint_timeout(
+                    "final answer check timed out",
+                    observation=observation,
+                    completed_stage="cycle_close",
+                    input_tokens=_sum_optional_tokens(
+                        observation_input_tokens,
+                        dependency_input_tokens,
+                        transition_result.inputTokens,
+                    ),
+                    output_tokens=_sum_optional_tokens(
+                        observation_output_tokens,
+                        dependency_output_tokens,
+                        transition_result.outputTokens,
+                    ),
+                ) from exc
+            answer_check_error = answer_check_result.validationError
+            if answer_check_result.payload is None and answer_check_error is None:
+                answer_check_error = "empty"
+            if self._diagnostics is not None:
+                self._diagnostics.record_transport_output(
+                    context=context,
+                    repair_index=0,
+                    payload=answer_check_result.payload,
+                    validation_error=answer_check_error,
+                    input_tokens=answer_check_result.inputTokens,
+                    output_tokens=answer_check_result.outputTokens,
+                    provider_retry_count=answer_check_result.retryCount,
+                    transport_stage="final_answer_check",
+                )
+            if answer_check_error is not None or answer_check_result.payload is None:
+                raise ModelProtocolError(
+                    "final answer check transport invalid: "
+                    f"{answer_check_error}"
+                )
+            checked_text = answer_check_result.payload.get("text")
+            required_answer_ids = _required_answer_evidence_ids(
+                context,
+                observation,
+            )
+            if not isinstance(checked_text, str) or not checked_text.strip():
+                raise ModelProtocolError("final answer check requires answer text")
+            transition = transition.model_copy(
+                update={
+                    "answer": transition.answer.model_copy(
+                        update={
+                            "text": checked_text,
+                            "citation_ids": required_answer_ids,
+                        }
+                    )
+                }
+            )
+            answer_check_input_tokens = answer_check_result.inputTokens
+            answer_check_output_tokens = answer_check_result.outputTokens
+            answer_check_retry_count = answer_check_result.retryCount
+            answer_check_attempted = True
+
+        decision = _normalize_cycle_close_decisions(
+            observation,
+            transition,
+        )
+
         input_tokens = _sum_optional_tokens(
-            observation_result.inputTokens,
+            observation_input_tokens,
             dependency_input_tokens,
             transition_result.inputTokens,
+            answer_check_input_tokens,
         )
         output_tokens = _sum_optional_tokens(
-            observation_result.outputTokens,
+            observation_output_tokens,
             dependency_output_tokens,
             transition_result.outputTokens,
+            answer_check_output_tokens,
         )
         return SolverCallResult(
             decision=decision,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             attempt_count=(
-                2
-                + observation_result.retryCount
+                1
+                + observation_attempt_count
                 + dependency_retry_count
                 + transition_result.retryCount
-                + int(completed_stage == "dependency_assessment")
+                + int(dependency_assessed)
+                + int(answer_check_attempted)
+                + answer_check_retry_count
             ),
+        )
+
+    def _solve_observation_integrations(
+        self,
+        context: SolverContext,
+        profile: ModelCallProfile,
+        *,
+        started_at: float,
+    ) -> tuple[ObservationIntegrationDecision, int | None, int | None, int]:
+        """各open WorkItemの本文評価を独立した単一タスクとして実行する。"""
+
+        observations: list[ObservationIntegrationDecision] = []
+        input_tokens: list[int | None] = []
+        output_tokens: list[int | None] = []
+        attempt_count = 0
+        for projected_context in _observation_work_item_contexts(context):
+            rendered = render_observation_integration_model_call(
+                projected_context,
+                profile,
+            )
+            if self._diagnostics is not None:
+                self._diagnostics.record_transport_input(
+                    context=projected_context,
+                    profile=profile,
+                    rendered=rendered,
+                    repair_index=0,
+                    transport_stage="observation_integration",
+                    provider=getattr(self._client, "provider", None),
+                )
+            remaining_timeout = profile.timeout_sec - (monotonic() - started_at)
+            if remaining_timeout <= 1:
+                raise TimeoutError("observation integration time exhausted")
+            try:
+                result = self._client.generate_structured_json(
+                    prompt=rendered.request,
+                    schema=rendered.output_schema,
+                    model=profile.model,
+                    max_tokens=profile.max_output_tokens,
+                    timeout_sec=max(1, round(remaining_timeout)),
+                )
+            except requests.Timeout as exc:
+                raise TimeoutError("observation integration timed out") from exc
+            error = result.validationError
+            if result.payload is None and error is None:
+                error = "empty"
+            if self._diagnostics is not None:
+                self._diagnostics.record_transport_output(
+                    context=projected_context,
+                    repair_index=0,
+                    payload=result.payload,
+                    validation_error=error,
+                    input_tokens=result.inputTokens,
+                    output_tokens=result.outputTokens,
+                    provider_retry_count=result.retryCount,
+                    transport_stage="observation_integration",
+                )
+            if error is not None or result.payload is None:
+                raise ModelProtocolError(
+                    f"observation integration transport invalid: {error}"
+                )
+            try:
+                observations.append(
+                    ObservationIntegrationDecision.model_validate(
+                        _normalize_observation_integration_payload(
+                            result.payload,
+                            context=projected_context,
+                        )
+                    )
+                )
+            except ValidationError as exc:
+                detail = exc.errors(include_url=False, include_input=False)[0]
+                raise ModelProtocolError(
+                    "observation integration contract invalid: "
+                    f"{detail['msg']}"
+                ) from exc
+            input_tokens.append(result.inputTokens)
+            output_tokens.append(result.outputTokens)
+            attempt_count += 1 + result.retryCount
+
+        return (
+            _merge_observation_integrations(observations),
+            _sum_optional_tokens(*input_tokens),
+            _sum_optional_tokens(*output_tokens),
+            attempt_count,
         )
 
     def _solve_search_review(
@@ -525,116 +850,123 @@ class StructuredJSONModelAdapter:
     ) -> SolverCallResult:
         """候補理解と比較選択を別コンテキストで順に実行する。"""
 
-        assessment_call = render_search_assessment_model_call(context, profile)
-        assessment_prompt = assessment_call.request
-        assessment_schema = assessment_call.output_schema
-        if self._diagnostics is not None:
-            self._diagnostics.record_transport_input(
-                context=context,
-                profile=profile,
-                rendered=assessment_call,
-                repair_index=0,
-                transport_stage="search_assessment",
-                provider=getattr(self._client, "provider", None),
+        provider = getattr(self._client, "provider", None)
+        assessment_results = []
+        actor_results = []
+        assessed_items: list[dict[str, Any]] = []
+        assessment_reasons: list[str] = []
+        for batch_context in _search_review_batch_contexts(context):
+            assessment_call = render_search_assessment_model_call(
+                batch_context,
+                profile,
+                provider=provider,
             )
-        started_at = monotonic()
-        try:
-            assessment_result = self._client.generate_structured_json(
-                prompt=assessment_prompt,
-                schema=assessment_schema,
-                model=profile.model,
-                max_tokens=profile.max_output_tokens,
-                timeout_sec=max(1, round(profile.timeout_sec)),
-            )
-        except requests.Timeout as exc:
             if self._diagnostics is not None:
-                self._diagnostics.record_transport_timeout(
-                    context=context,
+                self._diagnostics.record_transport_input(
+                    context=batch_context,
+                    profile=profile,
+                    rendered=assessment_call,
                     repair_index=0,
-                    reason="search assessment timed out",
+                    transport_stage="search_assessment",
+                    provider=provider,
+                )
+            try:
+                assessment_result = self._client.generate_structured_json(
+                    prompt=assessment_call.request,
+                    schema=assessment_call.output_schema,
+                    model=profile.model,
+                    max_tokens=profile.max_output_tokens,
+                    timeout_sec=max(1, round(profile.timeout_sec)),
+                )
+            except requests.Timeout as exc:
+                raise TimeoutError("search assessment timed out") from exc
+            assessment_error = assessment_result.validationError
+            if assessment_result.payload is None and assessment_error is None:
+                assessment_error = "empty"
+            if self._diagnostics is not None:
+                self._diagnostics.record_transport_output(
+                    context=batch_context,
+                    repair_index=0,
+                    payload=assessment_result.payload,
+                    validation_error=assessment_error,
+                    input_tokens=assessment_result.inputTokens,
+                    output_tokens=assessment_result.outputTokens,
+                    provider_retry_count=assessment_result.retryCount,
                     transport_stage="search_assessment",
                 )
-            raise TimeoutError("search assessment timed out") from exc
-        assessment_error = assessment_result.validationError
-        if assessment_result.payload is None and assessment_error is None:
-            assessment_error = "empty"
-        if self._diagnostics is not None:
-            self._diagnostics.record_transport_output(
-                context=context,
-                repair_index=0,
-                payload=assessment_result.payload,
-                validation_error=assessment_error,
-                input_tokens=assessment_result.inputTokens,
-                output_tokens=assessment_result.outputTokens,
-                provider_retry_count=assessment_result.retryCount,
-                transport_stage="search_assessment",
+            if assessment_error is not None or assessment_result.payload is None:
+                raise ModelProtocolError(
+                    f"search assessment transport invalid: {assessment_error}"
+                )
+            batch_payload = _normalize_search_assessment_transport_payload(
+                assessment_result.payload,
+                batch_context,
             )
-        if assessment_error is not None or assessment_result.payload is None:
-            raise ModelProtocolError(
-                f"search assessment transport invalid: {assessment_error}"
-            )
-        assessment_payload = _normalize_search_assessment_transport_payload(
-            assessment_result.payload,
-            context,
-        )
 
-        actor_call = render_search_actor_classification_model_call(
-            context,
-            assessment_payload,
-            profile,
-        )
-        if self._diagnostics is not None:
-            self._diagnostics.record_transport_input(
-                context=context,
-                profile=profile,
-                rendered=actor_call,
-                repair_index=0,
-                transport_stage="search_actor_classification",
-                provider=getattr(self._client, "provider", None),
+            actor_call = render_search_actor_classification_model_call(
+                batch_context,
+                batch_payload,
+                profile,
+                provider=provider,
             )
-        remaining_timeout = profile.timeout_sec - (monotonic() - started_at)
-        if remaining_timeout <= 1:
-            raise TimeoutError("search actor classification time exhausted")
-        try:
-            actor_result = self._client.generate_structured_json(
-                prompt=actor_call.request,
-                schema=actor_call.output_schema,
-                model=profile.model,
-                max_tokens=profile.max_output_tokens,
-                timeout_sec=max(1, round(remaining_timeout)),
-            )
-        except requests.Timeout as exc:
             if self._diagnostics is not None:
-                self._diagnostics.record_transport_timeout(
-                    context=context,
+                self._diagnostics.record_transport_input(
+                    context=batch_context,
+                    profile=profile,
+                    rendered=actor_call,
                     repair_index=0,
-                    reason="search actor classification timed out",
+                    transport_stage="search_actor_classification",
+                    provider=provider,
+                )
+            try:
+                actor_result = self._client.generate_structured_json(
+                    prompt=actor_call.request,
+                    schema=actor_call.output_schema,
+                    model=profile.model,
+                    max_tokens=profile.max_output_tokens,
+                    timeout_sec=max(1, round(profile.timeout_sec)),
+                )
+            except requests.Timeout as exc:
+                raise TimeoutError(
+                    "search actor classification timed out"
+                ) from exc
+            actor_error = actor_result.validationError
+            if actor_result.payload is None and actor_error is None:
+                actor_error = "empty"
+            if self._diagnostics is not None:
+                self._diagnostics.record_transport_output(
+                    context=batch_context,
+                    repair_index=0,
+                    payload=actor_result.payload,
+                    validation_error=actor_error,
+                    input_tokens=actor_result.inputTokens,
+                    output_tokens=actor_result.outputTokens,
+                    provider_retry_count=actor_result.retryCount,
                     transport_stage="search_actor_classification",
                 )
-            raise TimeoutError("search actor classification timed out") from exc
-        actor_error = actor_result.validationError
-        if actor_result.payload is None and actor_error is None:
-            actor_error = "empty"
-        if self._diagnostics is not None:
-            self._diagnostics.record_transport_output(
-                context=context,
-                repair_index=0,
-                payload=actor_result.payload,
-                validation_error=actor_error,
-                input_tokens=actor_result.inputTokens,
-                output_tokens=actor_result.outputTokens,
-                provider_retry_count=actor_result.retryCount,
-                transport_stage="search_actor_classification",
+            if actor_error is not None or actor_result.payload is None:
+                raise ModelProtocolError(
+                    f"search actor classification invalid: {actor_error}"
+                )
+            batch_payload = _apply_search_actor_classification(
+                batch_payload,
+                actor_result.payload,
+                batch_context,
             )
-        if actor_error is not None or actor_result.payload is None:
-            raise ModelProtocolError(
-                f"search actor classification invalid: {actor_error}"
-            )
-        assessment_payload = _apply_search_actor_classification(
-            assessment_payload,
-            actor_result.payload,
-            context,
-        )
+            _validate_search_assessment_payload(batch_payload, batch_context)
+            assessed_items.extend(batch_payload.get("assessments") or [])
+            if reason := batch_payload.get("reason"):
+                assessment_reasons.append(reason)
+            assessment_results.append(assessment_result)
+            actor_results.append(actor_result)
+
+        assessment_payload = {
+            "search_request_ids": list(
+                context.required_search_review_request_ids
+            ),
+            "assessments": assessed_items,
+            "reason": " ".join(assessment_reasons),
+        }
         _validate_search_assessment_payload(assessment_payload, context)
 
         selection_call = render_search_reselection_model_call(
@@ -653,16 +985,13 @@ class StructuredJSONModelAdapter:
                 transport_stage="search_reselection",
                 provider=getattr(self._client, "provider", None),
             )
-        remaining_timeout = profile.timeout_sec - (monotonic() - started_at)
-        if remaining_timeout <= 1:
-            raise TimeoutError("search reselection time exhausted")
         try:
             selection_result = self._client.generate_structured_json(
                 prompt=selection_prompt,
                 schema=selection_schema,
                 model=profile.model,
                 max_tokens=profile.max_output_tokens,
-                timeout_sec=max(1, round(remaining_timeout)),
+                timeout_sec=max(1, round(profile.timeout_sec)),
             )
         except requests.Timeout as exc:
             if self._diagnostics is not None:
@@ -720,13 +1049,13 @@ class StructuredJSONModelAdapter:
             ) from exc
 
         input_tokens = _sum_optional_tokens(
-            assessment_result.inputTokens,
-            actor_result.inputTokens,
+            *(result.inputTokens for result in assessment_results),
+            *(result.inputTokens for result in actor_results),
             selection_result.inputTokens,
         )
         output_tokens = _sum_optional_tokens(
-            assessment_result.outputTokens,
-            actor_result.outputTokens,
+            *(result.outputTokens for result in assessment_results),
+            *(result.outputTokens for result in actor_results),
             selection_result.outputTokens,
         )
         return SolverCallResult(
@@ -734,9 +1063,11 @@ class StructuredJSONModelAdapter:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             attempt_count=(
-                3
-                + assessment_result.retryCount
-                + actor_result.retryCount
+                len(assessment_results)
+                + len(actor_results)
+                + 1
+                + sum(result.retryCount for result in assessment_results)
+                + sum(result.retryCount for result in actor_results)
                 + selection_result.retryCount
             ),
         )
@@ -837,6 +1168,8 @@ def render_solver_model_call(
             projected_context,
             profile,
         )
+    if profile.context_projection == "graph_review":
+        return render_graph_review_model_call(projected_context, profile)
     if profile.context_projection in {
         "research_decomposition",
         "research_hypothesis",
@@ -853,12 +1186,27 @@ def render_solver_model_call(
             _initial_research_transport_schema(projected_context)
         )
         if initial_research
+        else _solver_anthropic_json_transport_schema(projected_context)
+        if provider == "anthropic"
         else _solver_common_transport_schema(projected_context)
+    )
+    dependency_action = bool(
+        projected_context.required_dependency_work_item_ids
+        and profile.context_projection == "full"
+        and profile.dependency_action_system_prompt is not None
     )
     return _render_solver_model_call(
         context,
-        profile.system_prompt,
-        completion_check_prompt=profile.completion_check_prompt,
+        (
+            profile.dependency_action_system_prompt
+            if dependency_action
+            else profile.system_prompt
+        ),
+        completion_check_prompt=(
+            profile.dependency_action_completion_check_prompt
+            if dependency_action
+            else profile.completion_check_prompt
+        ),
         output_schema=output_schema,
         input_payload=_solver_context_payload(
             projected_context,
@@ -871,6 +1219,30 @@ def render_solver_model_call(
         ),
         stage=stage,
     )
+
+
+def render_graph_review_model_call(
+    context: SolverContext,
+    profile: ModelCallProfile,
+) -> RenderedModelCall:
+    """Graph候補選別に必要な指示・入力・出力だけを組み立てる。"""
+
+    input_payload = _solver_context_payload(context, projection="graph_review")
+    instructions = (
+        f"{profile.system_prompt}\n\n"
+        f"{RUNTIME_INPUT_MARKER}"
+        f"{_post_context_completion_check(profile.completion_check_prompt)}"
+    )
+    rendered = build_rendered_model_call(
+        stage="graph_review",
+        instructions=instructions,
+        input_tag="graph_review_input",
+        input_payload=input_payload,
+        output_schema=_graph_review_transport_schema(context),
+        normalized_schema=GraphCandidateReview.model_json_schema(),
+    )
+    _ensure_solver_prompt_capacity(rendered.request, context.max_solver_input_chars)
+    return rendered
 
 
 def _render_staged_research_model_call(
@@ -914,23 +1286,27 @@ def _render_solver_model_call(
 ) -> RenderedModelCall:
     if output_schema is None:
         output_schema = _solver_common_transport_schema(context)
-    transport_instruction = _solver_transport_instruction()
     repair_instructions = _contract_repair_catalog(context)
     if input_payload is None:
         input_payload = context.model_dump(mode="json")
     else:
         input_payload = deepcopy(input_payload)
-    decision_field_names = tuple(
-        name
-        for name in output_schema.get("properties", {})
-        if name in SolverDecision.model_fields
-    )
+    if "decision_json" in output_schema.get("properties", {}):
+        decision_field_names = tuple(
+            _solver_common_transport_schema(context)["properties"]
+        )
+    else:
+        decision_field_names = tuple(
+            name
+            for name in output_schema.get("properties", {})
+            if name in SolverDecision.model_fields
+        )
     instructions = (
         f"{system_prompt}\n\n"
         f"{render_solver_contract_glossary(tuple(input_payload), decision_field_names)}\n\n"
         f"{minimal_contract or _MINIMAL_SOLVER_CONTRACT}\n\n"
         f"{repair_instructions}"
-        f"{transport_instruction}"
+        f"{_solver_transport_instruction(output_schema)}"
         f"{RUNTIME_INPUT_MARKER}"
         f"{_post_context_completion_check(completion_check_prompt)}"
     )
@@ -1043,8 +1419,141 @@ def _solver_context_payload(
         payload["graph_review_selection_limit"] = (
             context.graph_review_selection_limit
         )
-    if projection in {"full", "finalization"}:
+    if projection == "full" and context.required_dependency_work_item_ids:
+        # A prior LLM decision already established which WorkItems need a
+        # lower-norm action. Keep this planning step focused; other open work
+        # remains in CaseStore and is projected again after these actions.
+        active_work_item_ids = set(context.required_dependency_work_item_ids)
+        payload["work_tree"] = [
+            item
+            for item in payload["work_tree"]
+            if item["work_item_id"] in active_work_item_ids
+        ]
+        payload["hypotheses"] = [
+            item
+            for item in payload["hypotheses"]
+            if item["work_item_id"] in active_work_item_ids
+        ]
+        payload["focus_work_items"] = list(payload["work_tree"])
+
+        active_hypothesis_ids = {
+            item["hypothesis_id"] for item in payload["hypotheses"]
+        }
+        active_candidates = [
+            item
+            for item in payload["search_candidates"]
+            if active_hypothesis_ids.intersection(
+                item["matched_hypothesis_ids"]
+                or item["discovery_hypothesis_ids"]
+            )
+        ]
+        active_candidate_ids = {
+            item["article_id"] for item in active_candidates
+        }
+        payload["search_candidates"] = active_candidates
+        payload["fetchable_article_ids"] = [
+            article_id
+            for article_id in payload["fetchable_article_ids"]
+            if article_id in active_candidate_ids
+        ]
+
+        dependency_basis_ids = {
+            evidence_id
+            for item in payload["dependency_decisions"]
+            if item["work_item_id"] in active_work_item_ids
+            and item["status"] == "needs_action"
+            for evidence_id in item["basis_evidence_ids"]
+        }
+        payload["grounding_evidence_ids"] = [
+            evidence_id
+            for evidence_id in payload["grounding_evidence_ids"]
+            if evidence_id in dependency_basis_ids
+        ]
+        payload["material_evidence"] = [
+            item
+            for item in payload["material_evidence"]
+            if item["evidence_id"] in dependency_basis_ids
+        ]
+        payload["evidence_manifest"] = [
+            item
+            for item in payload["evidence_manifest"]
+            if item["evidence_id"] in dependency_basis_ids
+        ]
+        payload["omitted_evidence_ids"] = []
+        payload["recent_tool_requests"] = [
+            item
+            for item in payload["recent_tool_requests"]
+            if item["work_item_id"] in active_work_item_ids
+        ]
+        active_request_ids = {
+            item["request_id"] for item in payload["recent_tool_requests"]
+        }
+        payload["recent_tool_results"] = [
+            item
+            for item in payload["recent_tool_results"]
+            if item["request_id"] in active_request_ids
+        ]
+        payload["completed_legal_searches"] = [
+            item
+            for item in payload["completed_legal_searches"]
+            if item["work_item_id"] in active_work_item_ids
+        ]
+        payload["completed_graph_searches"] = [
+            item
+            for item in payload["completed_graph_searches"]
+            if item["work_item_id"] in active_work_item_ids
+        ]
         return payload
+    if projection == "finalization":
+        payload["resolved_work_item_ids"] = [
+            item["work_item_id"]
+            for item in payload["work_tree"]
+            if item["state"] == "resolved"
+        ]
+        payload["open_work_item_ids"] = [
+            item["work_item_id"]
+            for item in payload["work_tree"]
+            if item["state"] == "open"
+        ]
+        payload["unresolved_hypothesis_ids"] = [
+            item["hypothesis_id"]
+            for item in payload["hypotheses"]
+            if item["judgment"] == "unresolved"
+        ]
+        return payload
+    if projection == "full":
+        return payload
+    if projection == "graph_review":
+        graph_work_item_ids = {
+            item.work_item_id for item in context.graph_review_batch.candidates
+        }
+        graph_hypothesis_ids = {
+            item.hypothesis_id
+            for item in context.graph_review_batch.candidates
+            if item.hypothesis_id is not None
+        }
+        return {
+            "case_id": payload["case_id"],
+            "question": payload["question"],
+            "work_tree": [
+                item
+                for item in payload["work_tree"]
+                if item["work_item_id"] in graph_work_item_ids
+            ],
+            "hypotheses": [
+                item
+                for item in payload["hypotheses"]
+                if item["hypothesis_id"] in graph_hypothesis_ids
+            ],
+            "graph_review_batch": payload["graph_review_batch"],
+            "graph_review_ledger": payload["graph_review_ledger"],
+            "required_graph_review_request_ids": payload[
+                "required_graph_review_request_ids"
+            ],
+            "graph_review_selection_limit": (
+                context.graph_review_selection_limit
+            ),
+        }
     research_input = ResearchStepInput(
         question=context.question,
         work_items=tuple(
@@ -1106,6 +1615,7 @@ def _solver_context_payload(
         "hypotheses",
         "available_tools",
         "contract_feedback",
+        "action_feedback",
     )
     return {name: payload[name] for name in included_fields}
 
@@ -1340,7 +1850,18 @@ def _solver_prompt(
     ).request
 
 
-def _solver_transport_instruction() -> str:
+def _solver_transport_instruction(
+    output_schema: dict[str, Any] | None = None,
+) -> str:
+    if output_schema is not None and "decision_json" in output_schema.get(
+        "properties", {}
+    ):
+        return (
+            "以下は現在のSolverContextです。decision_jsonへ、上記の役割と"
+            "契約に従うSolverDecisionをJSON object形式の文字列として返してください。"
+            "AdapterがJSONを復元し、既知ID、件数、参照整合を含む共通契約で"
+            "完全検証します。\n"
+        )
     return (
         "以下は現在のSolverContextです。コンパクト輸送schemaに従い、"
         "復元後SolverDecisionのうちupdateを構造化object、tool_requestsを"
@@ -1414,6 +1935,47 @@ def render_cycle_close_model_call(
             _cycle_close_transport_schema(context, observation)
         ),
         normalized_schema=CycleCloseDecision.model_json_schema(),
+    )
+    _ensure_solver_prompt_capacity(rendered.request, context.max_solver_input_chars)
+    return rendered
+
+
+def render_final_answer_check_model_call(
+    context: SolverContext,
+    observation: ObservationIntegrationDecision,
+    draft_answer: FinalAnswer,
+    profile: ModelCallProfile,
+) -> RenderedModelCall:
+    """意味判断済み根拠だけで、最終回答本文の欠落・誤読を確認する。"""
+
+    if profile.final_answer_check_system_prompt is None:
+        raise ModelProtocolError("final answer check prompt is unavailable")
+    input_payload = {
+        "question": context.question,
+        "non_work_item_requirements": list(context.non_work_item_requirements),
+        "draft_answer": draft_answer.model_dump(mode="json"),
+        "answer_basis_by_work_item": _answer_basis_by_work_item(
+            context,
+            observation,
+        ),
+    }
+    instructions = (
+        f"{profile.final_answer_check_system_prompt}\n\n"
+        f"{RUNTIME_INPUT_MARKER}"
+        f"{_post_context_completion_check(profile.final_answer_check_completion_prompt)}"
+    )
+    output_schema = _strict_object(
+        {
+            "text": _described({"type": "string"}, FinalAnswer, "text"),
+        }
+    )
+    rendered = build_rendered_model_call(
+        stage="final_answer_check",
+        instructions=instructions,
+        input_tag="final_answer_check_input",
+        input_payload=input_payload,
+        output_schema=output_schema,
+        normalized_schema=output_schema,
     )
     _ensure_solver_prompt_capacity(rendered.request, context.max_solver_input_chars)
     return rendered
@@ -1510,6 +2072,12 @@ def _observation_integration_context_payload(
     }
     if context.contract_feedback is not None:
         previous = context.contract_feedback.previous_decision
+        active_work_item_ids = {
+            item.work_item_id for item in active_work_items
+        }
+        active_hypothesis_ids = {
+            item.hypothesis_id for item in active_hypotheses
+        }
         payload["contract_feedback"] = {
             "violation": context.contract_feedback.violation,
         }
@@ -1518,13 +2086,117 @@ def _observation_integration_context_payload(
             "update_work_items": [
                 item.model_dump(mode="json")
                 for item in previous.update.update_work_items
+                if item.work_item_id in active_work_item_ids
             ],
             "update_hypotheses": [
                 item.model_dump(mode="json")
                 for item in previous.update.update_hypotheses
+                if item.hypothesis_id in active_hypothesis_ids
             ],
         }
     return payload
+
+
+def _observation_work_item_contexts(
+    context: SolverContext,
+) -> tuple[SolverContext, ...]:
+    """前段LLMが結び付けたArticleだけをWorkItem単位で本文評価へ投影する。"""
+
+    active_work_items, active_hypotheses = _active_observation_items(context)
+    if not active_work_items:
+        return (context,)
+    grounding_ids = set(context.grounding_evidence_ids)
+    has_candidate_mappings = bool(context.evidence_hypothesis_candidates)
+    projected: list[SolverContext] = []
+    for work_item in active_work_items:
+        hypotheses = tuple(
+            item
+            for item in active_hypotheses
+            if item.work_item_id == work_item.work_item_id
+        )
+        hypothesis_ids = {item.hypothesis_id for item in hypotheses}
+        candidates = tuple(
+            item.model_copy(
+                update={
+                    "hypothesis_ids": tuple(
+                        hypothesis_id
+                        for hypothesis_id in item.hypothesis_ids
+                        if hypothesis_id in hypothesis_ids
+                    )
+                }
+            )
+            for item in context.evidence_hypothesis_candidates
+            if set(item.hypothesis_ids).intersection(hypothesis_ids)
+        )
+        candidate_article_ids = {item.article_id for item in candidates}
+        existing_evidence_ids = {
+            evidence_id
+            for hypothesis in hypotheses
+            for evidence_id in hypothesis.evidence_ids
+        }
+        visible_ids = tuple(
+            item.evidence_id
+            for item in context.material_evidence
+            if item.evidence_id in grounding_ids
+            and (
+                not has_candidate_mappings
+                or item.metadata.get("articleId") in candidate_article_ids
+                or item.evidence_id in existing_evidence_ids
+            )
+        )
+        visible_id_set = set(visible_ids)
+        projected.append(
+            context.model_copy(
+                update={
+                    "work_tree": (work_item,),
+                    "hypotheses": hypotheses,
+                    "grounding_evidence_ids": visible_ids,
+                    "evidence_manifest": tuple(
+                        item
+                        for item in context.evidence_manifest
+                        if item.evidence_id in visible_id_set
+                    ),
+                    "material_evidence": tuple(
+                        item
+                        for item in context.material_evidence
+                        if item.evidence_id in visible_id_set
+                    ),
+                    "evidence_hypothesis_candidates": candidates,
+                }
+            )
+        )
+    return tuple(projected)
+
+
+def _merge_observation_integrations(
+    observations: list[ObservationIntegrationDecision],
+) -> ObservationIntegrationDecision:
+    """独立したWorkItem評価を、意味を変えず一つのCycle差分へ連結する。"""
+
+    if not observations:
+        return ObservationIntegrationDecision(
+            decision_reason="評価対象のopen WorkItemはない。"
+        )
+    return ObservationIntegrationDecision(
+        decision_reason=" ".join(
+            item.decision_reason for item in observations
+        ),
+        update_work_items=tuple(
+            update
+            for item in observations
+            for update in item.update_work_items
+        ),
+        update_hypotheses=tuple(
+            update
+            for item in observations
+            for update in item.update_hypotheses
+        ),
+        dependency_decisions=tuple(
+            decision
+            for item in observations
+            for decision in item.dependency_decisions
+        ),
+    )
 
 
 def _active_observation_items(
@@ -1548,10 +2220,20 @@ def _cycle_close_context_payload(
     context: SolverContext,
     observation: ObservationIntegrationDecision,
 ) -> dict[str, Any]:
-    grounding_ids = set(context.grounding_evidence_ids)
     work_items, hypotheses = _project_observation_integration_state(
         context,
         observation,
+    )
+    required_answer_evidence_ids = _required_answer_evidence_ids(
+        context,
+        observation,
+    )
+    dependency_decisions = _merged_dependency_decisions(
+        context.dependency_decisions,
+        observation.dependency_decisions,
+    )
+    retainable_evidence_ids = set(
+        _retainable_cycle_evidence_ids(context, observation)
     )
     active_deferred = [
         item.model_dump(mode="json")
@@ -1572,20 +2254,22 @@ def _cycle_close_context_payload(
         "observation_summary": observation.decision_reason,
         "dependency_decisions_after_observation": [
             item.model_dump(mode="json")
-            for item in observation.dependency_decisions
+            for item in dependency_decisions
         ],
         "can_start_next_cycle": context.can_start_next_cycle,
         "remaining_research_cycles": context.remaining_research_cycles,
+        "max_retained_evidence": context.max_retained_evidence,
         "retainable_evidence": [
             item.model_dump(mode="json")
             for item in context.evidence_manifest
-            if item.evidence_id in grounding_ids
+            if item.evidence_id in retainable_evidence_ids
         ],
         "grounding_evidence": [
             item.model_dump(mode="json")
             for item in context.material_evidence
-            if item.evidence_id in grounding_ids
+            if item.evidence_id in set(required_answer_evidence_ids)
         ],
+        "required_answer_evidence_ids": list(required_answer_evidence_ids),
         "active_deferred_frontiers": active_deferred,
         "unreviewed_graph_candidate_count": (
             context.graph_review_batch.remaining_unreviewed_count
@@ -1596,6 +2280,142 @@ def _cycle_close_context_payload(
             "violation": context.contract_feedback.violation,
         }
     return payload
+
+
+def _required_answer_evidence_ids(
+    context: SolverContext,
+    observation: ObservationIntegrationDecision,
+) -> tuple[str, ...]:
+    """LLMが確定したWorkItem・依存根拠から、最終回答の根拠IDを集約する。"""
+
+    work_items, hypotheses = _project_observation_integration_state(
+        context,
+        observation,
+    )
+    resolved_work_item_ids = {
+        item.work_item_id for item in work_items if item.state == "resolved"
+    }
+    basis_hypothesis_ids = {
+        hypothesis_id
+        for item in work_items
+        if item.work_item_id in resolved_work_item_ids
+        for hypothesis_id in item.basis_hypothesis_ids
+    }
+    dependency_decisions = _merged_dependency_decisions(
+        context.dependency_decisions,
+        observation.dependency_decisions,
+    )
+    return tuple(
+        dict.fromkeys(
+            [
+                *(
+                    evidence_id
+                    for hypothesis in hypotheses
+                    if hypothesis.hypothesis_id in basis_hypothesis_ids
+                    for evidence_id in hypothesis.evidence_ids
+                ),
+                *(
+                    evidence_id
+                    for decision in dependency_decisions
+                    if decision.work_item_id in resolved_work_item_ids
+                    and decision.status == "resolved"
+                    for evidence_id in decision.basis_evidence_ids
+                ),
+            ]
+        )
+    )
+
+
+def _merged_dependency_decisions(
+    existing: tuple[DependencyDecision, ...],
+    updates: tuple[DependencyDecision, ...],
+) -> tuple[DependencyDecision, ...]:
+    """現在Cycleの差分で同じWorkItemの既存判断だけを置換する。"""
+
+    by_key = {
+        (item.dependency_kind, item.work_item_id): item for item in existing
+    }
+    for item in updates:
+        by_key[(item.dependency_kind, item.work_item_id)] = item
+    return tuple(by_key.values())
+
+
+def _retainable_cycle_evidence_ids(
+    context: SolverContext,
+    observation: ObservationIntegrationDecision,
+) -> tuple[str, ...]:
+    """状態から自動再投影される根拠を除いた追加保持候補を返す。"""
+
+    _, hypotheses = _project_observation_integration_state(
+        context,
+        observation,
+    )
+    state_managed_ids = {
+        evidence_id
+        for hypothesis in hypotheses
+        for evidence_id in hypothesis.evidence_ids
+    }
+    state_managed_ids.update(
+        evidence_id
+        for decision in observation.dependency_decisions
+        for evidence_id in decision.basis_evidence_ids
+    )
+    return tuple(
+        evidence_id
+        for evidence_id in context.grounding_evidence_ids
+        if evidence_id not in state_managed_ids
+    )
+
+
+def _answer_basis_by_work_item(
+    context: SolverContext,
+    observation: ObservationIntegrationDecision,
+) -> list[dict[str, Any]]:
+    """確定済み根拠をWorkItem単位に束ね、意味選別せず回答工程へ渡す。"""
+
+    work_items, hypotheses = _project_observation_integration_state(
+        context,
+        observation,
+    )
+    evidence_by_id = {
+        item.evidence_id: item for item in context.material_evidence
+    }
+    result: list[dict[str, Any]] = []
+    for work_item in work_items:
+        if work_item.state != "resolved":
+            continue
+        evidence_ids = tuple(
+            dict.fromkeys(
+                [
+                    *(
+                        evidence_id
+                        for hypothesis in hypotheses
+                        if hypothesis.hypothesis_id
+                        in set(work_item.basis_hypothesis_ids)
+                        for evidence_id in hypothesis.evidence_ids
+                    ),
+                    *(
+                        evidence_id
+                        for decision in observation.dependency_decisions
+                        if decision.work_item_id == work_item.work_item_id
+                        and decision.status == "resolved"
+                        for evidence_id in decision.basis_evidence_ids
+                    ),
+                ]
+            )
+        )
+        result.append(
+            {
+                "work_item_id": work_item.work_item_id,
+                "question": work_item.question,
+                "required_evidence": [
+                    evidence_by_id[evidence_id].model_dump(mode="json")
+                    for evidence_id in evidence_ids
+                    if evidence_id in evidence_by_id
+                ],
+            }
+        )
+    return result
 
 
 def _project_observation_integration_state(
@@ -1791,8 +2611,12 @@ def _dependency_decision_transport_payload(
 
 def _normalize_observation_integration_payload(
     payload: dict[str, Any],
+    *,
+    context: SolverContext | None = None,
 ) -> dict[str, Any]:
     normalized = deepcopy(payload)
+    if context is not None:
+        _normalize_grounding_evidence_aliases(normalized, context)
     for decision in normalized.get("dependency_decisions") or []:
         if not isinstance(decision, dict):
             continue
@@ -1803,12 +2627,69 @@ def _normalize_observation_integration_payload(
     return normalized
 
 
+def _normalize_grounding_evidence_aliases(
+    payload: dict[str, Any],
+    context: SolverContext,
+) -> None:
+    """取得済みArticle ID表現を、実在するgrounding Evidence IDへ展開する。"""
+
+    grounding_ids = set(context.grounding_evidence_ids)
+    evidence_ids_by_article: dict[str, list[str]] = {}
+    for evidence in context.material_evidence:
+        if evidence.evidence_id not in grounding_ids:
+            continue
+        article_id = evidence.metadata.get("articleId")
+        if isinstance(article_id, str):
+            evidence_ids_by_article.setdefault(article_id, []).append(
+                evidence.evidence_id
+            )
+
+    def normalize_ids(values: Any) -> Any:
+        if not isinstance(values, list):
+            return values
+        result: list[str] = []
+        for value in values:
+            replacements = (
+                [value]
+                if value in grounding_ids
+                else evidence_ids_by_article.get(value, [value])
+            )
+            for replacement in replacements:
+                if replacement not in result:
+                    result.append(replacement)
+        return result
+
+    if "retain_evidence_ids" in payload:
+        payload["retain_evidence_ids"] = normalize_ids(
+            payload.get("retain_evidence_ids")
+        )
+    for decision in payload.get("dependency_decisions") or []:
+        if isinstance(decision, dict) and "basis_evidence_ids" in decision:
+            decision["basis_evidence_ids"] = normalize_ids(
+                decision.get("basis_evidence_ids")
+            )
+    update = payload.get("update")
+    update_hypotheses = (
+        update.get("update_hypotheses")
+        if isinstance(update, dict)
+        else payload.get("update_hypotheses")
+    )
+    for hypothesis in update_hypotheses or []:
+        if isinstance(hypothesis, dict) and "evidence_ids" in hypothesis:
+            hypothesis["evidence_ids"] = normalize_ids(
+                hypothesis.get("evidence_ids")
+            )
+    answer = payload.get("answer")
+    if isinstance(answer, dict) and "citation_ids" in answer:
+        answer["citation_ids"] = normalize_ids(answer.get("citation_ids"))
+
+
 def _downgrade_unproven_dependency_confirmations(
     assessment: DependencyAssessmentDecision,
     *,
     article_id_by_evidence: Mapping[str, str],
 ) -> DependencyAssessmentDecision:
-    """構造上成立しない確認済み判断を、未確認へ安全側に戻す。"""
+    """異なるArticle本文がない確認済み判断だけを構造違反として戻す。"""
 
     decisions: list[DependencyDecision] = []
     for decision in assessment.dependency_decisions:
@@ -1827,10 +2708,7 @@ def _downgrade_unproven_dependency_confirmations(
             decision.model_copy(
                 update={
                     "status": "needs_action",
-                    "reason": (
-                        "委任元と末端下位規範を示す異なるArticle本文が"
-                        "揃っていないため、末端本文は未確認。"
-                    ),
+                    "reason": "委任元と末端下位規範を示す異なるArticle本文が揃っていないため、末端本文は未確認。",
                     "action_request_id": None,
                 }
             )
@@ -1945,10 +2823,24 @@ def _cycle_close_transport_schema(
     context: SolverContext,
     observation: ObservationIntegrationDecision,
 ) -> dict[str, Any]:
-    work_item_ids = tuple(
-        item.work_item_id for item in context.work_tree if item.state == "open"
+    projected_work_items, projected_hypotheses = (
+        _project_observation_integration_state(context, observation)
+    )
+    open_work_item_ids = tuple(
+        item.work_item_id
+        for item in projected_work_items
+        if item.state == "open"
+    )
+    unresolved_hypothesis_ids = tuple(
+        item.hypothesis_id
+        for item in projected_hypotheses
+        if item.judgment == "unresolved"
     )
     evidence_ids = context.grounding_evidence_ids
+    retainable_evidence_ids = _retainable_cycle_evidence_ids(
+        context,
+        observation,
+    )
     answer = _strict_object(
         {
             "text": _described({"type": "string"}, FinalAnswer, "text"),
@@ -1958,19 +2850,21 @@ def _cycle_close_transport_schema(
                 "citation_ids",
             ),
             "limitations": _described(
-                _string_array_schema(),
+                (
+                    _string_array_schema()
+                    if open_work_item_ids or unresolved_hypothesis_ids
+                    else _empty_array_schema()
+                ),
                 FinalAnswer,
                 "limitations",
             ),
             "unresolved_work_item_ids": _described(
-                _bounded_enum_array(work_item_ids),
+                _bounded_enum_array(open_work_item_ids),
                 FinalAnswer,
                 "unresolved_work_item_ids",
             ),
             "unresolved_hypothesis_ids": _described(
-                _bounded_enum_array(
-                    tuple(item.hypothesis_id for item in context.hypotheses)
-                ),
+                _bounded_enum_array(unresolved_hypothesis_ids),
                 FinalAnswer,
                 "unresolved_hypothesis_ids",
             ),
@@ -1981,7 +2875,12 @@ def _cycle_close_transport_schema(
         for item in observation.dependency_decisions
     )
     must_start_next_cycle = (
-        dependency_needs_action and context.can_start_next_cycle
+        context.can_start_next_cycle
+        and bool(
+            open_work_item_ids
+            or unresolved_hypothesis_ids
+            or dependency_needs_action
+        )
     )
     properties: dict[str, Any] = {
         "outcome": {
@@ -1989,8 +2888,6 @@ def _cycle_close_transport_schema(
             "enum": (
                 ["start_next_cycle"]
                 if must_start_next_cycle
-                else ["start_next_cycle", "finalize"]
-                if context.can_start_next_cycle
                 else ["finalize"]
             ),
             "description": CycleCloseDecision.model_fields["outcome"].description,
@@ -2004,14 +2901,14 @@ def _cycle_close_transport_schema(
             ].description,
         },
         "next_focus_work_item_ids": {
-            **_bounded_enum_array(work_item_ids),
+            **_bounded_enum_array(open_work_item_ids),
             "description": CycleCloseDecision.model_fields[
                 "next_focus_work_item_ids"
             ].description,
         },
         "retain_evidence_ids": {
             **_bounded_enum_array(
-                evidence_ids,
+                retainable_evidence_ids,
                 max_items=context.max_retained_evidence,
             ),
             "description": CycleCloseDecision.model_fields[
@@ -2072,6 +2969,7 @@ def _cycle_close_transport_schema(
                     "reason": {"type": "string", "minLength": 1},
                 }
             ),
+            "minItems": len(active_deferred),
             "maxItems": len(active_deferred),
             "description": CycleCloseDecision.model_fields[
                 "deferred_frontier_resolutions"
@@ -2162,6 +3060,8 @@ def _sum_optional_tokens(*values: int | None) -> int | None:
 def render_search_assessment_model_call(
     context: SolverContext,
     profile: ModelCallProfile,
+    *,
+    provider: str | None = None,
 ) -> RenderedModelCall:
     input_payload = _search_review_context_payload(context)
     instructions = (
@@ -2174,7 +3074,10 @@ def render_search_assessment_model_call(
         instructions=instructions,
         input_tag="solver_context",
         input_payload=input_payload,
-        output_schema=_search_review_transport_schema(context),
+        output_schema=_search_review_transport_schema(
+            context,
+            array_transport=False,
+        ),
         normalized_schema=SearchAssessmentDecision.model_json_schema(),
     )
     _ensure_solver_prompt_capacity(rendered.request, context.max_solver_input_chars)
@@ -2205,6 +3108,9 @@ def _search_review_context_payload(
     }
     return {
         "question": context.question,
+        "non_work_item_requirements": list(
+            context.non_work_item_requirements
+        ),
         "work_tree": [item.model_dump(mode="json") for item in context.work_tree],
         "hypotheses": [
             item.model_dump(mode="json") for item in context.hypotheses
@@ -2241,6 +3147,20 @@ def _search_review_context_payload(
     }
 
 
+def _search_review_batch_contexts(
+    context: SolverContext,
+) -> tuple[SolverContext, ...]:
+    """候補の意味評価と主体照合を小さな独立単位に分ける。"""
+
+    candidates = context.search_candidates
+    return tuple(
+        context.model_copy(
+            update={"search_candidates": candidates[offset:offset + _SEARCH_REVIEW_BATCH_SIZE]}
+        )
+        for offset in range(0, len(candidates), _SEARCH_REVIEW_BATCH_SIZE)
+    )
+
+
 def render_search_reselection_model_call(
     context: SolverContext,
     assessment_payload: dict[str, Any],
@@ -2258,13 +3178,29 @@ def render_search_reselection_model_call(
         for item in eligible_assessments
         if isinstance(item.get("article_id"), str)
     )
+    candidate_by_id = {
+        item.article_id: item for item in context.search_candidates
+    }
     input_payload = {
         "question": context.question,
+        "non_work_item_requirements": list(
+            context.non_work_item_requirements
+        ),
         "hypotheses": [
             item.model_dump(mode="json") for item in context.hypotheses
         ],
         "remaining_fetch_capacity": context.remaining_fetch_capacity,
-        "assessments": eligible_assessments,
+        "assessments": [
+            {
+                **item,
+                "title": candidate_by_id[item["article_id"]].title,
+                "headings": list(
+                    candidate_by_id[item["article_id"]].headings
+                ),
+            }
+            for item in eligible_assessments
+            if item.get("article_id") in candidate_by_id
+        ],
     }
     instructions = (
         f"{profile.followup_system_prompt}\n\n"
@@ -2290,6 +3226,8 @@ def render_search_actor_classification_model_call(
     context: SolverContext,
     assessment_payload: dict[str, Any],
     profile: ModelCallProfile,
+    *,
+    provider: str | None = None,
 ) -> RenderedModelCall:
     prompt = profile.actor_classification_system_prompt
     if prompt is None:
@@ -2312,6 +3250,7 @@ def render_search_actor_classification_model_call(
                 "enum": [
                     "hypothesis_actor",
                     "target_associated_actor",
+                    "actor_neutral",
                     "other",
                     "unknown",
                 ],
@@ -2320,20 +3259,37 @@ def render_search_actor_classification_model_call(
             "reason": {"type": "string", "minLength": 1},
         }
     )
-    schema = _strict_object(
-        {
-            "roles": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    article_id: {"$ref": "#/$defs/actor_role"}
-                    for article_id in candidate_ids
-                },
-                "required": list(candidate_ids),
+    if provider == "anthropic":
+        schema = _strict_object(
+            {
+                "roles": {
+                    "type": "array",
+                    "items": _strict_object(
+                        {
+                            "article_id": _enum_string(candidate_ids),
+                            **role_item["properties"],
+                        }
+                    ),
+                    "minItems": len(candidate_ids),
+                    "maxItems": len(candidate_ids),
+                }
             }
-        }
-    )
-    schema["$defs"] = {"actor_role": role_item}
+        )
+    else:
+        schema = _strict_object(
+            {
+                "roles": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        article_id: {"$ref": "#/$defs/actor_role"}
+                        for article_id in candidate_ids
+                    },
+                    "required": list(candidate_ids),
+                }
+            }
+        )
+        schema["$defs"] = {"actor_role": role_item}
     input_payload = {
         "question": context.question,
         "hypotheses": [
@@ -2456,7 +3412,6 @@ _CONTRACT_REPAIR_SECTIONS = (
     "retained_evidence_limit",
     "tool_request_limit",
     "unique_tool_request_ids",
-    "repeated_successful_search",
     "article_fetch_contract",
     "known_references",
     "graph_review",
@@ -2496,12 +3451,25 @@ def render_solver_transport_repair_model_call(
             ("stable", *section_names),
         ),
     )
+    output_schema = deepcopy(base_call.output_schema)
+    tool_requests = output_schema.get("properties", {}).get("tool_requests")
+    error_detail = _transport_error_detail(error)
+    if isinstance(tool_requests, dict) and any(
+        message in error_detail
+        for message in (
+            "all fetch_articles requests combined must contain at most",
+            "Article body fetches in one SolverDecision must be consolidated",
+        )
+    ):
+        # Usually each fetch request is bounded separately. During this repair the
+        # aggregate one-request rule must also be visible in provider grammar.
+        tool_requests["maxItems"] = 1
     rendered = build_rendered_model_call(
         stage="solver_transport_repair",
         instructions=instructions,
         input_tag=base_call.input_tag,
         input_payload=input_payload,
-        output_schema=base_call.output_schema,
+        output_schema=output_schema,
         normalized_schema=base_call.normalized_schema,
         prompt_assets=prompt_assets,
     )
@@ -3154,6 +4122,11 @@ def _solver_transport_schema(context: SolverContext) -> dict:
                     else {
                         "type": "array",
                         "items": deferred_frontier_resolution,
+                        **(
+                            {"minItems": len(active_deferred)}
+                            if context.finalize_only
+                            else {}
+                        ),
                         "maxItems": len(active_deferred),
                     }
                 ),
@@ -3210,7 +4183,11 @@ def _solver_transport_schema(context: SolverContext) -> dict:
     }
 
 
-def _search_review_transport_schema(context: SolverContext) -> dict[str, Any]:
+def _search_review_transport_schema(
+    context: SolverContext,
+    *,
+    array_transport: bool = False,
+) -> dict[str, Any]:
     """Search Reviewが意味選択だけへ集中する専用輸送schema。"""
 
     candidate_ids = tuple(item.article_id for item in context.search_candidates)
@@ -3243,6 +4220,36 @@ def _search_review_transport_schema(context: SolverContext) -> dict[str, Any]:
                     "次の独立処理で行う。"
                 ),
             },
+            "matched_non_work_item_requirements": {
+                **_bounded_enum_array(context.non_work_item_requirements),
+                "description": (
+                    "この候補本文を取得することで満たせる"
+                    "non_work_item_requirements。入力の文言をそのまま返す。"
+                ),
+            },
+        }
+    )
+    assessments_schema = (
+        {
+            "type": "array",
+            "items": _strict_object(
+                {
+                    "article_id": _enum_string(candidate_ids),
+                    **assessment["properties"],
+                }
+            ),
+            "minItems": len(candidate_ids),
+            "maxItems": len(candidate_ids),
+        }
+        if array_transport
+        else {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                article_id: {"$ref": "#/$defs/search_candidate_assessment"}
+                for article_id in candidate_ids
+            },
+            "required": list(candidate_ids),
         }
     )
     schema = _strict_object(
@@ -3264,17 +4271,7 @@ def _search_review_transport_schema(context: SolverContext) -> dict[str, Any]:
                 "search_request_ids",
             ),
             "assessments": _described(
-                {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        article_id: {
-                            "$ref": "#/$defs/search_candidate_assessment"
-                        }
-                        for article_id in candidate_ids
-                    },
-                    "required": list(candidate_ids),
-                },
+                assessments_schema,
                 SearchAssessmentDecision,
                 "assessments",
             ),
@@ -3285,7 +4282,8 @@ def _search_review_transport_schema(context: SolverContext) -> dict[str, Any]:
             ),
         }
     )
-    schema["$defs"] = {"search_candidate_assessment": assessment}
+    if not array_transport:
+        schema["$defs"] = {"search_candidate_assessment": assessment}
     return schema
 
 
@@ -3312,6 +4310,19 @@ def _search_reselection_transport_schema(
                                 {"type": "string", "minLength": 1},
                                 SearchCandidateSelection,
                                 "reason",
+                            ),
+                            "matched_hypothesis_ids": _described(
+                                {
+                                    **_bounded_enum_array(
+                                        tuple(
+                                            item.hypothesis_id
+                                            for item in context.hypotheses
+                                        )
+                                    ),
+                                    "minItems": 1,
+                                },
+                                SearchCandidateSelection,
+                                "matched_hypothesis_ids",
                             ),
                         }
                     ),
@@ -3448,6 +4459,13 @@ def _solver_compact_transport_schema(context: SolverContext) -> dict:
     return schema
 
 
+def _graph_review_transport_schema(context: SolverContext) -> dict[str, Any]:
+    """Graph Review専用の直列化契約を共通契約から切り出す。"""
+
+    schema = _solver_compact_transport_schema(context)
+    return deepcopy(schema["properties"]["graph_candidate_review"])
+
+
 def _solver_common_transport_schema(context: SolverContext) -> dict[str, Any]:
     """全Providerへ渡す、現在の処理に必要な意味項目だけのschema。"""
 
@@ -3509,7 +4527,64 @@ def _solver_common_transport_schema(context: SolverContext) -> dict[str, Any]:
     schema["required"] = [
         name for name in schema["required"] if name in included
     ]
-    return _strip_runtime_id_enums(schema)
+    schema = _strip_runtime_id_enums(schema)
+    _constrain_active_deferred_frontier_ids(schema, context)
+    if (
+        context.contract_feedback is not None
+        and "tool request references unknown Article IDs"
+        in context.contract_feedback.violation
+    ):
+        _constrain_repair_fetch_article_ids(schema, context.fetchable_article_ids)
+    return schema
+
+
+def _constrain_active_deferred_frontier_ids(
+    schema: dict[str, Any],
+    context: SolverContext,
+) -> None:
+    """Prevent stale ledger generations from satisfying a current boundary."""
+
+    active_ids = tuple(
+        item.frontier_item_id
+        for item in context.graph_review_ledger
+        if item.review_status == "relevant_deferred"
+        and item.content_status in {"not_requested", "failed", "timeout"}
+        and item.deferred_resolution_action != "no_longer_needed"
+    )
+    if not active_ids:
+        return
+    field_schema = (
+        schema.get("properties", {})
+        .get("deferred_frontier_resolutions", {})
+        .get("items", {})
+        .get("properties", {})
+        .get("frontier_item_id")
+    )
+    if isinstance(field_schema, dict):
+        field_schema["enum"] = list(active_ids)
+
+
+def _constrain_repair_fetch_article_ids(
+    schema: dict[str, Any],
+    fetchable_article_ids: tuple[str, ...],
+) -> None:
+    """未知ID修復時だけ、本文取得IDを現在の既知候補へ制約する。"""
+
+    request_schema = schema.get("properties", {}).get("tool_requests", {})
+    item_schema = request_schema.get("items", {})
+    variants = item_schema.get("anyOf", (item_schema,))
+    for variant in variants:
+        properties = variant.get("properties", {})
+        if properties.get("tool_name", {}).get("enum") != ["fetch_articles"]:
+            continue
+        article_items = (
+            properties.get("arguments", {})
+            .get("properties", {})
+            .get("article_ids", {})
+            .get("items")
+        )
+        if isinstance(article_items, dict):
+            article_items["enum"] = list(fetchable_article_ids)
 
 
 def _schema_is_empty_array(schema: dict[str, Any]) -> bool:
@@ -3704,7 +4779,31 @@ def _solver_anthropic_transport_schema(context: SolverContext) -> dict:
     schema["required"].append("hypothesis_evidence_bindings")
     schema["required"].append("dependency_article_bindings")
     schema["required"].append("fetch_articles")
+
     return schema
+
+
+def _solver_anthropic_json_transport_schema(
+    context: SolverContext,
+) -> dict[str, Any]:
+    """Keep Anthropic grammar small; validate the decoded common contract."""
+
+    expected_fields = tuple(
+        _solver_common_transport_schema(context)["properties"]
+    )
+    return _strict_object(
+        {
+            "decision_json": {
+                "type": "string",
+                "description": (
+                    "JSON object string for the current SolverDecision. "
+                    "Use only these current-step fields: "
+                    + ", ".join(expected_fields)
+                    + "."
+                ),
+            }
+        }
+    )
 
 
 def _anthropic_dependency_decisions_schema(
@@ -3839,15 +4938,6 @@ def _tool_requests_transport_schema(context: SolverContext) -> dict[str, Any]:
     }
     variants: list[dict[str, Any]] = []
     for definition in context.available_tools:
-        if (
-            definition.name == "legal_search"
-            and context.contract_feedback is not None
-            and "successful legal_search scope was already completed"
-            in context.contract_feedback.violation
-        ):
-            # 同じ検索を修復Promptへ返しても再度拒否される。意味選択は
-            # LLMへ残しつつ、この修復呼出しでは既知候補を扱うToolだけを許す。
-            continue
         argument_schema = deepcopy(definition.input_schema)
         if definition.name == "fetch_articles":
             article_ids = argument_schema.get("properties", {}).get("article_ids")
@@ -4313,6 +5403,12 @@ def _normalize_solver_payload(payload: dict) -> dict:
         normalized["start_next_cycle"] = False
         normalized["tool_requests"] = []
         normalized["frontier_re_adoptions"] = []
+        answer = normalized.get("answer")
+        if isinstance(answer, dict):
+            answer = dict(answer)
+            if answer.get("limitations") is None or answer.get("limitations") == "":
+                answer["limitations"] = []
+            normalized["answer"] = answer
     if normalized.get("next") == "continue" and isinstance(fetch_articles, dict):
         if any(
             isinstance(request, dict)
@@ -4747,25 +5843,15 @@ def _normalize_search_review_payload(
         for item in payload.get("selections") or []
         if isinstance(item, dict) and isinstance(item.get("article_id"), str)
     }
-    matched_by_article = {
-        item.get("article_id"): list(item.get("matched_hypothesis_ids") or ())
-        for item in payload.get("assessments") or []
-        if isinstance(item, dict) and isinstance(item.get("article_id"), str)
-    }
     selections = [
-        {
-            **item,
-            "matched_hypothesis_ids": matched_by_article.get(
-                item.get("article_id"),
-                [],
-            ),
-        }
+        dict(item)
         for item in payload.get("selections") or []
         if isinstance(item, dict)
     ]
     review = {
         "search_request_ids": payload.get("search_request_ids") or [],
         "selections": selections,
+        "assessments": payload.get("assessments") or [],
         "reason": payload.get("reason") or "検索候補を選択した",
         "deferred_article_ids": [
             item.article_id
@@ -4824,6 +5910,17 @@ def _apply_search_actor_classification(
     """独立した主体照合結果をArticle IDで機械的に合成する。"""
 
     roles = actor_payload.get("roles")
+    if isinstance(roles, list):
+        roles = {
+            item["article_id"]: {
+                key: value
+                for key, value in item.items()
+                if key != "article_id"
+            }
+            for item in roles
+            if isinstance(item, dict)
+            and isinstance(item.get("article_id"), str)
+        }
     if not isinstance(roles, dict):
         raise ModelProtocolError("search actor classification requires roles")
     expected_ids = {item.article_id for item in context.search_candidates}
@@ -4850,12 +5947,21 @@ def _apply_search_actor_classification(
         actor_matched_ids = {
             hypothesis_id
             for hypothesis_id in role.get("matched_hypothesis_ids") or ()
-            if regulated_actor_role == "hypothesis_actor"
+            if regulated_actor_role in {
+                "hypothesis_actor",
+                "actor_neutral",
+            }
             or (
                 regulated_actor_role == "target_associated_actor"
                 and actor_relation_by_hypothesis.get(hypothesis_id) == "same"
             )
         }
+        if assessment.get("legal_function") == "scope":
+            # scopeは対象・数・用語の範囲を定める分類であり、行為主体の
+            # 一致を要求しない。内容対応は前段LLMの判断をそのまま使う。
+            actor_matched_ids.update(
+                assessment.get("matched_hypothesis_ids") or ()
+            )
         assessment["matched_hypothesis_ids"] = [
             hypothesis_id
             for hypothesis_id in assessment.get("matched_hypothesis_ids") or ()
@@ -4898,7 +6004,8 @@ def _validate_search_assessment_payload(
         contradictory_ids = [
             hypothesis_id
             for hypothesis_id in matched_ids
-            if candidate_actor_role == "target_associated_actor"
+            if assessment.get("legal_function") != "scope"
+            and candidate_actor_role == "target_associated_actor"
             and hypothesis_actor_relations.get(hypothesis_id) == "different"
         ]
         if contradictory_ids:
@@ -4930,10 +6037,17 @@ def _validate_search_reselection_payload(
         if not isinstance(selection, dict):
             continue
         article_id = selection.get("article_id")
-        if not matched_by_article.get(article_id):
+        eligible_ids = set(matched_by_article.get(article_id) or ())
+        selected_ids = selection.get("matched_hypothesis_ids") or []
+        if not eligible_ids:
             raise ModelProtocolError(
                 "selected search candidate must directly match a hypothesis: "
                 f"{article_id}"
+            )
+        if not selected_ids or not set(selected_ids).issubset(eligible_ids):
+            raise ModelProtocolError(
+                "selected search candidate hypothesis IDs must be a non-empty "
+                f"subset of its assessment: {article_id}"
             )
 
 
@@ -5088,6 +6202,8 @@ def _normalize_absent_context_branches(
 ) -> None:
     """参照対象が存在しないGraph制御欄だけを機械的に空へ揃える。"""
 
+    _normalize_grounding_evidence_aliases(normalized, context)
+
     dependency_article_bindings = normalized.pop(
         "_dependency_article_bindings",
         None,
@@ -5100,18 +6216,119 @@ def _normalize_absent_context_branches(
         )
 
     article_aliases = _article_fetch_alias_map(context)
+    fetched_article_ids = {
+        article_id
+        for evidence in context.material_evidence
+        if evidence.evidence_id in context.grounding_evidence_ids
+        if isinstance(
+            article_id := evidence.metadata.get("articleId"),
+            str,
+        )
+        and article_id
+    }
+    fetched_article_ids.update(context.fetched_resource_ids_this_cycle)
     for request in normalized.get("tool_requests") or []:
-        if not isinstance(request, dict) or request.get("tool_name") != "fetch_articles":
+        if not isinstance(request, dict):
             continue
         arguments = request.get("arguments")
         if not isinstance(arguments, dict):
             continue
+        if request.get("tool_name") == "load_evidence":
+            evidence_ids = arguments.get("evidence_ids")
+            if isinstance(evidence_ids, list):
+                grounding_aliases: dict[str, list[str]] = {}
+                for evidence in context.material_evidence:
+                    article_id = evidence.metadata.get("articleId")
+                    if (
+                        evidence.evidence_id in context.grounding_evidence_ids
+                        and isinstance(article_id, str)
+                    ):
+                        grounding_aliases.setdefault(article_id, []).append(
+                            evidence.evidence_id
+                        )
+                normalized_evidence_ids: list[str] = []
+                for evidence_id in evidence_ids:
+                    for resolved_id in grounding_aliases.get(
+                        evidence_id, [evidence_id]
+                    ):
+                        if resolved_id not in normalized_evidence_ids:
+                            normalized_evidence_ids.append(resolved_id)
+                arguments["evidence_ids"] = normalized_evidence_ids
+            continue
+        if request.get("tool_name") != "fetch_articles":
+            continue
         article_ids = arguments.get("article_ids")
         if isinstance(article_ids, list):
-            arguments["article_ids"] = [
+            resolved_article_ids = [
                 article_aliases.get(article_id, article_id)
                 for article_id in article_ids
             ]
+            remaining_article_ids = [
+                article_id
+                for article_id in resolved_article_ids
+                if article_id not in fetched_article_ids
+            ]
+            # Removing an already fetched Article is deterministic deduplication,
+            # not legal relevance selection. Keep an all-redundant request intact
+            # so normal contract repair can ask the Solver for another action.
+            arguments["article_ids"] = (
+                remaining_article_ids
+                if remaining_article_ids
+                else resolved_article_ids
+            )
+
+    fetch_requests = [
+        request
+        for request in normalized.get("tool_requests") or []
+        if isinstance(request, dict)
+        and request.get("tool_name") == "fetch_articles"
+    ]
+    current_limit = min(4, context.remaining_fetch_capacity)
+    if fetch_requests and current_limit > 0:
+        primary_request = fetch_requests[0]
+        requested_article_ids = list(
+            dict.fromkeys(
+                article_id
+                for request in fetch_requests
+                for article_id in request.get("arguments", {}).get(
+                    "article_ids",
+                    (),
+                )
+                if isinstance(article_id, str)
+            )
+        )
+        primary_request.setdefault("arguments", {})["article_ids"] = (
+            requested_article_ids[:current_limit]
+        )
+        primary_request["hypothesis_ids"] = list(
+            dict.fromkeys(
+                hypothesis_id
+                for request in fetch_requests
+                for hypothesis_id in request.get("hypothesis_ids", ())
+                if isinstance(hypothesis_id, str)
+            )
+        )
+        primary_request_id = primary_request.get("request_id")
+        merged_request_ids = {
+            request.get("request_id")
+            for request in fetch_requests[1:]
+            if isinstance(request.get("request_id"), str)
+        }
+        for dependency in normalized.get("dependency_decisions") or []:
+            if (
+                isinstance(dependency, dict)
+                and dependency.get("action_request_id") in merged_request_ids
+            ):
+                dependency["action_request_id"] = primary_request_id
+        normalized["tool_requests"] = [
+            request
+            for request in normalized.get("tool_requests") or []
+            if request is primary_request
+            or not (
+                isinstance(request, dict)
+                and request.get("tool_name") == "fetch_articles"
+            )
+        ]
 
     if not context.cycle_close_required:
         requested_article_ids: set[str] = set()
@@ -5133,7 +6350,6 @@ def _normalize_absent_context_branches(
                     for article_id in article_ids
                     if isinstance(article_id, str)
                 )
-        current_limit = min(4, context.remaining_fetch_capacity)
         if len(requested_article_ids) > current_limit:
             raise ModelProtocolError(
                 "all fetch_articles requests combined must contain at most "

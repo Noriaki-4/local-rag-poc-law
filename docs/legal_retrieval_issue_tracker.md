@@ -1,6 +1,6 @@
 # 法令検索 課題管理
 
-> 更新日: 2026-08-24
+> 更新日: 2026-08-25
 >
 > 本書は、法令検索の現在地、未解決課題、優先順位、完了条件を管理する。
 > 設計仕様の正本ではない。Agent契約は
@@ -61,10 +61,10 @@ Neo4jから指定条件の1ホップ候補を取得する
 | ID | 優先度 | status | 課題 | 現在地 | 次の確認 |
 |---|---|---|---|---|---|
 | `LR-001` | P0 | 対応中 | 質問から必要な検索仮説を漏れなく作る | v150〜v152で規定存在や質問の言い換えを再現した。v153の労働法fixtureではHaikuが要件・上限構造・手続行為を含む仮説を1回で生成した | 収録済みの別分野でもHypothesisと`gaps`の意味形を実モデル確認する |
-| `LR-002` | P0 | 対応中 | 法令検索表現を作り、同一Cycle内でOpenSearchを適切に再検索する | 同一scopeの成功済み検索は契約で検出できる。Profile v181では、その修復呼出しに限り`legal_search`を出力候補から外し、既知候補の本文取得またはGraph探索をLLMへ選ばせる | 本文観察後に、既知候補では不足すると判断した場合だけ検索表現を変える実モデルtraceを確認する |
+| `LR-002` | P0 | 対応中 | 法令検索表現を作り、同一Cycle内でOpenSearchを適切に再検索する | 同一scopeの成功済み検索は実行前に検出する。Toolをschemaから消す修復は廃止し、実行しなかった要求を`action_feedback`としてSolverへ返す | 例外問題で、成功済みGraphが候補0件だった後に検索表現を変えて正しい施行令7条へ到達するtraceを確認する |
 | `LR-003` | P0 | 完了 | Graph由来Articleを起点に連続1ホップ探索する | `gpt-4o-mini`の実モデルtrace v7で、金商法27条の2→施行令7条、施行令7条→府令2条の5を別々の1ホップGraph要求として実行し、府令本文取得後にCycle 1で正常完了した | `lr_003_second_hop_integration_v1.json`、`lr_003_second_hop_graph_review_v1.json`、`lr_003_cycle_close_deferred_frontiers_v1.json`を回帰fixtureとして維持する |
-| `LR-004` | P0 | 対応中 | 複合問題の統合Decisionを成立させ、次の探索または完了へ進む | v157のHaiku実データE2Eは最初のTool観察後にAnthropicが共通strict schemaを大きすぎるとして400で拒否した。GPT-4o miniでは3 Article取得後のCycle Closeまで到達した | `LR-016`で観察統合とCycle Closeを単一責務化し、同じfixtureから両Providerの完成Prompt・schemaを確認する |
-| `LR-005` | P0 | 対応中 | `gpt-4o-mini`で新検索経路を実モデル評価する | Profile v183の実モデル評価で、未解決WorkItemしかない限定Finalizationは法的結論を断定せず引用も返さなかった。別実行ではArticle→Hypothesis対応から4 Hypothesisすべてへ本文Evidenceを保存できた。一方、主体不一致の27条の22の2を主根拠にしたため法的回答は不合格 | 完了した`LR-017`を反映して公開買付け総合問題を再評価する。Graphを要求しない問題は`LR-018`、要求後の連続探索は`LR-003`で確認する |
+| `LR-004` | P0 | 対応中 | 複合問題の統合Decisionを成立させ、次の探索または完了へ進む | Observation Integration、Dependency Assessment、Cycle Closeを分離した。Profile v260では投影後に未解決事項がなければCycle Close schemaが`finalize`だけを許し、矛盾した次Cycle開始を防ぐ | 公開買付け総合問題で複数Cycle後も同じ境界条件を満たすことを確認する |
+| `LR-005` | P0 | 対応中 | `gpt-4o-mini`で新検索経路を実モデル評価する | Profile v260の公告問題は1 Cycle・2 Toolで正常完了し、府令10条と法27条の3を取得・引用した。例外問題はprotocol errorを解消したが、施行令7条ではなく別制度段階の施行令を選び、必要根拠は1/3にとどまった | 例外問題の初回Hypothesisと候補選別を、公開買付け固有の固定語を追加せず改善する |
 | `LR-006` | P1 | 要設計 | 意味分類coverage不足時にも逆引き検索爆発と取りこぼしを両立させる | publish済み意味関係ならselectorで絞れるが、未分類範囲でraw `REFERENCES/to_subject`を使うと高fan-inになる | 限定fallbackの発動条件、scope上限、coverage不足の表示、限定回答条件を決める |
 | `LR-007` | P1 | 未着手 | CycleとStepを再開可能な状態として保存する | WorkItem、Hypothesis、Evidence、Graph review履歴はあるが、目標の`CycleRecord / StepRecord / ExplorationState`は未実装 | Tool観察後の中断から同じStepを再開し、別Cycleとして数えないfixtureを通す |
 | `LR-008` | P1 | 対応中 | status、Provider schema、Prompt、遷移検証の修正漏れを防ぐ | 主要Solver項目の`Field.description`から共通用語集を生成した。初回3 Stepは`ResearchStepInput`の実投影項目と入れ子要素から`input_contract`を生成し、基準Providerの完成成果物を本番生成結果と比較する。他Providerとの意味契約一致は重複ファイルを持たずテストする。Toolの用途・入力Schema・戻り値は`ToolDefinition`から`available_tools`へ投影する | 全statusのowner・遷移・永続化versionを説明付き正本へ集約し、未定義statusで契約テストが失敗するようにする |
@@ -78,6 +78,7 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-016` | P0 | 検証待ち | Tool観察の意味統合とCycle Closeを単一責務のStepへ分ける | v183でArticle→Hypothesis対応をObservationへ渡し、GPT-4o mini実モデルで4 Hypothesisへの本文Evidence保存を確認した。後続Stepの時間切れで成功済みObservationを失わないcheckpoint保存を追加した。対象WorkItemがない依存判定は呼び出さず、OpenAI schemaへ`null` enumを出す経路も除去した | 同じcheckpointをHaikuで再生し、本文の部分確認、意味更新、Cycle判断を確認する |
 | `LR-017` | P0 | 完了 | 検索候補の規律主体と行為対象を安定して区別する | Profile v197でWorkItem・Hypothesisに主体関係を保持し、内容評価と主体分類を別の単一タスクに分けた。両判断の共通Hypothesisだけを候補選択へ渡す | 公開買付けcheckpointを`gpt-4o-mini`の独立した2実行で再生し、両方で27条の2を選択、27条の22の2をdeferredとした。別分野fixtureを含む回帰テストにも合格 |
 | `LR-018` | P0 | 完了 | Graph探索が必要な未解決事項があってもSolverがGraph検索を要求しない | 次Cycle開始時の保留OpenSearch候補を自動Search Selectionへ戻さず、Integrationで既知候補・Graph・再検索を比較するよう修正した。Graph selectorのmode・predicate・directionを分岐schemaで拘束し、同一Graph要求と本文取得要求は選択内容を保ったまま輸送時に統合する | Cycle 2 fixtureで府令10条を含む既知候補の本文取得へ進むこと、および候補を除いたGraph必須状態で`27条の2 / IMPLEMENTS / from_subject`の1要求を返し共通契約を通過することを`gpt-4o-mini-2024-07-18`で確認済み |
+| `LR-019` | P0 | 対応中 | 統合の意味的な行動選択を違反別契約からSolver loopへ戻す | 成功済みと完全一致する検索・Graph要求は実行前に止めるが、違反別修復schemaでToolを禁止せず、通常の`action_feedback`としてSolverへ返す実装へ変更した。統合Promptと自己点検も固定順から判断基準中心へ簡素化した | 固定fixtureで全Toolが利用可能なまま別行動を選べることを確認し、Reviewer無効の総合問題でprotocol errorと反復回数を再評価する |
 
 ### 3.1 LR-016 Tool観察とCycle Closeの単一責務化
 
@@ -166,6 +167,25 @@ Programで判定しない。
 deferredとした。結果要約は
 [v197実モデル回帰fixture](../agent-api/tests/fixtures/framework/tob_actor_relation_selection_regression_v197.json)
 へ固定した。これにより本項の完了条件を満たした。
+
+### 3.4 2026-08-25 回帰確認
+
+Profile v250以降の統合・下位規範探索変更をfixture、全テスト、`gpt-4o-mini`実モデルで確認し、次の
+構造的なデグレードを修正した。
+
+- Tool観察後にDependency Assessmentを再実行せず、古い`needs_action`から検索やGraphを反復する経路。
+- 候補0件で成功したGraph要求が後続Viewから消え、同じ1ホップ検索を再要求できる経路。
+- 「府令で定める」等の本文文字列をProgramが解釈し、LLMの依存判断を上書きする経路。Programは既知ID、
+  Article数、根拠Articleの相異等の構造矛盾だけを検査する。
+- 重複検索の契約修復で過去の違反に含まれるTool種別をすべてschemaから除外し、検索とGraphの代替を
+  相互に失わせる経路。直前に重複した種別だけを修復時に外す。
+- Observation反映後に全WorkItemが解決済みでも、Cycle Closeが`start_next_cycle`を選べる契約。
+
+再現状態は`tests/fixtures/framework`のdependency actionおよびCycle Close fixtureへ固定した。Profile v261で
+全991テストが合格した。v260の公告問題は法27条の3・府令10条を取得して正常完了した。例外問題は構造上正常終了するが、
+施行令7条を選べない意味精度の課題が残るため、構造回帰の解消と法的回答の合格を区別して管理する。
+総合問題で重複Graphになったcheckpointをv261で再生すると、同じGraphを反復せず、法令表現を変えた
+`legal_search`を選び、共通契約を修復なしで通過した。
 
 ## 4. 最優先分析: 複合問題の統合
 
@@ -438,6 +458,26 @@ Programは既知ID、型、件数、参照整合、予算を検証する。Evide
 - ProgramはGraph探索を一律に強制せず、既知ID、selectorの型、件数、重複scopeだけを検証する。
 - Graph要求が作られた後の複数1ホップ探索は`LR-003`の完了条件で検証する。
 
+### LR-019 統合契約と意味的行動選択の分離
+
+- 構造契約は、JSON形状、既知ID、型、件数・予算、参照整合、同一成功済み要求の二重実行防止を検証する。
+- 検索、本文取得、Graph探索、Cycle切替、回答のどれを次に選ぶかはSolverが判断し、違反別schemaで代替行動を強制しない。
+- 意味的に不適切または進捗しない行動は、違反種別ごとの修復経路を増やさず、通常のObservationとしてSolverへ返す。
+- 用途別の`*_check.md`は、未解決事項を前進させるか、入力との対応があるか、成功済み要求を反復していないかを確認する短い自己点検にする。Tool引数制約や特定Toolの強制を混在させない。
+- Reviewerは既定無効を維持する。採用する場合も全Stepへ挿入せず、総合問題の最終回答前または停滞時だけ実行し、検索や状態更新を指示しない。
+- 公開買付け総合問題の固定fixtureで、修復schemaの切替による検索とGraphの往復が発生せず、Solverが通常の次行動または次Cycleを選べる。
+- Reviewer無効・有効を同じ代表evalで比較し、必要Article到達、未確認事項の断定、契約修復回数、同一Tool反復、protocol error、時間・tokenを記録する。
+
+2026-08-25の第一段階では、成功済みと完全一致する`legal_search`と
+`legal_graph_neighbors`を`ActionRejected`として実行前に止める一方、構造契約の
+`contract_feedback`から分離した。次のSolver入力には`action_feedback`として理由と未実行Requestを渡し、
+Provider schemaからToolを削除しない。統合と下位規範行動のPromptは、候補取得、Graph、再検索という
+固定順をやめ、未確認事項、既知候補、既知起点、関係・方向の説明可能性に応じてSolverが選ぶ形にした。
+自己点検は成功条件に直結する3〜5項目へ削減した。Reviewerは既存どおり既定無効・最終回答後だけとし、
+停滞時起動は代表evalで必要性を確認するまで追加しない。
+APIを使わない全回帰992件で、構造違反の修復、重複行動の実行前棄却、全Toolの継続提示、
+既存のReviewer既定無効を確認した。実モデルの総合問題による効果測定は未実施である。
+
 2026-08-25の修正では、次Cycleへ持ち越した検索候補を`search_candidates`と
 `fetchable_article_ids`へ残しつつ、`required_search_review_request_ids`へ自動設定しないようにした。
 新規の検索結果だけを専用Search Selectionへ送り、次Cycle開始時はIntegrationが次の行動を選ぶ。
@@ -507,6 +547,8 @@ Graph Toolの入力schemaは、`semantic_assertion`では`from_subject / to_subj
 LR-013  Provider共通の小型Solver輸送契約へ統一
     ↓
 LR-014  Haiku承認済みcheckpointをgpt-4o-miniで再生可能にする
+    ↓
+LR-019  統合の構造契約と意味的な行動選択を分離
     ↓
 LR-004  Cycle 1直後の統合fixtureと計測を整備
     ↓

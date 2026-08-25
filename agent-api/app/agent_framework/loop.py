@@ -15,6 +15,7 @@ from .context import (
     ContextCapacityExceeded,
     GraphReviewBatch,
     SearchCandidateArticle,
+    SolverActionFeedback,
     SolverContext,
     SolverContractFeedback,
     build_solver_context,
@@ -48,7 +49,7 @@ from .state import (
     utc_now,
 )
 from .store import CaseStore
-from .validation import ContractViolation, apply_solver_decision
+from .validation import ActionRejected, ContractViolation, apply_solver_decision
 
 LOAD_EVIDENCE_TOOL = "load_evidence"
 LOAD_EVIDENCE_DEFINITION = ToolDefinition(
@@ -75,7 +76,7 @@ LOAD_EVIDENCE_DEFINITION = ToolDefinition(
     read_only=True,
     parallel_safe=True,
 )
-MAX_SOLVER_CONTRACT_ATTEMPTS = 3
+MAX_SOLVER_DECISION_ATTEMPTS = 3
 logger = logging.getLogger(__name__)
 
 
@@ -282,8 +283,9 @@ class AgentLoop:
             )
             dependency_audit_required = bool(dependency_audit_work_item_ids)
             contract_feedback: SolverContractFeedback | None = None
+            action_feedback: SolverActionFeedback | None = None
             cycle_step_timed_out = False
-            for contract_attempt in range(MAX_SOLVER_CONTRACT_ATTEMPTS):
+            for decision_attempt in range(MAX_SOLVER_DECISION_ATTEMPTS):
                 attempt_remaining = self._remaining_wall_time(started_at)
                 model_budget = attempt_remaining
                 if not finalize_only:
@@ -307,6 +309,7 @@ class AgentLoop:
                     finalize_only=finalize_only,
                     reviewer_findings=reviewer_findings,
                     contract_feedback=contract_feedback,
+                    action_feedback=action_feedback,
                     required_dependency_kind=(
                         self._profile.required_dependency_kind
                         if dependency_audit_required
@@ -395,7 +398,7 @@ class AgentLoop:
                         context=context,
                         profile=call_profile,
                         purpose=purpose,
-                        contract_attempt=contract_attempt,
+                        contract_attempt=decision_attempt,
                     )
                 call_started = self._clock()
                 try:
@@ -406,7 +409,7 @@ class AgentLoop:
                         self._diagnostics.record_solver_output(
                             state=state,
                             purpose=f"{purpose}_{exc.completed_stage}_checkpoint",
-                            contract_attempt=contract_attempt,
+                            contract_attempt=decision_attempt,
                             decision=partial_decision,
                         )
                     try:
@@ -429,7 +432,7 @@ class AgentLoop:
                                 purpose=(
                                     f"{purpose}_{exc.completed_stage}_checkpoint"
                                 ),
-                                contract_attempt=contract_attempt,
+                                contract_attempt=decision_attempt,
                                 decision=partial_decision,
                                 violation=str(checkpoint_error),
                             )
@@ -443,7 +446,7 @@ class AgentLoop:
                                 purpose=(
                                     f"{purpose}_{exc.completed_stage}_checkpoint"
                                 ),
-                                contract_attempt=contract_attempt,
+                                contract_attempt=decision_attempt,
                                 decision=partial_decision,
                             )
                     model_traces.append(
@@ -493,8 +496,12 @@ class AgentLoop:
                     ModelCallTrace(
                         purpose=(
                             f"{purpose}_contract_repair"
-                            if contract_attempt
-                            else purpose
+                            if contract_feedback is not None
+                            else (
+                                f"{purpose}_action_feedback"
+                                if action_feedback is not None
+                                else purpose
+                            )
                         ),
                         model=call_profile.model,
                         latency_ms=self._elapsed_ms(call_started),
@@ -508,7 +515,7 @@ class AgentLoop:
                     self._diagnostics.record_solver_output(
                         state=state,
                         purpose=purpose,
-                        contract_attempt=contract_attempt,
+                        contract_attempt=decision_attempt,
                         decision=solver_call.decision,
                     )
                 try:
@@ -525,7 +532,8 @@ class AgentLoop:
                         ),
                         require_dependency_decisions=bool(
                             context.required_dependency_work_item_ids
-                        ),
+                        )
+                        and purpose != "observation_integration",
                         required_review_finding_ids=tuple(
                             item.finding_id for item in context.reviewer_findings
                         ),
@@ -632,31 +640,77 @@ class AgentLoop:
                         cycle_close_required=context.cycle_close_required,
                         can_start_next_cycle=context.can_start_next_cycle,
                         finalize_only=finalize_only,
+                        allow_dependency_action_without_tool=(
+                            purpose == "observation_integration"
+                        ),
                     )
+                    if purpose == "observation_integration":
+                        integrated_request_ids = tuple(
+                            dict.fromkeys(
+                                [
+                                    *candidate.integrated_tool_result_request_ids,
+                                    *(
+                                        item.request_id
+                                        for item in context.recent_tool_results
+                                    ),
+                                ]
+                            )
+                        )
+                        candidate = self._replace_state(
+                            candidate,
+                            integrated_tool_result_request_ids=(
+                                integrated_request_ids
+                            ),
+                        )
                     if self._diagnostics is not None:
                         self._diagnostics.record_decision_applied(
                             state_before=state,
                             state_after=candidate,
                             context=context,
                             purpose=purpose,
-                            contract_attempt=contract_attempt,
+                            contract_attempt=decision_attempt,
                             decision=solver_call.decision,
                         )
                     break
+                except ActionRejected as exc:
+                    logger.info("Solver action was not executed: %s", exc)
+                    rejected_feedback = SolverActionFeedback(
+                        code="already_completed",
+                        message=str(exc),
+                        rejected_tool_requests=exc.rejected_requests,
+                    )
+                    if self._diagnostics is not None:
+                        self._diagnostics.record_action_rejected(
+                            state=state,
+                            purpose=purpose,
+                            decision_attempt=decision_attempt,
+                            decision=solver_call.decision,
+                            feedback=rejected_feedback,
+                        )
+                    if decision_attempt == MAX_SOLVER_DECISION_ATTEMPTS - 1:
+                        raise
+                    contract_feedback = None
+                    action_feedback = rejected_feedback
                 except ContractViolation as exc:
                     logger.warning("Solver contract violation: %s", exc)
                     if self._diagnostics is not None:
                         self._diagnostics.record_contract_violation(
                             state=state,
                             purpose=purpose,
-                            contract_attempt=contract_attempt,
+                            contract_attempt=decision_attempt,
                             decision=solver_call.decision,
                             violation=str(exc),
                         )
-                    if contract_attempt == MAX_SOLVER_CONTRACT_ATTEMPTS - 1:
+                    if decision_attempt == MAX_SOLVER_DECISION_ATTEMPTS - 1:
                         raise
+                    action_feedback = None
                     contract_feedback = SolverContractFeedback(
-                        violation=str(exc),
+                        violation=_merge_contract_violations(
+                            contract_feedback.violation
+                            if contract_feedback is not None
+                            else None,
+                            str(exc),
+                        ),
                         previous_decision=solver_call.decision,
                     )
             if cycle_step_timed_out:
@@ -677,11 +731,18 @@ class AgentLoop:
                 and solver_call.decision.graph_candidate_review is not None
                 and solver_call.decision.graph_candidate_review.selected_article_ids
             ):
+                graph_fetch_request = self._graph_review_fetch_request(
+                    candidate,
+                    solver_call.decision.graph_candidate_review,
+                    fetchable_article_ids={
+                        item.article_id
+                        for item in context.graph_review_batch.candidates
+                        if item.content_status
+                        in {"not_requested", "failed", "timeout"}
+                    },
+                )
                 decision_requests = (
-                    self._graph_review_fetch_request(
-                        candidate,
-                        solver_call.decision.graph_candidate_review,
-                    ),
+                    (graph_fetch_request,) if graph_fetch_request is not None else ()
                 )
                 candidate = self._replace_state(
                     candidate,
@@ -811,6 +872,17 @@ class AgentLoop:
             and self._profile.solver_cycle_close is not None
         ):
             return self._profile.solver_cycle_close, "cycle_close"
+        if (
+            integration_call
+            and context.recent_tool_results
+            and self._profile.solver_cycle_close is not None
+        ):
+            return (
+                self._profile.solver_cycle_close.model_copy(
+                    update={"context_projection": "observation_integration"}
+                ),
+                "observation_integration",
+            )
         if integration_call or context.finalize_only:
             return self._profile.solver_integration, "integration"
         if (
@@ -834,13 +906,19 @@ class AgentLoop:
         self,
         state: CaseState,
         review: GraphCandidateReview,
-    ) -> ToolRequest:
-        selected_ids = tuple(review.selected_article_ids)
+        *,
+        fetchable_article_ids: set[str],
+    ) -> ToolRequest | None:
         selected_decisions = tuple(
-            item for item in review.frontier_decisions if item.action == "select"
+            item
+            for item in review.frontier_decisions
+            if item.action == "select" and item.article_id in fetchable_article_ids
         )
         if not selected_decisions:
-            raise ContractViolation("Graph review fetch requires a selected Frontier")
+            return None
+        selected_ids = tuple(
+            dict.fromkeys(item.article_id for item in selected_decisions)
+        )
         primary_work_item_id = selected_decisions[0].work_item_id
         hypothesis_ids = tuple(
             dict.fromkeys(
@@ -1440,8 +1518,19 @@ class AgentLoop:
         )
 
 
+def _merge_contract_violations(previous: str | None, current: str) -> str:
+    """同じ未適用Decisionの修復中に判明した違反を失わない。"""
+
+    if not previous:
+        return current
+    known = previous.split("\n")
+    if current in known:
+        return previous
+    return f"{previous}\n{current}"
+
+
 def _dependency_audit_work_item_ids(state: CaseState) -> tuple[str, ...]:
-    """LLMが本文取得へ関連付けたopen WorkItemだけを監査対象へ投影する。"""
+    """未統合の本文取得へ関連付けたopen WorkItemだけを監査対象へ投影する。"""
 
     open_work_item_ids = {
         item.work_item_id for item in state.work_items if item.state == "open"
@@ -1458,6 +1547,7 @@ def _dependency_audit_work_item_ids(state: CaseState) -> tuple[str, ...]:
         result.request_id
         for result in state.tool_results
         if result.status == "succeeded"
+        and result.request_id not in state.integrated_tool_result_request_ids
         and grounding_evidence_ids.intersection(result.evidence_ids)
     }
     projected: list[str] = []
@@ -1492,4 +1582,18 @@ def _dependency_audit_scope(
         or required_dependency_kind is None
     ):
         return ()
-    return _dependency_audit_work_item_ids(state)
+    fresh_scope = _dependency_audit_work_item_ids(state)
+    if fresh_scope:
+        return fresh_scope
+
+    open_work_item_ids = {
+        item.work_item_id for item in state.work_items if item.state == "open"
+    }
+    return tuple(
+        dict.fromkeys(
+            item.work_item_id
+            for item in state.dependency_decisions
+            if item.status == "needs_action"
+            and item.work_item_id in open_work_item_ids
+        )
+    )

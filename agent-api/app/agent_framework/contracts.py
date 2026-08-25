@@ -57,8 +57,9 @@ class HypothesisUpdate(FrameworkModel):
     evidence_ids: tuple[str, ...] = Field(
         default=(),
         description=(
-            "現在の判定とgapsの判断に使った取得済みgrounding Evidence ID。"
-            "unresolvedでも本文で確認できた部分があれば保持できる。"
+            "現在の判定とgapsの判断に直接必要な、最小集合の取得済み"
+            "grounding Evidence ID。関連するだけのParagraph・Itemを全件"
+            "入れない。unresolvedでも本文で確認できた部分があれば保持できる。"
         ),
     )
     gaps: tuple[str, ...] = Field(
@@ -149,6 +150,7 @@ class SearchCandidateAssessment(FrameworkModel):
     regulated_actor_role: Literal[
         "hypothesis_actor",
         "target_associated_actor",
+        "actor_neutral",
         "other",
         "unknown",
     ] = Field(
@@ -156,6 +158,7 @@ class SearchCandidateAssessment(FrameworkModel):
         description=(
             "候補が規律する行為者の質問内での役割。hypothesis_actorは命題の"
             "行為者、target_associated_actorは対象の所有者・発行者・所属先等、"
+            "actor_neutralは行為者を規律せず用語・数・対象範囲を定める候補、"
             "otherはそれ以外、unknownは候補から確定できない。AのBをCする質問で"
             "A自身によるCを規律する候補はtarget_associated_actor、A以外の者による"
             "Cを規律する候補はhypothesis_actor。"
@@ -167,6 +170,13 @@ class SearchCandidateAssessment(FrameworkModel):
             "主体、行為、対象が一致し、候補の条件または効果が命題かgapsの"
             "未確認部分を直接検証できるHypothesis ID。主体が不明または異なる"
             "場合は空。"
+        ),
+    )
+    matched_non_work_item_requirements: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "候補本文を取得することで満たせる、回答全体の明示要求。"
+            "候補選択に必要な要求だけを、入力の文言と完全一致で保持する。"
         ),
     )
 

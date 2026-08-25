@@ -18,6 +18,8 @@ search_navigationは根拠にせず、必要なArticle本文を取得するか�
 `material_evidence`にある場合は本文取得済みなので、再取得要求を削除して提示本文を評価します。
 Paragraph・ItemのEvidence IDをArticle IDとして使いません。必要なArticleが未発見の場合だけ
 Graphまたは異なる`legal_search`で発見します。`needs_action`のbasis Evidenceを再取得しません。
+violationに列挙されたArticle IDは直前の`fetch_articles`からすべて削除し、その要求をコピーしません。
+本文取得を続ける場合は、現在の`fetchable_article_ids`から選び直します。
 
 <!-- prompt-section:open_work_item -->
 追加調査できるならopenのままcontinueします。不能時だけlimitationsと既知の未解決IDを対応させます。
@@ -42,9 +44,6 @@ retain_evidence_idsは同じIDを重複させずmax_retained_evidence件以内�
 
 <!-- prompt-section:unique_tool_request_ids -->
 今回返す各ToolRequestのrequest_idを同じDecision内で相互に異なる短い局所IDにします。意味判断とToolの種類・引数は変えません。request_idを変更したToolRequestを指すDependencyDecisionがあれば、action_request_idにも同じ局所IDをコピーします。
-
-<!-- prompt-section:repeated_successful_search -->
-同じWorkItem・Hypothesis・query・filterで成功済みのlegal_searchを再要求しません。search_candidatesと対応する検索抜粋を評価し、関係する候補があればfetch_articlesで本文を取得します。既存候補では検証できないと判断した場合だけ、不足する確認事項をdecision_reasonに示して検索表現を変更します。
 
 <!-- prompt-section:article_fetch_contract -->
 複数の本文取得は1つのfetch_articlesへ統合します。選んだ全Article IDをarticle_idsへ、

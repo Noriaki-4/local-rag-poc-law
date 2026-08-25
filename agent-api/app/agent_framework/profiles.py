@@ -21,12 +21,18 @@ class ModelCallProfile(FrameworkModel):
     actor_classification_completion_check_prompt: str | None = None
     dependency_system_prompt: str | None = None
     dependency_completion_check_prompt: str | None = None
+    dependency_action_system_prompt: str | None = None
+    dependency_action_completion_check_prompt: str | None = None
+    final_answer_check_system_prompt: str | None = None
+    final_answer_check_completion_prompt: str | None = None
     context_projection: Literal[
         "full",
         "initial_research",
         "research_decomposition",
         "research_hypothesis",
         "research_search",
+        "graph_review",
+        "observation_integration",
         "cycle_close",
         "finalization",
     ] = "full"

@@ -1386,6 +1386,57 @@ def test_solver_can_repair_structural_contract() -> None:
     ]
 
 
+def test_repeated_successful_action_returns_normal_feedback() -> None:
+    first_request = _request("r1").model_copy(
+        update={"tool_name": "legal_search"}
+    )
+    duplicate = _request("r2").model_copy(
+        update={"tool_name": "legal_search"}
+    )
+    resolved = SolverDecision(
+        next="finalize",
+        update=CaseUpdate(
+            update_work_items=(
+                WorkItemUpdate(
+                    work_item_id="w1",
+                    state="resolved",
+                    resolution="取得本文で確認した",
+                    basis_hypothesis_ids=("h1",),
+                ),
+            ),
+            update_hypotheses=(
+                HypothesisUpdate(
+                    hypothesis_id="h1",
+                    judgment="supported",
+                    evidence_ids=("e_r1",),
+                ),
+            ),
+        ),
+        answer=FinalAnswer(text="回答", citation_ids=("e_r1",)),
+    )
+    model = FakeModel(
+        [
+            _first_research((first_request,)),
+            SolverDecision(next="continue", tool_requests=(duplicate,)),
+            resolved,
+        ]
+    )
+
+    state, trace = _run(model, tools=(FakeReadTool(name="legal_search"),))
+
+    assert state.run_status == "completed"
+    feedback_context = model.solver_contexts[2]
+    assert feedback_context.contract_feedback is None
+    assert feedback_context.action_feedback is not None
+    assert feedback_context.action_feedback.code == "already_completed"
+    assert feedback_context.action_feedback.rejected_tool_requests == (duplicate,)
+    assert [item.purpose for item in trace.model_calls] == [
+        "research",
+        "integration",
+        "integration_action_feedback",
+    ]
+
+
 def test_solver_can_use_second_contract_repair_without_program_rewriting() -> None:
     invalid_request = ToolRequest(
         request_id="invalid-r1",

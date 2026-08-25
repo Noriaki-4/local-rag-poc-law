@@ -10,7 +10,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Literal
 
-from .context import SolverContext
+from .context import SolverActionFeedback, SolverContext
 from .contracts import SolverDecision
 from .model_call_artifacts import RenderedModelCall, write_model_call_artifacts
 from .ports.model import ReviewerView
@@ -131,6 +131,40 @@ class AgentDiagnostics:
         }
         if self.mode == "snapshot":
             record["solverDecision"] = decision.model_dump(mode="json")
+        self._write(record)
+
+    def record_action_rejected(
+        self,
+        *,
+        state: CaseState,
+        purpose: str,
+        decision_attempt: int,
+        decision: SolverDecision,
+        feedback: SolverActionFeedback,
+    ) -> None:
+        """実行前に棄却した決定的な重複行動を契約違反と分けて記録する。"""
+
+        if self.mode == "off":
+            return
+        record: dict[str, Any] = {
+            "event": "action_rejected",
+            "caseId": state.case_id,
+            "purpose": purpose,
+            "decisionAttempt": decision_attempt + 1,
+            "actionCode": feedback.code,
+            "message": feedback.message,
+            "rejectedRequestIds": [
+                item.request_id for item in feedback.rejected_tool_requests
+            ],
+            "rejectedToolNames": [
+                item.tool_name for item in feedback.rejected_tool_requests
+            ],
+            "decisionStatus": _decision_status(decision),
+            "solverDecisionHash": _json_sha256(decision.model_dump(mode="json")),
+        }
+        if self.mode == "snapshot":
+            record["solverDecision"] = decision.model_dump(mode="json")
+            record["actionFeedback"] = feedback.model_dump(mode="json")
         self._write(record)
 
     def record_decision_applied(
@@ -602,6 +636,11 @@ def _context_status(context: SolverContext) -> dict[str, Any]:
         "contractViolation": (
             context.contract_feedback.violation
             if context.contract_feedback is not None
+            else None
+        ),
+        "actionFeedbackCode": (
+            context.action_feedback.code
+            if context.action_feedback is not None
             else None
         ),
     }
