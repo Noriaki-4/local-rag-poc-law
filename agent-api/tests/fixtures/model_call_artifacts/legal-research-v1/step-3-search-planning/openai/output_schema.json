@@ -35,13 +35,13 @@
             "type": "array"
           },
           "purpose": {
-            "description": "この検索で確認する法的内容。",
+            "description": "この検索で確認する法的内容を説明する文章。",
             "maxLength": 1000,
             "minLength": 1,
             "type": "string"
           },
           "query": {
-            "description": "制度名と判定軸を法令本文に現れやすい語で表した検索語。",
+            "description": "検索欄へ入力する短い法令用語・法令表現の組合せ。purposeや質問を言い換えた文章ではない。",
             "maxLength": 1000,
             "minLength": 1,
             "type": "string"

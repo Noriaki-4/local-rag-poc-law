@@ -32,7 +32,10 @@ class _LegalSearchArguments(BaseModel):
     query: str = Field(
         min_length=1,
         max_length=1000,
-        description="制度名と確認事項を法令に現れやすい表現へ言い換えた検索語。",
+        description=(
+            "検索欄へ入力する短い法令用語・法令表現の組合せ。"
+            "確認内容を説明する文章ではない。"
+        ),
     )
     doc_types: tuple[str, ...] = Field(
         default=("law", "guideline"),
@@ -156,7 +159,7 @@ class LegalSearchTool:
         name="legal_search",
         description=(
             "Article IDがまだ分からないとき、OpenSearchで法令またはガイドの候補を探す。"
-            "質問をそのまま繰り返さず、確認事項を法令表現へ言い換えて使う。"
+            "質問をそのまま繰り返さず、短い法令用語・法令表現を組み合わせて使う。"
             "返す検索抜粋は候補選択用であり、回答やHypothesisの根拠にはしない。"
         ),
         input_schema=model_input_schema(_LegalSearchArguments),

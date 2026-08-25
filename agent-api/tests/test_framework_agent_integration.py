@@ -654,7 +654,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "289"
+    assert diagnostic_records[0]["profileVersion"] == "290"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -662,7 +662,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "289"
+    assert transport_input["profileVersion"] == "290"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -1097,7 +1097,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "289"
+    assert profile.version == "290"
     mode_prompts = {
         "research": profile.solver_research.system_prompt,
         "integration": profile.solver_integration.system_prompt,
@@ -1154,6 +1154,9 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     assert "根拠法令名、条文番号、検索語、検索作業は書きません" in hypothesis_prompt
     assert "# 法令調査Solver：検索要求の作成" in search_prompt
     assert "legal_search" in search_prompt
+    assert "`gaps`がある場合" in search_prompt
+    assert "別々の検索にすることは強制しません" in search_prompt
+    assert "Hypothesisまたは`gaps`を検証" not in search_prompt
     for prompt in (research_prompt, hypothesis_prompt, search_prompt):
         assert "## 共通ルール" not in prompt
         assert "## 現在の作業" not in prompt
@@ -1341,7 +1344,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "289"
+    assert profile.version == "290"
     assert prompt.rindex("## 出力") > prompt.rindex(
         "</solver_context>"
     )
@@ -1392,7 +1395,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "289"
+    assert profile.version == "290"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -3683,7 +3686,7 @@ def test_real_model_initial_research_decomposition_fixture_is_reproducible() -> 
     assert "根拠法令名、条文番号、検索語、検索作業は書きません" in (
         hypothesis_prompt.system_prompt
     )
-    assert "法令本文に現れやすい語" in search_prompt.system_prompt
+    assert "短い法令用語・法令表現の組合せ" in search_prompt.system_prompt
 
 
 def test_real_model_cycle2_repeated_search_fixture_keeps_replanning_options() -> None:

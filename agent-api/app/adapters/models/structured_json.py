@@ -1713,7 +1713,7 @@ def _staged_research_transport_schema(
                         "現在のWorkItem自身が適用除外又は例外を問う場合は、"
                         "未知の除外事由を推測せず、"
                         "原則規定に対する別の例外規定又は下位法令への委任"
-                        "という検索経路だけを書く。委任の有無が未確認なら両方を"
+                        "という構造仮説だけを書く。委任の有無が未確認なら両方を"
                         "別の仮説にする。成立条件、対象範囲又は手続を問う"
                         "WorkItemは例外として扱わない。それ以外では、一般的な法的知識を"
                         "使い、法令本文によって支持又は否定できる誤り得る"
@@ -1756,13 +1756,16 @@ def _staged_research_transport_schema(
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 1000,
-                    "description": "この検索で確認する法的内容。",
+                    "description": "この検索で確認する法的内容を説明する文章。",
                 },
                 "query": {
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 1000,
-                    "description": "制度名と判定軸を法令本文に現れやすい語で表した検索語。",
+                    "description": (
+                        "検索欄へ入力する短い法令用語・法令表現の組合せ。"
+                        "purposeや質問を言い換えた文章ではない。"
+                    ),
                 },
                 "doc_types": {
                     "type": "array",

@@ -10,13 +10,12 @@
 
 ## 完了条件
 
-- 各検索要求が、既知WorkItemとそれに属する未検証Hypothesisを参照している。
-- 各検索語が、対象Hypothesisまたは`gaps`を検証できる法令表現になっている。
-- 今回の要求数が入力された上限内に収まっている。
+- 各検索要求について、どのHypothesisの何を確認する検索かが分かる。
+- 各検索語が、質問の言い換えではなく、法令本文から候補を探せる表現になっている。
 
 ## 手順
 
-1. 各Hypothesisの命題と`gaps`を確認します。
+1. 各Hypothesisの命題を確認します。`gaps`がある場合は、残る未確認事項として検索語へ反映します。
 2. `available_tools`で`legal_search`の用途、入力項目、戻り値を確認します。
 3. 今回の上限内で、未検証Hypothesisを調べる検索要求を作ります。
 4. 完了条件を確認します。
@@ -27,12 +26,29 @@
 
 - WorkItemやHypothesisの内容は変更しません。
 - 1つの検索要求は、同じWorkItemに属する1件以上のHypothesisを対象にします。
+- 複数Hypothesisで同じ検索語と候補を使える場合は、1つの検索要求にまとめられます。別々の検索にすることは強制しません。
 
 ### 検索語
 
-- 検索語は質問文をそのまま繰り返さず、制度名、行為または法的効果、判定軸を法令本文に現れやすい語で組み合わせます。
+- `purpose`には、この検索で確認する内容を文章で書きます。
+- `query`には、検索欄へ入力する短い法令用語・法令表現の組合せだけを書きます。質問文や`purpose`を別の文章にして入れません。
+- 検索語は質問文をそのまま繰り返さず、制度名と、確認する規律を表す語を組み合わせます。
+- 確認する規律に応じて、法令本文に現れる表現を使います。
+  - 義務・成立条件：`しなければならない`、`場合`
+  - 定義・範囲：`とは`、`をいう`、`に掲げる`
+  - 例外：`適用しない`、`除く`、`ただし`
+  - 委任：`政令で定める`、`府令で定める`
+  - 手続：対象となる`公告`、`届出`、`提出`等の行為
+- `に関する法令`、`必要になる条件`、`具体的条件`、`確認する`のような説明は`purpose`に書き、`query`には入れません。
 - 法令表現へ言い換えても、Hypothesisの主体、場所、行為方法、人数、数量、割合、期間等の識別に必要な事実は落とさず、別の判定軸へ変えません。
 - Hypothesisが行為者と対象に結び付く主体を別の役割としている場合、その区別が消える検索語にしません。
+
+### 例
+
+同じ制度について「義務の例外」と「例外要件の下位法令への委任」を確認する場合、検索要求を分ける必要はありません。
+
+- `purpose`：制度上の義務に対する例外と、委任された要件を確認する。
+- `query`：`制度名 義務 適用しない 除く 政令で定める`
 
 ### 上限と推測
 
@@ -62,11 +78,12 @@
 - `max_tool_requests_per_step`: 今回のStepで返せるTool要求総数の上限。
 </input_contract>
 
-<research_step_input>{"question":"上場会社の株式を、市場を通さずに多数の株主から買い集めたいのですが、公開買付けの手続が必要になるのはどのような場合ですか。対象となる株券等の範囲、主な例外、必要な手続も含めて、根拠となる条文とともに説明してください。","work_items":[{"work_item_id":"work_item_1","question":"公開買付けの手続が必要になる場合はどのような場合か？","action_actor":"質問者（市場外で株式を買い集める者）"},{"work_item_id":"work_item_2","question":"公開買付けの対象となる株券等の範囲は？","action_actor":"質問者（市場外で株式を買い集める者）"},{"work_item_id":"work_item_3","question":"公開買付けの主な例外は何か？","action_actor":"質問者（市場外で株式を買い集める者）"},{"work_item_id":"work_item_4","question":"公開買付けに必要な手続は何か？","action_actor":"質問者（市場外で株式を買い集める者）"}],"hypotheses":[{"hypothesis_id":"hypothesis_1","work_item_id":"work_item_1","statement":"公開買付けの手続が必要になるのは、特定の条件を満たす場合である。","action_actor":"質問者（市場外で株式を買い集める者）","gaps":["具体的な条件を示す法令が未確認"]},{"hypothesis_id":"hypothesis_2","work_item_id":"work_item_2","statement":"公開買付けの対象となる株券等は、特定の範囲に限定される。","action_actor":"質問者（市場外で株式を買い集める者）","gaps":["対象となる株券等の範囲を示す法令が未確認"]},{"hypothesis_id":"hypothesis_3","work_item_id":"work_item_3","statement":"公開買付けには主な例外が存在する。","action_actor":"質問者（市場外で株式を買い集める者）","gaps":["例外を示す法令が未確認"]},{"hypothesis_id":"hypothesis_4","work_item_id":"work_item_4","statement":"公開買付けに必要な手続は、特定の手続きに従う必要がある。","action_actor":"質問者（市場外で株式を買い集める者）","gaps":["必要な手続を示す法令が未確認"]}],"available_tools":[{"name":"legal_search","description":"Article IDがまだ分からないとき、OpenSearchで法令またはガイドの候補を探す。質問をそのまま繰り返さず、確認事項を法令表現へ言い換えて使う。返す検索抜粋は候補選択用であり、回答やHypothesisの根拠にはしない。","input_schema":{"additionalProperties":false,"properties":{"query":{"description":"制度名と確認事項を法令に現れやすい表現へ言い換えた検索語。","maxLength":1000,"minLength":1,"type":"string"},"doc_types":{"description":"検索対象。法令本文はlaw、行政解釈やガイドはguideline。現在の検索に必要な値を配列で返す。","items":{"type":"string"},"type":"array"},"document_ids":{"description":"検索対象文書を限定する既知documentId。限定しない場合は空配列。","items":{"type":"string"},"maxItems":12,"type":"array"}},"required":["query","doc_types","document_ids"],"type":"object"},"result_description":"候補Articleの所在と短い検索抜粋をnavigation Evidenceとして返す。Article本文のgrounding Evidenceは返さない。","read_only":true,"parallel_safe":true}],"max_tool_requests_per_step":5}</research_step_input>
+<research_step_input>{"question":"上場会社の株式を、市場を通さずに多数の株主から買い集めたいのですが、公開買付けの手続が必要になるのはどのような場合ですか。対象となる株券等の範囲、主な例外、必要な手続も含めて、根拠となる条文とともに説明してください。","work_items":[{"work_item_id":"work_item_1","question":"公開買付けの手続が必要になる場合はどのような場合か？","action_actor":"質問者（市場外で株式を買い集める者）"},{"work_item_id":"work_item_2","question":"公開買付けの対象となる株券等の範囲は？","action_actor":"質問者（市場外で株式を買い集める者）"},{"work_item_id":"work_item_3","question":"公開買付けの主な例外は何か？","action_actor":"質問者（市場外で株式を買い集める者）"},{"work_item_id":"work_item_4","question":"公開買付けに必要な手続は何か？","action_actor":"質問者（市場外で株式を買い集める者）"}],"hypotheses":[{"hypothesis_id":"hypothesis_1","work_item_id":"work_item_1","statement":"公開買付けの手続が必要になるのは、特定の条件を満たす場合である。","action_actor":"質問者（市場外で株式を買い集める者）","gaps":["具体的な条件を示す法令が未確認"]},{"hypothesis_id":"hypothesis_2","work_item_id":"work_item_2","statement":"公開買付けの対象となる株券等は、特定の範囲に限定される。","action_actor":"質問者（市場外で株式を買い集める者）","gaps":["対象となる株券等の範囲を示す法令が未確認"]},{"hypothesis_id":"hypothesis_3","work_item_id":"work_item_3","statement":"公開買付けには主な例外が存在する。","action_actor":"質問者（市場外で株式を買い集める者）","gaps":["例外を示す法令が未確認"]},{"hypothesis_id":"hypothesis_4","work_item_id":"work_item_4","statement":"公開買付けに必要な手続は、特定の手続きに従う必要がある。","action_actor":"質問者（市場外で株式を買い集める者）","gaps":["必要な手続を示す法令が未確認"]}],"available_tools":[{"name":"legal_search","description":"Article IDがまだ分からないとき、OpenSearchで法令またはガイドの候補を探す。質問をそのまま繰り返さず、短い法令用語・法令表現を組み合わせて使う。返す検索抜粋は候補選択用であり、回答やHypothesisの根拠にはしない。","input_schema":{"additionalProperties":false,"properties":{"query":{"description":"検索欄へ入力する短い法令用語・法令表現の組合せ。確認内容を説明する文章ではない。","maxLength":1000,"minLength":1,"type":"string"},"doc_types":{"description":"検索対象。法令本文はlaw、行政解釈やガイドはguideline。現在の検索に必要な値を配列で返す。","items":{"type":"string"},"type":"array"},"document_ids":{"description":"検索対象文書を限定する既知documentId。限定しない場合は空配列。","items":{"type":"string"},"maxItems":12,"type":"array"}},"required":["query","doc_types","document_ids"],"type":"object"},"result_description":"候補Articleの所在と短い検索抜粋をnavigation Evidenceとして返す。Article本文のgrounding Evidenceは返さない。","read_only":true,"parallel_safe":true}],"max_tool_requests_per_step":5}</research_step_input>
 
 ## 出力前の確認
 
-1. 各検索要求が既知WorkItemと、そのWorkItemに属する既知Hypothesisを参照するか確認します。
-2. 検索語がHypothesisまたは`gaps`の検証に使える法令表現か確認します。
-3. `doc_types`が今回必要な検索対象だけを含むか確認します。
-4. 問題があれば修正してから、schemaに従う出力だけを返します。
+1. 各検索要求について、どのHypothesisの何を確認する検索か説明できるか確認します。
+2. `purpose`は確認内容の説明、`query`は制度名を含む短い法令用語・法令表現の組合せになっているか確認します。`query`が質問又は`purpose`の言い換えなら修正します。
+3. 複数Hypothesisをまとめた場合は、同じ検索語と候補を使えるか確認します。
+4. `doc_types`が今回必要な検索対象だけを含むか確認します。
+5. 問題があれば修正してから、schemaに従う出力だけを返します。
