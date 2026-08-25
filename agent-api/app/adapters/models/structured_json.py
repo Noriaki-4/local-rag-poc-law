@@ -177,21 +177,21 @@ class StructuredJSONModelAdapter:
                         "research_hypothesis",
                         "research_search",
                     }:
-                        normalized = _normalize_staged_research_payload(
+                        decision = normalize_staged_research_decision(
                             result.payload,
                             projection=profile.context_projection,
                             context=context,
                         )
                     else:
                         normalized = _normalize_solver_payload(result.payload)
-                    _assign_tool_request_ids(normalized, context)
-                    _normalize_absent_context_branches(normalized, context)
-                    if _preserve_previous_update_for_contract_repair(context):
-                        normalized["update"] = (
-                            context.contract_feedback.previous_decision.update
-                        )
-                    decision = SolverDecision.model_validate(normalized)
-                    _validate_hypothesis_update_evidence(decision)
+                        _assign_tool_request_ids(normalized, context)
+                        _normalize_absent_context_branches(normalized, context)
+                        if _preserve_previous_update_for_contract_repair(context):
+                            normalized["update"] = (
+                                context.contract_feedback.previous_decision.update
+                            )
+                        decision = SolverDecision.model_validate(normalized)
+                        _validate_hypothesis_update_evidence(decision)
                     if self._diagnostics is not None:
                         self._diagnostics.record_transport_output(
                             context=context,
@@ -5774,6 +5774,26 @@ def _normalize_staged_research_payload(
             "tool_requests": requests,
         }
     raise ModelProtocolError(f"unknown staged research projection: {projection}")
+
+
+def normalize_staged_research_decision(
+    payload: dict[str, Any],
+    *,
+    projection: str,
+    context: SolverContext,
+) -> SolverDecision:
+    """本番と単独診断で共有する、段階別Research応答の正規化境界。"""
+
+    normalized = _normalize_staged_research_payload(
+        payload,
+        projection=projection,
+        context=context,
+    )
+    _assign_tool_request_ids(normalized, context)
+    _normalize_absent_context_branches(normalized, context)
+    decision = SolverDecision.model_validate(normalized)
+    _validate_hypothesis_update_evidence(decision)
+    return decision
 
 
 def _assign_tool_request_ids(

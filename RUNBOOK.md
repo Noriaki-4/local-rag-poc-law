@@ -1283,6 +1283,25 @@ python3 scripts/replay_agent_checkpoint.py \
 要求分解では、質問の明示要求をWorkItemと`non_work_item_requirements`へ分ける。後者は重要度ではなく、
 根拠・出典・引用・対象時点・地域・出力形式等、独立した法的結論を要しない明示要求の保存先である。
 
+質問分解だけを実モデルで診断する場合は、次の専用コマンドを使う。本番の
+`solver_question_decomposition.md`、入力投影、出力schema、Provider adapterを使うが、
+Hypothesis生成、検索、Graph、統合、契約修復は実行しない。モデル処理は1回だけで、
+完成Prompt、入力、schema、生応答、正規化結果、token数をGit管理外の出力先へ保存する。
+
+```bash
+agent-api/.venv/bin/python scripts/run_question_decomposition_debug.py \
+  --question '公開買付けの手続が必要になる条件を、根拠条文とともに説明してください。' \
+  --provider openai \
+  --model gpt-4o-mini-2024-07-18 \
+  --output eval-results/question-decomposition/openai
+```
+
+既存fixtureの質問を使う場合は、`--question`の代わりに`--fixture`を指定する。
+fixture直下の`question`または`solverContext.question`だけを読み、保存済み状態や期待値は
+モデルへ渡さない。`result.json`の`callCount=1`、`repairAttempted=false`により、後続処理や
+修復再呼出しが混ざっていないことを確認できる。通信上の再試行は`providerRetryCount`で区別する。
+構造違反時も成果物を保存して終了コード1を返す。
+
 初回Researchの失敗がモデルの法的仮説立案能力か、本番Prompt・契約の複雑さかを切り分ける場合は、
 本番Promptを一切合成しない最小診断を実行する。出力はWorkItemと入れ子のHypothesisだけであり、
 Tool、status、gaps、Cycle、Evidence、ID契約、完了判定を含まない。結果ディレクトリには完成Prompt、
