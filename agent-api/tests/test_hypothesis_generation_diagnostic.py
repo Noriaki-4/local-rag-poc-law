@@ -71,9 +71,8 @@ def test_render_uses_only_production_hypothesis_generation_stage() -> None:
     assert "法令本文によって支持又は否定できる暫定的な結論" in (
         rendered.instructions
     )
-    assert "1件で終えず、具体的な候補ごとにHypothesisを分けます" in (
-        rendered.instructions
-    )
+    assert "検索前に未知の除外事由" in rendered.instructions
+    assert "下位法令へ委任" in rendered.instructions
     properties = rendered.output_schema["properties"]["hypotheses"][
         "items"
     ]["properties"]
@@ -198,5 +197,6 @@ def test_v269_observed_failures_are_preserved_as_prompt_regression() -> None:
     prompt = profile.system_prompt
     completion = profile.completion_check_prompt or ""
     assert "一般的な法的知識" in prompt
-    assert "1件で終えず、具体的な候補ごとにHypothesisを分けます" in prompt
+    assert "検索前に未知の除外事由" in prompt
+    assert "下位法令へ委任" in prompt
     assert "根拠法令名、条文番号、検索語、検索作業" in completion

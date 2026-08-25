@@ -654,7 +654,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "282"
+    assert diagnostic_records[0]["profileVersion"] == "289"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -662,7 +662,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "282"
+    assert transport_input["profileVersion"] == "289"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -1097,7 +1097,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "282"
+    assert profile.version == "289"
     mode_prompts = {
         "research": profile.solver_research.system_prompt,
         "integration": profile.solver_integration.system_prompt,
@@ -1147,8 +1147,9 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     assert "法的結論を裏付ける根拠条文" in research_prompt
     assert "明確でない場合は、推測せず`不明`" in research_prompt
     assert "# 法令調査Solver：法的仮説の立案" in hypothesis_prompt
-    assert "検索候補となる法的命題" in hypothesis_prompt
-    assert "1件で終えず、具体的な候補ごとにHypothesisを分けます" in hypothesis_prompt
+    assert "本文取得前の検索計画" in hypothesis_prompt
+    assert "検索前に未知の除外事由" in hypothesis_prompt
+    assert "下位法令へ委任" in hypothesis_prompt
     assert "内容のない表現でWorkItemを言い換えません" in hypothesis_prompt
     assert "根拠法令名、条文番号、検索語、検索作業は書きません" in hypothesis_prompt
     assert "# 法令調査Solver：検索要求の作成" in search_prompt
@@ -1340,7 +1341,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "282"
+    assert profile.version == "289"
     assert prompt.rindex("## 出力") > prompt.rindex(
         "</solver_context>"
     )
@@ -1391,7 +1392,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "282"
+    assert profile.version == "289"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -1424,7 +1425,8 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     completion_prompt = hypothesis_profile.completion_check_prompt
     assert completion_prompt is not None
     assert "法令本文によって支持又は否定できる暫定的な結論" in research_prompt
-    assert "1件で終えず、具体的な候補ごとにHypothesisを分けます" in research_prompt
+    assert "検索前に未知の除外事由" in research_prompt
+    assert "下位法令へ委任" in research_prompt
     assert "根拠法令名、条文番号、検索語、検索作業は書きません" in research_prompt
     assert "根拠法令名、条文番号、検索語、検索作業" in completion_prompt
 
@@ -3677,7 +3679,7 @@ def test_real_model_initial_research_decomposition_fixture_is_reproducible() -> 
     search_prompt = legal_profiles.legal_agent_profile().solver_search_planning
     assert hypothesis_prompt is not None
     assert search_prompt is not None
-    assert "検索候補となる法的命題" in hypothesis_prompt.system_prompt
+    assert "本文取得前の検索計画" in hypothesis_prompt.system_prompt
     assert "根拠法令名、条文番号、検索語、検索作業は書きません" in (
         hypothesis_prompt.system_prompt
     )

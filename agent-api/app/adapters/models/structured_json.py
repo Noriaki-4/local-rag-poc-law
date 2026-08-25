@@ -1710,11 +1710,14 @@ def _staged_research_transport_schema(
                     "minLength": 1,
                     "maxLength": 2000,
                     "description": (
-                        "WorkItemの法的論点に対する、誤り得る暫定的な結論。"
-                        "一般的な法的知識を使い、法令本文によって支持又は否定"
-                        "できる1つの具体的な命題とする。WorkItemの言い換えだけ"
-                        "にはせず、確認済みの事実として扱わない。『特定の条件』"
-                        "等の内容のない表現を使わない。"
+                        "現在のWorkItem自身が適用除外又は例外を問う場合は、"
+                        "未知の除外事由を推測せず、"
+                        "原則規定に対する別の例外規定又は下位法令への委任"
+                        "という検索経路だけを書く。委任の有無が未確認なら両方を"
+                        "別の仮説にする。成立条件、対象範囲又は手続を問う"
+                        "WorkItemは例外として扱わない。それ以外では、一般的な法的知識を"
+                        "使い、法令本文によって支持又は否定できる誤り得る"
+                        "暫定的な結論を書く。根拠法令名や条文番号は書かない。"
                     ),
                 },
             }
@@ -1727,8 +1730,8 @@ def _staged_research_transport_schema(
                     "minItems": len(work_item_ids),
                     "maxItems": max(len(work_item_ids), min(48, len(work_item_ids) * 4)),
                     "description": (
-                        "提示されたWorkItemを検証するHypothesis。複数の種類や例外を問う"
-                        "WorkItemには、具体的な候補を複数返す。"
+                        "提示されたWorkItemを検証するHypothesis。適用除外又は例外"
+                        "以外で複数の種類を問うWorkItemには、具体的な候補を複数返す。"
                     ),
                 }
             }

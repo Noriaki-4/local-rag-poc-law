@@ -32,6 +32,10 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--model", required=True)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument(
+        "--work-item-id",
+        help="複数あるWorkItemのうち、単独で診断する既知ID。",
+    )
     parser.add_argument("--max-tokens", type=int, default=4096)
     parser.add_argument("--timeout-sec", type=int, default=90)
     return parser.parse_args()
@@ -160,6 +164,15 @@ def _result_payload(
 def main() -> None:
     args = _parse_args()
     question, work_items, requirements, fixture_id = _load_input(args.fixture)
+    if args.work_item_id is not None:
+        work_items = [
+            item
+            for item in work_items
+            if (item.get("work_item_id") if isinstance(item, dict) else None)
+            == args.work_item_id
+        ]
+        if not work_items:
+            raise ValueError(f"unknown WorkItem ID: {args.work_item_id}")
     run = run_hypothesis_generation_diagnostic(
         question,
         work_items,
