@@ -1589,7 +1589,6 @@ def _solver_context_payload(
             include={
                 "question",
                 "work_items",
-                "non_work_item_requirements",
             },
         )
     if projection == "research_search":
@@ -2050,7 +2049,6 @@ def _observation_integration_context_payload(
     active_work_items, active_hypotheses = _active_observation_items(context)
     payload: dict[str, Any] = {
         "question": context.question,
-        "non_work_item_requirements": list(context.non_work_item_requirements),
         "work_items": [
             item.model_dump(mode="json") for item in active_work_items
         ],
@@ -3108,9 +3106,6 @@ def _search_review_context_payload(
     }
     return {
         "question": context.question,
-        "non_work_item_requirements": list(
-            context.non_work_item_requirements
-        ),
         "work_tree": [item.model_dump(mode="json") for item in context.work_tree],
         "hypotheses": [
             item.model_dump(mode="json") for item in context.hypotheses
@@ -3183,9 +3178,6 @@ def render_search_reselection_model_call(
     }
     input_payload = {
         "question": context.question,
-        "non_work_item_requirements": list(
-            context.non_work_item_requirements
-        ),
         "hypotheses": [
             item.model_dump(mode="json") for item in context.hypotheses
         ],
@@ -4218,13 +4210,6 @@ def _search_review_transport_schema(
                     "規律主体をいったん除き、候補の行為、対象、条件または効果が"
                     "statementかgapsを直接検証できるHypothesis ID。主体照合は"
                     "次の独立処理で行う。"
-                ),
-            },
-            "matched_non_work_item_requirements": {
-                **_bounded_enum_array(context.non_work_item_requirements),
-                "description": (
-                    "この候補本文を取得することで満たせる"
-                    "non_work_item_requirements。入力の文言をそのまま返す。"
                 ),
             },
         }

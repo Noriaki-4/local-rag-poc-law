@@ -172,15 +172,6 @@ class SearchCandidateAssessment(FrameworkModel):
             "場合は空。"
         ),
     )
-    matched_non_work_item_requirements: tuple[str, ...] = Field(
-        default=(),
-        description=(
-            "候補本文を取得することで満たせる、回答全体の明示要求。"
-            "候補選択に必要な要求だけを、入力の文言と完全一致で保持する。"
-        ),
-    )
-
-
 class SearchAssessmentDecision(FrameworkModel):
     search_request_ids: tuple[str, ...] = Field(
         description="今回評価するlegal_search Request IDの全件。",

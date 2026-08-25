@@ -72,10 +72,9 @@ WorkItemが「書面に何を記載する必要があるか」なら、`gaps`は
   - `work_items[].question`: このWorkItemで確認する1つの法的事項。
   - `work_items[].actor_scope`: 確認事項の行為者と、対象に結び付く主体との関係。未指定ならnull。
   - `work_items[].actor_relation`: sameは同一主体、differentは別主体、unknownは未確定。
-- `non_work_item_requirements`: 質問の明示要求のうち、独立した法的結論を要するWorkItemにしなかった要求。
 </input_contract>
 
-<research_step_input>{"question":"上場会社の株式を、市場を通さずに多数の株主から買い集めたいのですが、公開買付けの手続が必要になるのはどのような場合ですか。対象となる株券等の範囲、主な例外、必要な手続も含めて、根拠となる条文とともに説明してください。","work_items":[{"work_item_id":"work_item_1","question":"公開買付けの手続が必要になる場合はどのような場合か？","actor_scope":null,"actor_relation":"unknown"},{"work_item_id":"work_item_2","question":"公開買付けの対象となる株券等の範囲は？","actor_scope":null,"actor_relation":"unknown"},{"work_item_id":"work_item_3","question":"公開買付けの主な例外は何か？","actor_scope":null,"actor_relation":"unknown"},{"work_item_id":"work_item_4","question":"公開買付けに必要な手続は何か？","actor_scope":null,"actor_relation":"unknown"}],"non_work_item_requirements":[]}</research_step_input>
+<research_step_input>{"question":"上場会社の株式を、市場を通さずに多数の株主から買い集めたいのですが、公開買付けの手続が必要になるのはどのような場合ですか。対象となる株券等の範囲、主な例外、必要な手続も含めて、根拠となる条文とともに説明してください。","work_items":[{"work_item_id":"work_item_1","question":"公開買付けの手続が必要になる場合はどのような場合か？","actor_scope":null,"actor_relation":"unknown"},{"work_item_id":"work_item_2","question":"公開買付けの対象となる株券等の範囲は？","actor_scope":null,"actor_relation":"unknown"},{"work_item_id":"work_item_3","question":"公開買付けの主な例外は何か？","actor_scope":null,"actor_relation":"unknown"},{"work_item_id":"work_item_4","question":"公開買付けに必要な手続は何か？","actor_scope":null,"actor_relation":"unknown"}]}</research_step_input>
 
 ## 出力前の確認
 

@@ -151,8 +151,8 @@ Search Reviewで保留した候補と、本文取得が未完了の選択候補�
 Solverが未確認事項に基づいて判断します。ID、引数、成功履歴の完全一致だけをProgramが検証します。
 
 CaseStoreと完全な`SolverContext`は正本として保持しますが、Providerへは用途別のread modelを渡せます。
-初回Researchは同じSolver・同じCycleで3回呼び出します。Step 1には質問だけ、Step 2には質問、WorkItem、
-`non_work_item_requirements`、Step 3には質問、WorkItem、Hypothesis、`legal_search`定義と今回の要求数上限だけを
+初回Researchは同じSolver・同じCycleで3回呼び出します。Step 1には質問だけ、Step 2には質問とWorkItem、
+Step 3には質問、WorkItem、Hypothesis、`legal_search`定義と今回の要求数上限だけを
 投影します。本文取得枠、Graph、Evidence、後続Cycleの状態は渡しません。各Provider schemaも、そのStepが
 判断する意味項目だけを要求します。
 
@@ -160,7 +160,8 @@ Adapterは各Stepの出力へ永続化用IDと既定statusを機械的に付け�
 Programは文字列の内容を補正せず、ID、件数、既知参照、WorkItemとHypothesisの所属だけを検証します。
 Step 1の不変条件は「質問の明示要求全体 = WorkItem + non_work_item_requirements」であり、元の質問は引き続き
 CaseStoreの正本です。`non_work_item_requirements`は重要度や全WorkItem共通性を表さず、独立した法的結論を
-要しない根拠・出典・引用・対象時点・地域・出力形式等の明示要求を欠落させず保持します。
+要しない根拠・出典・引用・対象時点・地域・表現・出力形式等の明示要求を欠落させず保持します。
+検索候補には対応付けず、最終回答の生成とチェックで全件を適用します。
 
 初回3 Stepの実行時入力は`ResearchStepInput`を正本とし、各Stepで実際に投影した項目だけを`input_contract`へ
 生成します。Step 3では`available_tools`の一覧全体の意味と、各Toolが持つ用途・入力Schema・戻り値説明を

@@ -1987,6 +1987,7 @@ Graph Review差分処理やCycle境界処理を混入させず、IntegrationとG
 | `solver_search_review.md` | 候補別にまとめた検索抜粋を全件読み、主体以外の内容、条件・効果、主な法的機能を短く評価する。この段階では主体照合や候補選択をせず、一時評価をCaseStateへ保存しない。 |
 | `solver_search_actor_classification.md` | 候補見出しと前段要約を読み、規律主体だけを既知Hypothesisの主体構造と照合する。法的機能、条件、効果、候補選択は扱わない。 |
 | `solver_search_reselection.md` | 内容面と主体面の両方で対応した前段の短い一時評価だけを比較し、中心命題を直接検証する候補を確保してから、異なる未確認事項へ広げて本文取得候補を選ぶ。元の検索抜粋、状態更新、再検索は扱わない。 |
+| `solver_final_answer_check.md` | WorkItemごとの取得本文に照らして回答案を確認し、`non_work_item_requirements`を全件反映する。回答要件を法的根拠として扱わない。 |
 | `solver_graph_review.md` | `graph_review_batch`と`graph_review_ledger`を読む。`review_trigger`を解釈し、過去の詳細が再提示されないことを候補の不存在と解釈しない。 |
 | `solver_graph_review.md` | 各batchの全候補をWorkItem・Hypothesis別に評価し、最大3件を`select`、関連する残りを`defer`、無関係と判断したものだけを`reject`する。 |
 | `solver_graph_review.md` | `remaining_fetch_capacity=0`なら新たにselectせず、関連候補をdeferしてCycle終了判断へ戻す。Graph Reviewから直接次Cycleの法的方針を決めない。 |
@@ -2187,7 +2188,7 @@ CaseStoreの正本や完全な`SolverContext`を削らず、Provider入力は用
 初回Researchは別Agentや別Cycleにせず、同じSolver・同じCycle内の3 Stepとして実行する。
 
 1. 質問だけを入力し、要求をWorkItemと`non_work_item_requirements`へ分ける。
-2. 質問、既知WorkItem、`non_work_item_requirements`を入力し、Hypothesisだけを作る。
+2. 質問と既知WorkItemを入力し、Hypothesisだけを作る。
 3. 質問、既知WorkItem、既知Hypothesis、`legal_search`定義と1 Stepの要求数上限を入力し、検索要求だけを作る。
 
 本文取得枠、Graph、Evidence、後続Cycleの状態は初回3 Stepへ渡さない。各StepのProvider schemaも、そのStepが判断する
@@ -2201,7 +2202,9 @@ ProgramはID、件数、既知参照、WorkItemとHypothesisの所属を検証�
 ```
 
 `non_work_item_requirements`は重要でない要求や全WorkItem共通の要求を意味しない。独立した法的結論を要しない
-根拠・出典・引用・対象時点・地域・出力形式等を保持し、元質問を置き換えない。初回3 Stepは単一責務を保つため、
+根拠・出典・引用・対象時点・地域・表現・出力形式等を保持し、元質問を置き換えない。検索候補やEvidenceには
+対応付けず、最終回答の生成とチェックで全件を適用する。検索と本文評価はWorkItem・Hypothesisを基準にし、
+回答要件を法的根拠や本文取得理由として扱わない。初回3 Stepは単一責務を保つため、
 後続処理用`solver_common.md`、Tool結果評価、Graph review、Cycle引継ぎ、Reviewer、最終回答の指示を合成しない。
 Integration等は完全な`SolverContext`を使う。用途別投影は項目の有無だけを決め、法的観点、関連性、WorkItem数は決めない。
 

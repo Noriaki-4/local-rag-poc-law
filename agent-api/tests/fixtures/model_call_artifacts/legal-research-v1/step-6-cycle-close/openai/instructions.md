@@ -18,6 +18,7 @@
 
 ## 入力
 
+- `non_work_item_requirements`：最終回答を作る場合に守る、回答全体への明示要求です。
 - `work_items_after_observation`、`hypotheses_after_observation`：直前の本文評価を反映済みの状態です。
 - `observation_summary`：直前の本文評価の短い要約です。
 - `dependency_decisions_after_observation`：本文評価後の下位規範確認状態です。
@@ -37,6 +38,7 @@
 5. 次Cycleを始める場合だけ、優先するWorkItemと再提示が必要なEvidenceを選びます。
 6. `finalize`では、`required_answer_evidence_ids`の各Evidenceから回答に使う規定内容を一つずつ拾います。
 7. 拾った内容を、条件の結合関係と限定を保って統合し、確認済み範囲と未確認範囲を区別した回答を返します。
+8. 最終回答を作る場合は、`non_work_item_requirements`をすべて回答へ反映します。
 
 ## ルール
 
@@ -56,6 +58,7 @@
 - 全WorkItemとHypothesisが解決済みなら、`limitations`、`unresolved_work_item_ids`、`unresolved_hypothesis_ids`はすべて空にします。
 - 実行上限で未解決のまま`finalize`する場合だけ、未確認内容を`limitations`に書き、対応する未解決IDを返します。
 - `finalize`では`required_answer_evidence_ids`を`answer.citation_ids`へ全件入れ、各Evidenceが示す規定内容を回答本文へ反映します。
+- `non_work_item_requirements`は法的結論の根拠にせず、根拠・出典・対象時点・地域・表現・出力形式等の回答要件として適用します。
 - 複数のEvidenceが一つの要件を構成する場合は、「かつ」等の結合関係を保ち、一部の条件だけで結論を出しません。
 - 「ただし」「除く」「限る」等の限定を読み落とさず、除外された事項を該当例として挙げません。
 

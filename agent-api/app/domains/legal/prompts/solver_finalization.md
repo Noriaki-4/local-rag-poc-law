@@ -11,6 +11,10 @@
 - 未解決WorkItem・Hypothesisと、それに対応する`limitations`
 - 未処理Graph候補の上限時の扱い
 
+### 入力
+
+- `non_work_item_requirements`：限定回答でも守る、回答全体への明示要求です。
+
 ### 完了条件
 
 - 解決済み事項だけを回答本文で断定している。
@@ -24,6 +28,7 @@
 3. `resolved_work_item_ids=[]`なら、仮説の内容を回答へ転記せず、法的結論を確認できなかった旨だけを回答します。
 4. `open_work_item_ids`を回答の`unresolved_work_item_ids`へ、入力の`unresolved_hypothesis_ids`を回答の同名項目へ、そのまま列挙します。
 5. `graph_review_ledger`に未処理の`relevant_deferred`があれば、全件を`deferred_frontier_resolutions`へ書きます。
+6. 回答を作るときは、`non_work_item_requirements`をすべて反映します。
 
 ### ルール
 
@@ -37,6 +42,7 @@
 - `resolved_work_item_ids=[]`なら、`citation_ids=[]`にします。
 - Tool失敗、timeout、候補不在を法的根拠の不存在として断定しません。
 - 回答は取得済み本文が示す範囲に限定します。
+- `non_work_item_requirements`は法的結論の根拠にせず、根拠・出典・対象時点・地域・表現・出力形式等の回答要件として適用します。
 
 #### Graph候補
 

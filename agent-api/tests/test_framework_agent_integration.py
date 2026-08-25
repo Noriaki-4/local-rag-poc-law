@@ -41,6 +41,7 @@ from app.adapters.models.structured_json import (
     _validate_search_reselection_payload,
     render_cycle_close_model_call,
     render_dependency_assessment_model_call,
+    render_final_answer_check_model_call,
     render_observation_integration_model_call,
     render_search_assessment_model_call,
     render_search_actor_classification_model_call,
@@ -654,7 +655,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "267"
+    assert diagnostic_records[0]["profileVersion"] == "268"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -662,7 +663,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "267"
+    assert transport_input["profileVersion"] == "268"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -1097,7 +1098,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "267"
+    assert profile.version == "268"
     mode_prompts = {
         "research": profile.solver_research.system_prompt,
         "integration": profile.solver_integration.system_prompt,
@@ -1356,7 +1357,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "267"
+    assert profile.version == "268"
     assert prompt.rindex("## 出力前の確認") > prompt.rindex(
         "</solver_context>"
     )
@@ -1407,7 +1408,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "267"
+    assert profile.version == "268"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -2148,7 +2149,7 @@ def test_candidate_selection_profiles_have_post_context_checks() -> None:
     )
 
 
-def test_search_reselection_keeps_answer_requirements_and_candidate_identity(
+def test_search_reselection_uses_hypotheses_and_keeps_candidate_identity(
 ) -> None:
     fixture_path = (
         Path(__file__).parent
@@ -2170,7 +2171,10 @@ def test_search_reselection_keeps_answer_requirements_and_candidate_identity(
     assessment_properties = assessment_schema["$defs"][
         "search_candidate_assessment"
     ]["properties"]
-    assert "matched_non_work_item_requirements" in assessment_properties
+    assert "matched_non_work_item_requirements" not in assessment_properties
+    assert "non_work_item_requirements" not in _search_review_context_payload(
+        context
+    )
 
     rendered = render_search_reselection_model_call(
         context,
@@ -2189,9 +2193,7 @@ def test_search_reselection_keeps_answer_requirements_and_candidate_identity(
         profile,
     )
 
-    assert rendered.input_payload["non_work_item_requirements"] == list(
-        context.non_work_item_requirements
-    )
+    assert "non_work_item_requirements" not in rendered.input_payload
     assessment = rendered.input_payload["assessments"][0]
     assert assessment["title"] == candidate.title
     assert assessment["headings"] == list(candidate.headings)
@@ -2234,7 +2236,6 @@ def test_anthropic_search_review_keys_assessments_by_article() -> None:
                 "legal_function": "procedure",
                 "summary": "候補の要約",
                 "matched_hypothesis_ids": [],
-                "matched_non_work_item_requirements": [],
             }
             for candidate in context.search_candidates
         ],
@@ -2439,7 +2440,6 @@ def test_scope_search_candidate_keeps_content_match_without_actor_alignment() ->
                 "legal_function": "scope",
                 "summary": "所有者数の範囲を定める。",
                 "matched_hypothesis_ids": ["h-1"],
-                "matched_non_work_item_requirements": [],
             }
         ]
     }
@@ -3992,6 +3992,22 @@ def test_final_answer_check_requires_every_enumerated_source_item() -> None:
     assert "本文の末尾まで確認" in (
         profile.final_answer_check_completion_prompt or ""
     )
+    context = SolverContext.model_validate(fixture["solverContext"])
+    observed = SolverDecision.model_validate(fixture["observedSolverDecision"])
+    final_answer_call = render_final_answer_check_model_call(
+        context,
+        ObservationIntegrationDecision(
+            decision_reason="取得本文を評価した",
+            update_work_items=observed.update.update_work_items,
+            update_hypotheses=observed.update.update_hypotheses,
+        ),
+        observed.answer,
+        profile,
+    )
+    assert final_answer_call.input_payload["non_work_item_requirements"] == [
+        "根拠条文とともに説明すること。"
+    ]
+    assert "法的結論の根拠として使いません" in final_answer_call.instructions
 
 
 def test_integration_uses_selected_fetched_graph_article_before_more_tools() -> None:
@@ -5232,7 +5248,6 @@ def test_cycle_close_fixture_projects_three_small_single_task_calls() -> None:
     )
     assert set(observation_call.input_payload) == {
         "question",
-        "non_work_item_requirements",
         "work_items",
         "hypotheses",
         "evidence_hypothesis_candidates",

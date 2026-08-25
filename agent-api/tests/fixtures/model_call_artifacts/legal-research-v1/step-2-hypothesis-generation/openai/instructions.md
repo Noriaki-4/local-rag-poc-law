@@ -72,7 +72,6 @@ WorkItemが「書面に何を記載する必要があるか」なら、`gaps`は
   - `work_items[].question`: このWorkItemで確認する1つの法的事項。
   - `work_items[].actor_scope`: 確認事項の行為者と、対象に結び付く主体との関係。未指定ならnull。
   - `work_items[].actor_relation`: sameは同一主体、differentは別主体、unknownは未確定。
-- `non_work_item_requirements`: 質問の明示要求のうち、独立した法的結論を要するWorkItemにしなかった要求。
 </input_contract>
 
 {{runtime_input}}

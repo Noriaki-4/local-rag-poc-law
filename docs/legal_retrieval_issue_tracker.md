@@ -489,6 +489,11 @@ Graph必須状態も`gpt-4o-mini-2024-07-18`で再生した。成功済みOpenSe
 複数Hypothesisに対する同一Tool実行は1要求へ機械的に統合し、全Hypothesisとの対応を保持した。
 ProgramはGraph要否、predicate、方向または候補の法的関連性を決めていない。
 
+2026-08-25に、`non_work_item_requirements`の責務も分離した。「簡潔に」「根拠条文とともに」等は
+検索候補本文だけで充足を判定できないため、Search Assessment、候補再選択、本文評価へは投影しない。
+検索対象はWorkItem・Hypothesisで決め、同要求はCycle Close、上限時Finalization、最終回答チェックで
+回答全体へ適用する。Programは要求の意味的な充足を判定しない。
+
 Graph Toolの入力schemaは、`semantic_assertion`では`from_subject / to_subject`とpredicateを、
 `explicit_reference / explains`では`outgoing / incoming`と`predicate=null`を許す分岐契約にした。
 これにより、LLMが選んだ意味をProgramが補正せず、無効なmode・directionの組合せをProvider出力時点で防ぐ。
