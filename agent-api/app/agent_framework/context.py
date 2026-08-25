@@ -317,13 +317,13 @@ class ResearchStepWorkItem(FrameworkModel):
 class ResearchStepHypothesis(FrameworkModel):
     hypothesis_id: str = Field(description="Programが付与した既知Hypothesis ID。")
     work_item_id: str = Field(description="このHypothesisが属する既知WorkItem ID。")
-    statement: str = Field(description="法令本文で検証する未確認の法的命題。")
+    statement: str = Field(description="法令本文で検証する暫定的な法的結論。")
     action_actor: str | None = Field(
         default=None,
         description="所属WorkItemで確定した、規制対象となる行為をする者。"
     )
     gaps: tuple[str, ...] = Field(
-        description="命題のうち法令本文でまだ確認すべき具体的な法的内容。"
+        description="結論のうち法令本文で確定すべき未確認の規律要素。"
     )
 
 

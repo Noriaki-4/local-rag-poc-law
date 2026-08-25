@@ -49,9 +49,9 @@
 - `hypotheses`: 作成済みの未確認Hypothesis。各要素は所属WorkItem、命題、gapsを持つ。
   - `hypotheses[].hypothesis_id`: Programが付与した既知Hypothesis ID。
   - `hypotheses[].work_item_id`: このHypothesisが属する既知WorkItem ID。
-  - `hypotheses[].statement`: 法令本文で検証する未確認の法的命題。
+  - `hypotheses[].statement`: 法令本文で検証する暫定的な法的結論。
   - `hypotheses[].action_actor`: 所属WorkItemで確定した、規制対象となる行為をする者。
-  - `hypotheses[].gaps`: 命題のうち法令本文でまだ確認すべき具体的な法的内容。
+  - `hypotheses[].gaps`: 結論のうち法令本文で確定すべき未確認の規律要素。
 - `available_tools`: 現在のStepで要求できるTool一覧。
   - `available_tools[].name`: SolverDecision.tool_requestsで使う正規のTool名。
   - `available_tools[].description`: Toolが何を行い、いつ使い、何を行わないかを説明するLLM向け契約。

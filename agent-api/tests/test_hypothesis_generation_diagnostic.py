@@ -4,6 +4,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+from app.adapters.models import StructuredJSONModelAdapter
+from app.agent_framework.context import build_solver_context
+from app.agent_framework.profiles import AgentLimits
+from app.agent_framework.state import CaseState, Hypothesis, WorkItem
 from app.domains.legal.hypothesis_generation_diagnostic import (
     render_hypothesis_generation_call,
     run_hypothesis_generation_diagnostic,
@@ -52,7 +56,7 @@ def test_render_uses_only_production_hypothesis_generation_stage() -> None:
         model="gpt-4o-mini",
     )
 
-    assert set(rendered.input_payload) == {"question", "work_items"}
+    assert set(rendered.input_payload) == {"work_items"}
     assert "non_work_item_requirements" not in rendered.input_payload
     work_item = rendered.input_payload["work_items"][0]
     assert "action_actor" not in work_item
@@ -64,11 +68,16 @@ def test_render_uses_only_production_hypothesis_generation_stage() -> None:
     assert "# 法令調査Solver：法的仮説の立案" in rendered.instructions
     assert "## 出力前の確認" in rendered.instructions
     assert "`work_items[].action_actor`" not in rendered.instructions
-    assert "質問から読み取れる範囲の行為者の役割と行為" in rendered.instructions
+    assert "法令本文によって支持又は否定できる暫定的な結論" in (
+        rendered.instructions
+    )
+    assert "1件で終えず、具体的な候補ごとにHypothesisを分けます" in (
+        rendered.instructions
+    )
     properties = rendered.output_schema["properties"]["hypotheses"][
         "items"
     ]["properties"]
-    assert set(properties) == {"work_item_id", "statement", "gaps"}
+    assert set(properties) == {"work_item_id", "statement"}
 
 
 def test_run_calls_model_once_and_normalizes_without_actor_copy() -> None:
@@ -78,7 +87,6 @@ def test_run_calls_model_once_and_normalizes_without_actor_copy() -> None:
                 {
                     "work_item_id": "wi-1",
                     "statement": "質問者は、対象事業の規模に応じて許可を要する。",
-                    "gaps": ["許可が必要になる事業規模"],
                 }
             ]
         }
@@ -102,6 +110,7 @@ def test_run_calls_model_once_and_normalizes_without_actor_copy() -> None:
     assert hypothesis.work_item_id == "wi-1"
     assert not hasattr(hypothesis, "actor_scope")
     assert not hasattr(hypothesis, "actor_relation")
+    assert hypothesis.gaps == ()
     assert run.decision.tool_requests == ()
 
 
@@ -123,6 +132,53 @@ def test_run_does_not_repair_invalid_first_output() -> None:
     assert run.validation_error == "invalid structured output"
 
 
+def test_production_adapter_generates_hypotheses_one_work_item_at_a_time() -> None:
+    client = FakeStructuredJSONClient(
+        {
+            "hypotheses": [
+                {
+                    "work_item_id": "wi-2",
+                    "statement": "第二の論点には暫定的な結論がある。",
+                }
+            ]
+        }
+    )
+    context = build_solver_context(
+        CaseState(
+            case_id="case-hypothesis-step",
+            question="二つの論点を確認する。",
+            work_items=(
+                WorkItem(work_item_id="wi-1", question="第一の論点"),
+                WorkItem(work_item_id="wi-2", question="第二の論点"),
+            ),
+            hypotheses=(
+                Hypothesis(
+                    hypothesis_id="h-1",
+                    work_item_id="wi-1",
+                    statement="第一の論点に対する暫定的な結論。",
+                ),
+            ),
+        ),
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+    )
+    profile = legal_agent_profile().solver_hypothesis_generation
+    assert profile is not None
+
+    result = StructuredJSONModelAdapter(client).solve(context, profile)
+
+    schema = client.calls[0]["schema"]
+    work_item_id_schema = schema["properties"]["hypotheses"]["items"][
+        "properties"
+    ]["work_item_id"]
+    assert work_item_id_schema["enum"] == ["wi-2"]
+    hypothesis = result.decision.update.add_hypotheses[0]
+    assert hypothesis.hypothesis_id == "h-2"
+    assert hypothesis.work_item_id == "wi-2"
+    assert hypothesis.gaps == ()
+
+
 def test_v269_observed_failures_are_preserved_as_prompt_regression() -> None:
     fixture_path = (
         Path(__file__).parent
@@ -141,6 +197,6 @@ def test_v269_observed_failures_are_preserved_as_prompt_regression() -> None:
     assert profile is not None
     prompt = profile.system_prompt
     completion = profile.completion_check_prompt or ""
-    assert "行為者の法的立場によって適用が変わり" in prompt
-    assert "分からない条件、数値、列挙、法的効果を作りません" in prompt
-    assert "質問にない観点、検索語、根拠条文" in completion
+    assert "一般的な法的知識" in prompt
+    assert "1件で終えず、具体的な候補ごとにHypothesisを分けます" in prompt
+    assert "根拠法令名、条文番号、検索語、検索作業" in completion

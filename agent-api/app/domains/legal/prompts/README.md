@@ -17,7 +17,7 @@ Programが法的関連性、根拠の十分性、候補の採否、次のToolを
 質問 ──→ Step 1 要求分解 ──→ WorkItemと残りの明示要求
                               │
                               ▼
-         Step 2 仮説立案 ──→ Hypothesis
+         Step 2 仮説立案 ──→ Hypothesis（未処理WorkItemごとに反復）
                               │
                               ▼
          Step 3 検索計画 ──→ legal_search要求
@@ -45,7 +45,7 @@ Cycle境界：取得本文の評価 ──→ 下位規範依存の評価 ──
 | 呼出し用途 | 合成するPrompt | この呼出しの目的 |
 |---|---|---|
 | `research` | question_decompositionのみ | 質問の明示要求を、独立した法的結論を要するWorkItemと、それ以外の明示要求へ分ける。 |
-| `hypothesis_generation` | hypothesis_generationのみ | 入力済みの各WorkItemについて、検索前の暫定的な法的命題を作る。 |
+| `hypothesis_generation` | hypothesis_generationのみ | HypothesisがないWorkItemを1件受け取り、検索前の暫定的な法的命題を作る。 |
 | `search_planning` | search_planningのみ | 入力済みHypothesisを検証する今回の`legal_search`要求を作る。 |
 | `integration` | identity + integrationまたはdependency_action + common + tools + completion | 通常はToolResultを評価して次の行動または完了を決める。未解決の下位規範依存がある場合は、その依存に対する次の行動だけを決める。 |
 | `observation_integration` | observation_integrationのみ | 取得本文を既存Hypothesis・WorkItemへ反映する。次の行動は決めない。 |
@@ -89,7 +89,7 @@ Anthropicの「明確で直接的な指示、必要時だけ順序付き手順�
 | `solver_tools.md` | OpenSearch候補の`search_candidates`投影、本文取得、1ホップGraph探索、RelationAssertionの意味と方向。Toolを使えるモードだけに合成する。 |
 | `solver_completion.md` | grounding Evidence、citation、下位規範、通常完了と上限時限定回答の共通条件。 |
 | `solver_question_decomposition.md` | 初回Step 1。WorkItemと`non_work_item_requirements`への要求分解。 |
-| `solver_hypothesis_generation.md` | 初回Step 2。既知WorkItemに対する法的仮説の立案。 |
+| `solver_hypothesis_generation.md` | 初回Step 2。Hypothesisがない既知WorkItem 1件に対する法的仮説の立案。 |
 | `solver_search_planning.md` | 初回Step 3。既知Hypothesisに対する`legal_search`要求の作成。 |
 | `solver_integration.md` | 観察結果の評価、状態更新、下位規範監査、次の行動。 |
 | `solver_observation_integration.md` | Cycle境界で、取得本文を既存状態へ反映する単一責務の判断。 |
@@ -120,7 +120,7 @@ Search Reviewで保留した候補と、本文取得が未完了の選択候補�
 4. `finalize_only=true`か
 5. `cycle_close_required=true`か。この場合は取得本文の評価、下位規範依存の評価、Cycle終了判断の順に呼び出す
 6. 初回でWorkItemがまだないか
-7. WorkItemはあるがHypothesisがまだないか
+7. HypothesisがまだないWorkItemがあるか
 8. 初回HypothesisはあるがToolをまだ実行していないか
 9. すでにToolResultを得た後か
 
@@ -151,8 +151,9 @@ Search Reviewで保留した候補と、本文取得が未完了の選択候補�
 Solverが未確認事項に基づいて判断します。ID、引数、成功履歴の完全一致だけをProgramが検証します。
 
 CaseStoreと完全な`SolverContext`は正本として保持しますが、Providerへは用途別のread modelを渡せます。
-初回Researchは同じSolver・同じCycleで3回呼び出します。Step 1には質問だけ、Step 2には質問とWorkItem、
-Step 3には質問、WorkItem、Hypothesis、`legal_search`定義と今回の要求数上限だけを
+初回Researchは同じSolver・同じCycleで段階的に呼び出します。Step 1には質問だけ、Step 2には
+HypothesisがないWorkItemを1件だけ渡し、全WorkItemを処理するまで逐次保存して反復します。Step 3には
+質問、WorkItem、Hypothesis、`legal_search`定義と今回の要求数上限だけを
 投影します。本文取得枠、Graph、Evidence、後続Cycleの状態は渡しません。各Provider schemaも、そのStepが
 判断する意味項目だけを要求します。
 

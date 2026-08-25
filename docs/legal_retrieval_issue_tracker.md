@@ -60,7 +60,7 @@ Neo4jから指定条件の1ホップ候補を取得する
 
 | ID | 優先度 | status | 課題 | 現在地 | 次の確認 |
 |---|---|---|---|---|---|
-| `LR-001` | P0 | 対応中 | 質問から必要な検索仮説を漏れなく作る | v150〜v152で規定存在や質問の言い換えを再現した。v153の労働法fixtureではHaikuが要件・上限構造・手続行為を含む仮説を1回で生成した | 収録済みの別分野でもHypothesisと`gaps`の意味形を実モデル確認する |
+| `LR-001` | P0 | 対応中 | 質問から必要な検索仮説を漏れなく作る | Profile v282で初回`gaps`生成をやめ、HypothesisがないWorkItemを1件ずつ処理して逐次保存する方式へ変更した。総合問題で4 WorkItemを4回に分け、全件へHypothesisを付与できた | 主体特定はLR-017/020で別管理し、Hypothesisを使った検索計画と候補取得を確認する |
 | `LR-002` | P0 | 対応中 | 法令検索表現を作り、同一Cycle内でOpenSearchを適切に再検索する | 同一scopeの成功済み検索は実行前に検出する。Toolをschemaから消す修復は廃止し、実行しなかった要求を`action_feedback`としてSolverへ返す | 例外問題で、成功済みGraphが候補0件だった後に検索表現を変えて正しい施行令7条へ到達するtraceを確認する |
 | `LR-003` | P0 | 完了 | Graph由来Articleを起点に連続1ホップ探索する | `gpt-4o-mini`の実モデルtrace v7で、金商法27条の2→施行令7条、施行令7条→府令2条の5を別々の1ホップGraph要求として実行し、府令本文取得後にCycle 1で正常完了した | `lr_003_second_hop_integration_v1.json`、`lr_003_second_hop_graph_review_v1.json`、`lr_003_cycle_close_deferred_frontiers_v1.json`を回帰fixtureとして維持する |
 | `LR-004` | P0 | 対応中 | 複合問題の統合Decisionを成立させ、次の探索または完了へ進む | Observation Integration、Dependency Assessment、Cycle Closeを分離した。Profile v260では投影後に未解決事項がなければCycle Close schemaが`finalize`だけを許し、矛盾した次Cycle開始を防ぐ | 公開買付け総合問題で複数Cycle後も同じ境界条件を満たすことを確認する |

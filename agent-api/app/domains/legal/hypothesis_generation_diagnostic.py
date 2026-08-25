@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from app.adapters.models.structured_json import render_solver_model_call
+from app.adapters.models.structured_json import (
+    _project_next_hypothesis_work_item,
+    render_solver_model_call,
+)
 from app.agent_framework.context import SolverContext, build_solver_context
 from app.agent_framework.model_call_artifacts import RenderedModelCall
 from app.agent_framework.state import CaseState, WorkItem
@@ -71,6 +74,7 @@ def render_hypothesis_generation_call(
         work_items,
         non_work_item_requirements=non_work_item_requirements,
     )
+    context = _project_next_hypothesis_work_item(context)
     rendered = render_solver_model_call(
         context,
         profile.model_copy(update={"model": model}),

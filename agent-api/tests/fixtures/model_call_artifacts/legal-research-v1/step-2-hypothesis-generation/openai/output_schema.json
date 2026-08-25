@@ -2,44 +2,31 @@
   "additionalProperties": false,
   "properties": {
     "hypotheses": {
-      "description": "各WorkItemを検証するHypothesis。",
+      "description": "提示されたWorkItemを検証するHypothesis。複数の種類や例外を問うWorkItemには、具体的な候補を複数返す。",
       "items": {
         "additionalProperties": false,
         "properties": {
-          "gaps": {
-            "description": "命題のうち法令本文でまだ確認すべき具体的な法的内容。",
-            "items": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "maxItems": 8,
-            "type": "array"
-          },
           "statement": {
-            "description": "検索前の未確認で誤り得る暫定的な法的命題。WorkItemの言い換えではなく、検索対象を選べる具体性を持つ。質問から読み取れる範囲で行為者の役割と行為を示し、未知の内容はgapsに残す。",
+            "description": "WorkItemの法的論点に対する、誤り得る暫定的な結論。一般的な法的知識を使い、法令本文によって支持又は否定できる1つの具体的な命題とする。WorkItemの言い換えだけにはせず、確認済みの事実として扱わない。『特定の条件』等の内容のない表現を使わない。",
             "maxLength": 2000,
             "minLength": 1,
             "type": "string"
           },
           "work_item_id": {
             "enum": [
-              "work_item_1",
-              "work_item_2",
-              "work_item_3",
-              "work_item_4"
+              "wi-1"
             ],
             "type": "string"
           }
         },
         "required": [
           "work_item_id",
-          "statement",
-          "gaps"
+          "statement"
         ],
         "type": "object"
       },
-      "maxItems": 16,
-      "minItems": 4,
+      "maxItems": 4,
+      "minItems": 1,
       "type": "array"
     }
   },

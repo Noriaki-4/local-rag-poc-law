@@ -1975,7 +1975,7 @@ Graph Review差分処理やCycle境界処理を混入させず、IntegrationとG
 | `solver_completion.md` | 直接Evidence、citation、下位規範、通常完了と上限時限定回答の共通完了条件を定義する。 |
 | `reviewer.md` | ReviewerViewの各状態、検査順序、`accept / revise`、Finding種別、既知IDの使い方を定義する。Reviewerは検索方法やToolRequestを決めない。 |
 | `solver_question_decomposition.md` | 初回Step 1。質問の明示要求を、独立した法的結論を要するWorkItemと`non_work_item_requirements`へ分ける。 |
-| `solver_hypothesis_generation.md` | 初回Step 2。既知WorkItemごとに、検索対象を選べる未確認の法的命題を作る。 |
+| `solver_hypothesis_generation.md` | 初回Step 2。Hypothesisがない既知WorkItemを1件ずつ処理し、検索対象を選べる未確認の法的命題を作って逐次保存する。初回`gaps`は空で初期化し、本文観察後に残る未確認事項だけを後続処理で記録する。 |
 | `solver_search_planning.md` | 初回Step 3。既知Hypothesisに対する今回の`legal_search`要求を作る。 |
 | `solver_integration.md` | 新しいToolResultを評価して状態を逐次更新し、未確認事項に対する次の行動を選ぶ。Graphの関係種別を説明できなければ全種別を要求せず、OpenSearchで根拠または起点を発見する。 |
 | `solver_observation_integration.md` | Cycle境界で、提示された取得本文を既存WorkItem・Hypothesis・下位規範確認へ反映する。Tool選択、Cycle移行、回答は扱わない。 |

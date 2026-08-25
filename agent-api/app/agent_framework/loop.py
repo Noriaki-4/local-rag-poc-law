@@ -885,9 +885,15 @@ class AgentLoop:
             )
         if integration_call or context.finalize_only:
             return self._profile.solver_integration, "integration"
+        work_items_with_hypotheses = {
+            item.work_item_id for item in context.hypotheses
+        }
         if (
-            context.work_tree
-            and not context.hypotheses
+            any(
+                item.state == "open"
+                and item.work_item_id not in work_items_with_hypotheses
+                for item in context.work_tree
+            )
             and self._profile.solver_hypothesis_generation is not None
         ):
             return (

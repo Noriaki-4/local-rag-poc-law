@@ -311,7 +311,7 @@ _INITIAL_RESEARCH_ARTIFACT_CASES = [
     (
         "hypothesis_generation",
         "solver_hypothesis_generation",
-        "tob_overview_cycle1_after_search_v1.json",
+        "tob_overview_hypothesis_actor_omission_v1.json",
         "step-2-hypothesis-generation",
     ),
     (

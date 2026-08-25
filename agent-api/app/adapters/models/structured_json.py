@@ -79,6 +79,20 @@ from app.llm import LLMClient
 _SEARCH_REVIEW_BATCH_SIZE = 8
 
 
+def _project_next_hypothesis_work_item(context: SolverContext) -> SolverContext:
+    """Hypothesis未作成のWorkItemを1件だけLLMへ提示する。"""
+
+    covered_ids = {item.work_item_id for item in context.hypotheses}
+    pending = tuple(
+        item
+        for item in context.work_tree
+        if item.state == "open" and item.work_item_id not in covered_ids
+    )
+    if not pending:
+        return context
+    return context.model_copy(update={"work_tree": (pending[0],)})
+
+
 class StructuredJSONModelAdapter:
     def __init__(
         self,
@@ -94,6 +108,8 @@ class StructuredJSONModelAdapter:
         profile: ModelCallProfile,
     ) -> SolverCallResult:
         provider = getattr(self._client, "provider", None)
+        if profile.context_projection == "research_hypothesis":
+            context = _project_next_hypothesis_work_item(context)
         if (
             context.required_search_review_request_ids
             and not context.graph_review_batch.candidates
@@ -1157,6 +1173,8 @@ def render_solver_model_call(
 ) -> RenderedModelCall:
     """Providerへ送るSolver呼出しとレビュー成果物を同時に作る。"""
 
+    if profile.context_projection == "research_hypothesis":
+        context = _project_next_hypothesis_work_item(context)
     projected_context = _project_available_tools(
         context,
         profile.available_tool_names,
@@ -1595,7 +1613,6 @@ def _solver_context_payload(
         return research_input.model_dump(mode="json", include={"question"})
     if projection == "research_hypothesis":
         return {
-            "question": research_input.question,
             "work_items": [
                 {
                     "work_item_id": item.work_item_id,
@@ -1693,17 +1710,12 @@ def _staged_research_transport_schema(
                     "minLength": 1,
                     "maxLength": 2000,
                     "description": (
-                        "検索前の未確認で誤り得る暫定的な法的命題。"
-                        "WorkItemの言い換えではなく、検索対象を選べる具体性を持つ。"
-                        "質問から読み取れる範囲で行為者の役割と行為を示し、"
-                        "未知の内容はgapsに残す。"
+                        "WorkItemの法的論点に対する、誤り得る暫定的な結論。"
+                        "一般的な法的知識を使い、法令本文によって支持又は否定"
+                        "できる1つの具体的な命題とする。WorkItemの言い換えだけ"
+                        "にはせず、確認済みの事実として扱わない。『特定の条件』"
+                        "等の内容のない表現を使わない。"
                     ),
-                },
-                "gaps": {
-                    "type": "array",
-                    "items": {"type": "string", "minLength": 1},
-                    "maxItems": 8,
-                    "description": "命題のうち法令本文でまだ確認すべき具体的な法的内容。",
                 },
             }
         )
@@ -1714,7 +1726,10 @@ def _staged_research_transport_schema(
                     "items": hypothesis,
                     "minItems": len(work_item_ids),
                     "maxItems": max(len(work_item_ids), min(48, len(work_item_ids) * 4)),
-                    "description": "各WorkItemを検証するHypothesis。",
+                    "description": (
+                        "提示されたWorkItemを検証するHypothesis。複数の種類や例外を問う"
+                        "WorkItemには、具体的な候補を複数返す。"
+                    ),
                 }
             }
         )
@@ -5677,14 +5692,28 @@ def _normalize_staged_research_payload(
             raise ModelProtocolError(
                 f"open WorkItems require at least one Hypothesis: {sorted(missing)}"
             )
+        used_hypothesis_ids = {item.hypothesis_id for item in context.hypotheses}
+        next_hypothesis_number = 1
+        generated_hypothesis_ids: list[str] = []
+        for _ in raw_hypotheses:
+            while f"h-{next_hypothesis_number}" in used_hypothesis_ids:
+                next_hypothesis_number += 1
+            hypothesis_id = f"h-{next_hypothesis_number}"
+            generated_hypothesis_ids.append(hypothesis_id)
+            used_hypothesis_ids.add(hypothesis_id)
+            next_hypothesis_number += 1
         hypotheses = [
             Hypothesis(
-                hypothesis_id=f"h-{index}",
+                hypothesis_id=hypothesis_id,
                 work_item_id=item["work_item_id"],
                 statement=item["statement"],
                 gaps=tuple(item.get("gaps") or ()),
             ).model_dump(mode="json")
-            for index, item in enumerate(raw_hypotheses, start=1)
+            for hypothesis_id, item in zip(
+                generated_hypothesis_ids,
+                raw_hypotheses,
+                strict=True,
+            )
         ]
         return {
             "next": "continue",
