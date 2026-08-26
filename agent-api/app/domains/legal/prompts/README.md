@@ -144,7 +144,8 @@ Search Reviewで保留した候補と、本文取得が未完了の選択候補�
 `validation_error`を分離します。レビュー時は、生成された`instructions.md`と`output_schema.json`を対にして確認し、
 実行時入力は`input.json`、実送信内容は`request.txt`で確認します。
 
-成功済みと完全一致する検索・Graph要求はProgramが実行前に棄却しますが、契約違反の修復にはしません。
+成功済みの検索・Graph scopeはProgramが実行前に棄却しますが、契約違反の修復にはしません。
+scopeはWorkItem、Hypothesis、Tool引数の組であり、`request_id`と`purpose`は含みません。
 `action_feedback`として、実行しなかった理由と直前のToolRequestだけを同じSolverへ返します。
 利用可能Toolはschemaから削除せず、既存結果の利用、条件を変えた同種Tool、別Toolのどれが妥当かを
 Solverが未確認事項に基づいて判断します。ID、引数、成功履歴の完全一致だけをProgramが検証します。

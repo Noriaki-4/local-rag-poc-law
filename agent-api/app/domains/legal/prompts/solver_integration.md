@@ -21,8 +21,8 @@
 - `hypotheses[].gaps`は、その命題に残る具体的な未確認事項です。
 - `search_candidates`とGraph候補はArticleを発見するための情報で、回答根拠ではありません。
 - `fetchable_article_ids`は、本文未取得で`fetch_articles`に指定できる既知Article IDです。
-- `completed_legal_searches`と`completed_graph_searches`は、成功済み行動の履歴です。
-- `action_feedback`がある場合、`rejected_tool_requests`は成功済み行動と重複したため実行されていません。既存結果を評価し、未確認事項に合う次の行動を選び直します。
+- `completed_legal_searches`と`completed_graph_searches`は、成功済みscopeの履歴です。
+- `action_feedback`がある場合、`rejected_tool_requests`は成功済みscopeと重複したため実行されていません。そのscopeを除外し、既存結果と未確認事項から行動を選び直します。
 
 ### 手順
 
@@ -41,8 +41,8 @@
 #### 次の行動
 
 - Toolは固定順で使いません。未確認事項を最も直接検証できる行動を選び、その理由を`decision_reason`に書きます。
-- 提示済み本文や成功済みと完全一致する検索・Graph要求を繰り返しません。
-- `action_feedback`を受けた場合もToolの種類は禁止されません。重複しない別条件が妥当なら同じToolを選べます。
+- 提示済み本文や成功済みの検索・Graph scopeを繰り返しません。
+- `action_feedback`を受けた場合もToolの種類は禁止されません。別scopeが妥当なら同じToolを選べます。
 - Graphで得たArticleも、本文確認後にさらに探索が必要と判断すれば次の1ホップ探索の起点にできます。
 - `required_dependency_work_item_ids`がある場合は、そのWorkItemの未確認依存を進める行動だけを選びます。
 

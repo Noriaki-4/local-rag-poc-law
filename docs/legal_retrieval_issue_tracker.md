@@ -604,6 +604,15 @@ ProgramはGraph要否、predicate、方向または候補の法的関連性を�
 検索対象はWorkItem・Hypothesisで決め、同要求はCycle Close、上限時Finalization、最終回答チェックで
 回答全体へ適用する。Programは要求の意味的な充足を判定しない。
 
+2026-08-26のProfile v314実モデル総合問題では、Cycle 2移行後に成功済み`legal_search`と
+同じscopeを3回要求し、`already_completed`で終了した。Programの重複scopeはWorkItem、Hypothesis、
+Tool引数の組であり、`request_id`と`purpose`を比較しない。一方、Promptは「完全一致する要求」とだけ
+書いていたため、LLMがIDや目的を変えたToolRequestを別の要求と解釈できる不整合があった。
+Profile v315では、契約description、共通Tool規則、Integration、Dependency Action、自己点検を同じ
+scope定義へ統一した。さらにDependency Action入力を次のTool選択に必要なread modelへ限定し、
+`action_feedback`を先頭へ投影する。棄却後もTool種類は制限せず、同じToolの別scopeを選ぶ意味判断は
+Solverに残す。
+
 2026-08-26の例外問題では、下位規範Action Promptが次のToolRequestだけを要求する一方、汎用Solver schemaが
 `next`、`start_next_cycle`、状態更新、最終回答も要求していた。実モデルはToolRequestを作りながら
 `next=finalize`、`answer=null`を返し、同じ無効出力を再試行した。Profile v304では、この呼出しの出力を

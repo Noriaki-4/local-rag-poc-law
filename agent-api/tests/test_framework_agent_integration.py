@@ -622,7 +622,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "314"
+    assert diagnostic_records[0]["profileVersion"] == "315"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -630,7 +630,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "314"
+    assert transport_input["profileVersion"] == "315"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -1065,7 +1065,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "314"
+    assert profile.version == "315"
     mode_prompts = {
         "research": profile.solver_research.system_prompt,
         "integration": profile.solver_integration.system_prompt,
@@ -1316,7 +1316,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "314"
+    assert profile.version == "315"
     assert prompt.rindex("## 出力") > prompt.rindex(
         "</solver_context>"
     )
@@ -1367,7 +1367,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "314"
+    assert profile.version == "315"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -1990,7 +1990,8 @@ def test_integration_repeated_search_fixture_prefers_fetchable_candidates() -> N
     assert fixture["expectedViolation"] == (
         "successful legal_search scope was already completed"
     )
-    assert "成功済みと完全一致する検索・Graph要求は繰り返しません" in prompt
+    assert "成功済みの検索・Graph scopeは繰り返しません" in prompt
+    assert "`request_id`や`purpose`だけを変えても別scopeにはなりません" in prompt
     assert "`action_feedback`を受けた場合もToolの種類は禁止されません" in prompt
 
 
@@ -4029,7 +4030,7 @@ def test_integration_uses_selected_fetched_graph_article_before_more_tools() -> 
     assert "本文取得前の候補を、Hypothesisの支持・反証や回答根拠" in (
         profile.system_prompt
     )
-    assert "成功済みと完全一致する行動" in (
+    assert "`request_id`または`purpose`だけの変更は同じscope" in (
         profile.completion_check_prompt or ""
     )
 
@@ -4213,8 +4214,33 @@ def test_action_feedback_keeps_all_tool_choices_available() -> None:
     assert rendered.input_payload["action_feedback"]["code"] == (
         "already_completed"
     )
+    assert next(iter(rendered.input_payload)) == "action_feedback"
+    assert set(rendered.input_payload) == {
+        "action_feedback",
+        "question",
+        "work_tree",
+        "hypotheses",
+        "dependency_decisions",
+        "required_dependency_kind",
+        "required_dependency_work_item_ids",
+        "material_evidence",
+        "omitted_evidence_ids",
+        "fetchable_article_ids",
+        "search_candidates",
+        "graph_review_ledger",
+        "completed_legal_searches",
+        "completed_graph_searches",
+        "available_tools",
+        "remaining_fetch_capacity",
+    }
     assert "contract_feedback" not in rendered.input_payload or (
         rendered.input_payload["contract_feedback"] is None
+    )
+    assert "棄却されたscopeを今回の選択肢から外します" in (
+        rendered.instructions
+    )
+    assert "request_id`や`purpose`だけを変えても別scopeにはなりません" in (
+        rendered.instructions
     )
 
 

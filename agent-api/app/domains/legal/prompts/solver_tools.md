@@ -7,7 +7,9 @@
 - ToolRequestは、未確認のHypothesisとopen WorkItemへ結び付けます。
 - `search_candidates`とGraph候補は発見情報です。本文確認前に根拠へ使いません。
 - 同一Decisionで複数Articleの本文を取得する場合は、上限内で1つの`fetch_articles`へまとめます。
-- 本文取得済みArticleと、成功済みと完全一致する検索・Graph要求は繰り返しません。
+- 本文取得済みArticleと、成功済みの検索・Graph scopeは繰り返しません。
+- 検索・Graph scopeは`work_item_id`、`hypothesis_ids`、Tool引数の組です。
+  `request_id`や`purpose`だけを変えても別scopeにはなりません。
 
 ### `legal_search`
 

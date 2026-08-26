@@ -1096,6 +1096,9 @@ cycle_close / finalization / reviewer_revision / search_selection / graph_select
 
 `docker compose up`は実行時に`.env`を読み直す。特定のmodelを検証する場合、以前のshell設定や
 既存コンテナを前提にせず、provider、model、診断modeを再作成コマンドへ明示する。
+また、ローカルのSource、Prompt、契約またはProfileを変更した後は、起動中の`agent-api`をそのまま
+使わない。コンテナの作成時刻が新しく見えても、最後の変更前にbuildされたImageである可能性がある。
+実モデル検証前に、必ず最後の変更を含めて`--build --force-recreate`する。
 次は全Solverを`gpt-4o-mini`にし、診断snapshotを保存する例である。
 
 ```bash
@@ -1109,6 +1112,24 @@ docker compose up --build -d --force-recreate agent-api
 コマンド行で指定した値は、その`docker compose`実行にだけ適用される。検証中にもう一度コンテナを
 再作成する場合も同じ値を明示するか、先に`.env`を検証条件へ変更する。値を省略して再作成すると、
 `.env`に残る別provider・modelへ戻ることがある。
+
+再作成後は、作業ツリーとコンテナのProfile versionが一致することも確認する。`/health`はmodel設定の
+確認には使えるが、現在はProfile versionを返さないため、これだけでコードが最新だと判断しない。
+
+```bash
+source_profile=$(
+  sed -n 's/.*version="\([^"]*\)".*/\1/p' \
+    agent-api/app/domains/legal/profiles.py | head -1
+)
+container_profile=$(
+  docker compose exec -T agent-api python -c \
+    'from app.domains.legal.profiles import legal_agent_profile; print(legal_agent_profile().version)'
+)
+test "$source_profile" = "$container_profile" || {
+  echo "Profile version mismatch: source=$source_profile container=$container_profile" >&2
+  exit 1
+}
+```
 
 起動後、APIを呼ぶ前にコンテナの実効設定を確認する。
 
@@ -1128,6 +1149,7 @@ curl -s http://localhost:8000/health | jq '{
 
 ```bash
 jq '.trace.agentFramework | {
+  profileVersion,
   provider,
   diagnosticsMode,
   models: ([.modelCalls[].model] | unique),
@@ -1136,8 +1158,9 @@ jq '.trace.agentFramework | {
 }' response.json
 ```
 
-指定したprovider・model・診断modeと、healthまたは回答traceが一致しない実行は評価対象にしない。
-その実行のtimeoutや回答品質を指定modelの結果として扱わず、正しい設定で再作成してからやり直す。
+SourceとコンテナのProfile version、または指定したprovider・model・診断modeが一致しない実行は
+評価対象にしない。その実行のtimeout、契約違反、検索結果、回答品質を現行実装の結果として扱わず、
+正しい設定で再作成してからやり直す。
 
 最初の検索動作確認用設定:
 

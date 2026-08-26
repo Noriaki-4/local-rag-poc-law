@@ -1522,7 +1522,33 @@ def _solver_context_payload(
             for item in payload["completed_graph_searches"]
             if item["work_item_id"] in active_work_item_ids
         ]
-        return payload
+        payload["graph_review_ledger"] = [
+            item
+            for item in payload["graph_review_ledger"]
+            if item["work_item_id"] in active_work_item_ids
+        ]
+        # Dependency Actionは既存の意味判断を変えず、次のToolを1件選ぶ処理。
+        # 全Solver状態を送るとaction_feedbackと候補が埋もれるため、この判断に
+        # 必要なread modelだけを投影する。
+        dependency_action_fields = (
+            "action_feedback",
+            "question",
+            "work_tree",
+            "hypotheses",
+            "dependency_decisions",
+            "required_dependency_kind",
+            "required_dependency_work_item_ids",
+            "material_evidence",
+            "omitted_evidence_ids",
+            "fetchable_article_ids",
+            "search_candidates",
+            "graph_review_ledger",
+            "completed_legal_searches",
+            "completed_graph_searches",
+            "available_tools",
+            "remaining_fetch_capacity",
+        )
+        return {name: payload[name] for name in dependency_action_fields}
     if projection == "finalization":
         payload["resolved_work_item_ids"] = [
             item["work_item_id"]

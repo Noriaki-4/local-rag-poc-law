@@ -5,7 +5,7 @@
   "normalizedSchemaHash": "71fffee5b902c3b6444e5c47354e1021340159dbe8f03c5b492ae3a26d5bb5f9",
   "outputSchemaHash": "c91dcfc5a4179ae1a82abeef3df8dc8765d8804c2933bc09168a0da6d3507377",
   "profileName": "legal-default",
-  "profileVersion": "314",
+  "profileVersion": "315",
   "promptAssets": [],
   "provider": "openai",
   "requestHash": "14f4b8fcfddf082549e0c34b432cafcc93912840dab67e39797474ec60e2ccc7",

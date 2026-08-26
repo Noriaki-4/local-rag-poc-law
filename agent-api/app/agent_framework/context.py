@@ -440,7 +440,10 @@ class SolverActionFeedback(FrameworkModel):
         )
     )
     rejected_tool_requests: tuple[ToolRequest, ...] = Field(
-        description="実行されずCaseStateへ保存されなかった直前のToolRequest。"
+        description=(
+            "実行されずCaseStateへ保存されなかった直前のToolRequest。"
+            "重複scopeの判定ではrequest_idとpurposeを比較しない。"
+        )
     )
 
 
@@ -452,7 +455,10 @@ class CompletedLegalSearch(FrameworkModel):
         description="成功済みlegal_searchが検証対象にした既知Hypothesis ID。",
     )
     arguments: dict[str, Any] = Field(
-        description="成功済みlegal_searchへ渡した入力引数。完全一致する再要求は禁止。",
+        description=(
+            "成功済みlegal_searchへ渡した入力引数。work_item_id、hypothesis_ids、"
+            "argumentsが同じscopeの再要求は禁止。request_idとpurposeはscopeに含めない。"
+        ),
     )
 
 
@@ -466,7 +472,8 @@ class CompletedGraphSearch(FrameworkModel):
     arguments: dict[str, Any] = Field(
         description=(
             "成功済みlegal_graph_neighborsへ渡した入力引数。候補0件の場合も含み、"
-            "完全一致する再要求は禁止。"
+            "work_item_id、hypothesis_ids、argumentsが同じscopeの再要求は禁止。"
+            "request_idとpurposeはscopeに含めない。"
         ),
     )
 
@@ -589,14 +596,14 @@ class SolverContext(FrameworkModel):
         default=(),
         description=(
             "過去Cycleを含む成功済みlegal_searchのWorkItem、Hypothesis、入力引数。"
-            "同じ3要素の完全一致を再要求しないための履歴。"
+            "同じ3要素をscopeとして再要求しないための履歴。"
         ),
     )
     completed_graph_searches: tuple[CompletedGraphSearch, ...] = Field(
         default=(),
         description=(
             "過去Cycleを含む成功済みlegal_graph_neighborsのWorkItem、Hypothesis、"
-            "入力引数。候補0件も履歴に含み、同じ3要素の完全一致を再要求しない。"
+            "入力引数。候補0件も履歴に含み、同じ3要素をscopeとして再要求しない。"
         ),
     )
     evidence_manifest: tuple[EvidenceManifestItem, ...] = Field(

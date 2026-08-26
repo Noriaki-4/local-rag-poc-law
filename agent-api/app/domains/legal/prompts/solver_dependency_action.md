@@ -16,13 +16,14 @@
 
 ### 手順
 
-1. `basis_evidence_ids`の本文から、確認済みの規定と残る未確認事項を把握します。
-2. 次の判断基準から、未確認事項を最も直接進めるToolを選びます。順番は固定しません。
+1. `action_feedback`がある場合は、棄却されたscopeを今回の選択肢から外します。
+2. `basis_evidence_ids`の本文から、確認済みの規定と残る未確認事項を把握します。
+3. 次の判断基準から、未確認事項を最も直接進めるToolを選びます。順番は固定しません。
    - 同じ事項を扱う既知候補の本文が必要：`fetch_articles`
    - 起点Articleと調べる関係・方向を説明できる：`legal_graph_neighbors`
    - Articleまたは関係がまだ分からない：`legal_search`
    - 必要な既知Evidence本文が今回省略されている：`load_evidence`
-3. 各`needs_action` WorkItemに対応するToolRequestを1件返します。
+4. 各`needs_action` WorkItemに対応するToolRequestを1件返します。
 
 ### ルール
 
@@ -30,8 +31,8 @@
 
 - 候補名や関係ラベルだけで下位規範を確認済みにしません。
 - `material_evidence`にある本文を再取得しません。
-- 成功済みと完全一致する検索・Graph要求を繰り返しません。
-- `action_feedback`がある場合、棄却された要求をそのままコピーせず、既存結果と未確認事項から行動を選び直します。同じToolの別条件は選べます。
+- 成功済みの検索・Graph scopeを繰り返しません。
+- `action_feedback`がある場合、棄却されたscopeを再出力しません。同じToolの別scopeは選べます。
 
 #### この処理ではしないこと
 
