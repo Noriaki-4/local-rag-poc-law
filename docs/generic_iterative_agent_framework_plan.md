@@ -1929,7 +1929,12 @@ Legal Domain Packの共通Promptには次を追加する。
   Programは検索表現の意味的同一性を推測せず、候補が不十分ならSolverが理由と異なる検索表現を返す。
   下位規範Actionで重複しない有効なTool要求がない場合は、SolverがToolRequestなしの
   `start_next_cycle=true`を選び、次Cycleで探索方針を見直せる。Programは重複要求を別要求へ書き換えず、
-  Cycle上限と参照整合だけを検証する。
+  Cycle上限と参照整合だけを検証する。成功済みscopeとして要求を棄却した後は、そのTool種類を
+  修復契約の選択肢から外し、Solverが別種のToolまたは`start_next_cycle=true`を選ぶ。同じCycle内で
+  棄却されたToolを再請求させず、Programが代替行動の意味を決めない。
+  Search ReviewがHypothesisに対応付けた本文未取得候補が残る場合は、Dependency Actionの
+  `available_tools`から`legal_search`を外す。候補の対応はLLM判断を正本とし、Programは保存済み対応と
+  本文取得状態だけから、既知候補を確認する前の同一検索反復を防ぐ。
 - 質問に関係すると判断した1ホップ候補は、Graph Reviewごとに最大3件、かつCycleの
   残り本文取得枠内でselectする。関連するが枠に収まらない候補はdeferし、
   graph_review_ledgerと次Cycleの引継ぎ候補へ残す。Graph候補だけを根拠にせず、端点Article本文を確認する。

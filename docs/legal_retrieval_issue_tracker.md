@@ -631,6 +631,21 @@ Profile v317・`gpt-4o-mini-2024-07-18`の例外問題再検証はCycle 2で正�
 一方、最終引用は施行令7条と府令2条の5だけで金商法27条の2を含まず、関連の薄いArticle取得と、表現を
 短くした類似再検索も残った。これは重複scope契約とは分け、引用完全性と探索効率の評価対象とする。
 
+同日の総合問題再検証では、Cycle 2で成功済み`legal_search`を再要求し、`ActionRejected`後も同一scopeを
+3回出力して`protocol_error`となった。v317は次Cycleへの選択肢を追加しただけで、棄却済みscopeを修復schemaから
+排除していなかった。Profile v318の最初の修正では、棄却後を`start_next_cycle=true`へ限定したため
+重複検索による`protocol_error`は解消したが、同じ未解決状態から各Cycleで同じ検索を選び、Cycle 4まで消費した。
+Profile v319では、棄却後の修復schemaから棄却されたTool種類を外し、Solverが別種のToolまたは次Cycleを選ぶ。
+Programは代替行動を生成せず、同じCycle内で棄却されたTool種類の再請求だけを防ぐ。
+
+Profile v319の実モデル総合問題は`protocol_error`なしで完了したが、各Cycleの最初に同じ検索を要求してから
+棄却・修復する流れが3回残った。Profile v320では、Search Reviewが未確認Hypothesisへ対応付けた
+本文未取得候補がある間、Dependency Actionの`available_tools`と出力schemaから`legal_search`を外す。
+Programは候補の意味を判断せず、保存済みのLLM対応判断と本文取得状態だけを使う。
+`gpt-4o-mini-2024-07-18`の総合問題再検証では、同一scopeの`action_rejected`とCycle 2以降の
+`legal_search`はいずれも0件となり、既知候補の`fetch_articles`へ進んだ。その後のCycle Closeは
+OpenAI TPM上限の429で停止したため、最終回答品質はこの実行では評価しない。
+
 2026-08-26の例外問題では、下位規範Action Promptが次のToolRequestだけを要求する一方、汎用Solver schemaが
 `next`、`start_next_cycle`、状態更新、最終回答も要求していた。実モデルはToolRequestを作りながら
 `next=finalize`、`answer=null`を返し、同じ無効出力を再試行した。Profile v304では、この呼出しの出力を

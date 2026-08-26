@@ -622,7 +622,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "317"
+    assert diagnostic_records[0]["profileVersion"] == "320"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -630,7 +630,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "317"
+    assert transport_input["profileVersion"] == "320"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -1065,7 +1065,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "317"
+    assert profile.version == "320"
     mode_prompts = {
         "research": profile.solver_research.system_prompt,
         "integration": profile.solver_integration.system_prompt,
@@ -1316,7 +1316,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "317"
+    assert profile.version == "320"
     assert prompt.rindex("## 出力") > prompt.rindex(
         "</solver_context>"
     )
@@ -1367,7 +1367,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "317"
+    assert profile.version == "320"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -4176,7 +4176,7 @@ def test_observation_keeps_each_work_item_dimension_separate() -> None:
     assert "別観点の下位規範を理由に" in dependency_call.instructions
 
 
-def test_action_feedback_keeps_all_tool_choices_available() -> None:
+def test_action_feedback_removes_the_rejected_tool_kind_from_repair() -> None:
     fixture_path = (
         Path(__file__).parent
         / "fixtures"
@@ -4208,9 +4208,14 @@ def test_action_feedback_keeps_all_tool_choices_available() -> None:
         variant["properties"]["tool_name"]["enum"][0]
         for variant in variants
     }
+    rejected_tool_names = {
+        request.tool_name
+        for request in repaired_context.action_feedback.rejected_tool_requests
+    }
 
+    assert repaired_context.can_start_next_cycle is True
+    assert not (allowed_tools & rejected_tool_names)
     assert "legal_search" in allowed_tools
-    assert "legal_graph_neighbors" in allowed_tools
     assert "fetch_articles" in allowed_tools
     assert rendered.input_payload["action_feedback"]["code"] == (
         "already_completed"
@@ -4238,12 +4243,27 @@ def test_action_feedback_keeps_all_tool_choices_available() -> None:
     assert "contract_feedback" not in rendered.input_payload or (
         rendered.input_payload["contract_feedback"] is None
     )
-    assert "棄却されたscopeを今回の選択肢から外します" in (
+    assert "棄却されたTool種類を使わず" in (
         rendered.instructions
     )
-    assert "request_id`や`purpose`だけを変えても別scopeにはなりません" in (
+    assert "別種のToolが適切でなければ`start_next_cycle=true`" in (
         rendered.instructions
     )
+    with pytest.raises(
+        ModelProtocolError,
+        match="dependency action cannot use a blocked Tool kind",
+    ):
+        normalize_dependency_action_decision(
+            {
+                "decision_reason": "棄却済みのToolを再び選ぶ。",
+                "start_next_cycle": False,
+                "tool_requests": [
+                    request.model_dump(mode="json")
+                    for request in repaired_context.action_feedback.rejected_tool_requests
+                ],
+            },
+            context=repaired_context,
+        )
 
 
 def test_graph_review_model_call_projects_only_selection_context() -> None:
@@ -7243,6 +7263,16 @@ def test_dependency_action_uses_dedicated_contract_and_preserves_prior_decision(
         variant["properties"]["work_item_id"]["enum"] == [work_item_id]
         for variant in request_variants
     )
+    allowed_tools = {
+        variant["properties"]["tool_name"]["enum"][0]
+        for variant in request_variants
+    }
+    assert "legal_search" not in allowed_tools
+    assert "fetch_articles" in allowed_tools
+    assert "legal_search" not in {
+        definition["name"]
+        for definition in rendered.input_payload["available_tools"]
+    }
     assert "continueまたはfinalize" not in rendered.instructions
     assert "DependencyDecisionの再判定は行いません" in rendered.instructions
     assert "重複しない有効なTool要求がなく次Cycleを開始できる場合" in (
@@ -7268,21 +7298,25 @@ def test_dependency_action_uses_dedicated_contract_and_preserves_prior_decision(
         for item in context.hypotheses
         if item.work_item_id == work_item_id
     )
+    fetchable_candidate = next(
+        candidate
+        for candidate in context.search_candidates
+        if candidate.article_id in context.fetchable_article_ids
+        and hypothesis_id in candidate.matched_hypothesis_ids
+    )
     decision = normalize_dependency_action_decision(
         {
-            "decision_reason": "未確認の規定を法令検索で探す。",
+            "decision_reason": "評価済み候補の本文を確認する。",
             "start_next_cycle": False,
             "tool_requests": [
                 {
-                    "request_id": "search-next",
+                    "request_id": "fetch-next",
                     "work_item_id": work_item_id,
-                    "tool_name": "legal_search",
+                    "tool_name": "fetch_articles",
                     "arguments": {
-                        "query": "株券等 所有者 少数 適用除外",
-                        "doc_types": ["law"],
-                        "document_ids": [],
+                        "article_ids": [fetchable_candidate.article_id],
                     },
-                    "purpose": "未確認の適用除外規定を探す。",
+                    "purpose": "未確認の適用除外候補本文を確認する。",
                     "hypothesis_ids": [hypothesis_id],
                 }
             ],
@@ -7337,6 +7371,88 @@ def test_dependency_action_can_move_to_next_cycle_without_repeating_scope(
     assert len(decision.dependency_decisions) == 1
     assert decision.dependency_decisions[0].status == "needs_action"
     assert decision.dependency_decisions[0].action_request_id is None
+
+
+def test_rejected_dependency_action_forces_the_next_cycle_contract() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_overview_duplicate_search_feedback_v317.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    state = CaseState(
+        case_id=fixture["source"]["caseId"],
+        question="公開買付けの条件、範囲、例外、手続を確認する。",
+        research_cycle_count=2,
+        work_items=(
+            WorkItem(work_item_id="wi-1", question="成立条件を確認する。"),
+        ),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h-1",
+                work_item_id="wi-1",
+                statement="一定の場合に公開買付けが必要となる。",
+            ),
+        ),
+        dependency_decisions=(
+            DependencyDecision(
+                dependency_kind="lower_norm",
+                work_item_id="wi-1",
+                status="needs_action",
+                reason="下位規範の具体的条件が未確認である。",
+            ),
+        ),
+    )
+    context = build_solver_context(
+        state,
+        AgentLimits(),
+        remaining_wall_time_sec=120,
+        finalize_only=False,
+        action_feedback=SolverActionFeedback.model_validate(
+            fixture["actionFeedback"]
+        ),
+        required_dependency_kind="lower_norm",
+        required_dependency_work_item_ids=("wi-1",),
+    )
+    profile = legal_profiles.legal_agent_profile().solver_integration
+
+    rendered = render_solver_model_call(
+        context,
+        profile,
+        provider="openai",
+        stage="integration",
+    )
+
+    assert context.can_start_next_cycle is True
+    assert rendered.output_schema["properties"]["start_next_cycle"]["enum"] == [
+        True
+    ]
+    assert rendered.output_schema["properties"]["tool_requests"]["maxItems"] == 0
+
+    anthropic = render_solver_model_call(
+        context,
+        profile,
+        provider="anthropic",
+        stage="integration",
+    )
+    assert anthropic.output_schema["properties"]["start_next_cycle"]["enum"] == [
+        True
+    ]
+    assert anthropic.output_schema["properties"]["tool_requests_json"]["enum"] == [
+        "[]"
+    ]
+
+    decision = normalize_dependency_action_decision(
+        {
+            "decision_reason": "成功済みscopeを繰り返さず、次Cycleで見直す。",
+            "start_next_cycle": fixture["expected"]["startNextCycle"],
+            "tool_requests": [],
+        },
+        context=context,
+    )
+    assert decision.start_next_cycle is fixture["expected"]["startNextCycle"]
+    assert len(decision.tool_requests) == fixture["expected"]["toolRequestCount"]
 
 
 def test_common_prompt_does_not_expose_provider_sidecars() -> None:

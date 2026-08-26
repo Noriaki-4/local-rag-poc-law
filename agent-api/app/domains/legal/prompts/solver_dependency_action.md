@@ -17,7 +17,7 @@
 
 ### 手順
 
-1. `action_feedback`がある場合は、棄却されたscopeを今回の選択肢から外します。
+1. `action_feedback`がある場合は、棄却されたTool種類を使わず、別種のToolまたは次Cycleを選びます。
 2. `basis_evidence_ids`の本文から、確認済みの規定と残る未確認事項を把握します。
 3. 次の判断基準から、未確認事項を最も直接進めるToolを選びます。順番は固定しません。
    - 同じ事項を扱う既知候補の本文が必要：`fetch_articles`
@@ -34,7 +34,8 @@
 - 候補名や関係ラベルだけで下位規範を確認済みにしません。
 - `material_evidence`にある本文を再取得しません。
 - 成功済みの検索・Graph scopeを繰り返しません。
-- `action_feedback`がある場合、棄却されたscopeを再出力しません。同じToolの別scopeは選べます。
+- `action_feedback`にあるTool種類は、今回の修復では使いません。別種のToolが適切でなければ`start_next_cycle=true`にします。
+- 未確認Hypothesisに対応する本文未取得の既知候補がある間は、その候補を確認してから再検索します。
 - `start_next_cycle`は`can_start_next_cycle=true`の場合だけ選べます。検索語をわずかに変えただけの要求を作る代わりには使いません。
 
 #### この処理ではしないこと

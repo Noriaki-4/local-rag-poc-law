@@ -1426,6 +1426,39 @@ def _project_finalization_context(context: SolverContext) -> SolverContext:
     )
 
 
+def _dependency_action_blocked_tool_names(
+    context: SolverContext,
+) -> frozenset[str]:
+    """既存のLLM判断と実行履歴から、今回選べないTool種類を返す。"""
+
+    blocked = {
+        request.tool_name
+        for request in (
+            context.action_feedback.rejected_tool_requests
+            if context.action_feedback is not None
+            else ()
+        )
+    }
+    required_work_item_ids = set(context.required_dependency_work_item_ids)
+    required_hypothesis_ids = {
+        hypothesis.hypothesis_id
+        for hypothesis in context.hypotheses
+        if hypothesis.work_item_id in required_work_item_ids
+    }
+    fetchable_article_ids = set(context.fetchable_article_ids)
+    if any(
+        candidate.article_id in fetchable_article_ids
+        and bool(
+            required_hypothesis_ids.intersection(
+                candidate.matched_hypothesis_ids
+            )
+        )
+        for candidate in context.search_candidates
+    ):
+        blocked.add("legal_search")
+    return frozenset(blocked)
+
+
 def _solver_context_payload(
     context: SolverContext,
     *,
@@ -1549,6 +1582,12 @@ def _solver_context_payload(
             "available_tools",
             "remaining_fetch_capacity",
         )
+        blocked_tool_names = _dependency_action_blocked_tool_names(context)
+        payload["available_tools"] = [
+            definition
+            for definition in payload["available_tools"]
+            if definition["name"] not in blocked_tool_names
+        ]
         return {name: payload[name] for name in dependency_action_fields}
     if projection == "finalization":
         payload["resolved_work_item_ids"] = [
@@ -4355,6 +4394,18 @@ def _dependency_action_transport_schema(
 ) -> dict[str, Any]:
     """下位規範の次Actionだけを返す専用契約。"""
 
+    rejected_tool_names = _dependency_action_blocked_tool_names(context)
+    available_action_tools = tuple(
+        definition
+        for definition in context.available_tools
+        if definition.name not in rejected_tool_names
+    )
+    force_next_cycle = bool(
+        context.action_feedback is not None
+        and context.can_start_next_cycle
+        and not available_action_tools
+    )
+
     if json_transport:
         return _strict_object(
             {
@@ -4367,7 +4418,9 @@ def _dependency_action_transport_schema(
                     {
                         "type": "boolean",
                         "enum": (
-                            [False, True]
+                            [True]
+                            if force_next_cycle
+                            else [False, True]
                             if context.can_start_next_cycle
                             else [False]
                         ),
@@ -4378,12 +4431,14 @@ def _dependency_action_transport_schema(
                 "tool_requests_json": {
                     "type": "string",
                     "description": "ToolRequest array encoded as one JSON array string",
+                    **({"enum": ["[]"]} if force_next_cycle else {}),
                 },
             }
         )
     required_ids = set(context.required_dependency_work_item_ids)
     action_context = context.model_copy(
         update={
+            "available_tools": available_action_tools,
             "work_tree": tuple(
                 item
                 for item in context.work_tree
@@ -4396,10 +4451,17 @@ def _dependency_action_transport_schema(
             ),
         }
     )
-    tool_requests = _tool_requests_transport_schema(action_context)
+    tool_requests = (
+        _empty_array_schema()
+        if force_next_cycle
+        else _tool_requests_transport_schema(action_context)
+    )
     required_count = len(context.required_dependency_work_item_ids)
-    tool_requests["minItems"] = 0 if context.can_start_next_cycle else required_count
-    tool_requests["maxItems"] = required_count
+    if not force_next_cycle:
+        tool_requests["minItems"] = (
+            0 if context.can_start_next_cycle else required_count
+        )
+        tool_requests["maxItems"] = required_count
     return _strict_object(
         {
             "decision_reason": _described(
@@ -4411,7 +4473,9 @@ def _dependency_action_transport_schema(
                 {
                     "type": "boolean",
                     "enum": (
-                        [False, True]
+                        [True]
+                        if force_next_cycle
+                        else [False, True]
                         if context.can_start_next_cycle
                         else [False]
                     ),
@@ -5919,6 +5983,20 @@ def normalize_dependency_action_decision(
     if action.start_next_cycle and not context.can_start_next_cycle:
         raise ModelProtocolError("next research Cycle is not available")
 
+    rejected_tool_names = _dependency_action_blocked_tool_names(context)
+    repeated_tool_names = sorted(
+        {
+            request.tool_name
+            for request in action.tool_requests
+            if request.tool_name in rejected_tool_names
+        }
+    )
+    if repeated_tool_names:
+        raise ModelProtocolError(
+            "dependency action cannot use a blocked Tool kind: "
+            + ", ".join(repeated_tool_names)
+        )
+
     required_ids = set(context.required_dependency_work_item_ids)
     requests_by_work_item: dict[str, list[ToolRequest]] = {}
     for request in action.tool_requests:
@@ -6619,6 +6697,7 @@ _DEPENDENCY_ACTION_CONTRACT = """
 出力原則:
 - 今回の処理では`decision_reason`、`start_next_cycle`、`tool_requests`だけを返す。
 - ToolRequestは、対応するopen WorkItemと未確認Hypothesisへ結び付ける。
+- `action_feedback`がある場合は、棄却されたTool種類を使わず、別種のToolまたはstart_next_cycle=trueを選ぶ。
 - 現在Cycleに有効な行動があればstart_next_cycle=falseとし、各`needs_action` WorkItemについて、未確認事項を直接進めるToolRequestを1件返す。
 - 重複しない有効なTool要求がなく次Cycleを開始できる場合は、start_next_cycle=true、tool_requests=[]にする。
 - request_idは同じ出力内で重複しない短い局所IDにする。Programが永続化用IDへ置き換え、既存のDependencyDecisionへ対応付ける。

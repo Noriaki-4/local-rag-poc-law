@@ -1,0 +1,34 @@
+{
+  "source": {
+    "caseId": "legal-b6571b38f2534e99b3a84e29438dbcc0",
+    "model": "gpt-4o-mini-2024-07-18",
+    "profileVersion": "317",
+    "questionId": "tob-overview"
+  },
+  "actionFeedback": {
+    "code": "already_completed",
+    "message": "successful legal_search scope was already completed",
+    "rejected_tool_requests": [
+      {
+        "request_id": "rejected-search",
+        "work_item_id": "wi-1",
+        "tool_name": "legal_search",
+        "arguments": {
+          "query": "公開買付け 条件 金額",
+          "doc_types": [
+            "law"
+          ],
+          "document_ids": []
+        },
+        "purpose": "公開買付けが必要となる条件を確認する。",
+        "hypothesis_ids": [
+          "h-1"
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "startNextCycle": true,
+    "toolRequestCount": 0
+  }
+}

@@ -269,8 +269,8 @@ class DependencyActionDecision(FrameworkModel):
     start_next_cycle: bool = Field(
         default=False,
         description=(
-            "現在Cycleに重複しない有効なTool要求がない場合だけtrue。"
-            "trueではToolRequestを返さず、次Cycleで探索方針を見直す。"
+            "trueはToolなしで次Cycleへ移り、探索方針を見直す。"
+            "棄却後に別種のToolを選ばない場合にも使う。"
         ),
     )
     tool_requests: tuple[ToolRequest, ...] = Field(

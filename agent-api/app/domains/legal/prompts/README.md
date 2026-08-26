@@ -147,10 +147,10 @@ Search Reviewで保留した候補と、本文取得が未完了の選択候補�
 成功済みの検索・Graph scopeはProgramが実行前に棄却しますが、契約違反の修復にはしません。
 scopeはWorkItem、Hypothesis、Tool引数の組であり、`request_id`と`purpose`は含みません。
 `action_feedback`として、実行しなかった理由と直前のToolRequestだけを同じSolverへ返します。
-利用可能Toolはschemaから削除せず、既存結果の利用、条件を変えた同種Tool、別Toolのどれが妥当かを
-Solverが未確認事項に基づいて判断します。重複しない有効なTool要求がない場合は、Solverが
-`start_next_cycle=true`を選び、次Cycleで探索方針を見直せます。ID、引数、成功履歴の完全一致だけを
-Programが検証します。
+棄却後の修復schemaから棄却されたTool種類を外し、別種のToolまたは`start_next_cycle=true`だけを
+選べるようにします。Programは代替Toolを選ばず、ID、引数、成功履歴の完全一致とCycle可否だけを検証します。
+また、Search ReviewでHypothesisに対応済みの本文未取得候補がある間は、Dependency Actionから
+`legal_search`を外します。これは候補の意味をProgramが判断するのではなく、保存済みのLLM判断を再利用する優先制御です。
 
 CaseStoreと完全な`SolverContext`は正本として保持しますが、Providerへは用途別のread modelを渡せます。
 初回Researchは同じSolver・同じCycleで段階的に呼び出します。Step 1には質問だけ、Step 2には
