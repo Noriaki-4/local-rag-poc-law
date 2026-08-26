@@ -881,7 +881,6 @@ class StructuredJSONModelAdapter:
 
         provider = getattr(self._client, "provider", None)
         assessment_results = []
-        actor_results = []
         assessed_items: list[dict[str, Any]] = []
         for batch_context in _search_review_batch_contexts(context):
             assessment_call = render_search_assessment_model_call(
@@ -931,65 +930,8 @@ class StructuredJSONModelAdapter:
                 batch_context,
             )
             _validate_search_assessment_payload(batch_payload, batch_context)
-            actor_result = None
-            if _search_actor_pairs(batch_payload):
-                actor_call = render_search_actor_classification_model_call(
-                    batch_context,
-                    batch_payload,
-                    profile,
-                    provider=provider,
-                )
-                if self._diagnostics is not None:
-                    self._diagnostics.record_transport_input(
-                        context=batch_context,
-                        profile=profile,
-                        rendered=actor_call,
-                        repair_index=0,
-                        transport_stage="search_actor_classification",
-                        provider=provider,
-                    )
-                try:
-                    actor_result = self._client.generate_structured_json(
-                        prompt=actor_call.request,
-                        schema=actor_call.output_schema,
-                        model=profile.model,
-                        max_tokens=profile.max_output_tokens,
-                        timeout_sec=max(1, round(profile.timeout_sec)),
-                    )
-                except requests.Timeout as exc:
-                    raise TimeoutError(
-                        "search actor classification timed out"
-                    ) from exc
-                actor_error = actor_result.validationError
-                if actor_result.payload is None and actor_error is None:
-                    actor_error = "empty"
-                if self._diagnostics is not None:
-                    self._diagnostics.record_transport_output(
-                        context=batch_context,
-                        repair_index=0,
-                        payload=actor_result.payload,
-                        validation_error=actor_error,
-                        input_tokens=actor_result.inputTokens,
-                        output_tokens=actor_result.outputTokens,
-                        provider_retry_count=actor_result.retryCount,
-                        transport_stage="search_actor_classification",
-                    )
-                if actor_error is not None or actor_result.payload is None:
-                    raise ModelProtocolError(
-                        f"search actor classification invalid: {actor_error}"
-                    )
-            batch_payload = _apply_search_actor_classification(
-                batch_payload,
-                actor_result.payload if actor_result is not None else {
-                    "actor_matches": []
-                },
-                batch_context,
-            )
-            _validate_search_assessment_payload(batch_payload, batch_context)
             assessed_items.extend(batch_payload.get("assessments") or [])
             assessment_results.append(assessment_result)
-            if actor_result is not None:
-                actor_results.append(actor_result)
 
         assessment_payload = {
             "assessments": assessed_items,
@@ -1047,10 +989,13 @@ class StructuredJSONModelAdapter:
             raise ModelProtocolError(
                 f"search reselection transport invalid: {selection_error}"
             )
+        selection_payload = _normalize_search_reselection_transport_payload(
+            selection_result.payload
+        )
         try:
-            SearchReselectionDecision.model_validate(selection_result.payload)
+            SearchReselectionDecision.model_validate(selection_payload)
             _validate_search_reselection_payload(
-                selection_result.payload,
+                selection_payload,
                 assessment_payload,
             )
         except ValidationError as exc:
@@ -1064,7 +1009,7 @@ class StructuredJSONModelAdapter:
                 context.required_search_review_request_ids
             ),
             **assessment_payload,
-            **selection_result.payload,
+            **selection_payload,
         }
         try:
             decision = SolverDecision.model_validate(
@@ -1080,12 +1025,10 @@ class StructuredJSONModelAdapter:
 
         input_tokens = _sum_optional_tokens(
             *(result.inputTokens for result in assessment_results),
-            *(result.inputTokens for result in actor_results),
             selection_result.inputTokens,
         )
         output_tokens = _sum_optional_tokens(
             *(result.outputTokens for result in assessment_results),
-            *(result.outputTokens for result in actor_results),
             selection_result.outputTokens,
         )
         return SolverCallResult(
@@ -1094,10 +1037,8 @@ class StructuredJSONModelAdapter:
             output_tokens=output_tokens,
             attempt_count=(
                 len(assessment_results)
-                + len(actor_results)
                 + 1
                 + sum(result.retryCount for result in assessment_results)
-                + sum(result.retryCount for result in actor_results)
                 + selection_result.retryCount
             ),
         )
@@ -3211,7 +3152,7 @@ def _search_review_context_payload(
 def _search_review_batch_contexts(
     context: SolverContext,
 ) -> tuple[SolverContext, ...]:
-    """候補の意味評価と主体照合を小さな独立単位に分ける。"""
+    """候補の内容評価を小さな独立単位に分ける。"""
 
     candidates = context.search_candidates
     return tuple(
@@ -3237,22 +3178,20 @@ def render_search_reselection_model_call(
         article_id = item.get("article_id")
         if not isinstance(article_id, str):
             continue
-        actor_status_by_hypothesis = {
-            actor_match.get("hypothesis_id"): actor_match.get("status")
-            for actor_match in item.get("actor_matches") or []
-            if isinstance(actor_match, dict)
-        }
         selectable_ids = tuple(
             hypothesis_id
             for hypothesis_id in item.get("matched_hypothesis_ids") or []
-            if actor_status_by_hypothesis.get(hypothesis_id)
-            in {"matched", "unknown"}
         )
         if not selectable_ids:
             continue
         eligible_hypothesis_ids_by_article[article_id] = selectable_ids
         eligible_assessments.append(
-            {**item, "selectable_hypothesis_ids": list(selectable_ids)}
+            {
+                "article_id": article_id,
+                "legal_function": item.get("legal_function"),
+                "summary": item.get("summary"),
+                "matched_hypothesis_ids": list(selectable_ids),
+            }
         )
     eligible_article_ids = tuple(
         item["article_id"]
@@ -3262,12 +3201,18 @@ def render_search_reselection_model_call(
     candidate_by_id = {
         item.article_id: item for item in context.search_candidates
     }
+    current_fetch_request_capacity = _tool_array_argument_capacity(
+        context,
+        tool_name="fetch_articles",
+        argument_name="article_ids",
+        fallback=context.remaining_fetch_capacity,
+    )
     input_payload = {
         "question": context.question,
         "hypotheses": [
             item.model_dump(mode="json") for item in context.hypotheses
         ],
-        "remaining_fetch_capacity": context.remaining_fetch_capacity,
+        "current_fetch_request_capacity": current_fetch_request_capacity,
         "assessments": [
             {
                 **item,
@@ -3294,116 +3239,12 @@ def render_search_reselection_model_call(
             context,
             candidate_ids=eligible_article_ids,
             hypothesis_ids_by_article=eligible_hypothesis_ids_by_article,
+            selection_limit=current_fetch_request_capacity,
         ),
         normalized_schema=SearchReselectionDecision.model_json_schema(),
     )
     _ensure_solver_prompt_capacity(rendered.request, context.max_solver_input_chars)
     return rendered
-
-
-def render_search_actor_classification_model_call(
-    context: SolverContext,
-    assessment_payload: dict[str, Any],
-    profile: ModelCallProfile,
-    *,
-    provider: str | None = None,
-) -> RenderedModelCall:
-    prompt = profile.actor_classification_system_prompt
-    if prompt is None:
-        raise ModelProtocolError("search actor classification prompt is unavailable")
-    assessments = assessment_payload.get("assessments") or []
-    candidate_by_id = {
-        item.article_id: item for item in context.search_candidates
-    }
-    expected_pairs = _search_actor_pairs(assessment_payload)
-    schema = _strict_object(
-        {
-            "actor_matches": {
-                "type": "array",
-                "items": _strict_object(
-                    {
-                        "status": {
-                            "type": "string",
-                            "enum": ["matched", "mismatched", "unknown"],
-                        },
-                        "regulated_actor": {
-                            "type": "string",
-                            "minLength": 1,
-                        },
-                        "reason": {"type": "string", "minLength": 1},
-                    }
-                ),
-                "minItems": len(expected_pairs),
-                "maxItems": len(expected_pairs),
-                "description": (
-                    "inputのpairsと同じ順序で返す主体照合結果。IDはProgramが"
-                    "対応付けるため出力しない。"
-                ),
-            }
-        }
-    )
-    work_item_by_id = {item.work_item_id: item for item in context.work_tree}
-    input_payload = {
-        "question": context.question,
-        "pairs": [
-            {
-                "article_id": item["article_id"],
-                "headings": list(
-                    candidate_by_id[item["article_id"]].headings
-                ),
-                "summary": item["summary"],
-                "hypothesis_id": hypothesis.hypothesis_id,
-                "action_actor": (
-                    work_item_by_id[hypothesis.work_item_id].action_actor
-                    if hypothesis.work_item_id in work_item_by_id
-                    else None
-                ),
-                "work_item_question": (
-                    work_item_by_id[hypothesis.work_item_id].question
-                    if hypothesis.work_item_id in work_item_by_id
-                    else None
-                ),
-                "statement": hypothesis.statement,
-                "gaps": list(hypothesis.gaps),
-            }
-            for item in assessments
-            if isinstance(item, dict)
-            and item.get("article_id") in candidate_by_id
-            for hypothesis in context.hypotheses
-            if hypothesis.hypothesis_id
-            in (item.get("matched_hypothesis_ids") or ())
-        ],
-    }
-    instructions = (
-        f"{prompt}\n\n{RUNTIME_INPUT_MARKER}"
-        f"{_post_context_completion_check(profile.actor_classification_completion_check_prompt)}"
-    )
-    return build_rendered_model_call(
-        stage="search_actor_classification",
-        instructions=instructions,
-        input_tag="search_actor_context",
-        input_payload=input_payload,
-        output_schema=schema,
-        normalized_schema=schema,
-    )
-
-
-def _search_actor_pairs(
-    assessment_payload: dict[str, Any],
-) -> tuple[tuple[str, str], ...]:
-    """内容評価が作ったArticle・Hypothesis組を順序付きで返す。"""
-
-    pairs: list[tuple[str, str]] = []
-    for assessment in assessment_payload.get("assessments") or ():
-        if not isinstance(assessment, dict):
-            continue
-        article_id = assessment.get("article_id")
-        if not isinstance(article_id, str):
-            continue
-        for hypothesis_id in assessment.get("matched_hypothesis_ids") or ():
-            if isinstance(hypothesis_id, str):
-                pairs.append((article_id, hypothesis_id))
-    return tuple(pairs)
 
 
 def _search_reselection_prompt(
@@ -4346,6 +4187,7 @@ def _search_reselection_transport_schema(
     *,
     candidate_ids: tuple[str, ...] | None = None,
     hypothesis_ids_by_article: Mapping[str, tuple[str, ...]] | None = None,
+    selection_limit: int | None = None,
 ) -> dict[str, Any]:
     if candidate_ids is None:
         candidate_ids = tuple(item.article_id for item in context.search_candidates)
@@ -4356,6 +4198,13 @@ def _search_reselection_transport_schema(
         hypothesis_ids_by_article = {
             article_id: all_hypothesis_ids for article_id in candidate_ids
         }
+    if selection_limit is None:
+        selection_limit = _tool_array_argument_capacity(
+            context,
+            tool_name="fetch_articles",
+            argument_name="article_ids",
+            fallback=context.remaining_fetch_capacity,
+        )
     selection_variants = [
         _strict_object(
             {
@@ -4404,7 +4253,7 @@ def _search_reselection_transport_schema(
                     "items": selection_item_schema,
                     "maxItems": min(
                         len(candidate_ids),
-                        context.remaining_fetch_capacity,
+                        selection_limit,
                     ),
                 },
                 SearchReselectionDecision,
@@ -4417,6 +4266,32 @@ def _search_reselection_transport_schema(
             ),
         }
     )
+
+
+def _tool_array_argument_capacity(
+    context: SolverContext,
+    *,
+    tool_name: str,
+    argument_name: str,
+    fallback: int,
+) -> int:
+    """Tool schemaの配列上限と現在の残容量の小さい方を返す。"""
+
+    capacity = max(0, fallback)
+    for definition in context.available_tools:
+        if definition.name != tool_name:
+            continue
+        properties = definition.input_schema.get("properties")
+        if not isinstance(properties, dict):
+            break
+        argument_schema = properties.get(argument_name)
+        if not isinstance(argument_schema, dict):
+            break
+        max_items = argument_schema.get("maxItems")
+        if isinstance(max_items, int) and max_items >= 0:
+            capacity = min(capacity, max_items)
+        break
+    return capacity
 
 
 def _dependency_action_transport_schema(
@@ -6140,62 +6015,43 @@ def _normalize_search_assessment_transport_payload(
     return normalized
 
 
-def _apply_search_actor_classification(
-    assessment_payload: dict[str, Any],
-    actor_payload: dict[str, Any],
-    context: SolverContext,
+def _normalize_search_reselection_transport_payload(
+    payload: dict[str, Any],
 ) -> dict[str, Any]:
-    """主体照合をArticle・Hypothesis組へ機械的に結合する。"""
+    """同じArticleの重複選択を、提示順を保った1件へ正規化する。"""
 
-    actor_matches = actor_payload.get("actor_matches")
-    if not isinstance(actor_matches, list):
-        raise ModelProtocolError(
-            "search actor classification requires actor_matches"
-        )
-    expected_pairs = _search_actor_pairs(assessment_payload)
-    if len(actor_matches) != len(expected_pairs):
-        raise ModelProtocolError(
-            "search actor classification must cover every content-matched pair"
-        )
-    normalized_matches: list[dict[str, Any]] = []
-    for expected_pair, item in zip(expected_pairs, actor_matches, strict=True):
-        if not isinstance(item, dict):
-            raise ModelProtocolError("search actor classification item invalid")
-        supplied_pair = (item.get("article_id"), item.get("hypothesis_id"))
-        if any(value is not None for value in supplied_pair) and supplied_pair != (
-            expected_pair
-        ):
-            raise ModelProtocolError(
-                "search actor classification changed the input pair order"
-            )
-        normalized_matches.append(
-            {
-                "article_id": expected_pair[0],
-                "hypothesis_id": expected_pair[1],
-                **{
-                    key: value
-                    for key, value in item.items()
-                    if key not in {"article_id", "hypothesis_id"}
-                },
-            }
-        )
-
-    matches_by_article: dict[str, list[dict[str, Any]]] = {}
-    for item in normalized_matches:
-        matches_by_article.setdefault(item["article_id"], []).append(
-            {
-                key: value
-                for key, value in item.items()
-                if key != "article_id"
-            }
-        )
-    normalized = deepcopy(assessment_payload)
-    for assessment in normalized.get("assessments") or []:
-        if not isinstance(assessment, dict):
+    normalized = deepcopy(payload)
+    selections = normalized.get("selections")
+    if not isinstance(selections, list):
+        return normalized
+    merged_by_article: dict[str, dict[str, Any]] = {}
+    ordered_article_ids: list[str] = []
+    for selection in selections:
+        if not isinstance(selection, dict):
             continue
-        assessment["actor_matches"] = matches_by_article.get(
-            assessment.get("article_id"), []
+        article_id = selection.get("article_id")
+        if not isinstance(article_id, str):
+            continue
+        existing = merged_by_article.get(article_id)
+        if existing is None:
+            existing = deepcopy(selection)
+            existing["matched_hypothesis_ids"] = list(
+                dict.fromkeys(selection.get("matched_hypothesis_ids") or ())
+            )
+            merged_by_article[article_id] = existing
+            ordered_article_ids.append(article_id)
+            continue
+        existing["matched_hypothesis_ids"] = list(
+            dict.fromkeys(
+                [
+                    *(existing.get("matched_hypothesis_ids") or ()),
+                    *(selection.get("matched_hypothesis_ids") or ()),
+                ]
+            )
         )
+    normalized["selections"] = [
+        merged_by_article[article_id] for article_id in ordered_article_ids
+    ]
     return normalized
 
 
@@ -6246,15 +6102,6 @@ def _validate_search_reselection_payload(
         for item in assessment_payload.get("assessments") or []
         if isinstance(item, dict)
     }
-    actor_status_by_pair = {
-        (item.get("article_id"), actor_match.get("hypothesis_id")): (
-            actor_match.get("status")
-        )
-        for item in assessment_payload.get("assessments") or []
-        if isinstance(item, dict)
-        for actor_match in item.get("actor_matches") or []
-        if isinstance(actor_match, dict)
-    }
     for selection in payload.get("selections") or []:
         if not isinstance(selection, dict):
             continue
@@ -6270,17 +6117,6 @@ def _validate_search_reselection_payload(
             raise ModelProtocolError(
                 "selected search candidate hypothesis IDs must be a non-empty "
                 f"subset of its assessment: {article_id}"
-            )
-        mismatched_ids = [
-            hypothesis_id
-            for hypothesis_id in selected_ids
-            if actor_status_by_pair.get((article_id, hypothesis_id))
-            == "mismatched"
-        ]
-        if mismatched_ids:
-            raise ModelProtocolError(
-                "selected search candidate contradicts its actor assessment: "
-                f"{article_id} {mismatched_ids}"
             )
 
 

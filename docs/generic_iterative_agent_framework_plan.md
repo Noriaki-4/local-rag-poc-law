@@ -294,7 +294,7 @@ Solverが同じHypothesisについて明示した1ホップGraph検索は同じs
 - 通常: 1〜2 research cyclesで完了する
 - 多段探索または再計画が必要な場合: 3〜4 research cycles
 - 上限: 4 research cycles
-- 1 Cycleの本文取得累計上限: Profileの`max_fetched_resources_per_cycle`。Legal初期値は3。Article全文を同時評価する負荷をCycleへ分散するためであり、Tool 1回の物理上限4とは区別する
+- 1 Cycleの本文取得累計上限: Profileの`max_fetched_resources_per_cycle`。Legal初期値は5。Article全文を複数Stepへ分散するためであり、Tool 1回の物理上限4とは区別する
 - 1 Cycle内のaction-observation step上限: Profileの`max_steps_per_cycle`
 - Run全体のstep上限: Profileの`max_total_steps`
 - Solverが`finalize`を返した時点で即終了
@@ -437,8 +437,8 @@ class Hypothesis:
 - Hypothesisは必ず1つのWorkItemへ所属する。
 - `action_actor`は規制対象となる行為をする者を表す。主体そのものは質問分解LLMが判断する。
   行為対象や関係主体は`question`に残し、別の分類項目へ推測で分解しない。WorkItemを正本とし、
-  Hypothesisには重複保存しない。検索計画と候補主体照合のread modelへProgramが所属WorkItemから
-  `action_actor`を決定的に結合する。
+  Hypothesisには重複保存しない。Programは検索計画のread modelへ、所属WorkItemから
+  `action_actor`を決定的に結合する。検索抜粋だけで主体を確定せず、本文取得後の評価で確認する。
 - `Hypothesis.work_item_id`は、そのHypothesisが検証するWorkItemを表す。
 - `Hypothesis.statement`には本文取得前の未確認で誤り得る暫定回答を置き、本文で検証できる命題とする。
   要件、例外構造または手続行為の候補を含め、質問の言い換えだけを命題にしない。
@@ -1647,7 +1647,7 @@ reviewer:
 
 limits:
   max_research_cycles: 4
-  max_fetched_resources_per_cycle: 3
+  max_fetched_resources_per_cycle: 5
   max_steps_per_cycle: 4
   max_total_steps: 8
   max_tool_requests_per_step: 5
@@ -1982,9 +1982,8 @@ Graph Review差分処理やCycle境界処理を混入させず、IntegrationとG
 | `solver_cycle_close.md` | 直前の本文評価を前提に、active Frontierの引継ぎと`finalize / start_next_cycle`だけを扱う。本文再評価や次Cycleの詳細なTool計画は行わない。 |
 | `solver_finalization.md` | `finalize_only=true`で追加Toolを要求せず、確認済み範囲と未確認範囲を分けた回答を作る。 |
 | `solver_reviewer_revision.md` | 全Findingを本文と照合し、`addressed / disputed`を全件返す。回答修正か追加調査かはSolverが判断する。 |
-| `solver_search_review.md` | 候補別にまとめた検索抜粋を全件読み、主体以外の内容、条件・効果、主な法的機能を短く評価する。この段階では主体照合や候補選択をせず、一時評価をCaseStateへ保存しない。 |
-| `solver_search_actor_classification.md` | 候補見出しと前段要約を読み、規律主体だけを既知Hypothesisの主体構造と照合する。法的機能、条件、効果、候補選択は扱わない。 |
-| `solver_search_reselection.md` | 内容面と主体面の両方で対応した前段の短い一時評価だけを比較し、中心命題を直接検証する候補を確保してから、異なる未確認事項へ広げて本文取得候補を選ぶ。元の検索抜粋、状態更新、再検索は扱わない。 |
+| `solver_search_review.md` | 候補別にまとめた検索抜粋を全件読み、内容、条件・効果、主な法的機能を短く評価する。規律主体を確定できなくても本文確認の価値があるHypothesisへ対応付けられる。この段階では候補選択をせず、一時評価をCaseStateへ保存しない。 |
+| `solver_search_reselection.md` | 前段の短い一時評価だけを比較し、中心命題を確認する候補を確保してから、異なる未確認事項へ広げて本文取得候補を選ぶ。検索抜粋だけで規律主体を確定せず、元の検索抜粋の再評価、状態更新、再検索は扱わない。 |
 | `solver_final_answer_check.md` | WorkItemごとの取得本文に照らして回答案を確認し、`non_work_item_requirements`を全件反映する。回答要件を法的根拠として扱わない。 |
 | `solver_graph_review.md` | `graph_review_batch`と`graph_review_ledger`を読む。`review_trigger`を解釈し、過去の詳細が再提示されないことを候補の不存在と解釈しない。 |
 | `solver_graph_review.md` | 各batchの全候補をWorkItem・Hypothesis別に評価し、最大3件を`select`、関連する残りを`defer`、無関係と判断したものだけを`reject`する。 |
@@ -2208,8 +2207,8 @@ ProgramはID、件数、既知参照、WorkItemとHypothesisの所属を検証�
 Integration等は完全な`SolverContext`を使う。用途別投影は項目の有無だけを決め、法的観点、関連性、WorkItem数は決めない。
 主体情報も同様に、質問分解LLMがWorkItemへ保存した`action_actor`を正本とする。行為対象はWorkItemの
 `question`から読み取る。ProgramはHypothesisの所属IDでこれらを後続Viewへ結合するだけで、主体の意味を
-補正しない。候補の規律主体との対応はLLMが直接判断し、Programは内容評価と主体照合が返した既知Hypothesis IDの
-積集合だけを検証する。
+補正しない。検索抜粋だけで候補の規律主体を確定せず、内容面で対応した候補を本文取得できるようにする。
+取得本文とHypothesisの主体対応はLLMが判断し、Programは既知Hypothesis ID、件数、型だけを検証する。
 
 ## 12. 実装Phase
 
@@ -2279,7 +2278,7 @@ Integration等は完全な`SolverContext`を使う。用途別投影は項目の
 - 全WorkTree案内、現Cycleのgoal・strategy、直前Step、frontier、Solver指定focus、直前の新規Evidence、保持Evidenceを組み立てる。
 - Cycleの`planned → running → completed`と、各Stepの`planned → observed → completed`を保存し、
   Cycleの`completed`時だけcycle数を増やす。
-- `max_research_cycles=4`、Cycle累計の`max_fetched_resources_per_cycle=3`、
+- `max_research_cycles=4`、Cycle累計の`max_fetched_resources_per_cycle=5`、
   `max_tool_requests_per_step`を別の制約として実装する。自動Toolをstep・Cycle traceへ計上するが、
   本文取得数とは混同しない。
 - Cycleの本文取得・step・時間境界前に新しいactionを止め、予約したSolver呼出しで
@@ -2307,7 +2306,7 @@ Phase 1の主要な実装リスクは`contract_rendering.py`である。Enum、�
 
 - Cycle 1で検索→起点本文→1ホップ→隣接本文を複数Stepとして継続し、必要根拠を探し切って`finalize`できる。
 - Tool実行やStep完了だけではcycle数が増えず、`start_next_cycle`または`finalize`でCycleを閉じた時だけ増える。
-- 1 Cycleの5件目の本文取得を実行前に拒否し、4件までの観察結果をSolverが評価して
+- 1 Cycleの6件目の本文取得を実行前に拒否し、5件までの観察結果をSolverが評価して
   `finalize`または次Cycleへの引継ぎを返し、その後の`start_cycle`で次Cycleの計画を作る。
 - 最大4 Cycleへ到達するfixtureと、1〜3 Cycleで早期`finalize`するfixtureがともに通る。
 - Stepの`planned`では未完了Toolだけを実行し、`observed`では成功済みToolを再実行せず評価へ進む。
@@ -2524,7 +2523,7 @@ publishする別単位とする。Graph schema、抽出規則、入力データ�
 完了条件:
 
 - Reviewer無効の単純問題では、LLM呼び出しが原則2〜3回以内である。
-- 公開買付けのような多段探索は、1 Cycleの本文取得を4件以内に抑え、
+- 公開買付けのような多段探索は、1 Cycleの本文取得を5件以内に抑え、
   通常1〜2 Cycle、必要な場合のみ最大4 Cycleで完了する。
 - 最大経路でもRun全体のaction stepは`max_total_steps`、Solver判断は原則`max_total_steps + 1`を超えない。
 - 各LLM・Tool実行前にCycle終了、残りCycle、最終回答の予約を確保し、予算不足の中間呼出しを

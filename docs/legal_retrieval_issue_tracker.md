@@ -76,11 +76,11 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-014` | P1 | 検証待ち | Haikuで承認した中間状態から安価なモデルで後続処理を再生する | checkpointの明示承認をpromotion時に記録し、指定Provider・modelで1回のSolver処理を再生する`replay_agent_checkpoint.py`を実装した。APIを使わない単体テストは合格した | Haikuの正常中間状態を承認済みfixtureへ昇格し、`gpt-4o-mini`、同じcheckpointのHaikuの順に実モデル再生する |
 | `LR-015` | P0 | 検証待ち | 初回Researchを単一責務のStepへ分け、要求をWorkItemとそれ以外へ欠落なく分解する | Profile v156で同一Cycle内の要求分解、仮説立案、検索要求作成を実装した。各完成Promptは単独で読めるH1を持ち、処理順のStep番号を含めない。一時的な段階比較コードを整理した後の全900テストに合格した | 別分野fixtureと公開買付けE2Eを`gpt-4o-mini`で確認し、最終的にHaikuで品質確認する |
 | `LR-016` | P0 | 検証待ち | Tool観察の意味統合とCycle Closeを単一責務のStepへ分ける | v183でArticle→Hypothesis対応をObservationへ渡し、GPT-4o mini実モデルで4 Hypothesisへの本文Evidence保存を確認した。後続Stepの時間切れで成功済みObservationを失わないcheckpoint保存を追加した。対象WorkItemがない依存判定は呼び出さず、OpenAI schemaへ`null` enumを出す経路も除去した | 同じcheckpointをHaikuで再生し、本文の部分確認、意味更新、Cycle判断を確認する |
-| `LR-017` | P0 | 対応中 | 検索候補の規律主体と行為対象を安定して区別する | Profile v304で主体照合LLMによるArticle・Hypothesis IDの再出力を廃止し、入力順の照合結果をProgramが既知組へ結合するようにした。候補選択には内容対応があり、主体照合が`mismatched`でない組だけを投影し、Provider schemaも同じ組だけを許可する | 公開買付け3問を再実行し、主体照合の転記漏れと、前段で不一致とした組の再選択によるprotocol errorがないことを確認する |
+| `LR-017` | P0 | 対応中 | 検索候補の規律主体と行為対象を安定して区別する | Profile v310の隔離診断で、検索抜粋と`action_actor=不明`から行為者を確定する結果が実行ごとに揺れた。Profile v311では本文取得前の専用主体照合を廃止し、内容面でHypothesisに対応する候補を本文取得可能にした。旧主体照合値は保存互換だけに残し、Solver入力と候補選択条件には使わない | 公開買付け3問で、主体未確定の必要Articleが本文取得前に除外されず、取得本文を評価するLLMが主体の一致・分岐を判断できることを確認する。利用者確認と条件付き回答はLR-020で扱う |
 | `LR-018` | P0 | 完了 | Graph探索が必要な未解決事項があってもSolverがGraph検索を要求しない | 次Cycle開始時の保留OpenSearch候補を自動Search Selectionへ戻さず、Integrationで既知候補・Graph・再検索を比較するよう修正した。Graph selectorのmode・predicate・directionを分岐schemaで拘束し、同一Graph要求と本文取得要求は選択内容を保ったまま輸送時に統合する | Cycle 2 fixtureで府令10条を含む既知候補の本文取得へ進むこと、および候補を除いたGraph必須状態で`27条の2 / IMPLEMENTS / from_subject`の1要求を返し共通契約を通過することを`gpt-4o-mini-2024-07-18`で確認済み |
 | `LR-019` | P0 | 対応中 | 統合の意味的な行動選択を違反別契約からSolver loopへ戻す | 下位規範Action PromptはTool選択だけを求めていたが、汎用Solver schemaが`finalize`と`answer`も要求できる不整合があり、実モデルが`finalize + answer=null + ToolRequest`を返して停止した。Profile v304で同処理を`decision_reason + tool_requests`だけの専用契約へ分離し、既存DependencyDecisionとの対応はProgramがWorkItem IDから復元する | 例外問題を再実行し、下位規範Actionが汎用完了分岐へ入らず次Toolを実行できることを確認する |
 | `LR-020` | P1 | 要設計 | 複数の解釈や規律主体が成立する質問を一方的に確定せず、利用者へ確認する | 質問分解時に主体を確定させると誤った候補を早期に除外する。主体を限定せず検索すれば、発行者自身と発行者以外等の異なる規律主体が候補本文から判明する | LLMが検索後に結論を変える主体分岐を検出し、既知情報で確定できなければ確認を求める。Programが確認待ちを保存し、回答後に同じCaseを再開する最小契約を設計する |
-| `LR-021` | P0 | 対応中 | 検索候補の内容評価を単一責務にする | Profile v309でSearch Assessmentを本文取得候補の要約・法的機能分類・内容面のHypothesis対応だけに限定した。本文取得候補は`legal_search`の結果をArticle単位にまとめた候補であり、この時点では本文取得対象として未選択と定義した。専用入力read modelの`Field.description`を基本的な意味の正本にし、必要項目だけを投影して入力契約を完成Promptへ生成する。`assessments`の各keyは対応する`search_candidates[].article_id`と同じ文字列にし、輸送schemaが全候補の過不足ない対応を強制する。既知の検索Request IDはProgramが付与し、後続で使われない全体`reason`はLLM出力から削除した。`run_search_assessment_debug.py`は本番Promptだけを1回呼び、完成Prompt・入力・schema・生応答を保存できる | 公告、例外、総合の順に内容評価、主体照合、候補選択を別々に実モデル検証する |
+| `LR-021` | P0 | 対応中 | 検索候補の内容評価を単一責務にする | Profile v309でSearch Assessmentを本文取得候補の要約・法的機能分類・内容面のHypothesis対応だけに限定した。Profile v311では、その対応結果を候補選択へ直接渡し、検索抜粋に基づく専用主体照合を削除した。既知の検索Request IDはProgramが付与し、意味判断はLLMに残す | 公告、例外、総合の順に内容評価と候補選択を隔離検証し、その後に本文取得後の統合を確認する |
 | `LR-022` | P0 | 未着手 | 後続Cycleで既存WorkItemへ代替Hypothesisを追加する | 設計ではHypothesisの`statement`を別の意味へ上書きせず、見立てを変える場合は新しいHypothesisを追加する。しかし現行の段階別経路は、Hypothesisが1件もないopen WorkItemだけを生成処理へ送り、本文評価は既存Hypothesisの更新だけを許す。そのため、初期仮説が反証された場合も、同じWorkItemへ新しい見立てを追加して次Cycleで仕切り直せない | H1が`contradicted`または新しい規律構造が判明したfixtureで、H1と根拠を履歴として保持し、Cycle 2で同じWorkItemへ新IDのH2を追加できることを確認する。検索方法だけを変える場合は不要なHypothesisを追加しない |
 
 ### 3.1 LR-016 Tool観察とCycle Closeの単一責務化
@@ -191,6 +191,21 @@ Profile v275では、その後の切り分けで`target_actor`と`actor_relation
 候補の主体対応はLLMが、内容評価済みのArticle・Hypothesis組ごとにstatusと理由を返す。
 Programは組を追加・削除せず結合し、最終的な本文取得候補は後段のLLMが選択する。
 旧fixtureと保存状態の`target_actor`、`actor_relation`、`regulated_actor_role`は読込み時に破棄する。
+
+Profile v310の実モデル隔離診断では、`action_actor=不明`の同じ入力に対する主体照合が、ほぼ全件一致から
+全件不一致まで変動した。検索抜粋だけでの主体確定を本文取得の門番にする設計が不安定だったため、Profile v311で
+専用主体照合を検索経路から削除した。内容面で対応した候補は、主体が未確定でも本文取得できる。主体の一致、
+別主体の規律又は質問自体の曖昧さは、取得本文を評価するLLMが判断する。
+
+本文取得枠を5件へ変更した実モデル確認では、Reselectionが同じArticleを複数回返し、Provider schemaは通過するが
+内部の一意性契約で停止した。Profile v312では同じArticle IDの輸送上の重複を提示順の1件へ正規化し、
+`matched_hypothesis_ids`は和集合で保持する。これはArticleの採否を変更する意味判断ではなく、集合として扱う
+選択結果の構造正規化である。Promptと完了確認にも、同じArticleを最大1回だけ返すことを明記する。
+
+同じ確認で、Cycle全体の本文取得上限5件を、1回の`fetch_articles`上限4件としてReselectionへ提示する
+不整合も判明した。Profile v313ではTool定義の`article_ids.maxItems`を正本として、現在のCycle残容量との
+小さい方を`current_fetch_request_capacity`として提示し、Provider schemaも同じ値で制約する。5件目は同じ
+要求へ詰め込まず、最初の本文評価後の次Stepで取得できる候補として保持する。
 
 ### 3.4 LR-020 曖昧な質問の確認
 

@@ -110,7 +110,7 @@ def test_run_calls_model_once_and_normalizes_assessment_map() -> None:
     assert tuple(
         item.article_id for item in run.decision.assessments
     ) == tuple(item.article_id for item in context.search_candidates)
-    assert run.decision.assessments[0].actor_matches == ()
+    assert "actor_matches" not in run.decision.assessments[0].model_dump()
 
 
 def test_v309_real_model_search_assessment_fixtures_preserve_call_boundary() -> None:

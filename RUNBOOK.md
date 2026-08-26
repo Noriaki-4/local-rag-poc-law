@@ -1336,7 +1336,9 @@ agent-api/.venv/bin/python scripts/run_search_assessment_debug.py \
 
 `--article-id`は複数指定できる。出力先の`instructions.md`と`output_schema.json`が結合後の固定指示と
 契約、`input.json`が実際の候補・Hypothesis・検索抜粋、`result.json`が生応答と正規化結果である。
-`callCount=1`、`repairAttempted=false`により、後段の主体照合や選択が混ざっていないことを確認する。
+`callCount=1`、`repairAttempted=false`により、後段の候補選択が混ざっていないことを確認する。
+本文取得前の専用主体照合は行わない。検索抜粋だけで規律主体を確定せず、内容面で対応した候補を本文取得し、
+取得本文を評価するLLMが規律主体を確認する。
 
 初回Researchの失敗がモデルの法的仮説立案能力か、本番Prompt・契約の複雑さかを切り分ける場合は、
 本番Promptを一切合成しない最小診断を実行する。出力はWorkItemと入れ子のHypothesisだけであり、
@@ -1387,7 +1389,7 @@ Legal ProfileのGraph要求は1回1ホップである。SolverがHypothesisに�
 明示して`legal_graph_neighbors`を要求する。Graph候補Articleの本文取得後、その先が必要なら、Solverは
 そのArticleを新しい起点にして次の1ホップを要求できる。Programは累積depthや発見元を理由に除外しない。
 `fetch_articles`1回のArticle IDは物理上限4個、1 Cycleの本文取得成功数は
-`AGENT_FRAMEWORK_MAX_FETCHED_RESOURCES_PER_CYCLE`（現行既定3件）で制限する。
+`AGENT_FRAMEWORK_MAX_FETCHED_RESOURCES_PER_CYCLE`（現行既定5件）で制限する。
 Legal Profileの1 Solver Decisionは検索系Toolを最大4要求、`fetch_articles`を最大1要求とし、
 合計上限は5要求である。本文取得量の4 Article上限とは別の制約である。
 Graph Reviewから1 stepで選ぶ候補は最大3件とし、残りの関連候補はdeferして後続stepまたは次Cycleへ残す。

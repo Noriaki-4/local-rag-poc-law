@@ -16,7 +16,6 @@ from .state import (
     Hypothesis,
     HypothesisJudgment,
     ReviewFindingResolution,
-    SearchCandidateActorMatch,
     SearchCandidateReview,
     SearchCandidateSelection,
     ToolRequest,
@@ -147,32 +146,16 @@ class SearchCandidateAssessment(FrameworkModel):
         description=(
             "見出しと検索抜粋が同じ行為と規律を直接扱い、本文を確認する価値がある"
             "Hypothesis ID。同じ制度名や語句を含むだけの場合は含めない。"
-            "行為者の一致は次の独立処理で確認する。"
-        ),
-    )
-    actor_matches: tuple[SearchCandidateActorMatch, ...] = Field(
-        default=(),
-        description=(
-            "matched_hypothesis_idsの各Article・Hypothesis組について、次の独立処理で"
-            "規律主体を照合した結果。内容評価だけの段階では空。"
+            "行為者を確定できない場合も、本文確認の価値があれば含められる。"
         ),
     )
 
     @model_validator(mode="after")
-    def require_consistent_actor_matches(self) -> SearchCandidateAssessment:
+    def require_unique_hypothesis_ids(self) -> SearchCandidateAssessment:
         if len(self.matched_hypothesis_ids) != len(
             set(self.matched_hypothesis_ids)
         ):
             raise ValueError("search assessment hypothesis IDs must be unique")
-        actor_hypothesis_ids = tuple(
-            item.hypothesis_id for item in self.actor_matches
-        )
-        if len(actor_hypothesis_ids) != len(set(actor_hypothesis_ids)):
-            raise ValueError("search actor match hypothesis IDs must be unique")
-        if not set(actor_hypothesis_ids).issubset(self.matched_hypothesis_ids):
-            raise ValueError(
-                "search actor matches must reference content-matched hypotheses"
-            )
         return self
 
 
@@ -184,7 +167,10 @@ class SearchAssessmentDecision(FrameworkModel):
 
 class SearchReselectionDecision(FrameworkModel):
     selections: tuple[SearchCandidateSelection, ...] = Field(
-        description="現在の本文取得枠で取得する候補と選択理由。",
+        description=(
+            "今回の1回の本文取得要求で取得する候補と選択理由。"
+            "同じArticleは重複させず最大1回だけ含める。"
+        ),
     )
     reason: str = Field(
         min_length=1,

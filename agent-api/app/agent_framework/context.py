@@ -19,7 +19,6 @@ from .state import (
     FrontierReviewStatus,
     Hypothesis,
     ReviewFinding,
-    SearchCandidateActorMatch,
     ToolRequest,
     ToolResult,
     ToolStatus,
@@ -289,24 +288,17 @@ class SearchCandidateArticle(FrameworkModel):
         default=(),
         description="前Cycleで候補本文により満たせると判断された明示要求。",
     )
-    actor_match_reason: str | None = Field(
-        default=None,
-        description="前Cycleの主体照合理由。",
-    )
-    actor_matches: tuple[SearchCandidateActorMatch, ...] = Field(
-        default=(),
-        description="前CycleでArticle・Hypothesisごとに行った規律主体の照合結果。",
-    )
-
     @model_validator(mode="before")
     @classmethod
-    def discard_legacy_actor_role(cls, value: object) -> object:
-        """旧read modelの分類ラベルを直接照合へ移行する。"""
+    def discard_legacy_actor_fields(cls, value: object) -> object:
+        """本文取得前の主体照合を廃止した旧read modelを読み替える。"""
 
         if not isinstance(value, dict):
             return value
         migrated = dict(value)
         migrated.pop("regulated_actor_role", None)
+        migrated.pop("actor_match_reason", None)
+        migrated.pop("actor_matches", None)
         return migrated
 
 
@@ -1268,16 +1260,6 @@ def _search_candidate_projection(
                 assessment_by_article[
                     article_id
                 ].matched_non_work_item_requirements
-                if article_id in assessment_by_article
-                else ()
-            ),
-            actor_match_reason=(
-                assessment_by_article[article_id].actor_match_reason
-                if article_id in assessment_by_article
-                else None
-            ),
-            actor_matches=(
-                assessment_by_article[article_id].actor_matches
                 if article_id in assessment_by_article
                 else ()
             ),

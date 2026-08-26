@@ -17,8 +17,6 @@ class ModelCallProfile(FrameworkModel):
     followup_system_prompt: str | None = None
     completion_check_prompt: str | None = None
     followup_completion_check_prompt: str | None = None
-    actor_classification_system_prompt: str | None = None
-    actor_classification_completion_check_prompt: str | None = None
     dependency_system_prompt: str | None = None
     dependency_completion_check_prompt: str | None = None
     dependency_action_system_prompt: str | None = None

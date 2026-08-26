@@ -12,13 +12,14 @@
 
 ## 完了条件
 
-- 選択した全候補が、主体と内容の両方で未確認Hypothesisを直接検証できる。
+- 選択した全候補が、未確認Hypothesisの本文確認に役立つ。
 - 候補のある未確認Hypothesisへ、取得枠を偏りなく配分している。
-- 選択数が`remaining_fetch_capacity`以内である。
+- 同じArticleを重複して選択していない。
+- 選択数が`current_fetch_request_capacity`以内である。
 
 ## 手順
 
-1. 提示された`assessments`から、各未確認Hypothesisに主体と内容の両方で対応する候補を確認します。
+1. 提示された`assessments`から、各未確認Hypothesisの本文確認に役立つ候補を確認します。
 2. 各Hypothesisを直接検証する候補を、取得枠内で選びます。
 3. 選択したArticle、Hypothesis、理由と全体方針を返します。
 
@@ -26,10 +27,9 @@
 
 ### 対応判定
 
-- `matched_hypothesis_ids`は内容面の対応、`actor_matches`はArticle・Hypothesis組ごとの主体照合です。
-  `selectable_hypothesis_ids`には、両評価を機械的に結合し、`mismatched`を除いたIDだけが示されています。
-- 選択するHypothesisは`selectable_hypothesis_ids`から指定します。`unknown`は、本文取得により主体を確認する必要がある場合だけ選べます。
-- 同じ制度でも、規律主体、行為、手続段階が異なる候補を代用しません。
+- 選択するHypothesisは、候補の`matched_hypothesis_ids`から指定します。
+- 規律主体を検索抜粋だけで確定できなくても、それを確認する価値があれば本文取得候補にできます。
+- 同じ制度名や語句を含むだけで、Hypothesisの確認に役立たない候補は選びません。
 - Hypothesisの`gaps`を直接埋める候補を選び、周辺事項だけの候補で代用しません。
 - `matched_hypothesis_ids`には、その候補で今回直接検証するHypothesisだけを書きます。
 
@@ -38,14 +38,15 @@
 - 質問の中心命題を直接検証する候補があれば、まず1件を選びます。特定の法的機能を常に中心とはみなしません。
 - 同じHypothesisの候補を複数選ぶ前に、候補のある他の未確認Hypothesisへ1枠ずつ配分します。
   2件目は、別々の`gaps`を直接埋める場合だけ選びます。
-- `remaining_fetch_capacity`は上限であり目標件数ではありません。内容が重複する候補は追加しません。
+- `current_fetch_request_capacity`は今回1回の本文取得要求の上限であり、Cycle全体の上限ではありません。
+  上限まで選ぶ必要はありません。内容が重複する候補は追加しません。
 
 ### 根拠条文の要求
 
 - 根拠法令・条文の提示が要求されている場合は、義務を自ら定める候補を含めます。
 - 詳細規定が上位の根拠Articleを明示し、そのArticleも候補にある場合は、同じ段階の詳細候補を増やす前に両方を選びます。
 
-Assessmentは前段で全文候補を比較して作成済みです。この段階で`legal_function`を変更したり、
+Assessmentは前段で全候補を比較して作成済みです。この段階で`legal_function`を変更したり、
 `summary`の従たる記載を主機能として再分類したりしません。
 
 選択理由の冒頭には`legal_function=applicability`のようにAssessmentの値をそのまま書きます。

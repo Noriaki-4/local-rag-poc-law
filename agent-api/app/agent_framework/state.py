@@ -22,7 +22,6 @@ ReviewFindingKind = Literal[
 ]
 ReviewFindingResolutionOutcome = Literal["addressed", "disputed"]
 DependencyStatus = Literal["not_required", "needs_action", "resolved"]
-SearchActorMatchStatus = Literal["matched", "mismatched", "unknown"]
 FrontierReviewStatus = Literal[
     "unreviewed",
     "selected",
@@ -472,26 +471,6 @@ class SearchCandidateSelection(FrameworkModel):
         return self
 
 
-class SearchCandidateActorMatch(FrameworkModel):
-    """候補ArticleとHypothesisの一組に対する規律主体の照合結果。"""
-
-    hypothesis_id: str = Field(description="内容面で対応した既知Hypothesis ID。")
-    status: SearchActorMatchStatus = Field(
-        description=(
-            "matchedは主体一致、mismatchedは主体不一致、unknownは検索抜粋だけでは"
-            "判定できない状態。"
-        ),
-    )
-    regulated_actor: str = Field(
-        min_length=1,
-        description="候補の見出しと要約から読み取った規律主体。",
-    )
-    reason: str = Field(
-        min_length=1,
-        description="候補の規律主体とHypothesisの行為者を比較した理由。",
-    )
-
-
 class SearchCandidateAssessmentRecord(FrameworkModel):
     """Search Assessmentで確定した候補理解をCycle間で保持する。"""
 
@@ -508,43 +487,18 @@ class SearchCandidateAssessmentRecord(FrameworkModel):
         default=(),
         description="候補本文の取得で満たせる回答全体の明示要求。",
     )
-    actor_match_reason: str | None = Field(
-        default=None,
-        description="旧記録との互換用に保持する、候補単位の主体照合理由。",
-    )
-    actor_matches: tuple[SearchCandidateActorMatch, ...] = Field(
-        default=(),
-        description=(
-            "内容面で対応したArticleとHypothesisの各組について、"
-            "規律主体を照合した結果。"
-        ),
-    )
-
     @model_validator(mode="before")
     @classmethod
-    def discard_legacy_actor_role(cls, value: object) -> object:
-        """旧分類ラベルを捨て、直接照合の結果だけを引き継ぐ。"""
+    def discard_legacy_actor_fields(cls, value: object) -> object:
+        """本文取得前の主体照合を廃止した旧保存値を読み飛ばす。"""
 
         if not isinstance(value, dict):
             return value
         migrated = dict(value)
         migrated.pop("regulated_actor_role", None)
+        migrated.pop("actor_match_reason", None)
+        migrated.pop("actor_matches", None)
         return migrated
-
-    @model_validator(mode="after")
-    def require_consistent_actor_matches(
-        self,
-    ) -> SearchCandidateAssessmentRecord:
-        actor_hypothesis_ids = tuple(
-            item.hypothesis_id for item in self.actor_matches
-        )
-        if len(actor_hypothesis_ids) != len(set(actor_hypothesis_ids)):
-            raise ValueError("search actor match hypothesis IDs must be unique")
-        if not set(actor_hypothesis_ids).issubset(self.matched_hypothesis_ids):
-            raise ValueError(
-                "search actor matches must reference content-matched hypotheses"
-            )
-        return self
 
 
 class SearchCandidateReview(FrameworkModel):

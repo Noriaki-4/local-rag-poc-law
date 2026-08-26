@@ -588,73 +588,10 @@
       "title": "ReviewFindingResolution",
       "type": "object"
     },
-    "SearchCandidateActorMatch": {
-      "additionalProperties": false,
-      "description": "候補ArticleとHypothesisの一組に対する規律主体の照合結果。",
-      "properties": {
-        "hypothesis_id": {
-          "description": "内容面で対応した既知Hypothesis ID。",
-          "title": "Hypothesis Id",
-          "type": "string"
-        },
-        "reason": {
-          "description": "候補の規律主体とHypothesisの行為者を比較した理由。",
-          "minLength": 1,
-          "title": "Reason",
-          "type": "string"
-        },
-        "regulated_actor": {
-          "description": "候補の見出しと要約から読み取った規律主体。",
-          "minLength": 1,
-          "title": "Regulated Actor",
-          "type": "string"
-        },
-        "status": {
-          "description": "matchedは主体一致、mismatchedは主体不一致、unknownは検索抜粋だけでは判定できない状態。",
-          "enum": [
-            "matched",
-            "mismatched",
-            "unknown"
-          ],
-          "title": "Status",
-          "type": "string"
-        }
-      },
-      "required": [
-        "hypothesis_id",
-        "status",
-        "regulated_actor",
-        "reason"
-      ],
-      "title": "SearchCandidateActorMatch",
-      "type": "object"
-    },
     "SearchCandidateAssessmentRecord": {
       "additionalProperties": false,
       "description": "Search Assessmentで確定した候補理解をCycle間で保持する。",
       "properties": {
-        "actor_match_reason": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "旧記録との互換用に保持する、候補単位の主体照合理由。",
-          "title": "Actor Match Reason"
-        },
-        "actor_matches": {
-          "default": [],
-          "description": "内容面で対応したArticleとHypothesisの各組について、規律主体を照合した結果。",
-          "items": {
-            "$ref": "#/$defs/SearchCandidateActorMatch"
-          },
-          "title": "Actor Matches",
-          "type": "array"
-        },
         "article_id": {
           "description": "評価した候補Article ID。",
           "title": "Article Id",

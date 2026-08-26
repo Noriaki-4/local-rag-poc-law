@@ -53,7 +53,7 @@ Cycle境界：取得本文の評価 ──→ 下位規範依存の評価 ──
 | `cycle_close` | cycle_closeのみ | 直前の本文評価を前提に、完了または次Cycleへの引継ぎだけを決める。 |
 | `finalization` | identity + finalization + common + completion | 実行上限時に追加Toolなしで、確認済み範囲と未確認範囲を分けた回答を作る。 |
 | `reviewer_revision` | identity + reviewer_revision + common + tools + completion | Reviewer Findingを全件処理し、回答修正または追加調査を決める。 |
-| `search_selection` | search_review → search_actor_classification → search_reselection | OpenSearch候補を全件要約し、独立した主体照合を経て、今回本文取得する候補を決める。 |
+| `search_selection` | search_review → search_reselection | OpenSearch候補を全件要約・対応付けし、今回本文取得する候補を決める。規律主体は本文取得後に確認する。 |
 | `graph_selection` | graph_reviewのみ | 新しい1ホップGraph候補を差分評価し、本文取得する候補と保留・除外を決める。 |
 
 `search_selection`と`graph_selection`は同じSolverの処理モードです。任意実行のReviewer Agentではありません。
@@ -99,8 +99,7 @@ Anthropicの「明確で直接的な指示、必要時だけ順序付き手順�
 | `solver_finalization.md` | `finalize_only=true`時の限定最終化。 |
 | `solver_reviewer_revision.md` | Reviewer Findingの受領、反映、反論、再調査。 |
 | `solver_search_review.md` | OpenSearch候補の見出しと検索抜粋を全件評価し、内容を要約・分類して、同じ法的論点を調べるHypothesisへ対応付ける。Article全文、回答根拠、行為者、Hypothesisの正否は判断しない。 |
-| `solver_search_actor_classification.md` | 内容評価が作ったArticle・Hypothesis組を入力順に照合し、IDを再出力せず各組の規律主体を`matched / mismatched / unknown`で返す。 |
-| `solver_search_reselection.md` | 前段の短い自己要約と、主体不一致を除いた選択可能Hypothesis IDから本文取得候補を選ぶ。 |
+| `solver_search_reselection.md` | 前段の短い自己要約と対応Hypothesis IDから本文取得候補を選ぶ。検索抜粋だけで規律主体を確定しない。 |
 | `solver_graph_review.md` | Graph差分候補の`select / defer / reject`と本文取得順。 |
 | `solver_*_check.md` | 対応する処理の入力後に置く、短い出力前完了確認。処理本体の手順や新しい出力項目は定義しない。 |
 | `minimal_hypothesis_diagnostic.md` | 本番Promptを合成せず、質問分解・WorkItem・具体的な法的仮説だけを実モデルで切り分ける診断用Prompt。本番Profileでは使用しない。 |
@@ -162,10 +161,9 @@ Adapterは各Stepの出力へ永続化用IDと既定statusを機械的に付け�
 Programは文字列の内容を補正せず、ID、件数、既知参照、WorkItemとHypothesisの所属だけを検証します。
 質問分解で判断した規制対象行為の行為者は、WorkItemの`action_actor`に保持します。行為対象や関係主体は
 WorkItemの`question`に残し、別の分類項目へ推測で分解しません。Hypothesisには主体を重複保存せず、
-検索計画・候補主体照合のread modelへ所属WorkItemから決定的に結合します。候補の規律主体との対応はLLMが
-`question`、`action_actor`、Hypothesisを直接比較します。Programは内容評価が作ったArticle・Hypothesis組へ
-入力順で照合結果を結合するため、主体照合LLMに既知IDを再入力させません。候補選択には、内容対応があり、
-主体照合が`mismatched`でない組だけを機械的に投影します。Programは条文の意味や主体を判断しません。
+検索計画のread modelへ所属WorkItemから決定的に結合します。検索抜粋だけでは規律主体を確定せず、
+内容面で本文確認の価値がある候補を選択対象にします。本文取得後の規律主体とHypothesisの対応はLLMが判断し、
+Programは条文の意味や主体を判断しません。
 Step 1の不変条件は「質問の明示要求全体 = WorkItem + non_work_item_requirements」であり、元の質問は引き続き
 CaseStoreの正本です。`non_work_item_requirements`は重要度や全WorkItem共通性を表さず、独立した法的結論を
 要しない根拠・出典・引用の提示や表現・出力形式等の明示要求を欠落させず保持します。

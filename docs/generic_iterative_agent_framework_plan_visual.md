@@ -133,7 +133,7 @@ flowchart TD
     I --> J[次Cycleで新しいgoal・strategy]
 ```
 
-Legal Profileでは1 CycleのArticle本文取得を累計4件以内、Graph候補から1 Stepで選ぶ本文を3件以内、
+Legal Profileでは1 CycleのArticle本文取得を累計5件以内、Graph候補から1 Stepで選ぶ本文を3件以内、
 Research Cycleを最大4回とする。上限値は目標ではなく、暴走防止の機械的制約である。
 
 ## 5. OpenSearchとNeo4jの使い分け
