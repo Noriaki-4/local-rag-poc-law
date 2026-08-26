@@ -298,16 +298,13 @@ class FakeStructuredLLM:
                 ]
             },
             {
-                "search_request_ids": [],
-                "assessments": [
-                    {
-                        "article_id": "law-test-article-2",
+                "assessments": {
+                    "law-test-article-2": {
                         "legal_function": "applicability",
                         "summary": "検証法の適用要件を定める",
                         "matched_hypothesis_ids": ["h-1"],
                     }
-                ],
-                "reason": "検索候補1件を評価した",
+                },
             },
             {
                 "actor_matches": [
@@ -455,13 +452,6 @@ class FakeStructuredLLM:
                 outputTokens=10,
             )
         if "next" not in schema_properties:
-            search_request_schema = schema_properties.get(
-                "search_request_ids"
-            )
-            if search_request_schema is not None:
-                decision["search_request_ids"] = search_request_schema["items"][
-                    "enum"
-                ]
             return StructuredJSONResult(
                 payload=decision,
                 provider="fake",
@@ -611,11 +601,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert "dependency_decisions" not in llm.calls[0]["schema"]["properties"]
     assert "dependency_decisions_json" not in llm.calls[0]["schema"]["properties"]
     search_schema = llm.calls[3]["schema"]
-    assert set(search_schema["properties"]) == {
-        "search_request_ids",
-        "assessments",
-        "reason",
-    }
+    assert set(search_schema["properties"]) == {"assessments"}
     assessment_schema = search_schema["properties"]["assessments"]
     assert assessment_schema["type"] == "object"
     assert len(assessment_schema["properties"]) == 1
@@ -660,7 +646,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "305"
+    assert diagnostic_records[0]["profileVersion"] == "309"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -668,7 +654,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "305"
+    assert transport_input["profileVersion"] == "309"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -1103,7 +1089,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "305"
+    assert profile.version == "309"
     mode_prompts = {
         "research": profile.solver_research.system_prompt,
         "integration": profile.solver_integration.system_prompt,
@@ -1351,7 +1337,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "305"
+    assert profile.version == "309"
     assert prompt.rindex("## 出力") > prompt.rindex(
         "</solver_context>"
     )
@@ -1402,7 +1388,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "305"
+    assert profile.version == "309"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -1604,7 +1590,6 @@ def test_search_review_duplicate_fixture_uses_article_keyed_assessments() -> Non
         _validate_search_assessment_payload(observed_payload, context)
     normalized = _normalize_search_assessment_transport_payload(
         {
-            "search_request_ids": fixture["requiredSearchRequestIds"],
             "assessments": {
                 article_id: {
                     "legal_function": "scope",
@@ -1613,7 +1598,6 @@ def test_search_review_duplicate_fixture_uses_article_keyed_assessments() -> Non
                 }
                 for article_id in candidate_ids
             },
-            "reason": "全候補を確認した",
         },
         context,
     )
@@ -1835,9 +1819,13 @@ def test_real_search_actor_mismatch_is_preserved_as_fixture() -> None:
         "search_candidate_assessment"
     ]
     assert "matched_hypothesis_ids" in assessment_item["properties"]
-    assert "行為者の一致は次の独立処理" in rendered.instructions
-    assert "Article全文の内容は推測しません" in rendered.instructions
-    assert "`statement`は現時点の命題" in (
+    assert "### この処理では判断しないこと" in rendered.instructions
+    assert "- 行為者の一致" in rendered.instructions
+    assert "Article全文を推測しません" in rendered.instructions
+    assert "`hypotheses[].statement`: 法令本文で検証する1つの法的命題" in (
+        rendered.instructions
+    )
+    assert "`search_candidates[].search_excerpts[].content`" in (
         rendered.instructions
     )
     assert "本文を確認する価値がある" in assessment_item[
@@ -1874,7 +1862,6 @@ def test_search_actor_classification_keeps_content_pairs_and_adds_actor_status()
     issuer_article_id = "law-323AC0000000025-article-27_22_2"
     buyer_article_id = "law-323AC0000000025-article-27_2"
     assessment_payload = {
-        "search_request_ids": list(context.required_search_review_request_ids),
         "assessments": [
             {
                 "article_id": article_id,
@@ -1884,7 +1871,6 @@ def test_search_actor_classification_keeps_content_pairs_and_adds_actor_status()
             }
             for article_id in article_ids
         ],
-        "reason": "内容面では全候補を評価した",
     }
     actor_payload = {
         "actor_matches": [
@@ -2305,8 +2291,6 @@ def test_anthropic_search_review_keys_assessments_by_article() -> None:
             }
             for candidate in context.search_candidates
         ],
-        "search_request_ids": list(context.required_search_review_request_ids),
-        "reason": "候補を個別評価した",
     }
     actor_call = render_search_actor_classification_model_call(
         context,
@@ -2691,15 +2675,14 @@ def test_search_review_prompt_defines_evidence_join_and_limited_role() -> None:
     assert search_prompt is not None
     prompt = search_prompt.system_prompt
     assert [line for line in prompt.splitlines() if line.startswith("# ")] == [
-        "# 法令調査Solver：検索抜粋の整理"
+        "# 法令調査Solver：本文取得候補の内容評価"
     ]
     assert "`search_excerpts`" in prompt
     assert "一文で`summary`" in prompt
     assert "Hypothesisの正否" in prompt
-    assert "## 判断しないこと" in prompt
+    assert "### この処理では判断しないこと" in prompt
     assert "- 行為者の一致" in prompt
     assert "- 本文取得候補の最終選択" in prompt
-    assert "行為者の一致は次の独立処理" in prompt
     assert "別Articleを参照するだけ" in prompt
     assert search_prompt.actor_classification_system_prompt is not None
     assert "候補の行為者照合" in (
@@ -6554,7 +6537,7 @@ def test_search_review_view_groups_each_excerpt_with_its_candidate() -> None:
 
     view = _search_review_context_payload(context)
 
-    assert view["candidate_count"] == len(context.search_candidates)
+    assert len(view["search_candidates"]) == len(context.search_candidates)
     assert view["search_candidates"]
     ordinance = next(
         item

@@ -98,7 +98,7 @@ Anthropicの「明確で直接的な指示、必要時だけ順序付き手順�
 | `solver_cycle_close.md` | Cycle終了と次Cycleへの構造化引継ぎ。 |
 | `solver_finalization.md` | `finalize_only=true`時の限定最終化。 |
 | `solver_reviewer_revision.md` | Reviewer Findingの受領、反映、反論、再調査。 |
-| `solver_search_review.md` | OpenSearch候補の見出しと検索抜粋を全件整理し、同じ法的争点を調べるHypothesisへ対応付ける。Article全文、回答根拠、Hypothesisの正否は判断しない。 |
+| `solver_search_review.md` | OpenSearch候補の見出しと検索抜粋を全件評価し、内容を要約・分類して、同じ法的論点を調べるHypothesisへ対応付ける。Article全文、回答根拠、行為者、Hypothesisの正否は判断しない。 |
 | `solver_search_actor_classification.md` | 内容評価が作ったArticle・Hypothesis組を入力順に照合し、IDを再出力せず各組の規律主体を`matched / mismatched / unknown`で返す。 |
 | `solver_search_reselection.md` | 前段の短い自己要約と、主体不一致を除いた選択可能Hypothesis IDから本文取得候補を選ぶ。 |
 | `solver_graph_review.md` | Graph差分候補の`select / defer / reject`と本文取得順。 |

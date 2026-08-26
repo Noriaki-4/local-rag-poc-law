@@ -75,6 +75,47 @@ def contract_field_description(
     return description
 
 
+@lru_cache(maxsize=16)
+def render_model_input_glossary(model_type: type[BaseModel]) -> str:
+    """用途別read modelの入力契約をField.descriptionから生成する。"""
+
+    lines = [
+        "<input_contract>",
+        "以下は今回の入力項目と意味です。",
+    ]
+    _append_model_fields(lines, model_type)
+    lines.append("</input_contract>")
+    return "\n".join(lines)
+
+
+def _append_model_fields(
+    lines: list[str],
+    model_type: type[BaseModel],
+    *,
+    prefix: str = "",
+    indent: str = "",
+) -> None:
+    for field_name, field in model_type.model_fields.items():
+        description = (field.description or "").strip()
+        if not description:
+            raise ValueError(
+                f"LLM-visible input field lacks description: "
+                f"{model_type.__name__}.{field_name}"
+            )
+        path = f"{prefix}.{field_name}" if prefix else field_name
+        is_collection = get_origin(field.annotation) in {list, tuple}
+        item_type = _collection_item_model(field.annotation)
+        display_path = f"{path}[]" if is_collection else path
+        lines.append(f"{indent}- `{display_path}`: {description}")
+        if item_type is not None:
+            _append_model_fields(
+                lines,
+                item_type,
+                prefix=display_path,
+                indent=f"{indent}  ",
+            )
+
+
 @lru_cache(maxsize=8)
 def render_research_step_input_glossary(
     field_names: tuple[str, ...],

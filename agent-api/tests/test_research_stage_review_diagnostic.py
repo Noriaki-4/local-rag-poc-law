@@ -39,20 +39,14 @@ class FakeStructuredJSONClient:
 
 
 _QUESTION = (
-    "公開買付けによらずに株券等を買い付けることができる主な適用除外を"
-    "説明してください。そのうち、株券等の所有者が少数である場合に"
-    "適用除外となるための具体的な条件を、根拠条文とともに説明してください。"
+    "株券等の所有者が少数である場合に、公開買付けによらずに株券等を"
+    "買い付けることができる具体的な条件を、根拠条文とともに説明してください。"
 )
 
 _WORK_ITEMS = [
     {
         "work_item_id": "wi-1",
-        "question": "公開買付けによらない買付けの主な適用除外は何か。",
-        "action_actor": "株券等を買い付ける者",
-    },
-    {
-        "work_item_id": "wi-2",
-        "question": "所有者が少数の場合に適用除外となる条件は何か。",
+        "question": "所有者が少数の場合に公開買付けによらずに買い付けられる条件は何か。",
         "action_actor": "株券等を買い付ける者",
     },
 ]
@@ -61,12 +55,6 @@ _HYPOTHESES = [
     {
         "hypothesis_id": "h-1",
         "work_item_id": "wi-1",
-        "statement": "買付け方法や相手方の属性に応じた適用除外がある。",
-        "gaps": ["適用除外の類型"],
-    },
-    {
-        "hypothesis_id": "h-2",
-        "work_item_id": "wi-2",
         "statement": "所有者数と所有者の同意が適用除外の判定軸になる。",
         "gaps": ["人数の基準", "必要な同意の範囲"],
     },
@@ -107,14 +95,6 @@ def test_question_review_calls_model_once_without_mutating_draft() -> None:
                     "action_target_preserved_in_question": True,
                     "note": "修正後は全観点を満たす",
                 },
-                {
-                    "work_item_id": "wi-2",
-                    "one_legal_question": True,
-                    "response_instruction_removed": True,
-                    "action_actor_matches_regulated_action": True,
-                    "action_target_preserved_in_question": True,
-                    "note": "修正後は全観点を満たす",
-                },
             ],
             "work_items": _WORK_ITEMS,
             "non_work_item_requirements": ["根拠条文を示す"],
@@ -134,7 +114,7 @@ def test_question_review_calls_model_once_without_mutating_draft() -> None:
     assert _WORK_ITEMS == original
     assert run.validation_error is None
     assert isinstance(run.review, QuestionDecompositionReview)
-    assert run.review.work_items[1].action_actor == "株券等を買い付ける者"
+    assert run.review.work_items[0].action_actor == "株券等を買い付ける者"
 
 
 def test_hypothesis_review_calls_model_once_without_mutating_draft() -> None:
@@ -149,14 +129,6 @@ def test_hypothesis_review_calls_model_once_without_mutating_draft() -> None:
             "checks": [
                 {
                     "hypothesis_id": "h-1",
-                    "predicts_legal_proposition": True,
-                    "has_searchable_legal_axis": True,
-                    "gaps_only_unresolved_meaning": True,
-                    "actors_match_work_item": True,
-                    "note": "修正後は全観点を満たす",
-                },
-                {
-                    "hypothesis_id": "h-2",
                     "predicts_legal_proposition": True,
                     "has_searchable_legal_axis": True,
                     "gaps_only_unresolved_meaning": True,
@@ -181,7 +153,7 @@ def test_hypothesis_review_calls_model_once_without_mutating_draft() -> None:
     assert _HYPOTHESES == original
     assert run.validation_error is None
     assert isinstance(run.review, HypothesisReview)
-    assert run.review.hypotheses[1].gaps == (
+    assert run.review.hypotheses[0].gaps == (
         "人数の基準",
         "必要な同意の範囲",
     )

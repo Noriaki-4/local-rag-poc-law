@@ -177,16 +177,8 @@ class SearchCandidateAssessment(FrameworkModel):
 
 
 class SearchAssessmentDecision(FrameworkModel):
-    search_request_ids: tuple[str, ...] = Field(
-        description="今回評価するlegal_search Request IDの全件。",
-    )
     assessments: tuple[SearchCandidateAssessment, ...] = Field(
-        description="提示順を保ち、全検索候補を一度ずつ評価した一覧。",
-    )
-    reason: str = Field(
-        min_length=1,
-        max_length=2000,
-        description="候補全体をどの確認事項・法的機能から評価したかの短い説明。",
+        description="提示順を保ち、全本文取得候補を一度ずつ評価した一覧。",
     )
 
 

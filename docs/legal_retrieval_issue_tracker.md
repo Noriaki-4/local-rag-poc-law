@@ -80,7 +80,7 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-018` | P0 | 完了 | Graph探索が必要な未解決事項があってもSolverがGraph検索を要求しない | 次Cycle開始時の保留OpenSearch候補を自動Search Selectionへ戻さず、Integrationで既知候補・Graph・再検索を比較するよう修正した。Graph selectorのmode・predicate・directionを分岐schemaで拘束し、同一Graph要求と本文取得要求は選択内容を保ったまま輸送時に統合する | Cycle 2 fixtureで府令10条を含む既知候補の本文取得へ進むこと、および候補を除いたGraph必須状態で`27条の2 / IMPLEMENTS / from_subject`の1要求を返し共通契約を通過することを`gpt-4o-mini-2024-07-18`で確認済み |
 | `LR-019` | P0 | 対応中 | 統合の意味的な行動選択を違反別契約からSolver loopへ戻す | 下位規範Action PromptはTool選択だけを求めていたが、汎用Solver schemaが`finalize`と`answer`も要求できる不整合があり、実モデルが`finalize + answer=null + ToolRequest`を返して停止した。Profile v304で同処理を`decision_reason + tool_requests`だけの専用契約へ分離し、既存DependencyDecisionとの対応はProgramがWorkItem IDから復元する | 例外問題を再実行し、下位規範Actionが汎用完了分岐へ入らず次Toolを実行できることを確認する |
 | `LR-020` | P1 | 要設計 | 複数の解釈や規律主体が成立する質問を一方的に確定せず、利用者へ確認する | 質問分解時に主体を確定させると誤った候補を早期に除外する。主体を限定せず検索すれば、発行者自身と発行者以外等の異なる規律主体が候補本文から判明する | LLMが検索後に結論を変える主体分岐を検出し、既知情報で確定できなければ確認を求める。Programが確認待ちを保存し、回答後に同じCaseを再開する最小契約を設計する |
-| `LR-021` | P0 | 対応中 | 検索候補の内容評価を単一責務にする | Profile v292でArticle・Hypothesis組と主体照合を分離した。v293では、見出しと検索抜粋だけでArticle全体やHypothesisの正否を判断させず、同じ法的争点の本文取得候補を整理する予備判定へ責務を限定した。`run_search_assessment_debug.py`は本番`solver_search_review.md`だけを1回呼び、完成Prompt・入力・schema・生応答を保存できる。v293の単独候補診断でも別規制の府令63条と義務成立後の金商法27条の13が`h-1`へ誤対応し、候補数ではなく、入力Hypothesisが確認する法的結論を特定できないことが残因と分かった | 検索抜粋評価へ規則を追加する前に、Hypothesis生成が確認対象の法的結論を具体化できるかを最小fixtureで確認する。その後、公告、例外、総合の順に内容評価、主体照合、候補選択を別々に検証する |
+| `LR-021` | P0 | 対応中 | 検索候補の内容評価を単一責務にする | Profile v309でSearch Assessmentを本文取得候補の要約・法的機能分類・内容面のHypothesis対応だけに限定した。本文取得候補は`legal_search`の結果をArticle単位にまとめた候補であり、この時点では本文取得対象として未選択と定義した。専用入力read modelの`Field.description`を基本的な意味の正本にし、必要項目だけを投影して入力契約を完成Promptへ生成する。`assessments`の各keyは対応する`search_candidates[].article_id`と同じ文字列にし、輸送schemaが全候補の過不足ない対応を強制する。既知の検索Request IDはProgramが付与し、後続で使われない全体`reason`はLLM出力から削除した。`run_search_assessment_debug.py`は本番Promptだけを1回呼び、完成Prompt・入力・schema・生応答を保存できる | 公告、例外、総合の順に内容評価、主体照合、候補選択を別々に実モデル検証する |
 | `LR-022` | P0 | 未着手 | 後続Cycleで既存WorkItemへ代替Hypothesisを追加する | 設計ではHypothesisの`statement`を別の意味へ上書きせず、見立てを変える場合は新しいHypothesisを追加する。しかし現行の段階別経路は、Hypothesisが1件もないopen WorkItemだけを生成処理へ送り、本文評価は既存Hypothesisの更新だけを許す。そのため、初期仮説が反証された場合も、同じWorkItemへ新しい見立てを追加して次Cycleで仕切り直せない | H1が`contradicted`または新しい規律構造が判明したfixtureで、H1と根拠を履歴として保持し、Cycle 2で同じWorkItemへ新IDのH2を追加できることを確認する。検索方法だけを変える場合は不要なHypothesisを追加しない |
 
 ### 3.1 LR-016 Tool観察とCycle Closeの単一責務化
@@ -219,10 +219,10 @@ Solverが一つへ決め打ちせず、解釈候補と相違点を利用者へ�
 利用者へ確認できない実行形態では、Solverが一方を選ばず、主体ごとの条件付き結果と未確定事項を返す。
 確認は主語の省略だけを理由に要求せず、主体の違いが検索経路または法的結論を実際に変える場合に限る。
 
-評価時の誤差と機能課題を混同しないため、`tob-exceptions`設問は、所有者が少数である場合を
-「公開買付けによらずに買い付けられる条件」と明示する文へ変更した。`gpt-4o-mini`の隔離実行では、
-後半のWorkItemとHypothesisが買付け条件、所有者数の基準、合意条件を維持した。これは評価設問の明確化であり、
-曖昧なエンドユーザー質問への確認機能を実装したものではない。
+評価時の誤差と機能課題を混同しないため、`tob-exceptions`設問は「主な適用除外」と、その一類型である
+「所有者が少数の場合」を重ねて問わない。所有者が少数の場合に、公開買付けによらずに買い付けられる
+具体的条件だけを尋ねる。必要根拠は金商法27条の2、施行令7条、公開買付府令2条の5のままとする。
+これは評価設問の焦点を一つにしたものであり、曖昧なエンドユーザー質問への確認機能を実装したものではない。
 
 ### 3.5 2026-08-25 回帰確認
 

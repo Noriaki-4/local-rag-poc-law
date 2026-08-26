@@ -310,6 +310,65 @@ class SearchCandidateArticle(FrameworkModel):
         return migrated
 
 
+class SearchAssessmentExcerpt(FrameworkModel):
+    """本文取得候補の内容評価に渡すOpenSearch検索抜粋。"""
+
+    content: str = Field(
+        description=(
+            "この本文取得候補を発見した検索結果の抜粋。"
+            "Article本文の全部または一部で、長いArticleでは検索に一致した"
+            "Paragraph・Item等だけの場合がある。"
+        )
+    )
+
+
+class SearchAssessmentCandidate(FrameworkModel):
+    """検索結果からArticle単位に作った本文取得候補。"""
+
+    article_id: str = Field(description="評価する本文取得候補のArticle ID。")
+    title: str | None = Field(
+        description="本文取得候補が属する文書の表示名。取得できない場合はnull。"
+    )
+    headings: tuple[str, ...] = Field(
+        description="検索結果に含まれた本文取得候補Articleの見出し。"
+    )
+    search_excerpts: tuple[SearchAssessmentExcerpt, ...] = Field(
+        description="本文取得候補を発見した検索結果の抜粋。回答根拠には使わない。"
+    )
+
+
+class SearchAssessmentWorkItem(FrameworkModel):
+    work_item_id: str = Field(description="評価対象の既知WorkItem ID。")
+    question: str = Field(description="このWorkItemで確認する1つの法的事項。")
+
+
+class SearchAssessmentHypothesis(FrameworkModel):
+    hypothesis_id: str = Field(description="評価対象の既知Hypothesis ID。")
+    work_item_id: str = Field(description="このHypothesisが属する既知WorkItem ID。")
+    statement: str = Field(description="法令本文で検証する1つの法的命題。")
+    gaps: tuple[str, ...] = Field(
+        description="statementを判定するために法令本文で未確認の内容。"
+    )
+
+
+class SearchAssessmentInput(FrameworkModel):
+    """検索結果の内容評価に必要な項目だけを持つread model。"""
+
+    question: str = Field(description="利用者が回答を求めている元の質問。")
+    work_tree: tuple[SearchAssessmentWorkItem, ...] = Field(
+        description="本文取得候補と対応付けるWorkItemのIDと確認事項。"
+    )
+    hypotheses: tuple[SearchAssessmentHypothesis, ...] = Field(
+        description="本文取得候補と内容面の対応を評価するHypothesis。"
+    )
+    search_candidates: tuple[SearchAssessmentCandidate, ...] = Field(
+        description=(
+            "legal_searchの検索結果をArticle単位にまとめた、"
+            "Article本文の取得候補。この時点では本文取得対象として未選択。"
+        )
+    )
+
+
 class ResearchStepWorkItem(FrameworkModel):
     work_item_id: str = Field(description="Programが付与した既知WorkItem ID。")
     question: str = Field(description="このWorkItemで確認する1つの法的事項。")
@@ -501,7 +560,10 @@ class SolverContext(FrameworkModel):
     )
     search_candidates: tuple[SearchCandidateArticle, ...] = Field(
         default=(),
-        description="OpenSearchで発見した候補Articleと発見元・検索抜粋の対応。",
+        description=(
+            "OpenSearch検索結果をArticle単位にまとめた本文取得候補と、"
+            "発見元・検索抜粋の対応。本文取得対象としては未選択。"
+        ),
     )
     work_tree: tuple[WorkTreeItem, ...] = Field(
         description="WorkItemの階層、状態、対応HypothesisをProgramが投影した一覧。",

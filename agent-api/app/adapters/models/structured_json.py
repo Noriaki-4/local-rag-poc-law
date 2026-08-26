@@ -17,11 +17,17 @@ from app.agent_framework.context import (
     ResearchStepHypothesis,
     ResearchStepInput,
     ResearchStepWorkItem,
+    SearchAssessmentCandidate,
+    SearchAssessmentExcerpt,
+    SearchAssessmentHypothesis,
+    SearchAssessmentInput,
+    SearchAssessmentWorkItem,
     SolverContext,
     WorkTreeItem,
 )
 from app.agent_framework.contract_rendering import (
     contract_field_description,
+    render_model_input_glossary,
     render_research_step_input_glossary,
     render_solver_contract_glossary,
 )
@@ -877,7 +883,6 @@ class StructuredJSONModelAdapter:
         assessment_results = []
         actor_results = []
         assessed_items: list[dict[str, Any]] = []
-        assessment_reasons: list[str] = []
         for batch_context in _search_review_batch_contexts(context):
             assessment_call = render_search_assessment_model_call(
                 batch_context,
@@ -982,18 +987,12 @@ class StructuredJSONModelAdapter:
             )
             _validate_search_assessment_payload(batch_payload, batch_context)
             assessed_items.extend(batch_payload.get("assessments") or [])
-            if reason := batch_payload.get("reason"):
-                assessment_reasons.append(reason)
             assessment_results.append(assessment_result)
             if actor_result is not None:
                 actor_results.append(actor_result)
 
         assessment_payload = {
-            "search_request_ids": list(
-                context.required_search_review_request_ids
-            ),
             "assessments": assessed_items,
-            "reason": " ".join(assessment_reasons),
         }
         _validate_search_assessment_payload(assessment_payload, context)
 
@@ -1061,6 +1060,9 @@ class StructuredJSONModelAdapter:
             ) from exc
 
         combined_payload = {
+            "search_request_ids": list(
+                context.required_search_review_request_ids
+            ),
             **assessment_payload,
             **selection_result.payload,
         }
@@ -3128,6 +3130,7 @@ def render_search_assessment_model_call(
     input_payload = _search_review_context_payload(context)
     instructions = (
         f"{profile.system_prompt}\n\n"
+        f"{render_model_input_glossary(SearchAssessmentInput)}\n\n"
         f"{RUNTIME_INPUT_MARKER}"
         f"{_post_context_completion_check(profile.completion_check_prompt)}"
     )
@@ -3168,41 +3171,41 @@ def _search_review_context_payload(
     evidence_by_id = {
         item.evidence_id: item for item in context.material_evidence
     }
-    return {
-        "question": context.question,
-        "work_tree": [item.model_dump(mode="json") for item in context.work_tree],
-        "hypotheses": [
-            item.model_dump(mode="json") for item in context.hypotheses
-        ],
-        "required_search_review_request_ids": list(
-            context.required_search_review_request_ids
+    input_model = SearchAssessmentInput(
+        question=context.question,
+        work_tree=tuple(
+            SearchAssessmentWorkItem(
+                work_item_id=item.work_item_id,
+                question=item.question,
+            )
+            for item in context.work_tree
         ),
-        "candidate_count": len(context.search_candidates),
-        "search_candidates": [
-            {
-                "article_id": candidate.article_id,
-                "document_id": candidate.document_id,
-                "title": candidate.title,
-                "headings": list(candidate.headings),
-                "discovery_work_item_ids": list(
-                    candidate.discovery_work_item_ids
-                ),
-                "discovery_hypothesis_ids": list(
-                    candidate.discovery_hypothesis_ids
-                ),
-                "search_request_ids": list(candidate.search_request_ids),
-                "search_excerpts": [
-                    {
-                        "evidence_id": evidence_id,
-                        "content": evidence_by_id[evidence_id].content,
-                    }
+        hypotheses=tuple(
+            SearchAssessmentHypothesis(
+                hypothesis_id=item.hypothesis_id,
+                work_item_id=item.work_item_id,
+                statement=item.statement,
+                gaps=item.gaps,
+            )
+            for item in context.hypotheses
+        ),
+        search_candidates=tuple(
+            SearchAssessmentCandidate(
+                article_id=candidate.article_id,
+                title=candidate.title,
+                headings=candidate.headings,
+                search_excerpts=tuple(
+                    SearchAssessmentExcerpt(
+                        content=evidence_by_id[evidence_id].content,
+                    )
                     for evidence_id in candidate.navigation_evidence_ids
                     if evidence_id in evidence_by_id
-                ],
-            }
+                ),
+            )
             for candidate in context.search_candidates
-        ],
-    }
+        ),
+    )
+    return input_model.model_dump(mode="json")
 
 
 def _search_review_batch_contexts(
@@ -4323,32 +4326,14 @@ def _search_review_transport_schema(
     )
     schema = _strict_object(
         {
-            "search_request_ids": _described(
-                {
-                    "type": "array",
-                    "items": _enum_string(
-                        context.required_search_review_request_ids
-                    ),
-                    "minItems": len(
-                        context.required_search_review_request_ids
-                    ),
-                    "maxItems": len(
-                        context.required_search_review_request_ids
-                    ),
-                },
-                SearchAssessmentDecision,
-                "search_request_ids",
-            ),
-            "assessments": _described(
-                assessments_schema,
-                SearchAssessmentDecision,
-                "assessments",
-            ),
-            "reason": _described(
-                {"type": "string", "minLength": 1},
-                SearchAssessmentDecision,
-                "reason",
-            ),
+            "assessments": {
+                **assessments_schema,
+                "description": (
+                    f"{contract_field_description(SearchAssessmentDecision, 'assessments')} "
+                    "objectの各keyは、対応する"
+                    "search_candidates[].article_idと同じ文字列にする。"
+                ),
+            },
         }
     )
     if not array_transport:

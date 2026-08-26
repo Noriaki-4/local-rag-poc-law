@@ -48,7 +48,6 @@ def _context() -> SolverContext:
 
 def _assessment_payload(context: SolverContext) -> dict[str, Any]:
     return {
-        "search_request_ids": list(context.required_search_review_request_ids),
         "assessments": {
             candidate.article_id: {
                 "legal_function": "applicability",
@@ -57,7 +56,6 @@ def _assessment_payload(context: SolverContext) -> dict[str, Any]:
             }
             for candidate in context.search_candidates
         },
-        "reason": "全候補の内容を評価した。",
     }
 
 
@@ -71,7 +69,7 @@ def test_render_uses_only_production_search_assessment_prompt_and_schema() -> No
     )
 
     assert rendered.stage == "search_assessment"
-    assert "# 法令調査Solver：検索抜粋の整理" in rendered.instructions
+    assert "# 法令調査Solver：本文取得候補の内容評価" in rendered.instructions
     assert "# 法令調査Solver：検索候補の主体照合" not in rendered.instructions
     assert "# 法令調査Solver：検索候補の選択" not in rendered.instructions
     assert set(rendered.input_payload) == {
@@ -79,13 +77,17 @@ def test_render_uses_only_production_search_assessment_prompt_and_schema() -> No
         "work_tree",
         "hypotheses",
         "search_candidates",
-        "candidate_count",
-        "required_search_review_request_ids",
     }
-    assert set(rendered.output_schema["properties"]) == {
-        "search_request_ids",
-        "assessments",
-        "reason",
+    assert "`search_candidates[]`: legal_searchの検索結果" in (
+        rendered.instructions
+    )
+    assert set(rendered.output_schema["properties"]) == {"assessments"}
+    assessments_schema = rendered.output_schema["properties"]["assessments"]
+    assert "search_candidates[].article_idと同じ文字列" in (
+        assessments_schema["description"]
+    )
+    assert set(assessments_schema["properties"]) == {
+        item.article_id for item in context.search_candidates
     }
 
 
@@ -109,3 +111,39 @@ def test_run_calls_model_once_and_normalizes_assessment_map() -> None:
         item.article_id for item in run.decision.assessments
     ) == tuple(item.article_id for item in context.search_candidates)
     assert run.decision.assessments[0].actor_matches == ()
+
+
+def test_v309_real_model_search_assessment_fixtures_preserve_call_boundary() -> None:
+    fixture_names = (
+        "tob_announcement_search_assessment_v309_observed_v1.json",
+        "tob_exceptions_focused_search_assessment_v309_observed_v1.json",
+        "tob_overview_search_assessment_v309_observed_v1.json",
+    )
+
+    for fixture_name in fixture_names:
+        fixture = json.loads(
+            (FIXTURE.parent / fixture_name).read_text(encoding="utf-8")
+        )
+        source = fixture["source"]
+        transport_input = fixture["observedTransportInput"]
+        transport_output = fixture["observedTransportOutput"]
+        input_candidates = transport_input["inputPayload"]["search_candidates"]
+        candidate_ids = tuple(item["article_id"] for item in input_candidates)
+
+        assert fixture["checkpoint"]["approved"] is True
+        assert fixture["checkpoint"]["sourceProvider"] == "openai"
+        assert source["model"] == "gpt-4o-mini-2024-07-18"
+        assert source["profileVersion"] == "309"
+        assert source["transportStage"] == "search_assessment"
+        assert transport_output["validationError"] is None
+        assert set(transport_output["payload"]) == {"assessments"}
+        assert tuple(transport_output["payload"]["assessments"]) == candidate_ids
+
+    exception_fixture = json.loads(
+        (
+            FIXTURE.parent
+            / "tob_exceptions_focused_search_assessment_v309_observed_v1.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert exception_fixture["expectations"]["workItemCount"] == 1
+    assert exception_fixture["expectations"]["hypothesisCount"] == 1
