@@ -2,17 +2,18 @@
 
 ### 目的
 
-`needs_action`のWorkItemについて、未確認の下位規範を確認する次のToolRequestを選びます。WorkItem、Hypothesis、DependencyDecisionの意味評価はやり直しません。
+`needs_action`のWorkItemについて、未確認の下位規範を確認する次のToolRequestを選びます。現在Cycleに有効な要求が残らない場合は、次Cycleで探索方針を見直します。WorkItem、Hypothesis、DependencyDecisionの意味評価はやり直しません。
 入力に出ていない他のopen WorkItemはCaseStoreに残り、この行動後に再提示されます。
 
 ### 出力
 
 - 各`needs_action`を進めるToolRequest
+- 現在Cycleに有効なTool要求がない場合の`start_next_cycle=true`
 - Toolを選んだ短い理由
 
 ### 完了条件
 
-各`needs_action`に対し、その未確認事項を進めるToolRequestが対応していることです。
+各`needs_action`に未確認事項を進めるToolRequestが対応しているか、重複しない有効な要求がない場合に次Cycleへの見直しを選んでいることです。
 
 ### 手順
 
@@ -23,7 +24,8 @@
    - 起点Articleと調べる関係・方向を説明できる：`legal_graph_neighbors`
    - Articleまたは関係がまだ分からない：`legal_search`
    - 必要な既知Evidence本文が今回省略されている：`load_evidence`
-4. 各`needs_action` WorkItemに対応するToolRequestを1件返します。
+4. 有効な行動がある場合は、各`needs_action` WorkItemに対応するToolRequestを1件返し、`start_next_cycle=false`にします。
+5. 成功済みscope以外に未確認事項を進める行動がない場合は、ToolRequestを返さず`start_next_cycle=true`にします。
 
 ### ルール
 
@@ -33,7 +35,8 @@
 - `material_evidence`にある本文を再取得しません。
 - 成功済みの検索・Graph scopeを繰り返しません。
 - `action_feedback`がある場合、棄却されたscopeを再出力しません。同じToolの別scopeは選べます。
+- `start_next_cycle`は`can_start_next_cycle=true`の場合だけ選べます。検索語をわずかに変えただけの要求を作る代わりには使いません。
 
 #### この処理ではしないこと
 
-- 回答、Cycle移行、状態更新、DependencyDecisionの再判定は行いません。
+- 回答、状態更新、DependencyDecisionの再判定は行いません。Cycleについては、現在の行動を続けられない場合の次Cycle移行だけを判断できます。

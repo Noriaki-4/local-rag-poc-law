@@ -622,7 +622,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "315"
+    assert diagnostic_records[0]["profileVersion"] == "317"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -630,7 +630,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "315"
+    assert transport_input["profileVersion"] == "317"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -1065,7 +1065,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "315"
+    assert profile.version == "317"
     mode_prompts = {
         "research": profile.solver_research.system_prompt,
         "integration": profile.solver_integration.system_prompt,
@@ -1316,7 +1316,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "315"
+    assert profile.version == "317"
     assert prompt.rindex("## 出力") > prompt.rindex(
         "</solver_context>"
     )
@@ -1367,7 +1367,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "315"
+    assert profile.version == "317"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -2329,6 +2329,7 @@ def test_cycle2_anthropic_solver_uses_provider_transport_schema() -> None:
 
     assert set(rendered.output_schema["properties"]) == {
         "decision_reason",
+        "start_next_cycle",
         "tool_requests_json",
     }
     assert len(json.dumps(rendered.output_schema)) < 1_000
@@ -4218,6 +4219,7 @@ def test_action_feedback_keeps_all_tool_choices_available() -> None:
     assert set(rendered.input_payload) == {
         "action_feedback",
         "question",
+        "can_start_next_cycle",
         "work_tree",
         "hypotheses",
         "dependency_decisions",
@@ -7223,11 +7225,16 @@ def test_dependency_action_uses_dedicated_contract_and_preserves_prior_decision(
 
     assert set(rendered.output_schema["properties"]) == {
         "decision_reason",
+        "start_next_cycle",
         "tool_requests",
     }
     assert rendered.normalized_schema == DependencyActionDecision.model_json_schema()
-    assert rendered.output_schema["properties"]["tool_requests"]["minItems"] == 1
+    assert rendered.output_schema["properties"]["tool_requests"]["minItems"] == 0
     assert rendered.output_schema["properties"]["tool_requests"]["maxItems"] == 1
+    assert rendered.output_schema["properties"]["start_next_cycle"]["enum"] == [
+        False,
+        True,
+    ]
     request_item_schema = rendered.output_schema["properties"]["tool_requests"][
         "items"
     ]
@@ -7238,6 +7245,9 @@ def test_dependency_action_uses_dedicated_contract_and_preserves_prior_decision(
     )
     assert "continueまたはfinalize" not in rendered.instructions
     assert "DependencyDecisionの再判定は行いません" in rendered.instructions
+    assert "重複しない有効なTool要求がなく次Cycleを開始できる場合" in (
+        rendered.instructions
+    )
 
     anthropic_rendered = render_solver_model_call(
         context,
@@ -7247,6 +7257,7 @@ def test_dependency_action_uses_dedicated_contract_and_preserves_prior_decision(
     )
     assert set(anthropic_rendered.output_schema["properties"]) == {
         "decision_reason",
+        "start_next_cycle",
         "tool_requests_json",
     }
     assert "`tool_requests_json`には" in anthropic_rendered.instructions
@@ -7260,6 +7271,7 @@ def test_dependency_action_uses_dedicated_contract_and_preserves_prior_decision(
     decision = normalize_dependency_action_decision(
         {
             "decision_reason": "未確認の規定を法令検索で探す。",
+            "start_next_cycle": False,
             "tool_requests": [
                 {
                     "request_id": "search-next",
@@ -7291,6 +7303,40 @@ def test_dependency_action_uses_dedicated_contract_and_preserves_prior_decision(
     assert decision.dependency_decisions[0].action_request_id == (
         decision.tool_requests[0].request_id
     )
+
+
+def test_dependency_action_can_move_to_next_cycle_without_repeating_scope(
+) -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_exceptions_cycle2_finalize_tool_conflict_v275.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    context = SolverContext.model_validate(fixture["solverContext"])
+
+    decision = normalize_dependency_action_decision(
+        {
+            "decision_reason": (
+                "現在Cycleに未確認事項を進める重複しないTool要求がないため、"
+                "次Cycleで探索方針を見直す。"
+            ),
+            "start_next_cycle": True,
+            "tool_requests": [],
+        },
+        context=context,
+    )
+
+    assert decision.next == "continue"
+    assert decision.start_next_cycle is True
+    assert decision.tool_requests == ()
+    assert decision.next_focus_work_item_ids == (
+        *context.required_dependency_work_item_ids,
+    )
+    assert len(decision.dependency_decisions) == 1
+    assert decision.dependency_decisions[0].status == "needs_action"
+    assert decision.dependency_decisions[0].action_request_id is None
 
 
 def test_common_prompt_does_not_expose_provider_sidecars() -> None:
@@ -8208,6 +8254,7 @@ def test_minimal_solver_contract_defines_state_field_invariants() -> None:
     assert "正規契約のupdateに許されるキーはadd_work_items" in prompt
     assert "work_tree等の現在状態を返さない" in prompt
     assert "add_work_items要素: work_item_id" in prompt
+    assert "今回適用する最終差分を1件だけ返す" in prompt
     assert "state、resolution" in prompt
     assert "statusは使わない" in prompt
     assert "ToolRequest.work_item_idは、このupdate適用後もstate=open" in prompt

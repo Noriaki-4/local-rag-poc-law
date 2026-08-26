@@ -1927,6 +1927,9 @@ Legal Domain Packの共通Promptには次を追加する。
 - 同一WorkItem・Hypothesis・Tool引数で成功済みのlegal_searchを再要求した場合は構造契約違反とする。
   `request_id`と`purpose`はこの重複scopeに含めない。
   Programは検索表現の意味的同一性を推測せず、候補が不十分ならSolverが理由と異なる検索表現を返す。
+  下位規範Actionで重複しない有効なTool要求がない場合は、SolverがToolRequestなしの
+  `start_next_cycle=true`を選び、次Cycleで探索方針を見直せる。Programは重複要求を別要求へ書き換えず、
+  Cycle上限と参照整合だけを検証する。
 - 質問に関係すると判断した1ホップ候補は、Graph Reviewごとに最大3件、かつCycleの
   残り本文取得枠内でselectする。関連するが枠に収まらない候補はdeferし、
   graph_review_ledgerと次Cycleの引継ぎ候補へ残す。Graph候補だけを根拠にせず、端点Article本文を確認する。

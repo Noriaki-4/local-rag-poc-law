@@ -189,23 +189,35 @@ class CaseUpdate(FrameworkModel):
     )
     add_work_items: tuple[WorkItem, ...] = Field(
         default=(),
-        description="今回新しく作る、重複しない確認事項。",
+        description="今回新しく作る確認事項。work_item_idごとに1件だけ返す。",
     )
     update_work_items: tuple[WorkItemUpdate, ...] = Field(
         default=(),
-        description="既存WorkItemに対する今回の状態差分。",
+        description=(
+            "既存WorkItemに対する今回の最終状態差分。"
+            "同じwork_item_idの更新は1件だけ返す。"
+        ),
     )
     add_hypotheses: tuple[Hypothesis, ...] = Field(
         default=(),
-        description="新しいWorkItem等へ置く、本文で独立検証可能な命題。",
+        description=(
+            "新しいWorkItem等へ置く、本文で独立検証可能な命題。"
+            "hypothesis_idごとに1件だけ返す。"
+        ),
     )
     update_hypotheses: tuple[HypothesisUpdate, ...] = Field(
         default=(),
-        description="既存Hypothesisに対する今回の判定差分。",
+        description=(
+            "既存Hypothesisに対する今回の最終判定差分。"
+            "同じhypothesis_idの更新は1件だけ返す。"
+        ),
     )
     impact_decisions: tuple[WorkItemImpactDecision, ...] = Field(
         default=(),
-        description="前提Hypothesisが否定されたときの子WorkItemの維持・置換・破棄。",
+        description=(
+            "前提Hypothesisが否定されたときの子WorkItemの維持・置換・破棄。"
+            "work_item_idごとに1件だけ返す。"
+        ),
     )
 
 
@@ -252,11 +264,29 @@ class DependencyActionDecision(FrameworkModel):
     decision_reason: str = Field(
         min_length=1,
         max_length=1200,
-        description="未確認の下位規範に対して今回のToolを選んだ短い理由。",
+        description="未確認の下位規範に対してToolまたは次Cycleを選んだ短い理由。",
+    )
+    start_next_cycle: bool = Field(
+        default=False,
+        description=(
+            "現在Cycleに重複しない有効なTool要求がない場合だけtrue。"
+            "trueではToolRequestを返さず、次Cycleで探索方針を見直す。"
+        ),
     )
     tool_requests: tuple[ToolRequest, ...] = Field(
-        description="各needs_action WorkItemを進める今回のTool要求。",
+        default=(),
+        description=(
+            "start_next_cycle=falseのとき、各needs_action WorkItemを進める今回のTool要求。"
+        ),
     )
+
+    @model_validator(mode="after")
+    def validate_action_shape(self) -> DependencyActionDecision:
+        if self.start_next_cycle and self.tool_requests:
+            raise ValueError("next Cycle action cannot include ToolRequest")
+        if not self.start_next_cycle and not self.tool_requests:
+            raise ValueError("current Cycle action requires ToolRequest")
+        return self
 
 
 class CycleCloseDecision(FrameworkModel):

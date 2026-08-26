@@ -613,6 +613,24 @@ scope定義へ統一した。さらにDependency Action入力を次のTool選択
 `action_feedback`を先頭へ投影する。棄却後もTool種類は制限せず、同じToolの別scopeを選ぶ意味判断は
 Solverに残す。
 
+同日の修正後も、例外問題ではDependency Actionが成功済み`legal_search`を再要求し続け、3回目の
+`ActionRejected`がrun全体の`protocol_error`になった。原因は、重複scopeを禁止しながら専用契約が
+各`needs_action`へ必ずToolRequestを要求し、別の有効な行動がない場合の出力を許していなかったことにある。
+Profile v316では、Solverが重複しないToolを選ぶか、`can_start_next_cycle=true`の場合にToolRequestなしで
+`start_next_cycle=true`を選ぶ契約へ変更した。Programは重複scopeとCycle上限だけを検証し、別検索の有効性や
+次Cycleへ移るべきかの意味判断はSolverに残す。
+
+v316の再検証では重複検索は発生しなかったが、Integrationが同じWorkItem IDへ異なる状態更新を2件返し、
+契約修復でも同じ配列を繰り返した。Profile v317では、CaseUpdateのdescription、共通契約、Integrationの
+出力前確認へ「各IDの今回の最終差分は1件だけ」を定義した。Programは競合更新から一方を選ばず、LLMが
+本文評価に基づいて最終状態を選ぶ。併せて、Dependency Actionの結合後Promptに残っていた「ToolRequest必須」
+という旧共通契約を、v316の`start_next_cycle`契約へ揃えた。
+
+Profile v317・`gpt-4o-mini-2024-07-18`の例外問題再検証はCycle 2で正常完了し、必要な金商法27条の2、
+施行令7条、公開買付府令2条の5をすべて本文取得した。同一scopeの再要求による`protocol_error`は発生しなかった。
+一方、最終引用は施行令7条と府令2条の5だけで金商法27条の2を含まず、関連の薄いArticle取得と、表現を
+短くした類似再検索も残った。これは重複scope契約とは分け、引用完全性と探索効率の評価対象とする。
+
 2026-08-26の例外問題では、下位規範Action Promptが次のToolRequestだけを要求する一方、汎用Solver schemaが
 `next`、`start_next_cycle`、状態更新、最終回答も要求していた。実モデルはToolRequestを作りながら
 `next=finalize`、`answer=null`を返し、同じ無効出力を再試行した。Profile v304では、この呼出しの出力を

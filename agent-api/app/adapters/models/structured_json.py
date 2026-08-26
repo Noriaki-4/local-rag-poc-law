@@ -1533,6 +1533,7 @@ def _solver_context_payload(
         dependency_action_fields = (
             "action_feedback",
             "question",
+            "can_start_next_cycle",
             "work_tree",
             "hypotheses",
             "dependency_decisions",
@@ -4362,6 +4363,18 @@ def _dependency_action_transport_schema(
                     DependencyActionDecision,
                     "decision_reason",
                 ),
+                "start_next_cycle": _described(
+                    {
+                        "type": "boolean",
+                        "enum": (
+                            [False, True]
+                            if context.can_start_next_cycle
+                            else [False]
+                        ),
+                    },
+                    DependencyActionDecision,
+                    "start_next_cycle",
+                ),
                 "tool_requests_json": {
                     "type": "string",
                     "description": "ToolRequest array encoded as one JSON array string",
@@ -4385,7 +4398,7 @@ def _dependency_action_transport_schema(
     )
     tool_requests = _tool_requests_transport_schema(action_context)
     required_count = len(context.required_dependency_work_item_ids)
-    tool_requests["minItems"] = required_count
+    tool_requests["minItems"] = 0 if context.can_start_next_cycle else required_count
     tool_requests["maxItems"] = required_count
     return _strict_object(
         {
@@ -4393,6 +4406,18 @@ def _dependency_action_transport_schema(
                 {"type": "string", "minLength": 1, "maxLength": 1200},
                 DependencyActionDecision,
                 "decision_reason",
+            ),
+            "start_next_cycle": _described(
+                {
+                    "type": "boolean",
+                    "enum": (
+                        [False, True]
+                        if context.can_start_next_cycle
+                        else [False]
+                    ),
+                },
+                DependencyActionDecision,
+                "start_next_cycle",
             ),
             "tool_requests": _described(
                 tool_requests,
@@ -5891,12 +5916,16 @@ def normalize_dependency_action_decision(
             f"dependency action contract invalid: {detail['msg']}"
         ) from exc
 
+    if action.start_next_cycle and not context.can_start_next_cycle:
+        raise ModelProtocolError("next research Cycle is not available")
+
     required_ids = set(context.required_dependency_work_item_ids)
     requests_by_work_item: dict[str, list[ToolRequest]] = {}
     for request in action.tool_requests:
         requests_by_work_item.setdefault(request.work_item_id, []).append(request)
-    if set(requests_by_work_item) != required_ids or any(
-        len(requests) != 1 for requests in requests_by_work_item.values()
+    if not action.start_next_cycle and (
+        set(requests_by_work_item) != required_ids
+        or any(len(requests) != 1 for requests in requests_by_work_item.values())
     ):
         raise ModelProtocolError(
             "dependency action requires exactly one ToolRequest per needs_action "
@@ -5907,10 +5936,18 @@ def normalize_dependency_action_decision(
     for dependency in context.dependency_decisions:
         if dependency.work_item_id not in required_ids:
             continue
-        request = requests_by_work_item[dependency.work_item_id][0]
+        request = (
+            None
+            if action.start_next_cycle
+            else requests_by_work_item[dependency.work_item_id][0]
+        )
         active_dependencies.append(
             dependency.model_copy(
-                update={"action_request_id": request.request_id}
+                update={
+                    "action_request_id": (
+                        request.request_id if request is not None else None
+                    )
+                }
             ).model_dump(mode="json")
         )
     if {item["work_item_id"] for item in active_dependencies} != required_ids:
@@ -5922,7 +5959,7 @@ def normalize_dependency_action_decision(
         {
             "next": "continue",
             "decision_reason": action.decision_reason,
-            "start_next_cycle": False,
+            "start_next_cycle": action.start_next_cycle,
             "update": {},
             "next_focus_work_item_ids": list(
                 context.required_dependency_work_item_ids
@@ -6559,6 +6596,7 @@ updateの状態契約:
 - update_work_items要素: work_item_id、state、resolution、basis_hypothesis_ids。
 - add_hypotheses要素: hypothesis_id、work_item_id、statement、judgment、evidence_ids、gaps。statusは使わない。
 - update_hypotheses要素: hypothesis_id、judgment、evidence_ids、gaps。
+- 各差分配列では同じWorkItem IDまたはHypothesis IDを複数回返さず、今回適用する最終差分を1件だけ返す。
 - WorkItemのstate=openは未完了なのでresolution=null、resolved/droppedは終了状態なので空でないresolutionを持つ。
 - next_focus_work_item_idsと各ToolRequest.work_item_idは、このupdate適用後もstate=openのWorkItemだけを参照する。Toolが必要ならWorkItemを閉じない。
 - Hypothesisのjudgment=unresolvedは未確認、supported/contradictedは本文根拠で確認済みなので空でないevidence_idsを持つ。
@@ -6579,9 +6617,10 @@ updateの状態契約:
 
 _DEPENDENCY_ACTION_CONTRACT = """
 出力原則:
-- 今回の処理では`decision_reason`と`tool_requests`だけを返す。
+- 今回の処理では`decision_reason`、`start_next_cycle`、`tool_requests`だけを返す。
 - ToolRequestは、対応するopen WorkItemと未確認Hypothesisへ結び付ける。
-- 各`needs_action` WorkItemについて、未確認事項を直接進めるToolRequestを1件返す。
+- 現在Cycleに有効な行動があればstart_next_cycle=falseとし、各`needs_action` WorkItemについて、未確認事項を直接進めるToolRequestを1件返す。
+- 重複しない有効なTool要求がなく次Cycleを開始できる場合は、start_next_cycle=true、tool_requests=[]にする。
 - request_idは同じ出力内で重複しない短い局所IDにする。Programが永続化用IDへ置き換え、既存のDependencyDecisionへ対応付ける。
 - Tool名とargumentsは`available_tools`に従う。
 """.strip()

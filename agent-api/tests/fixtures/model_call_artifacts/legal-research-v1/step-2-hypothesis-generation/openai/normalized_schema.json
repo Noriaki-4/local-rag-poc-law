@@ -5,7 +5,7 @@
       "properties": {
         "add_hypotheses": {
           "default": [],
-          "description": "新しいWorkItem等へ置く、本文で独立検証可能な命題。",
+          "description": "新しいWorkItem等へ置く、本文で独立検証可能な命題。hypothesis_idごとに1件だけ返す。",
           "items": {
             "$ref": "#/$defs/Hypothesis"
           },
@@ -14,7 +14,7 @@
         },
         "add_work_items": {
           "default": [],
-          "description": "今回新しく作る、重複しない確認事項。",
+          "description": "今回新しく作る確認事項。work_item_idごとに1件だけ返す。",
           "items": {
             "$ref": "#/$defs/WorkItem"
           },
@@ -23,7 +23,7 @@
         },
         "impact_decisions": {
           "default": [],
-          "description": "前提Hypothesisが否定されたときの子WorkItemの維持・置換・破棄。",
+          "description": "前提Hypothesisが否定されたときの子WorkItemの維持・置換・破棄。work_item_idごとに1件だけ返す。",
           "items": {
             "$ref": "#/$defs/WorkItemImpactDecision"
           },
@@ -48,7 +48,7 @@
         },
         "update_hypotheses": {
           "default": [],
-          "description": "既存Hypothesisに対する今回の判定差分。",
+          "description": "既存Hypothesisに対する今回の最終判定差分。同じhypothesis_idの更新は1件だけ返す。",
           "items": {
             "$ref": "#/$defs/HypothesisUpdate"
           },
@@ -57,7 +57,7 @@
         },
         "update_work_items": {
           "default": [],
-          "description": "既存WorkItemに対する今回の状態差分。",
+          "description": "既存WorkItemに対する今回の最終状態差分。同じwork_item_idの更新は1件だけ返す。",
           "items": {
             "$ref": "#/$defs/WorkItemUpdate"
           },
