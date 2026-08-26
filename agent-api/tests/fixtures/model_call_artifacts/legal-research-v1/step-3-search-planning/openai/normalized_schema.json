@@ -449,7 +449,7 @@
         },
         "gaps": {
           "default": [],
-          "description": "暫定的な結論のうち、法令本文で確定すべき基準、値、範囲その他の未確認の規律要素。抽象的な内容、根拠条文、検索語、検索作業、WorkItemの言い換えは含めない。",
+          "description": "statementに残る、法令本文で確定すべき基準、値、範囲その他の具体的な規律要素。該当する要素がなければ空とする。抽象的な内容、根拠条文、検索語、検索作業、WorkItemの言い換えは含めない。",
           "items": {
             "type": "string"
           },
@@ -475,7 +475,7 @@
           "type": "string"
         },
         "statement": {
-          "description": "WorkItemの法的論点に対する、誤り得る暫定的な結論。一般的な法的知識を使い、法令本文によって支持または否定できる1つの具体的な命題とする。WorkItemの言い換えだけにはせず、確認済みの事実として扱わない。",
+          "description": "WorkItemへの回答を構成し得る、誤り得る1つの法的命題。一般的な法的知識を使い、法令本文によって個別に支持または否定できる法的命題とする。WorkItemの言い換えだけにはせず、確認済みの事実として扱わない。",
           "maxLength": 1200,
           "minLength": 1,
           "title": "Statement",
@@ -511,7 +511,7 @@
         },
         "gaps": {
           "default": [],
-          "description": "この命題を判定するために、本文でまだ確認すべき具体的情報。",
+          "description": "statementに残る、本文でまだ確認すべき具体的情報。該当する情報がなければ空とする。",
           "items": {
             "type": "string"
           },
@@ -588,6 +588,47 @@
       "title": "ReviewFindingResolution",
       "type": "object"
     },
+    "SearchCandidateActorMatch": {
+      "additionalProperties": false,
+      "description": "候補ArticleとHypothesisの一組に対する規律主体の照合結果。",
+      "properties": {
+        "hypothesis_id": {
+          "description": "内容面で対応した既知Hypothesis ID。",
+          "title": "Hypothesis Id",
+          "type": "string"
+        },
+        "reason": {
+          "description": "候補の規律主体とHypothesisの行為者を比較した理由。",
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "regulated_actor": {
+          "description": "候補の見出しと要約から読み取った規律主体。",
+          "minLength": 1,
+          "title": "Regulated Actor",
+          "type": "string"
+        },
+        "status": {
+          "description": "matchedは主体一致、mismatchedは主体不一致、unknownは検索抜粋だけでは判定できない状態。",
+          "enum": [
+            "matched",
+            "mismatched",
+            "unknown"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "hypothesis_id",
+        "status",
+        "regulated_actor",
+        "reason"
+      ],
+      "title": "SearchCandidateActorMatch",
+      "type": "object"
+    },
     "SearchCandidateAssessmentRecord": {
       "additionalProperties": false,
       "description": "Search Assessmentで確定した候補理解をCycle間で保持する。",
@@ -602,8 +643,17 @@
             }
           ],
           "default": null,
-          "description": "候補の規律主体とWorkItemの行為者を照合した短い理由。",
+          "description": "旧記録との互換用に保持する、候補単位の主体照合理由。",
           "title": "Actor Match Reason"
+        },
+        "actor_matches": {
+          "default": [],
+          "description": "内容面で対応したArticleとHypothesisの各組について、規律主体を照合した結果。",
+          "items": {
+            "$ref": "#/$defs/SearchCandidateActorMatch"
+          },
+          "title": "Actor Matches",
+          "type": "array"
         },
         "article_id": {
           "description": "評価した候補Article ID。",
@@ -623,7 +673,7 @@
         },
         "matched_hypothesis_ids": {
           "default": [],
-          "description": "候補が直接検証できるとSolverが判断したHypothesis ID。",
+          "description": "候補本文を確認する価値があるとSolverが判断したHypothesis ID。",
           "items": {
             "type": "string"
           },
@@ -640,7 +690,7 @@
           "type": "array"
         },
         "summary": {
-          "description": "候補本文の取得要否を判断するための意味要約。",
+          "description": "候補の見出しと検索抜粋に基づく内容要約。",
           "title": "Summary",
           "type": "string"
         }

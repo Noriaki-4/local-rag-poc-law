@@ -16,6 +16,7 @@ from .state import (
     Hypothesis,
     HypothesisJudgment,
     ReviewFindingResolution,
+    SearchCandidateActorMatch,
     SearchCandidateReview,
     SearchCandidateSelection,
     ToolRequest,
@@ -64,7 +65,10 @@ class HypothesisUpdate(FrameworkModel):
     )
     gaps: tuple[str, ...] = Field(
         default=(),
-        description="この命題を判定するために、本文でまだ確認すべき具体的情報。",
+        description=(
+            "statementに残る、本文でまだ確認すべき具体的情報。"
+            "該当する情報がなければ空とする。"
+        ),
     )
 
 
@@ -125,36 +129,53 @@ class SearchCandidateAssessment(FrameworkModel):
         "scope",
     ] = Field(
         description=(
-            "applicabilityは適用条件、exceptionは例外、procedureは手続、"
-            "scopeは対象範囲として、この候補が直接検証できる主な機能。"
+            "見出しと検索抜粋が直接示す主な法的機能。applicabilityは適用条件、"
+            "exceptionは適用しない場合、procedureは規律に従うための手続、"
+            "scopeは対象の意味または範囲。"
         ),
     )
     summary: str = Field(
         min_length=1,
         max_length=2000,
         description=(
-            "見出しと検索抜粋から読み取れる候補内容の短い自己要約。"
-            "規律主体、行為、対象、条件、効果を明記する。回答根拠ではない。"
-        ),
-    )
-    actor_match_reason: str = Field(
-        default="旧記録では未記録",
-        min_length=1,
-        max_length=1200,
-        description=(
-            "候補が規律する行為者とWorkItemのaction_actorを比較した結果。"
-            "一致するIDを挙げた場合は共通する行為者を、不一致で空にした場合は"
-            "異なる二つの行為者を明記する。"
+            "提示された見出しと検索抜粋が扱う内容の短い要約。"
+            "Article全文の内容を推測せず、回答根拠として扱わない。"
         ),
     )
     matched_hypothesis_ids: tuple[str, ...] = Field(
         default=(),
         description=(
-            "主体、行為、対象が一致し、候補の条件または効果が命題かgapsの"
-            "未確認部分を直接検証できるHypothesis ID。主体が不明または異なる"
-            "場合は空。"
+            "見出しと検索抜粋が同じ行為と規律を直接扱い、本文を確認する価値がある"
+            "Hypothesis ID。同じ制度名や語句を含むだけの場合は含めない。"
+            "行為者の一致は次の独立処理で確認する。"
         ),
     )
+    actor_matches: tuple[SearchCandidateActorMatch, ...] = Field(
+        default=(),
+        description=(
+            "matched_hypothesis_idsの各Article・Hypothesis組について、次の独立処理で"
+            "規律主体を照合した結果。内容評価だけの段階では空。"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def require_consistent_actor_matches(self) -> SearchCandidateAssessment:
+        if len(self.matched_hypothesis_ids) != len(
+            set(self.matched_hypothesis_ids)
+        ):
+            raise ValueError("search assessment hypothesis IDs must be unique")
+        actor_hypothesis_ids = tuple(
+            item.hypothesis_id for item in self.actor_matches
+        )
+        if len(actor_hypothesis_ids) != len(set(actor_hypothesis_ids)):
+            raise ValueError("search actor match hypothesis IDs must be unique")
+        if not set(actor_hypothesis_ids).issubset(self.matched_hypothesis_ids):
+            raise ValueError(
+                "search actor matches must reference content-matched hypotheses"
+            )
+        return self
+
+
 class SearchAssessmentDecision(FrameworkModel):
     search_request_ids: tuple[str, ...] = Field(
         description="今回評価するlegal_search Request IDの全件。",

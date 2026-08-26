@@ -22,6 +22,7 @@ ReviewFindingKind = Literal[
 ]
 ReviewFindingResolutionOutcome = Literal["addressed", "disputed"]
 DependencyStatus = Literal["not_required", "needs_action", "resolved"]
+SearchActorMatchStatus = Literal["matched", "mismatched", "unknown"]
 FrontierReviewStatus = Literal[
     "unreviewed",
     "selected",
@@ -150,9 +151,9 @@ class Hypothesis(FrameworkModel):
         min_length=1,
         max_length=1200,
         description=(
-            "WorkItemの法的論点に対する、誤り得る暫定的な結論。"
-            "一般的な法的知識を使い、法令本文によって支持または否定できる"
-            "1つの具体的な命題とする。WorkItemの言い換えだけにはせず、"
+            "WorkItemへの回答を構成し得る、誤り得る1つの法的命題。"
+            "一般的な法的知識を使い、法令本文によって個別に支持または否定"
+            "できる法的命題とする。WorkItemの言い換えだけにはせず、"
             "確認済みの事実として扱わない。"
         ),
     )
@@ -174,9 +175,9 @@ class Hypothesis(FrameworkModel):
     gaps: tuple[str, ...] = Field(
         default=(),
         description=(
-            "暫定的な結論のうち、法令本文で確定すべき基準、値、範囲その他の"
-            "未確認の規律要素。抽象的な内容、根拠条文、検索語、検索作業、"
-            "WorkItemの言い換えは含めない。"
+            "statementに残る、法令本文で確定すべき基準、値、範囲その他の"
+            "具体的な規律要素。該当する要素がなければ空とする。抽象的な内容、"
+            "根拠条文、検索語、検索作業、WorkItemの言い換えは含めない。"
         ),
     )
 
@@ -471,6 +472,26 @@ class SearchCandidateSelection(FrameworkModel):
         return self
 
 
+class SearchCandidateActorMatch(FrameworkModel):
+    """候補ArticleとHypothesisの一組に対する規律主体の照合結果。"""
+
+    hypothesis_id: str = Field(description="内容面で対応した既知Hypothesis ID。")
+    status: SearchActorMatchStatus = Field(
+        description=(
+            "matchedは主体一致、mismatchedは主体不一致、unknownは検索抜粋だけでは"
+            "判定できない状態。"
+        ),
+    )
+    regulated_actor: str = Field(
+        min_length=1,
+        description="候補の見出しと要約から読み取った規律主体。",
+    )
+    reason: str = Field(
+        min_length=1,
+        description="候補の規律主体とHypothesisの行為者を比較した理由。",
+    )
+
+
 class SearchCandidateAssessmentRecord(FrameworkModel):
     """Search Assessmentで確定した候補理解をCycle間で保持する。"""
 
@@ -478,10 +499,10 @@ class SearchCandidateAssessmentRecord(FrameworkModel):
     legal_function: Literal[
         "applicability", "exception", "procedure", "scope"
     ] = Field(description="Solverが判断した候補の法的機能。")
-    summary: str = Field(description="候補本文の取得要否を判断するための意味要約。")
+    summary: str = Field(description="候補の見出しと検索抜粋に基づく内容要約。")
     matched_hypothesis_ids: tuple[str, ...] = Field(
         default=(),
-        description="候補が直接検証できるとSolverが判断したHypothesis ID。",
+        description="候補本文を確認する価値があるとSolverが判断したHypothesis ID。",
     )
     matched_non_work_item_requirements: tuple[str, ...] = Field(
         default=(),
@@ -489,7 +510,14 @@ class SearchCandidateAssessmentRecord(FrameworkModel):
     )
     actor_match_reason: str | None = Field(
         default=None,
-        description="候補の規律主体とWorkItemの行為者を照合した短い理由。",
+        description="旧記録との互換用に保持する、候補単位の主体照合理由。",
+    )
+    actor_matches: tuple[SearchCandidateActorMatch, ...] = Field(
+        default=(),
+        description=(
+            "内容面で対応したArticleとHypothesisの各組について、"
+            "規律主体を照合した結果。"
+        ),
     )
 
     @model_validator(mode="before")
@@ -502,6 +530,21 @@ class SearchCandidateAssessmentRecord(FrameworkModel):
         migrated = dict(value)
         migrated.pop("regulated_actor_role", None)
         return migrated
+
+    @model_validator(mode="after")
+    def require_consistent_actor_matches(
+        self,
+    ) -> SearchCandidateAssessmentRecord:
+        actor_hypothesis_ids = tuple(
+            item.hypothesis_id for item in self.actor_matches
+        )
+        if len(actor_hypothesis_ids) != len(set(actor_hypothesis_ids)):
+            raise ValueError("search actor match hypothesis IDs must be unique")
+        if not set(actor_hypothesis_ids).issubset(self.matched_hypothesis_ids):
+            raise ValueError(
+                "search actor matches must reference content-matched hypotheses"
+            )
+        return self
 
 
 class SearchCandidateReview(FrameworkModel):

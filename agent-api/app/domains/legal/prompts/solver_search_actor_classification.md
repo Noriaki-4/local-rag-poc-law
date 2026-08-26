@@ -2,29 +2,28 @@
 
 ## 目的
 
-候補の自己要約は完了しています。各候補が規律する行為者を、Hypothesisの行為者と照合します。
-法的機能、条件、効果、候補の採否は判断しません。
+内容評価で対応付けられた各Article・Hypothesis組について、候補が規律する行為者を照合します。
+組の追加・削除、内容評価、候補選択は行いません。
 
 ## 出力
 
-- 各候補の規律主体、主体面で対応するHypothesis ID、理由
+- 各Article・Hypothesis組の`matched / mismatched / unknown`、規律主体、理由
 
 ## 完了条件
 
-- 全候補を1回ずつ照合している。
-- 候補の規律主体と、各Hypothesisが扱う行為者を直接比較している。
-- 主体面だけを判断し、内容評価や候補選択をやり直していない。
+- 入力された全Article・Hypothesis組を1回ずつ照合している。
+- 各組で、候補の規律主体とHypothesisが扱う行為者を直接比較している。
+- Article・Hypothesis組を追加または省略していない。
 
 ## 手順
 
-1. 各Hypothesisの`work_item_question`、`statement`、`gaps`、`action_actor`を確認します。
-2. 各候補の`headings`と`summary`から、義務、禁止、許可等の効果を受ける行為者を`regulated_actor`へ書きます。
+1. 各候補の`content_matched_hypotheses`を、指定された組としてそのまま使います。
+2. 候補の`headings`と`summary`から、義務、禁止、許可等の効果を受ける行為者を`regulated_actor`へ書きます。
    条件中に現れる所有者、発行者等を、規律される行為者と取り違えません。
-3. 同じ法的行為をする主体を扱うHypothesis IDだけを`matched_hypothesis_ids`へ入れます。
-   用語、人数、割合、対象範囲だけを定め、特定の行為者を規律しない候補は、内容面で対応済みのIDを保持できます。
+3. 候補とHypothesisが同じ法的行為をする主体を扱うなら`matched`、異なるなら`mismatched`、検索抜粋だけでは判定できないなら`unknown`とします。
 
 ## ルール
 
 - 呼称の文字列一致ではなく、同じ法的行為を行う役割かで判断します。
-- 行為者が異なる、または要約から判定できないHypothesis IDは入れません。
+- 用語、人数、割合、対象範囲だけを定め、特定の行為者を規律しない候補は、行為者不一致と決めつけず`unknown`にできます。
 - この処理では候補を選びません。

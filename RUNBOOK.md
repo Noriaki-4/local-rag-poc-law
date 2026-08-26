@@ -1315,10 +1315,28 @@ agent-api/.venv/bin/python scripts/run_hypothesis_generation_debug.py \
   --output eval-results/hypothesis-generation/overview
 ```
 
-Hypothesis生成は新規のModel呼出し1回であり、前段の会話履歴を送らない。入力は元質問と確定済みWorkItemだけで、
-`non_work_item_requirements`、Tool、Evidence、Graphは送らない。主体情報はWorkItemの`action_actor`、
-`target_actor`、`actor_relation`を正本とし、Hypothesis出力へ重複させない。`result.json`の
+Hypothesis生成は新規のModel呼出し1回であり、前段の会話履歴を送らない。入力は元質問と、確定済みWorkItemの
+ID・確認事項・`action_actor`だけで、
+`non_work_item_requirements`、Tool、Evidence、Graphは送らない。質問から読み取れる行為者はWorkItemの
+`action_actor`を正本とし、Hypothesis出力へ重複させない。Hypothesis出力には本文で未確認の`gaps`を含める。`result.json`の
 `callCount=1`、`repairAttempted=false`、`validationError`と、生成された完成Prompt・schema・生応答を確認する。
+
+OpenSearch候補の検索抜粋整理だけを診断する場合は次を使う。承認済みcheckpointの
+`SolverContext`から、本番の`solver_search_review.md`、候補別検索抜粋、出力schemaを完成形にし、
+予備判定を1回だけ呼ぶ。Article全文やHypothesisの正否は判断せず、行為者照合、候補選択、本文取得、修復も実行しない。
+
+```bash
+agent-api/.venv/bin/python scripts/run_search_assessment_debug.py \
+  --fixture agent-api/tests/fixtures/framework/tob_actor_relation_search_v191.json \
+  --provider openai \
+  --model gpt-4o-mini-2024-07-18 \
+  --article-id law-323AC0000000025-article-27_2 \
+  --output eval-results/search-assessment/article-27-2
+```
+
+`--article-id`は複数指定できる。出力先の`instructions.md`と`output_schema.json`が結合後の固定指示と
+契約、`input.json`が実際の候補・Hypothesis・検索抜粋、`result.json`が生応答と正規化結果である。
+`callCount=1`、`repairAttempted=false`により、後段の主体照合や選択が混ざっていないことを確認する。
 
 初回Researchの失敗がモデルの法的仮説立案能力か、本番Prompt・契約の複雑さかを切り分ける場合は、
 本番Promptを一切合成しない最小診断を実行する。出力はWorkItemと入れ子のHypothesisだけであり、

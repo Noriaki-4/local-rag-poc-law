@@ -14,7 +14,7 @@
         },
         "gaps": {
           "default": [],
-          "description": "この命題を判定するために、本文でまだ確認すべき具体的情報。",
+          "description": "statementに残る、本文でまだ確認すべき具体的情報。該当する情報がなければ空とする。",
           "items": {
             "type": "string"
           },

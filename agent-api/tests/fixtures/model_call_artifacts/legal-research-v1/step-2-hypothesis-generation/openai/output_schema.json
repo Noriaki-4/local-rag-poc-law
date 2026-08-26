@@ -2,12 +2,21 @@
   "additionalProperties": false,
   "properties": {
     "hypotheses": {
-      "description": "提示されたWorkItemを検証するHypothesis。適用除外又は例外以外で複数の種類を問うWorkItemには、具体的な候補を複数返す。",
+      "description": "提示されたWorkItemを検証するHypothesis。独立して適用され得る条件、義務又は回答事項ごとに返す。",
       "items": {
         "additionalProperties": false,
         "properties": {
+          "gaps": {
+            "description": "statementに残る、法令本文で確認すべき具体的な規律要素。該当する要素がなければ空にする。行為者が不明で結論を左右する場合は、その役割の確認も含める。根拠条文の提示や検索作業は書かない。",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 8,
+            "type": "array"
+          },
           "statement": {
-            "description": "現在のWorkItem自身が適用除外又は例外を問う場合は、未知の除外事由を推測せず、原則規定に対する別の例外規定又は下位法令への委任という構造仮説だけを書く。委任の有無が未確認なら両方を別の仮説にする。成立条件、対象範囲又は手続を問うWorkItemは例外として扱わない。それ以外では、一般的な法的知識を使い、法令本文によって支持又は否定できる誤り得る暫定的な結論を書く。根拠法令名や条文番号は書かない。",
+            "description": "WorkItemへの回答を構成し得る、法令本文の一つの規定内容で個別に支持又は否定できる1つの法的命題。一般的な法的知識を使ってよいが、WorkItemにない行為者、具体的な数値又は条文番号を確定事項として作らない。規定の存在や検索方針ではなく、確認する法的命題を書く。",
             "maxLength": 2000,
             "minLength": 1,
             "type": "string"
@@ -21,11 +30,11 @@
         },
         "required": [
           "work_item_id",
-          "statement"
+          "statement",
+          "gaps"
         ],
         "type": "object"
       },
-      "maxItems": 4,
       "minItems": 1,
       "type": "array"
     }

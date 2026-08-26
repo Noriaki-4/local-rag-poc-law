@@ -60,11 +60,11 @@ Neo4jから指定条件の1ホップ候補を取得する
 
 | ID | 優先度 | status | 課題 | 現在地 | 次の確認 |
 |---|---|---|---|---|---|
-| `LR-001` | P0 | 対応中 | 質問から必要な検索仮説を漏れなく作る | Profile v289で初回`gaps`生成をやめ、HypothesisがないWorkItemを1件ずつ処理して逐次保存する方式へ変更した。適用除外は未知の具体例を作らず、直接の例外規定と下位法令への委任を別Hypothesisとして扱う。検索要求まで分けることは強制しない | 主体特定はLR-017/020で別管理し、通常論点の仮説具体性と、Hypothesisを使った検索計画・候補取得を確認する |
+| `LR-001` | P0 | 対応中 | 質問から必要な検索仮説を漏れなく作る | Profile v289でHypothesisがないWorkItemを1件ずつ処理する方式へ変更した際、元質問、`action_actor`及び`gaps`をHypothesis生成契約から落としたため、主体の推測と抽象的な命題が再発した。v300で`statement`をWorkItemへの回答を構成する回答項目として定義し、追加の未確認事項がない`gaps=[]`を許可した。v301でWorkItem最大24件、Hypothesis最大4件／WorkItemという意味上の上限をProvider schemaから削除した。v302で分割単位を「法令本文の一つの規定内容で個別に支持又は否定できる命題」と明確化した。v303では1 WorkItemずつ処理するHypothesis生成入力から元質問全体を外し、WorkItemを唯一の作業範囲とした。`gpt-4o-mini`の隔離実行では総合の成立条件へ他WorkItemの論点が混入する問題は解消した。一方、公告は4件に分かれたが一部`statement`に複数事項が残り、広い例外は抽象的な1件に留まった。`action_actor`はWorkItemだけを正本とし、Hypothesisには複製しない | 公開買付けの公告・例外・総合WorkItemを隔離実行し、WorkItem外の論点を混ぜず、検索対象を選べる具体的なHypothesisが生成されることを確認する |
 | `LR-002` | P0 | 対応中 | 法令検索表現を作り、同一Cycle内でOpenSearchを適切に再検索する | 検索要求作成だけの隔離診断を追加した。Profile v290で`purpose`を確認内容、`query`を短い法令用語の組合せとして分離した。例外問題では直接例外と委任を1検索にまとめて法令表現を生成できたが、総合問題の検索語はまだ抽象的である | 個別語をPromptへ追加せず、LR-001のHypothesis具体性と実際のOpenSearch候補を合わせて評価する |
 | `LR-003` | P0 | 完了 | Graph由来Articleを起点に連続1ホップ探索する | `gpt-4o-mini`の実モデルtrace v7で、金商法27条の2→施行令7条、施行令7条→府令2条の5を別々の1ホップGraph要求として実行し、府令本文取得後にCycle 1で正常完了した | `lr_003_second_hop_integration_v1.json`、`lr_003_second_hop_graph_review_v1.json`、`lr_003_cycle_close_deferred_frontiers_v1.json`を回帰fixtureとして維持する |
 | `LR-004` | P0 | 対応中 | 複合問題の統合Decisionを成立させ、次の探索または完了へ進む | Observation Integration、Dependency Assessment、Cycle Closeを分離した。Profile v260では投影後に未解決事項がなければCycle Close schemaが`finalize`だけを許し、矛盾した次Cycle開始を防ぐ | 公開買付け総合問題で複数Cycle後も同じ境界条件を満たすことを確認する |
-| `LR-005` | P0 | 対応中 | `gpt-4o-mini`で新検索経路を実モデル評価する | Profile v260の公告問題は1 Cycle・2 Toolで正常完了し、府令10条と法27条の3を取得・引用した。例外問題はprotocol errorを解消したが、施行令7条ではなく別制度段階の施行令を選び、必要根拠は1/3にとどまった | 例外問題の初回Hypothesisと候補選別を、公開買付け固有の固定語を追加せず改善する |
+| `LR-005` | P0 | 対応中 | `gpt-4o-mini`で新検索経路を実モデル評価する | Profile v291で公告・例外・総合を各1回実行した。正常完了は公告だけで、必要Articleは合計2/11、回答要点は4/12。例外と総合はCycle終了後の`finalize`矛盾で`protocol_error`となった | LR-021の候補理解・対応判断を単一責務化した後、LR-019のCycle切替を修正し、同じ3問を再実行する |
 | `LR-006` | P1 | 要設計 | 意味分類coverage不足時にも逆引き検索爆発と取りこぼしを両立させる | publish済み意味関係ならselectorで絞れるが、未分類範囲でraw `REFERENCES/to_subject`を使うと高fan-inになる | 限定fallbackの発動条件、scope上限、coverage不足の表示、限定回答条件を決める |
 | `LR-007` | P1 | 未着手 | CycleとStepを再開可能な状態として保存する | WorkItem、Hypothesis、Evidence、Graph review履歴はあるが、目標の`CycleRecord / StepRecord / ExplorationState`は未実装 | Tool観察後の中断から同じStepを再開し、別Cycleとして数えないfixtureを通す |
 | `LR-008` | P1 | 対応中 | status、Provider schema、Prompt、遷移検証の修正漏れを防ぐ | 主要Solver項目の`Field.description`から共通用語集を生成した。初回3 Stepは`ResearchStepInput`の実投影項目と入れ子要素から`input_contract`を生成し、基準Providerの完成成果物を本番生成結果と比較する。他Providerとの意味契約一致は重複ファイルを持たずテストする。Toolの用途・入力Schema・戻り値は`ToolDefinition`から`available_tools`へ投影する | 全statusのowner・遷移・永続化versionを説明付き正本へ集約し、未定義statusで契約テストが失敗するようにする |
@@ -76,10 +76,11 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-014` | P1 | 検証待ち | Haikuで承認した中間状態から安価なモデルで後続処理を再生する | checkpointの明示承認をpromotion時に記録し、指定Provider・modelで1回のSolver処理を再生する`replay_agent_checkpoint.py`を実装した。APIを使わない単体テストは合格した | Haikuの正常中間状態を承認済みfixtureへ昇格し、`gpt-4o-mini`、同じcheckpointのHaikuの順に実モデル再生する |
 | `LR-015` | P0 | 検証待ち | 初回Researchを単一責務のStepへ分け、要求をWorkItemとそれ以外へ欠落なく分解する | Profile v156で同一Cycle内の要求分解、仮説立案、検索要求作成を実装した。各完成Promptは単独で読めるH1を持ち、処理順のStep番号を含めない。一時的な段階比較コードを整理した後の全900テストに合格した | 別分野fixtureと公開買付けE2Eを`gpt-4o-mini`で確認し、最終的にHaikuで品質確認する |
 | `LR-016` | P0 | 検証待ち | Tool観察の意味統合とCycle Closeを単一責務のStepへ分ける | v183でArticle→Hypothesis対応をObservationへ渡し、GPT-4o mini実モデルで4 Hypothesisへの本文Evidence保存を確認した。後続Stepの時間切れで成功済みObservationを失わないcheckpoint保存を追加した。対象WorkItemがない依存判定は呼び出さず、OpenAI schemaへ`null` enumを出す経路も除去した | 同じcheckpointをHaikuで再生し、本文の部分確認、意味更新、Cycle判断を確認する |
-| `LR-017` | P0 | 対応中 | 検索候補の規律主体と行為対象を安定して区別する | Profile v275でWorkItemを`action_actor`だけへ簡素化し、候補との対応をLLMの直接照合へ変更した。Programは内容評価と主体照合のHypothesis ID積集合だけを取る | 2候補の隔離診断は合格したが、公開買付け総合の実データ実行では発行者自身の27条の22の2を再び選択した。`tob_overview_issuer_actor_mismatch_v275.json`で再現する |
+| `LR-017` | P0 | 対応中 | 検索候補の規律主体と行為対象を安定して区別する | Profile v292で内容評価が作ったArticle・Hypothesis組を主体照合の固定入力とし、Programによる独立ID集合の積集合を廃止した。主体照合は各組を`matched / mismatched / unknown`で返す | 隔離fixtureで組の全件性、主体不一致候補の選択拒否、内容評価単独診断を確認した後、公開買付け3問を再実行する |
 | `LR-018` | P0 | 完了 | Graph探索が必要な未解決事項があってもSolverがGraph検索を要求しない | 次Cycle開始時の保留OpenSearch候補を自動Search Selectionへ戻さず、Integrationで既知候補・Graph・再検索を比較するよう修正した。Graph selectorのmode・predicate・directionを分岐schemaで拘束し、同一Graph要求と本文取得要求は選択内容を保ったまま輸送時に統合する | Cycle 2 fixtureで府令10条を含む既知候補の本文取得へ進むこと、および候補を除いたGraph必須状態で`27条の2 / IMPLEMENTS / from_subject`の1要求を返し共通契約を通過することを`gpt-4o-mini-2024-07-18`で確認済み |
-| `LR-019` | P0 | 対応中 | 統合の意味的な行動選択を違反別契約からSolver loopへ戻す | 成功済みと完全一致する検索・Graph要求は実行前に止めるが、違反別修復schemaでToolを禁止せず、通常の`action_feedback`としてSolverへ返す実装へ変更した。統合Promptと自己点検も固定順から判断基準中心へ簡素化した | 固定fixtureで全Toolが利用可能なまま別行動を選べることを確認し、Reviewer無効の総合問題でprotocol errorと反復回数を再評価する |
+| `LR-019` | P0 | 対応中 | 統合の意味的な行動選択を違反別契約からSolver loopへ戻す | Profile v291の例外・総合で、次の探索要求を持ちながら`next=finalize`、`answer=null`を2回返して`protocol_error`となった。総合はCycle 2開始までは到達した | Cycle開始時のIntegration完成Promptをfixture化し、Toolを要求する場合の`next`と完了条件の理解を隔離診断する |
 | `LR-020` | P1 | 要設計 | 複数の解釈や規律主体が成立する質問を一方的に確定せず、利用者へ確認する | 質問分解時に主体を確定させると誤った候補を早期に除外する。主体を限定せず検索すれば、発行者自身と発行者以外等の異なる規律主体が候補本文から判明する | LLMが検索後に結論を変える主体分岐を検出し、既知情報で確定できなければ確認を求める。Programが確認待ちを保存し、回答後に同じCaseを再開する最小契約を設計する |
+| `LR-021` | P0 | 対応中 | 検索候補の内容評価を単一責務にする | Profile v292でArticle・Hypothesis組と主体照合を分離した。v293では、見出しと検索抜粋だけでArticle全体やHypothesisの正否を判断させず、同じ法的争点の本文取得候補を整理する予備判定へ責務を限定した。`run_search_assessment_debug.py`は本番`solver_search_review.md`だけを1回呼び、完成Prompt・入力・schema・生応答を保存できる。v293の単独候補診断でも別規制の府令63条と義務成立後の金商法27条の13が`h-1`へ誤対応し、候補数ではなく、入力Hypothesisが確認する法的結論を特定できないことが残因と分かった | 検索抜粋評価へ規則を追加する前に、Hypothesis生成が確認対象の法的結論を具体化できるかを最小fixtureで確認する。その後、公告、例外、総合の順に内容評価、主体照合、候補選択を別々に検証する |
 
 ### 3.1 LR-016 Tool観察とCycle Closeの単一責務化
 
@@ -155,9 +156,11 @@ ID付与、既知ID・件数・参照整合の検証だけを担当する。要�
 
 一括した候補評価へ`matched_hypothesis_ids`を追加しただけでは、候補要約で主体を正しく記述しても、
 同じ出力内の主体対応で取り違えることがあった。Profile v197では処理を、候補の内容評価、候補見出しと
-要約を使う主体分類、両結果を使う候補選択の3段階へ分けた。Programは内容面と主体面でLLMが指定した
-Hypothesis IDの共通部分を計算し、既知ID、重複、enum間の矛盾だけを検証する。条文の意味や正しい主体は
-Programで判定しない。
+要約を使う主体分類、両結果を使う候補選択の3段階へ分けた。その後、二つのLLM処理が
+`matched_hypothesis_ids`を独立生成し、Programが積集合を取ると、片方のID欠落だけで候補が理由なく消える
+構造問題が判明した。Profile v292では内容評価が作ったArticle・Hypothesis組を主体照合の固定入力とし、
+主体照合は各組のstatusと理由だけを返す。Programは組の全件性、既知ID、重複と出力間の矛盾だけを検証し、
+条文の意味や正しい主体は判定しない。
 
 再発時点の状態は
 [主体不一致候補fixture](../agent-api/tests/fixtures/framework/tob_overview_search_actor_mismatch_v1.json)へ保存した。
@@ -178,7 +181,8 @@ deferredとした。結果要約は
 Profile v275では、その後の切り分けで`target_actor`と`actor_relation`がなくても、WorkItemの質問、
 `action_actor`、Hypothesisを候補要約と直接比較すれば、公開買付けと別分野の主体不一致を識別できることを確認した。
 そのため三項目への事前分類は廃止し、WorkItemは`action_actor`だけを正本とする。行為対象は`question`に残し、
-候補の主体対応はLLMが`matched_hypothesis_ids`として直接返す。Programは内容評価とのID積集合だけを計算する。
+候補の主体対応はLLMが、内容評価済みのArticle・Hypothesis組ごとにstatusと理由を返す。
+Programは組を追加・削除せず結合し、最終的な本文取得候補は後段のLLMが選択する。
 旧fixtureと保存状態の`target_actor`、`actor_relation`、`regulated_actor_role`は読込み時に破棄する。
 
 ### 3.4 LR-020 曖昧な質問の確認
@@ -656,6 +660,7 @@ LR-010  必要性と費用を再評価して全件分類を再開
 | 2026-08-23 | LR-012 Prompt・契約成果物 | 固定指示、動的入力、Provider schema、正規化後schema、実送信内容を分離。3 Provider基準成果物と全887テストに合格 | [RUNBOOK](../RUNBOOK.md) |
 | 2026-08-24 | LR-013 / LR-014 共通小型契約・checkpoint再生 | Legal Profile v154。Provider共通schema、実行時IDの事後検証、承認済みcheckpoint再生コマンドを実装。代表Cycle Close schemaは14,494→7,014文字、全895テスト合格。実モデル再生は未実施 | [RUNBOOK](../RUNBOOK.md) |
 | 2026-08-25 | Profile v275・公開買付け3問・`gpt-4o-mini` | 公告は必要Article 2/2だが回答要点不足。例外は2/3取得後、総合は0/6取得後に、いずれもCycle 2の`finalize`とTool要求の矛盾で停止。総合では27条の22の2を誤選択 | `tob_announcement_final_answer_incomplete_v275.json`、`tob_exceptions_cycle2_finalize_tool_conflict_v275.json`、`tob_overview_issuer_actor_mismatch_v275.json`、`tob_overview_cycle2_finalize_tool_conflict_v275.json` |
+| 2026-08-25 | Profile v291・公開買付け3問・`gpt-4o-mini` | 公告だけ正常完了。3問合計で必要Article 2/11、回答要点4/12。例外と総合は`next=finalize`、`answer=null`、Tool要求ありの矛盾を修復できず`protocol_error`。候補内容評価と主体照合の対応ID不一致、および取得候補の誤選択を確認 | `eval-results/e2e-v291-gpt4omini/`、`eval-results/agent-framework-diagnostics/legal-beb78a10fd89425eb78de503e5829a93.jsonl`、`legal-07f80109b5074079851b241bccfb32ce.jsonl`、`legal-985c7b715e12438cbf2404d0257625a6.jsonl` |
 ### 2026-08-25: 質問分解と仮説立案の主体表現を分離
 
 - WorkItemの主体情報を`action_actor`、`target_actor`、`actor_relation`へ分離し、Hypothesisには重複保存しない。

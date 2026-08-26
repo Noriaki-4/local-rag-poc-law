@@ -52,6 +52,7 @@ def test_render_uses_only_production_question_decomposition_stage() -> None:
         "work_items",
         "non_work_item_requirements",
     }
+    assert "maxItems" not in rendered.output_schema["properties"]["work_items"]
     work_item_properties = rendered.output_schema["properties"]["work_items"][
         "items"
     ]["properties"]

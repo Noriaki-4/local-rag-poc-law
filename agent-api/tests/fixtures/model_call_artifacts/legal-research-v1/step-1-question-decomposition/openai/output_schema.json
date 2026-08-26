@@ -34,7 +34,6 @@
         ],
         "type": "object"
       },
-      "maxItems": 24,
       "minItems": 1,
       "type": "array"
     }

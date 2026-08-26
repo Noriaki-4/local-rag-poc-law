@@ -19,6 +19,7 @@ from .state import (
     FrontierReviewStatus,
     Hypothesis,
     ReviewFinding,
+    SearchCandidateActorMatch,
     ToolRequest,
     ToolResult,
     ToolStatus,
@@ -282,7 +283,7 @@ class SearchCandidateArticle(FrameworkModel):
     )
     matched_hypothesis_ids: tuple[str, ...] = Field(
         default=(),
-        description="前Cycleで候補が直接検証できると判断されたHypothesis ID。",
+        description="前Cycleで候補本文を確認する価値があると判断されたHypothesis ID。",
     )
     matched_non_work_item_requirements: tuple[str, ...] = Field(
         default=(),
@@ -291,6 +292,10 @@ class SearchCandidateArticle(FrameworkModel):
     actor_match_reason: str | None = Field(
         default=None,
         description="前Cycleの主体照合理由。",
+    )
+    actor_matches: tuple[SearchCandidateActorMatch, ...] = Field(
+        default=(),
+        description="前CycleでArticle・Hypothesisごとに行った規律主体の照合結果。",
     )
 
     @model_validator(mode="before")
@@ -317,13 +322,18 @@ class ResearchStepWorkItem(FrameworkModel):
 class ResearchStepHypothesis(FrameworkModel):
     hypothesis_id: str = Field(description="Programが付与した既知Hypothesis ID。")
     work_item_id: str = Field(description="このHypothesisが属する既知WorkItem ID。")
-    statement: str = Field(description="法令本文で検証する暫定的な法的結論。")
+    statement: str = Field(
+        description="WorkItemへの回答を構成し得る、法令本文で検証する1つの法的命題。"
+    )
     action_actor: str | None = Field(
         default=None,
         description="所属WorkItemで確定した、規制対象となる行為をする者。"
     )
     gaps: tuple[str, ...] = Field(
-        description="結論のうち法令本文で確定すべき未確認の規律要素。"
+        description=(
+            "statementに残る、法令本文で確定すべき具体的な規律要素。"
+            "該当する要素がなければ空。"
+        )
     )
 
 
@@ -1203,6 +1213,11 @@ def _search_candidate_projection(
                 assessment_by_article[article_id].actor_match_reason
                 if article_id in assessment_by_article
                 else None
+            ),
+            actor_matches=(
+                assessment_by_article[article_id].actor_matches
+                if article_id in assessment_by_article
+                else ()
             ),
         )
         for article_id, item in candidates.items()

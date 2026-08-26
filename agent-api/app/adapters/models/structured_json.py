@@ -918,55 +918,58 @@ class StructuredJSONModelAdapter:
                 assessment_result.payload,
                 batch_context,
             )
-
-            actor_call = render_search_actor_classification_model_call(
-                batch_context,
-                batch_payload,
-                profile,
-                provider=provider,
-            )
-            if self._diagnostics is not None:
-                self._diagnostics.record_transport_input(
-                    context=batch_context,
-                    profile=profile,
-                    rendered=actor_call,
-                    repair_index=0,
-                    transport_stage="search_actor_classification",
+            actor_result = None
+            if _search_actor_pairs(batch_payload):
+                actor_call = render_search_actor_classification_model_call(
+                    batch_context,
+                    batch_payload,
+                    profile,
                     provider=provider,
                 )
-            try:
-                actor_result = self._client.generate_structured_json(
-                    prompt=actor_call.request,
-                    schema=actor_call.output_schema,
-                    model=profile.model,
-                    max_tokens=profile.max_output_tokens,
-                    timeout_sec=max(1, round(profile.timeout_sec)),
-                )
-            except requests.Timeout as exc:
-                raise TimeoutError(
-                    "search actor classification timed out"
-                ) from exc
-            actor_error = actor_result.validationError
-            if actor_result.payload is None and actor_error is None:
-                actor_error = "empty"
-            if self._diagnostics is not None:
-                self._diagnostics.record_transport_output(
-                    context=batch_context,
-                    repair_index=0,
-                    payload=actor_result.payload,
-                    validation_error=actor_error,
-                    input_tokens=actor_result.inputTokens,
-                    output_tokens=actor_result.outputTokens,
-                    provider_retry_count=actor_result.retryCount,
-                    transport_stage="search_actor_classification",
-                )
-            if actor_error is not None or actor_result.payload is None:
-                raise ModelProtocolError(
-                    f"search actor classification invalid: {actor_error}"
-                )
+                if self._diagnostics is not None:
+                    self._diagnostics.record_transport_input(
+                        context=batch_context,
+                        profile=profile,
+                        rendered=actor_call,
+                        repair_index=0,
+                        transport_stage="search_actor_classification",
+                        provider=provider,
+                    )
+                try:
+                    actor_result = self._client.generate_structured_json(
+                        prompt=actor_call.request,
+                        schema=actor_call.output_schema,
+                        model=profile.model,
+                        max_tokens=profile.max_output_tokens,
+                        timeout_sec=max(1, round(profile.timeout_sec)),
+                    )
+                except requests.Timeout as exc:
+                    raise TimeoutError(
+                        "search actor classification timed out"
+                    ) from exc
+                actor_error = actor_result.validationError
+                if actor_result.payload is None and actor_error is None:
+                    actor_error = "empty"
+                if self._diagnostics is not None:
+                    self._diagnostics.record_transport_output(
+                        context=batch_context,
+                        repair_index=0,
+                        payload=actor_result.payload,
+                        validation_error=actor_error,
+                        input_tokens=actor_result.inputTokens,
+                        output_tokens=actor_result.outputTokens,
+                        provider_retry_count=actor_result.retryCount,
+                        transport_stage="search_actor_classification",
+                    )
+                if actor_error is not None or actor_result.payload is None:
+                    raise ModelProtocolError(
+                        f"search actor classification invalid: {actor_error}"
+                    )
             batch_payload = _apply_search_actor_classification(
                 batch_payload,
-                actor_result.payload,
+                actor_result.payload if actor_result is not None else {
+                    "actor_matches": []
+                },
                 batch_context,
             )
             _validate_search_assessment_payload(batch_payload, batch_context)
@@ -974,7 +977,8 @@ class StructuredJSONModelAdapter:
             if reason := batch_payload.get("reason"):
                 assessment_reasons.append(reason)
             assessment_results.append(assessment_result)
-            actor_results.append(actor_result)
+            if actor_result is not None:
+                actor_results.append(actor_result)
 
         assessment_payload = {
             "search_request_ids": list(
@@ -1617,6 +1621,7 @@ def _solver_context_payload(
                 {
                     "work_item_id": item.work_item_id,
                     "question": item.question,
+                    "action_actor": item.action_actor,
                 }
                 for item in research_input.work_items
             ],
@@ -1684,7 +1689,6 @@ def _staged_research_transport_schema(
                     "type": "array",
                     "items": work_item,
                     "minItems": 1,
-                    "maxItems": 24,
                     "description": "質問に含まれる法的論点の一覧。",
                 },
                 "non_work_item_requirements": {
@@ -1710,14 +1714,22 @@ def _staged_research_transport_schema(
                     "minLength": 1,
                     "maxLength": 2000,
                     "description": (
-                        "現在のWorkItem自身が適用除外又は例外を問う場合は、"
-                        "未知の除外事由を推測せず、"
-                        "原則規定に対する別の例外規定又は下位法令への委任"
-                        "という構造仮説だけを書く。委任の有無が未確認なら両方を"
-                        "別の仮説にする。成立条件、対象範囲又は手続を問う"
-                        "WorkItemは例外として扱わない。それ以外では、一般的な法的知識を"
-                        "使い、法令本文によって支持又は否定できる誤り得る"
-                        "暫定的な結論を書く。根拠法令名や条文番号は書かない。"
+                        "WorkItemへの回答を構成し得る、法令本文の一つの規定内容で"
+                        "個別に支持又は否定できる1つの法的命題。一般的な法的知識を"
+                        "使ってよいが、WorkItemにない行為者、具体的な数値又は条文番号を"
+                        "確定事項として作らない。規定の存在や検索"
+                        "方針ではなく、確認する法的命題を書く。"
+                    ),
+                },
+                "gaps": {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1},
+                    "maxItems": 8,
+                    "description": (
+                        "statementに残る、法令本文で確認すべき具体的な規律要素。"
+                        "該当する要素がなければ空にする。行為者が不明で結論を左右す"
+                        "る場合は、その役割の確認も含める。根拠条文の提示や検索作業"
+                        "は書かない。"
                     ),
                 },
             }
@@ -1728,10 +1740,9 @@ def _staged_research_transport_schema(
                     "type": "array",
                     "items": hypothesis,
                     "minItems": len(work_item_ids),
-                    "maxItems": max(len(work_item_ids), min(48, len(work_item_ids) * 4)),
                     "description": (
-                        "提示されたWorkItemを検証するHypothesis。適用除外又は例外"
-                        "以外で複数の種類を問うWorkItemには、具体的な候補を複数返す。"
+                        "提示されたWorkItemを検証するHypothesis。独立して適用され得る"
+                        "条件、義務又は回答事項ごとに返す。"
                     ),
                 }
             }
@@ -3118,7 +3129,6 @@ def _search_review_context_payload(
         "hypotheses": [
             item.model_dump(mode="json") for item in context.hypotheses
         ],
-        "remaining_fetch_capacity": context.remaining_fetch_capacity,
         "required_search_review_request_ids": list(
             context.required_search_review_request_ids
         ),
@@ -3237,70 +3247,39 @@ def render_search_actor_classification_model_call(
         item.article_id: item for item in context.search_candidates
     }
     candidate_ids = tuple(
-        item["article_id"]
-        for item in assessments
-        if isinstance(item, dict) and isinstance(item.get("article_id"), str)
+        dict.fromkeys(
+            article_id for article_id, _ in _search_actor_pairs(assessment_payload)
+        )
     )
     hypothesis_ids = tuple(item.hypothesis_id for item in context.hypotheses)
-    role_item = _strict_object(
+    expected_pairs = _search_actor_pairs(assessment_payload)
+    schema = _strict_object(
         {
-            "regulated_actor": {"type": "string", "minLength": 1},
-            "matched_hypothesis_ids": _bounded_enum_array(hypothesis_ids),
-            "reason": {"type": "string", "minLength": 1},
+            "actor_matches": {
+                "type": "array",
+                "items": _strict_object(
+                    {
+                        "article_id": _enum_string(candidate_ids),
+                        "hypothesis_id": _enum_string(hypothesis_ids),
+                        "status": {
+                            "type": "string",
+                            "enum": ["matched", "mismatched", "unknown"],
+                        },
+                        "regulated_actor": {
+                            "type": "string",
+                            "minLength": 1,
+                        },
+                        "reason": {"type": "string", "minLength": 1},
+                    }
+                ),
+                "minItems": len(expected_pairs),
+                "maxItems": len(expected_pairs),
+            }
         }
     )
-    if provider == "anthropic":
-        schema = _strict_object(
-            {
-                "roles": {
-                    "type": "array",
-                    "items": _strict_object(
-                        {
-                            "article_id": _enum_string(candidate_ids),
-                            **role_item["properties"],
-                        }
-                    ),
-                    "minItems": len(candidate_ids),
-                    "maxItems": len(candidate_ids),
-                }
-            }
-        )
-    else:
-        schema = _strict_object(
-            {
-                "roles": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        article_id: {"$ref": "#/$defs/actor_role"}
-                        for article_id in candidate_ids
-                    },
-                    "required": list(candidate_ids),
-                }
-            }
-        )
-        schema["$defs"] = {"actor_role": role_item}
     work_item_by_id = {item.work_item_id: item for item in context.work_tree}
     input_payload = {
         "question": context.question,
-        "hypotheses": [
-            {
-                "hypothesis_id": item.hypothesis_id,
-                "action_actor": (
-                    work_item_by_id[item.work_item_id].action_actor
-                    if item.work_item_id in work_item_by_id
-                    else None
-                ),
-                "work_item_question": (
-                    work_item_by_id[item.work_item_id].question
-                    if item.work_item_id in work_item_by_id
-                    else None
-                ),
-                "statement": item.statement,
-                "gaps": list(item.gaps),
-            }
-            for item in context.hypotheses
-        ],
         "candidates": [
             {
                 "article_id": item["article_id"],
@@ -3308,6 +3287,26 @@ def render_search_actor_classification_model_call(
                     candidate_by_id[item["article_id"]].headings
                 ),
                 "summary": item["summary"],
+                "content_matched_hypotheses": [
+                    {
+                        "hypothesis_id": hypothesis.hypothesis_id,
+                        "action_actor": (
+                            work_item_by_id[hypothesis.work_item_id].action_actor
+                            if hypothesis.work_item_id in work_item_by_id
+                            else None
+                        ),
+                        "work_item_question": (
+                            work_item_by_id[hypothesis.work_item_id].question
+                            if hypothesis.work_item_id in work_item_by_id
+                            else None
+                        ),
+                        "statement": hypothesis.statement,
+                        "gaps": list(hypothesis.gaps),
+                    }
+                    for hypothesis in context.hypotheses
+                    if hypothesis.hypothesis_id
+                    in (item.get("matched_hypothesis_ids") or ())
+                ],
             }
             for item in assessments
             if isinstance(item, dict)
@@ -3326,6 +3325,24 @@ def render_search_actor_classification_model_call(
         output_schema=schema,
         normalized_schema=schema,
     )
+
+
+def _search_actor_pairs(
+    assessment_payload: dict[str, Any],
+) -> tuple[tuple[str, str], ...]:
+    """内容評価が作ったArticle・Hypothesis組を順序付きで返す。"""
+
+    pairs: list[tuple[str, str]] = []
+    for assessment in assessment_payload.get("assessments") or ():
+        if not isinstance(assessment, dict):
+            continue
+        article_id = assessment.get("article_id")
+        if not isinstance(article_id, str):
+            continue
+        for hypothesis_id in assessment.get("matched_hypothesis_ids") or ():
+            if isinstance(hypothesis_id, str):
+                pairs.append((article_id, hypothesis_id))
+    return tuple(pairs)
 
 
 def _search_reselection_prompt(
@@ -4216,9 +4233,9 @@ def _search_review_transport_schema(
             "matched_hypothesis_ids": {
                 **_bounded_enum_array(hypothesis_ids),
                 "description": (
-                    "規律主体をいったん除き、候補の行為、対象、条件または効果が"
-                    "statementかgapsを直接検証できるHypothesis ID。主体照合は"
-                    "次の独立処理で行う。"
+                    "見出しと検索抜粋が同じ行為と規律を直接扱い、本文を確認する"
+                    "価値があるHypothesis ID。同じ制度名や語句を含むだけの場合は"
+                    "含めない。行為者の一致は次の独立処理で確認する。"
                 ),
             },
         }
@@ -5934,44 +5951,52 @@ def _apply_search_actor_classification(
     actor_payload: dict[str, Any],
     context: SolverContext,
 ) -> dict[str, Any]:
-    """独立した主体照合結果をArticle IDで機械的に合成する。"""
+    """主体照合をArticle・Hypothesis組へ機械的に結合する。"""
 
-    roles = actor_payload.get("roles")
-    if isinstance(roles, list):
-        roles = {
-            item["article_id"]: {
+    actor_matches = actor_payload.get("actor_matches")
+    if not isinstance(actor_matches, list):
+        raise ModelProtocolError(
+            "search actor classification requires actor_matches"
+        )
+    expected_pairs = set(_search_actor_pairs(assessment_payload))
+    actual_pairs: list[tuple[str, str]] = []
+    for item in actor_matches:
+        if not isinstance(item, dict):
+            raise ModelProtocolError("search actor classification item invalid")
+        article_id = item.get("article_id")
+        hypothesis_id = item.get("hypothesis_id")
+        if not isinstance(article_id, str) or not isinstance(
+            hypothesis_id, str
+        ):
+            raise ModelProtocolError(
+                "search actor classification pair IDs are invalid"
+            )
+        actual_pairs.append((article_id, hypothesis_id))
+    if len(actual_pairs) != len(set(actual_pairs)):
+        raise ModelProtocolError(
+            "search actor classification pairs must be unique"
+        )
+    if set(actual_pairs) != expected_pairs:
+        raise ModelProtocolError(
+            "search actor classification must cover every content-matched pair"
+        )
+
+    matches_by_article: dict[str, list[dict[str, Any]]] = {}
+    for item in actor_matches:
+        matches_by_article.setdefault(item["article_id"], []).append(
+            {
                 key: value
                 for key, value in item.items()
                 if key != "article_id"
             }
-            for item in roles
-            if isinstance(item, dict)
-            and isinstance(item.get("article_id"), str)
-        }
-    if not isinstance(roles, dict):
-        raise ModelProtocolError("search actor classification requires roles")
-    expected_ids = {item.article_id for item in context.search_candidates}
-    if set(roles) != expected_ids:
-        raise ModelProtocolError(
-            "search actor classification must cover every candidate"
         )
     normalized = deepcopy(assessment_payload)
     for assessment in normalized.get("assessments") or []:
         if not isinstance(assessment, dict):
             continue
-        role = roles.get(assessment.get("article_id"))
-        if not isinstance(role, dict):
-            raise ModelProtocolError("search actor classification item invalid")
-        assessment["actor_match_reason"] = role.get("reason") or "主体照合結果"
-        actor_matched_ids = {
-            hypothesis_id
-            for hypothesis_id in role.get("matched_hypothesis_ids") or ()
-        }
-        assessment["matched_hypothesis_ids"] = [
-            hypothesis_id
-            for hypothesis_id in assessment.get("matched_hypothesis_ids") or ()
-            if hypothesis_id in actor_matched_ids
-        ]
+        assessment["actor_matches"] = matches_by_article.get(
+            assessment.get("article_id"), []
+        )
     return normalized
 
 
@@ -6022,6 +6047,15 @@ def _validate_search_reselection_payload(
         for item in assessment_payload.get("assessments") or []
         if isinstance(item, dict)
     }
+    actor_status_by_pair = {
+        (item.get("article_id"), actor_match.get("hypothesis_id")): (
+            actor_match.get("status")
+        )
+        for item in assessment_payload.get("assessments") or []
+        if isinstance(item, dict)
+        for actor_match in item.get("actor_matches") or []
+        if isinstance(actor_match, dict)
+    }
     for selection in payload.get("selections") or []:
         if not isinstance(selection, dict):
             continue
@@ -6037,6 +6071,17 @@ def _validate_search_reselection_payload(
             raise ModelProtocolError(
                 "selected search candidate hypothesis IDs must be a non-empty "
                 f"subset of its assessment: {article_id}"
+            )
+        mismatched_ids = [
+            hypothesis_id
+            for hypothesis_id in selected_ids
+            if actor_status_by_pair.get((article_id, hypothesis_id))
+            == "mismatched"
+        ]
+        if mismatched_ids:
+            raise ModelProtocolError(
+                "selected search candidate contradicts its actor assessment: "
+                f"{article_id} {mismatched_ids}"
             )
 
 

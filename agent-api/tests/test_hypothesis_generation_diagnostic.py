@@ -59,7 +59,7 @@ def test_render_uses_only_production_hypothesis_generation_stage() -> None:
     assert set(rendered.input_payload) == {"work_items"}
     assert "non_work_item_requirements" not in rendered.input_payload
     work_item = rendered.input_payload["work_items"][0]
-    assert "action_actor" not in work_item
+    assert work_item["action_actor"] == "質問者"
     assert "target_actor" not in work_item
     assert "actor_relation" not in work_item
     assert "actor_scope" not in work_item
@@ -67,16 +67,28 @@ def test_render_uses_only_production_hypothesis_generation_stage() -> None:
     assert rendered.stage.endswith("research_hypothesis")
     assert "# 法令調査Solver：法的仮説の立案" in rendered.instructions
     assert "## 出力前の確認" in rendered.instructions
-    assert "`work_items[].action_actor`" not in rendered.instructions
-    assert "法令本文によって支持又は否定できる暫定的な結論" in (
+    assert "`work_items[].action_actor`" in rendered.instructions
+    assert "独立して検証できる命題が複数ある場合" in (
         rendered.instructions
     )
-    assert "検索前に未知の除外事由" in rendered.instructions
-    assert "下位法令へ委任" in rendered.instructions
+    assert "`gaps`" in rendered.instructions
+    assert "WorkItemにない行為者" in rendered.instructions
+    assert "具体的な数値又は条文番号" in rendered.instructions
+    assert "命題ごとにHypothesisを分けて`statement`へ書きます" in (
+        rendered.instructions
+    )
+    assert "独立して適用され得る条件、義務又は回答事項を1つだけ" in (
+        rendered.instructions
+    )
     properties = rendered.output_schema["properties"]["hypotheses"][
         "items"
     ]["properties"]
-    assert set(properties) == {"work_item_id", "statement"}
+    assert "条件、義務又は回答事項ごとに返す" in rendered.output_schema["properties"][
+        "hypotheses"
+    ]["description"]
+    assert "maxItems" not in rendered.output_schema["properties"]["hypotheses"]
+    assert set(properties) == {"work_item_id", "statement", "gaps"}
+    assert "minItems" not in properties["gaps"]
 
 
 def test_run_calls_model_once_and_normalizes_without_actor_copy() -> None:
@@ -86,6 +98,7 @@ def test_run_calls_model_once_and_normalizes_without_actor_copy() -> None:
                 {
                     "work_item_id": "wi-1",
                     "statement": "質問者は、対象事業の規模に応じて許可を要する。",
+                    "gaps": ["許可が必要になる事業規模の条件"],
                 }
             ]
         }
@@ -109,8 +122,36 @@ def test_run_calls_model_once_and_normalizes_without_actor_copy() -> None:
     assert hypothesis.work_item_id == "wi-1"
     assert not hasattr(hypothesis, "actor_scope")
     assert not hasattr(hypothesis, "actor_relation")
-    assert hypothesis.gaps == ()
+    assert hypothesis.gaps == ("許可が必要になる事業規模の条件",)
     assert run.decision.tool_requests == ()
+
+
+def test_run_accepts_hypothesis_without_additional_gaps() -> None:
+    client = FakeStructuredJSONClient(
+        {
+            "hypotheses": [
+                {
+                    "work_item_id": "wi-1",
+                    "statement": "質問者は対象事業について許可を要する。",
+                    "gaps": [],
+                }
+            ]
+        }
+    )
+
+    run = run_hypothesis_generation_diagnostic(
+        "許可が必要になる条件は何か。",
+        _WORK_ITEMS,
+        provider="openai",
+        model="gpt-4o-mini",
+        max_tokens=2048,
+        timeout_sec=30,
+        client=client,
+    )
+
+    assert run.validation_error is None
+    assert run.decision is not None
+    assert run.decision.update.add_hypotheses[0].gaps == ()
 
 
 def test_run_does_not_repair_invalid_first_output() -> None:
@@ -138,6 +179,7 @@ def test_production_adapter_generates_hypotheses_one_work_item_at_a_time() -> No
                 {
                     "work_item_id": "wi-2",
                     "statement": "第二の論点には暫定的な結論がある。",
+                    "gaps": ["第二の論点を判定する条件"],
                 }
             ]
         }
@@ -175,7 +217,7 @@ def test_production_adapter_generates_hypotheses_one_work_item_at_a_time() -> No
     hypothesis = result.decision.update.add_hypotheses[0]
     assert hypothesis.hypothesis_id == "h-2"
     assert hypothesis.work_item_id == "wi-2"
-    assert hypothesis.gaps == ()
+    assert hypothesis.gaps == ("第二の論点を判定する条件",)
 
 
 def test_v269_observed_failures_are_preserved_as_prompt_regression() -> None:
@@ -196,7 +238,8 @@ def test_v269_observed_failures_are_preserved_as_prompt_regression() -> None:
     assert profile is not None
     prompt = profile.system_prompt
     completion = profile.completion_check_prompt or ""
-    assert "一般的な法的知識" in prompt
-    assert "検索前に未知の除外事由" in prompt
-    assert "下位法令へ委任" in prompt
-    assert "根拠法令名、条文番号、検索語、検索作業" in completion
+    assert "WorkItemを確認します" in prompt
+    assert "`gaps`" in prompt
+    assert "WorkItemにない行為者" in prompt
+    assert "具体的な数値又は条文番号" in prompt
+    assert "各`statement`を1つの法的命題に分けた" in completion
