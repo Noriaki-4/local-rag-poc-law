@@ -258,6 +258,11 @@ Profile v250以降の統合・下位規範探索変更をfixture、全テスト�
 総合問題で重複Graphになったcheckpointをv261で再生すると、同じGraphを反復せず、法令表現を変えた
 `legal_search`を選び、共通契約を修復なしで通過した。
 
+Profile v314では、この最後の不整合を契約構造から除いた。Cycle CloseのProvider出力から重複した
+`outcome`を削除し、Observation IntegrationでSolverが確定したopen WorkItemの有無と次Cycle可否から、
+Programが`required_transition`を決定的に導出する。resolved WorkItemに属する未採用のunresolved
+Hypothesisは次Cycle開始条件にしない。LLMは指定された遷移に応じて引継ぎ内容または回答だけを返す。
+
 ## 4. 最優先分析: 複合問題の統合
 
 ### 4.1 本書でいう統合

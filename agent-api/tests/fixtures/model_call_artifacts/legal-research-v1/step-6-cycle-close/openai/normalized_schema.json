@@ -204,10 +204,10 @@
         }
       ],
       "default": null,
-      "description": "outcome=finalizeの場合だけ返す根拠付き回答。"
+      "description": "required_transition=finalizeの場合だけ返す根拠付き回答。"
     },
     "decision_reason": {
-      "description": "未確認事項、完了条件、残りCycleに結び付けた境界判断の短い説明。",
+      "description": "Programから指定されたCycle遷移について、未確認事項または完了根拠に結び付けた短い説明。",
       "maxLength": 1200,
       "minLength": 1,
       "title": "Decision Reason",
@@ -230,15 +230,6 @@
       },
       "title": "Next Focus Work Item Ids",
       "type": "array"
-    },
-    "outcome": {
-      "description": "未確認事項を次Cycleへ送るか、既知根拠で回答を完了するか。",
-      "enum": [
-        "start_next_cycle",
-        "finalize"
-      ],
-      "title": "Outcome",
-      "type": "string"
     },
     "retain_evidence_ids": {
       "default": [],
@@ -263,7 +254,6 @@
     }
   },
   "required": [
-    "outcome",
     "decision_reason"
   ],
   "title": "CycleCloseDecision",

@@ -622,7 +622,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "313"
+    assert diagnostic_records[0]["profileVersion"] == "314"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -630,7 +630,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "313"
+    assert transport_input["profileVersion"] == "314"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -1065,7 +1065,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "313"
+    assert profile.version == "314"
     mode_prompts = {
         "research": profile.solver_research.system_prompt,
         "integration": profile.solver_integration.system_prompt,
@@ -1167,7 +1167,10 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     assert profile.solver_cycle_close.followup_system_prompt is not None
     transition_prompt = profile.solver_cycle_close.followup_system_prompt
     assert "# 法令調査Solver：Cycleの終了判断" in transition_prompt
-    assert "本文の再評価、状態更新、Tool選択は行いません" in transition_prompt
+    assert "本文の再評価、状態更新、Tool選択、遷移の変更は行いません" in (
+        transition_prompt
+    )
+    assert "`required_transition`に従っている" in transition_prompt
     assert "retainable_evidence" in transition_prompt
     assert "fetchable_article_ids" not in transition_prompt
 
@@ -1313,7 +1316,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "313"
+    assert profile.version == "314"
     assert prompt.rindex("## 出力") > prompt.rindex(
         "</solver_context>"
     )
@@ -1364,7 +1367,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "313"
+    assert profile.version == "314"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -5019,12 +5022,9 @@ def test_tob_announcement_cycle_close_must_continue_for_projected_open_work(
 
     rendered = render_cycle_close_model_call(context, observation, profile)
 
-    assert rendered.output_schema["properties"]["outcome"]["enum"] == [
-        "start_next_cycle"
-    ]
-    assert rendered.output_schema["properties"]["answer"]["anyOf"] == [
-        {"type": "null"}
-    ]
+    assert "outcome" not in rendered.output_schema["properties"]
+    assert rendered.input_payload["required_transition"] == "start_next_cycle"
+    assert rendered.output_schema["properties"]["answer"]["type"] == "null"
     projected_work_items = {
         item["work_item_id"]: item
         for item in rendered.input_payload["work_items_after_observation"]
@@ -5082,12 +5082,76 @@ def test_cycle_close_requires_finalize_after_observation_resolves_all() -> None:
 
     rendered = render_cycle_close_model_call(context, observation, profile)
 
-    assert rendered.output_schema["properties"]["outcome"]["enum"] == [
-        "finalize"
-    ]
-    assert rendered.output_schema["properties"]["answer"]["anyOf"][0][
-        "type"
-    ] == "object"
+    assert "outcome" not in rendered.output_schema["properties"]
+    assert rendered.input_payload["required_transition"] == "finalize"
+    assert rendered.output_schema["properties"]["answer"]["type"] == "object"
+
+
+def test_cycle_close_ignores_unresolved_hypothesis_of_resolved_work_item() -> None:
+    state = CaseState(
+        case_id="cycle-close-resolved-parent",
+        question="確認する。",
+        research_cycle_count=1,
+        work_items=(
+            WorkItem(work_item_id="wi-1", question="法的要件を確認する。"),
+        ),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h-basis",
+                work_item_id="wi-1",
+                statement="本文で確認できた命題。",
+            ),
+            Hypothesis(
+                hypothesis_id="h-unused",
+                work_item_id="wi-1",
+                statement="結論に採用しなかった命題。",
+            ),
+        ),
+    )
+    context = build_solver_context(
+        state,
+        AgentLimits(max_research_cycles=4),
+        remaining_wall_time_sec=180,
+        finalize_only=False,
+    ).model_copy(update={"cycle_close_required": True})
+    observation = ObservationIntegrationDecision.model_validate(
+        {
+            "decision_reason": "採用した命題でWorkItemへ回答できる。",
+            "update_work_items": [
+                {
+                    "work_item_id": "wi-1",
+                    "state": "resolved",
+                    "resolution": "本文で法的要件を確認した。",
+                    "basis_hypothesis_ids": ["h-basis"],
+                }
+            ],
+            "update_hypotheses": [
+                {
+                    "hypothesis_id": "h-basis",
+                    "judgment": "supported",
+                    "evidence_ids": [],
+                    "gaps": [],
+                },
+                {
+                    "hypothesis_id": "h-unused",
+                    "judgment": "unresolved",
+                    "evidence_ids": [],
+                    "gaps": ["未採用の確認事項"],
+                },
+            ],
+        }
+    )
+    profile = legal_profiles.legal_agent_profile().solver_cycle_close
+    assert profile is not None
+
+    rendered = render_cycle_close_model_call(context, observation, profile)
+
+    assert rendered.input_payload["required_transition"] == "finalize"
+    assert rendered.output_schema["properties"]["answer"]["type"] == "object"
+    unresolved_ids = rendered.output_schema["properties"]["answer"][
+        "properties"
+    ]["unresolved_hypothesis_ids"]
+    assert unresolved_ids["maxItems"] == 0
 
 
 def test_tob_exceptions_mixed_refetch_keeps_only_the_unfetched_article() -> None:
@@ -5306,7 +5370,6 @@ def test_cycle_close_fixture_projects_three_small_single_task_calls() -> None:
         profile,
     )
     assert set(transition_call.output_schema["properties"]) == {
-        "outcome",
         "decision_reason",
         "next_focus_work_item_ids",
         "retain_evidence_ids",
@@ -5314,13 +5377,12 @@ def test_cycle_close_fixture_projects_three_small_single_task_calls() -> None:
     }
     assert set(transition_call.input_payload) == {
         "question",
+        "required_transition",
         "non_work_item_requirements",
         "work_items_after_observation",
         "hypotheses_after_observation",
         "observation_summary",
         "dependency_decisions_after_observation",
-        "can_start_next_cycle",
-        "remaining_research_cycles",
         "max_retained_evidence",
         "retainable_evidence",
         "grounding_evidence",
@@ -5475,7 +5537,6 @@ def test_cycle_close_adapter_combines_observation_and_transition() -> None:
                     ],
                 },
                 {
-                    "outcome": "start_next_cycle",
                     "decision_reason": "未確認の下位規範を次Cycleで確認する",
                     "next_focus_work_item_ids": [context.work_tree[0].work_item_id],
                     "retain_evidence_ids": [grounding_id],
@@ -5563,7 +5624,6 @@ def test_cycle_close_skips_dependency_call_when_no_work_item_requires_it() -> No
                 for _ in range(observation_count)
                 ],
                 {
-                    "outcome": "start_next_cycle",
                     "decision_reason": "未確認事項を次Cycleへ引き継ぐ",
                     "next_focus_work_item_ids": [
                         context.work_tree[0].work_item_id
@@ -5817,12 +5877,10 @@ def test_cycle_close_cannot_finalize_needs_action_dependency() -> None:
 
     rendered = render_cycle_close_model_call(context, aligned, profile)
 
-    assert rendered.output_schema["properties"]["outcome"]["enum"] == [
+    assert rendered.input_payload["required_transition"] == (
         fixture["expectedBehavior"]["outcome"]
-    ]
-    assert rendered.output_schema["properties"]["answer"]["anyOf"] == [
-        {"type": "null"}
-    ]
+    )
+    assert rendered.output_schema["properties"]["answer"]["type"] == "null"
     projected = rendered.input_payload["work_items_after_observation"]
     assert projected[0]["state"] == "open"
 

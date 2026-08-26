@@ -1418,9 +1418,10 @@ WorkTree案内とCaseStoreには残る。
 各StepのToolResultは直後のSolver判断へ必ず渡す。最後の許可StepでもHypothesis、WorkTree、frontierを
 更新してからCycleを閉じ、未評価のToolResultを残したまま次Cycleまたは回答へ進まない。
 
-各Cycleの`start_cycle`はresearch profileを使う。Tool実行後のstep判断、Cycle終了判断、
-Reviewer差戻し後の判断はintegration profileを使い、直前結果の意味評価、状態更新、
-`continue_cycle / start_next_cycle / finalize`の選択を同じLLM呼び出しで行う。
+各Cycleの`start_cycle`はresearch profileを使う。Tool実行後のstep判断とReviewer差戻し後の判断は
+integration profileを使う。Cycle境界では、Observation Integrationが直前結果を意味評価して
+WorkItem・Hypothesis状態を更新し、Programがopen WorkItemの有無と次Cycle可否から
+`start_next_cycle / finalize`を導出する。Cycle CloseのLLM出力に同じ遷移を重複して持たせない。
 `start_next_cycle`後の次呼出しで、research profileが引継ぎを読んで新しいCycle計画を作る。
 通常終了のためだけの独立Integrator呼び出しは設けない。上限到達時はintegration profileへ
 `finalize_only=true`を渡し、追加ToolRequestだけを禁止する。
@@ -1863,9 +1864,9 @@ research・integrationの両方へ必ず合成する。次の契約語彙には�
   必要と判断した未取得Evidenceが残る場合にstart_next_cycleを選ぶ。
 - cycle_budget_reached=true、cycle_step_limit_reached=true、またはcycle_close_required=trueなら、
   現Cycleに新しいToolRequestを追加しない。Observation Integrationで直前までのToolResultを評価して
-  WorkItem・Hypothesisを更新し、その差分を適用した状態だけをCycle Closeで評価する。完了できるなら
-  finalize、未解決で残りCycle予算があるなら、次Cycleへ渡す命題と再採用候補を明示して
-  start_next_cycleを選ぶ。次のgoal・strategyは次のstart_cycleで決める。
+  WorkItem・Hypothesisを更新する。Programは、その差分を適用した後にopen WorkItemがなくなれば
+  finalize、open WorkItemが残り次Cycleを開始できればstart_next_cycleを導出する。Cycle Closeは指定された
+  遷移に応じて回答または引継ぎ内容を返す。次のgoal・strategyは次のstart_cycleで決める。
 - cycle_step_timeoutは中間呼出しがCycle予算で時間切れになった実行事実であり、仮説の否定、
   根拠の不存在、provider全体の障害を意味しない。予約済みのCycle終了判断で手元の結果を整理する。
 - finalize_only=falseなら必要な追加調査をcontinue_cycleでき、方針変更が必要ならstart_next_cycleを選べる。

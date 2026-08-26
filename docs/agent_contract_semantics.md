@@ -43,7 +43,8 @@ Solverに選ばせる。どのHypothesisが結論を十分に支えるかは意�
 | `SearchCandidateReview` | OpenSearch候補の本文取得対象、対応Hypothesis、保留候補 | 候補ID、Hypothesis ID、重複、全件性、取得上限を検証 | 検索抜粋をHypothesisに照らして選別 | `solver_search_review.md`、`solver_search_reselection.md` |
 | `GraphCandidateReview` | Graph候補の`select / defer / reject`判断 | Link・Frontier・Request ID、全件性、上限を検証 | Relationの種類・方向とHypothesisから関連性を判断 | `solver_graph_review.md` |
 | `SolverDecision.next` | 次のaction-observationを続けるか、回答を確定するか | actionまたはanswerの有無、Cycle境界を検証 | 根拠、gap、上限から`continue / finalize`を判断 | 全Solverモード |
-| `start_next_cycle` | 現Cycleを閉じて次Cycleへ移るか | Cycle上限、残り時間、境界処理との整合を検証 | 現Cycleの結果を評価して仕切り直し要否を判断 | `solver_common.md`、`solver_cycle_close.md` |
+| `required_transition` | Observation反映後に必要なCycle遷移 | LLMが確定したWorkItem状態と次Cycle可否から`start_next_cycle / finalize`を導出 | 指定された遷移に応じて引継ぎ内容または最終回答を作る | `solver_cycle_close.md` |
+| `start_next_cycle` | 内部`SolverDecision`で現Cycleを閉じて次Cycleへ移ることを表す | `required_transition`から設定し、Cycle上限と境界処理との整合を検証 | 直接出力しない | なし |
 | `FinalAnswer` | 根拠付き回答、引用、制約、未解決ID | 引用可能Evidence、open WorkItemとの一致、下位規範根拠を検証 | 取得本文が示す範囲で回答を統合 | `solver_completion.md`、`solver_finalization.md` |
 
 ## `basis_hypothesis_ids`の状態別意味
@@ -66,6 +67,10 @@ W1を本文に基づきresolvedへ更新
 
 open WorkItemのbasisが新たに`contradicted`になった場合、ProgramはそのWorkItemを自動変更せず、
 `WorkItemImpactDecision`の対象IDを決定的に要求する。維持・置換・破棄の意味判断はSolverが行う。
+
+Cycle Closeではopen WorkItemを未完了の正本とする。resolvedまたはdroppedのWorkItemに属する未採用の
+unresolved Hypothesisだけを理由に、次Cycleを開始しない。法的な完了可否はObservation Integrationで
+SolverがWorkItem状態として判断し、Programはその状態と実行上限から遷移だけを導出する。
 
 ## 変更時の確認順序
 

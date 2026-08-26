@@ -6,7 +6,7 @@ import json
 from collections.abc import Mapping
 from copy import deepcopy
 from time import monotonic
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 import requests
@@ -658,6 +658,20 @@ class StructuredJSONModelAdapter:
                 f"cycle close contract invalid: {detail['msg']}"
             ) from exc
 
+        required_transition = _required_cycle_close_transition(
+            context,
+            observation,
+        )
+        if required_transition == "start_next_cycle":
+            if transition.answer is not None:
+                raise ModelProtocolError(
+                    "cycle close contract invalid: next cycle cannot contain an answer"
+                )
+        elif transition.answer is None:
+            raise ModelProtocolError(
+                "cycle close contract invalid: finalize requires an answer"
+            )
+
         if transition.answer is not None:
             answer_check_call = render_final_answer_check_model_call(
                 context,
@@ -757,6 +771,7 @@ class StructuredJSONModelAdapter:
             answer_check_attempted = True
 
         decision = _normalize_cycle_close_decisions(
+            context,
             observation,
             transition,
         )
@@ -2249,6 +2264,10 @@ def _cycle_close_context_payload(
     ]
     payload: dict[str, Any] = {
         "question": context.question,
+        "required_transition": _required_cycle_close_transition(
+            context,
+            observation,
+        ),
         "non_work_item_requirements": list(context.non_work_item_requirements),
         "work_items_after_observation": [
             item.model_dump(mode="json") for item in work_items
@@ -2261,8 +2280,6 @@ def _cycle_close_context_payload(
             item.model_dump(mode="json")
             for item in dependency_decisions
         ],
-        "can_start_next_cycle": context.can_start_next_cycle,
-        "remaining_research_cycles": context.remaining_research_cycles,
         "max_retained_evidence": context.max_retained_evidence,
         "retainable_evidence": [
             item.model_dump(mode="json")
@@ -2836,10 +2853,12 @@ def _cycle_close_transport_schema(
         for item in projected_work_items
         if item.state == "open"
     )
+    open_work_item_id_set = set(open_work_item_ids)
     unresolved_hypothesis_ids = tuple(
         item.hypothesis_id
         for item in projected_hypotheses
         if item.judgment == "unresolved"
+        and item.work_item_id in open_work_item_id_set
     )
     evidence_ids = context.grounding_evidence_ids
     retainable_evidence_ids = _retainable_cycle_evidence_ids(
@@ -2875,28 +2894,12 @@ def _cycle_close_transport_schema(
             ),
         }
     )
-    dependency_needs_action = any(
-        item.status == "needs_action"
-        for item in observation.dependency_decisions
+    required_transition = _required_cycle_close_transition(
+        context,
+        observation,
     )
-    must_start_next_cycle = (
-        context.can_start_next_cycle
-        and bool(
-            open_work_item_ids
-            or unresolved_hypothesis_ids
-            or dependency_needs_action
-        )
-    )
+    must_start_next_cycle = required_transition == "start_next_cycle"
     properties: dict[str, Any] = {
-        "outcome": {
-            "type": "string",
-            "enum": (
-                ["start_next_cycle"]
-                if must_start_next_cycle
-                else ["finalize"]
-            ),
-            "description": CycleCloseDecision.model_fields["outcome"].description,
-        },
         "decision_reason": {
             "type": "string",
             "minLength": 1,
@@ -2906,26 +2909,30 @@ def _cycle_close_transport_schema(
             ].description,
         },
         "next_focus_work_item_ids": {
-            **_bounded_enum_array(open_work_item_ids),
+            **(
+                _bounded_enum_array(open_work_item_ids)
+                if must_start_next_cycle
+                else _empty_array_schema()
+            ),
             "description": CycleCloseDecision.model_fields[
                 "next_focus_work_item_ids"
             ].description,
         },
         "retain_evidence_ids": {
-            **_bounded_enum_array(
-                retainable_evidence_ids,
-                max_items=context.max_retained_evidence,
+            **(
+                _bounded_enum_array(
+                    retainable_evidence_ids,
+                    max_items=context.max_retained_evidence,
+                )
+                if must_start_next_cycle
+                else _empty_array_schema()
             ),
             "description": CycleCloseDecision.model_fields[
                 "retain_evidence_ids"
             ].description,
         },
         "answer": {
-            "anyOf": (
-                [{"type": "null"}]
-                if must_start_next_cycle
-                else [answer, {"type": "null"}]
-            ),
+            **({"type": "null"} if must_start_next_cycle else answer),
             "description": CycleCloseDecision.model_fields["answer"].description,
         },
     }
@@ -3006,10 +3013,14 @@ def _cycle_close_transport_schema(
 
 
 def _normalize_cycle_close_decisions(
+    context: SolverContext,
     observation: ObservationIntegrationDecision,
     transition: CycleCloseDecision,
 ) -> SolverDecision:
-    start_next_cycle = transition.outcome == "start_next_cycle"
+    start_next_cycle = (
+        _required_cycle_close_transition(context, observation)
+        == "start_next_cycle"
+    )
     return SolverDecision(
         next="continue" if start_next_cycle else "finalize",
         decision_reason=transition.decision_reason,
@@ -3027,6 +3038,22 @@ def _normalize_cycle_close_decisions(
         unreviewed_graph_resolution=transition.unreviewed_graph_resolution,
         answer=transition.answer,
     )
+
+
+def _required_cycle_close_transition(
+    context: SolverContext,
+    observation: ObservationIntegrationDecision,
+) -> Literal["start_next_cycle", "finalize"]:
+    """LLMが確定したWorkItem状態から、構造上のCycle遷移を導出する。"""
+
+    projected_work_items, _ = _project_observation_integration_state(
+        context,
+        observation,
+    )
+    has_open_work = any(item.state == "open" for item in projected_work_items)
+    if context.can_start_next_cycle and has_open_work:
+        return "start_next_cycle"
+    return "finalize"
 
 
 def _cycle_close_checkpoint_timeout(

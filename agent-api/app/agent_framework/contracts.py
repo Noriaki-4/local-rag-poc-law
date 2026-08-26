@@ -260,13 +260,13 @@ class DependencyActionDecision(FrameworkModel):
 
 
 class CycleCloseDecision(FrameworkModel):
-    outcome: Literal["start_next_cycle", "finalize"] = Field(
-        description="未確認事項を次Cycleへ送るか、既知根拠で回答を完了するか。",
-    )
     decision_reason: str = Field(
         min_length=1,
         max_length=1200,
-        description="未確認事項、完了条件、残りCycleに結び付けた境界判断の短い説明。",
+        description=(
+            "Programから指定されたCycle遷移について、未確認事項または完了根拠に"
+            "結び付けた短い説明。"
+        ),
     )
     next_focus_work_item_ids: tuple[str, ...] = Field(
         default=(),
@@ -286,17 +286,8 @@ class CycleCloseDecision(FrameworkModel):
     )
     answer: FinalAnswer | None = Field(
         default=None,
-        description="outcome=finalizeの場合だけ返す根拠付き回答。",
+        description="required_transition=finalizeの場合だけ返す根拠付き回答。",
     )
-
-    @model_validator(mode="after")
-    def validate_outcome_shape(self) -> CycleCloseDecision:
-        if self.outcome == "start_next_cycle":
-            if self.answer is not None:
-                raise ValueError("next cycle decision cannot contain an answer")
-        elif self.answer is None:
-            raise ValueError("finalize cycle decision requires an answer")
-        return self
 
 
 class SolverDecision(FrameworkModel):
