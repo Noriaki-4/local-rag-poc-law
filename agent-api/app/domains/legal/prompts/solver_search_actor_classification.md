@@ -7,17 +7,17 @@
 
 ## 出力
 
-- 各Article・Hypothesis組の`matched / mismatched / unknown`、規律主体、理由
+- 入力された各組と同じ順序の`matched / mismatched / unknown`、規律主体、理由
 
 ## 完了条件
 
 - 入力された全Article・Hypothesis組を1回ずつ照合している。
 - 各組で、候補の規律主体とHypothesisが扱う行為者を直接比較している。
-- Article・Hypothesis組を追加または省略していない。
+- 入力順を変えず、各組について結果を1件返している。
 
 ## 手順
 
-1. 各候補の`content_matched_hypotheses`を、指定された組としてそのまま使います。
+1. 入力の`pairs`を上から順に確認します。
 2. 候補の`headings`と`summary`から、義務、禁止、許可等の効果を受ける行為者を`regulated_actor`へ書きます。
    条件中に現れる所有者、発行者等を、規律される行為者と取り違えません。
 3. 候補とHypothesisが同じ法的行為をする主体を扱うなら`matched`、異なるなら`mismatched`、検索抜粋だけでは判定できないなら`unknown`とします。
@@ -27,3 +27,4 @@
 - 呼称の文字列一致ではなく、同じ法的行為を行う役割かで判断します。
 - 用語、人数、割合、対象範囲だけを定め、特定の行為者を規律しない候補は、行為者不一致と決めつけず`unknown`にできます。
 - この処理では候補を選びません。
+- Article IDとHypothesis IDは出力しません。Programが入力順に対応付けます。

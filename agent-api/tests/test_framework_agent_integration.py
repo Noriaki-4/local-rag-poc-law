@@ -48,6 +48,7 @@ from app.adapters.models.structured_json import (
     render_search_reselection_model_call,
     render_solver_model_call,
     render_solver_transport_repair_model_call,
+    normalize_dependency_action_decision,
 )
 from app.adapters.persistence.simple_in_memory import InMemoryCaseStore
 from app.adapters.tools.legal_search import (
@@ -73,6 +74,7 @@ from app.agent_framework.context import (
     build_solver_context,
 )
 from app.agent_framework.contracts import (
+    DependencyActionDecision,
     DependencyAssessmentDecision,
     HypothesisUpdate,
     ObservationIntegrationDecision,
@@ -658,7 +660,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "303"
+    assert diagnostic_records[0]["profileVersion"] == "305"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -666,7 +668,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "303"
+    assert transport_input["profileVersion"] == "305"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -1101,7 +1103,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "303"
+    assert profile.version == "305"
     mode_prompts = {
         "research": profile.solver_research.system_prompt,
         "integration": profile.solver_integration.system_prompt,
@@ -1349,7 +1351,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "303"
+    assert profile.version == "305"
     assert prompt.rindex("## 出力") > prompt.rindex(
         "</solver_context>"
     )
@@ -1400,7 +1402,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "303"
+    assert profile.version == "305"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -1740,8 +1742,8 @@ def test_search_reselection_underselect_fixture_checks_remaining_hypotheses(
     assert len(fixture["observedSelections"]) < fixture["expectedSelectionCount"]
     assert "同じHypothesisの候補を複数選ぶ前に" in prompt
     assert "直接検証できる候補がある未確認Hypothesis" in prompt
-    assert "主体照合が`mismatched`でない" in prompt
-    assert "`summary`と両方の評価" in prompt
+    assert "`selectable_hypothesis_ids`にある" in prompt
+    assert "両評価を機械的に結合" in prompt
     assert "selected / deferred" not in prompt
 
 
@@ -1933,13 +1935,14 @@ def test_search_actor_classification_keeps_content_pairs_and_adds_actor_status()
         "status"
     ] == "matched"
     assert {
-        (
-            item["article_id"],
-            match["hypothesis_id"],
-        )
-        for item in rendered.input_payload["candidates"]
-        for match in item["content_matched_hypotheses"]
+        (item["article_id"], item["hypothesis_id"])
+        for item in rendered.input_payload["pairs"]
     } == {(article_id, "h-1") for article_id in article_ids}
+    actor_item_properties = rendered.output_schema["properties"][
+        "actor_matches"
+    ]["items"]["properties"]
+    assert "article_id" not in actor_item_properties
+    assert "hypothesis_id" not in actor_item_properties
     with pytest.raises(
         ModelProtocolError,
         match="must cover every content-matched pair",
@@ -1966,6 +1969,23 @@ def test_search_actor_classification_keeps_content_pairs_and_adds_actor_status()
             combined,
         )
     _validate_search_assessment_payload(combined, context)
+
+    reselection = render_search_reselection_model_call(
+        context,
+        combined,
+        profile,
+    )
+    selectable_article_ids = {
+        item["article_id"] for item in reselection.input_payload["assessments"]
+    }
+    assert issuer_article_id not in selectable_article_ids
+    assert buyer_article_id in selectable_article_ids
+    buyer_assessment = next(
+        item
+        for item in reselection.input_payload["assessments"]
+        if item["article_id"] == buyer_article_id
+    )
+    assert buyer_assessment["selectable_hypothesis_ids"] == ["h-1"]
 
 
 def test_lr_017_real_model_replays_select_buyer_rule_consistently() -> None:
@@ -2147,7 +2167,7 @@ def test_candidate_selection_profiles_have_post_context_checks() -> None:
     assert search.completion_check_prompt is not None
     assert search.followup_completion_check_prompt is not None
     assert "重複・余分・欠落がない" in search.completion_check_prompt
-    assert "主体照合が`mismatched`でない" in (
+    assert "`selectable_hypothesis_ids`にある" in (
         search.followup_completion_check_prompt
     )
     assert "selected / deferred" not in (
@@ -2299,18 +2319,14 @@ def test_anthropic_search_review_keys_assessments_by_article() -> None:
         "items"
     ]["properties"]
     assert "regulated_actor_role" not in actor_item_properties
+    assert "article_id" not in actor_item_properties
+    assert "hypothesis_id" not in actor_item_properties
     assert "hypotheses" not in actor_call.input_payload
-    assert "target_actor" not in actor_call.input_payload["candidates"][0][
-        "content_matched_hypotheses"
-    ][0]
-    assert "actor_relation" not in actor_call.input_payload["candidates"][0][
-        "content_matched_hypotheses"
-    ][0]
+    assert "target_actor" not in actor_call.input_payload["pairs"][0]
+    assert "actor_relation" not in actor_call.input_payload["pairs"][0]
     actor_payload = {
         "actor_matches": [
             {
-                "article_id": candidate.article_id,
-                "hypothesis_id": hypothesis_id,
                 "regulated_actor": "不明",
                 "status": "unknown",
                 "reason": "主体を確定できない",
@@ -2419,12 +2435,14 @@ def test_cycle2_anthropic_solver_uses_provider_transport_schema() -> None:
         provider="anthropic",
     )
 
-    assert set(rendered.output_schema["properties"]) == {"decision_json"}
-    assert rendered.output_schema == _solver_anthropic_json_transport_schema(
-        context
-    )
+    assert set(rendered.output_schema["properties"]) == {
+        "decision_reason",
+        "tool_requests_json",
+    }
     assert len(json.dumps(rendered.output_schema)) < 1_000
-    assert "JSON object形式の文字列" in rendered.instructions
+    assert "ToolRequest array encoded as one JSON array string" in json.dumps(
+        rendered.output_schema
+    )
 
 
 def test_search_assessment_batches_large_candidate_sets() -> None:
@@ -2678,7 +2696,9 @@ def test_search_review_prompt_defines_evidence_join_and_limited_role() -> None:
     assert "`search_excerpts`" in prompt
     assert "一文で`summary`" in prompt
     assert "Hypothesisの正否" in prompt
-    assert "行為者の一致、本文取得候補の最終選択" in prompt
+    assert "## 判断しないこと" in prompt
+    assert "- 行為者の一致" in prompt
+    assert "- 本文取得候補の最終選択" in prompt
     assert "行為者の一致は次の独立処理" in prompt
     assert "別Articleを参照するだけ" in prompt
     assert search_prompt.actor_classification_system_prompt is not None
@@ -7220,6 +7240,98 @@ def test_transport_repair_explains_finalize_requires_an_answer() -> None:
     assert "next=finalizeを維持するなら" in prompt
     assert "確認済みEvidenceに基づくanswer" in prompt
     assert "start_next_cycle=true" in prompt
+
+
+def test_dependency_action_uses_dedicated_contract_and_preserves_prior_decision(
+) -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_exceptions_cycle2_finalize_tool_conflict_v275.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    context = SolverContext.model_validate(fixture["solverContext"])
+    profile = legal_profiles.legal_agent_profile().solver_integration
+
+    rendered = render_solver_model_call(
+        context,
+        profile,
+        provider="openai",
+        stage="integration",
+    )
+    work_item_id = context.required_dependency_work_item_ids[0]
+
+    assert set(rendered.output_schema["properties"]) == {
+        "decision_reason",
+        "tool_requests",
+    }
+    assert rendered.normalized_schema == DependencyActionDecision.model_json_schema()
+    assert rendered.output_schema["properties"]["tool_requests"]["minItems"] == 1
+    assert rendered.output_schema["properties"]["tool_requests"]["maxItems"] == 1
+    request_item_schema = rendered.output_schema["properties"]["tool_requests"][
+        "items"
+    ]
+    request_variants = request_item_schema.get("anyOf", [request_item_schema])
+    assert all(
+        variant["properties"]["work_item_id"]["enum"] == [work_item_id]
+        for variant in request_variants
+    )
+    assert "continueまたはfinalize" not in rendered.instructions
+    assert "DependencyDecisionの再判定は行いません" in rendered.instructions
+
+    anthropic_rendered = render_solver_model_call(
+        context,
+        profile,
+        provider="anthropic",
+        stage="integration",
+    )
+    assert set(anthropic_rendered.output_schema["properties"]) == {
+        "decision_reason",
+        "tool_requests_json",
+    }
+    assert "`tool_requests_json`には" in anthropic_rendered.instructions
+    assert "同名の`_json`なし項目は返しません" in anthropic_rendered.instructions
+
+    hypothesis_id = next(
+        item.hypothesis_id
+        for item in context.hypotheses
+        if item.work_item_id == work_item_id
+    )
+    decision = normalize_dependency_action_decision(
+        {
+            "decision_reason": "未確認の規定を法令検索で探す。",
+            "tool_requests": [
+                {
+                    "request_id": "search-next",
+                    "work_item_id": work_item_id,
+                    "tool_name": "legal_search",
+                    "arguments": {
+                        "query": "株券等 所有者 少数 適用除外",
+                        "doc_types": ["law"],
+                        "document_ids": [],
+                    },
+                    "purpose": "未確認の適用除外規定を探す。",
+                    "hypothesis_ids": [hypothesis_id],
+                }
+            ],
+        },
+        context=context,
+    )
+
+    assert decision.next == "continue"
+    assert decision.answer is None
+    assert len(decision.tool_requests) == 1
+    assert len(decision.dependency_decisions) == 1
+    assert decision.dependency_decisions[0].status == "needs_action"
+    assert decision.dependency_decisions[0].reason == next(
+        item.reason
+        for item in context.dependency_decisions
+        if item.work_item_id == work_item_id
+    )
+    assert decision.dependency_decisions[0].action_request_id == (
+        decision.tool_requests[0].request_id
+    )
 
 
 def test_common_prompt_does_not_expose_provider_sidecars() -> None:

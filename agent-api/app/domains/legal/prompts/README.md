@@ -47,7 +47,7 @@ Cycle境界：取得本文の評価 ──→ 下位規範依存の評価 ──
 | `research` | question_decompositionのみ | 質問の明示要求を、独立した法的結論を要するWorkItemと、それ以外の明示要求へ分ける。 |
 | `hypothesis_generation` | hypothesis_generationのみ | HypothesisがないWorkItemを1件受け取り、検索前の暫定的な法的命題を作る。 |
 | `search_planning` | search_planningのみ | 入力済みHypothesisを検証する今回の`legal_search`要求を作る。 |
-| `integration` | identity + integrationまたはdependency_action + common + tools + completion | 通常はToolResultを評価して次の行動または完了を決める。未解決の下位規範依存がある場合は、その依存に対する次の行動だけを決める。 |
+| `integration` | 通常はidentity + integration + common + tools + completion。未解決の下位規範依存がある場合はidentity + dependency_action + tools | 通常はToolResultを評価して次の行動または完了を決める。未解決の下位規範依存がある場合は、その依存に対する次のToolRequestだけを専用契約で決める。 |
 | `observation_integration` | observation_integrationのみ | 取得本文を既存Hypothesis・WorkItemへ反映する。次の行動は決めない。 |
 | `dependency_assessment` | dependency_assessmentのみ | 本文評価後に、下位規範確認が不要・追加探索が必要・確認済みのいずれかを判断する。 |
 | `cycle_close` | cycle_closeのみ | 直前の本文評価を前提に、完了または次Cycleへの引継ぎだけを決める。 |
@@ -89,7 +89,7 @@ Anthropicの「明確で直接的な指示、必要時だけ順序付き手順�
 | `solver_tools.md` | OpenSearch候補の`search_candidates`投影、本文取得、1ホップGraph探索、RelationAssertionの意味と方向。Toolを使えるモードだけに合成する。 |
 | `solver_completion.md` | grounding Evidence、citation、下位規範、通常完了と上限時限定回答の共通条件。 |
 | `solver_question_decomposition.md` | 初回Step 1。WorkItemと`non_work_item_requirements`への要求分解。 |
-| `solver_hypothesis_generation.md` | 初回Step 2。元質問と、Hypothesisがない既知WorkItem 1件の`question`・`action_actor`から、法的仮説と未確認の`gaps`を立案する。 |
+| `solver_hypothesis_generation.md` | 初回Step 2。Hypothesisがない既知WorkItem 1件から、法的仮説と未確認の`gaps`を立案する。 |
 | `solver_search_planning.md` | 初回Step 3。既知Hypothesisに対する`legal_search`要求の作成。 |
 | `solver_integration.md` | 観察結果の評価、状態更新、下位規範監査、次の行動。 |
 | `solver_observation_integration.md` | Cycle境界で、取得本文を既存状態へ反映する単一責務の判断。 |
@@ -99,8 +99,8 @@ Anthropicの「明確で直接的な指示、必要時だけ順序付き手順�
 | `solver_finalization.md` | `finalize_only=true`時の限定最終化。 |
 | `solver_reviewer_revision.md` | Reviewer Findingの受領、反映、反論、再調査。 |
 | `solver_search_review.md` | OpenSearch候補の見出しと検索抜粋を全件整理し、同じ法的争点を調べるHypothesisへ対応付ける。Article全文、回答根拠、Hypothesisの正否は判断しない。 |
-| `solver_search_actor_classification.md` | 内容評価が作ったArticle・Hypothesis組を増減せず、各組の規律主体を`matched / mismatched / unknown`で照合する。 |
-| `solver_search_reselection.md` | 検索抜粋を再掲せず、前段の短い自己要約一覧から本文取得候補を選ぶ。 |
+| `solver_search_actor_classification.md` | 内容評価が作ったArticle・Hypothesis組を入力順に照合し、IDを再出力せず各組の規律主体を`matched / mismatched / unknown`で返す。 |
+| `solver_search_reselection.md` | 前段の短い自己要約と、主体不一致を除いた選択可能Hypothesis IDから本文取得候補を選ぶ。 |
 | `solver_graph_review.md` | Graph差分候補の`select / defer / reject`と本文取得順。 |
 | `solver_*_check.md` | 対応する処理の入力後に置く、短い出力前完了確認。処理本体の手順や新しい出力項目は定義しない。 |
 | `minimal_hypothesis_diagnostic.md` | 本番Promptを合成せず、質問分解・WorkItem・具体的な法的仮説だけを実モデルで切り分ける診断用Prompt。本番Profileでは使用しない。 |
@@ -152,7 +152,7 @@ Solverが未確認事項に基づいて判断します。ID、引数、成功履
 
 CaseStoreと完全な`SolverContext`は正本として保持しますが、Providerへは用途別のread modelを渡せます。
 初回Researchは同じSolver・同じCycleで段階的に呼び出します。Step 1には質問だけ、Step 2には
-元質問と、HypothesisがないWorkItem 1件のID・確認事項・`action_actor`だけを渡し、法的仮説と`gaps`を
+HypothesisがないWorkItem 1件のID・確認事項・`action_actor`だけを渡し、法的仮説と`gaps`を
 逐次保存して全WorkItemを処理します。Step 3には
 質問、WorkItem、Hypothesis、`legal_search`定義と今回の要求数上限だけを
 投影します。本文取得枠、Graph、Evidence、後続Cycleの状態は渡しません。各Provider schemaも、そのStepが
@@ -163,8 +163,9 @@ Programは文字列の内容を補正せず、ID、件数、既知参照、WorkI
 質問分解で判断した規制対象行為の行為者は、WorkItemの`action_actor`に保持します。行為対象や関係主体は
 WorkItemの`question`に残し、別の分類項目へ推測で分解しません。Hypothesisには主体を重複保存せず、
 検索計画・候補主体照合のread modelへ所属WorkItemから決定的に結合します。候補の規律主体との対応はLLMが
-`question`、`action_actor`、Hypothesisを直接比較します。Programは内容評価が作ったArticle・Hypothesis組の
-全件性と既知IDを検証して照合結果を結合し、二つの独立したID集合の積集合による候補削除は行いません。
+`question`、`action_actor`、Hypothesisを直接比較します。Programは内容評価が作ったArticle・Hypothesis組へ
+入力順で照合結果を結合するため、主体照合LLMに既知IDを再入力させません。候補選択には、内容対応があり、
+主体照合が`mismatched`でない組だけを機械的に投影します。Programは条文の意味や主体を判断しません。
 Step 1の不変条件は「質問の明示要求全体 = WorkItem + non_work_item_requirements」であり、元の質問は引き続き
 CaseStoreの正本です。`non_work_item_requirements`は重要度や全WorkItem共通性を表さず、独立した法的結論を
 要しない根拠・出典・引用の提示や表現・出力形式等の明示要求を欠落させず保持します。

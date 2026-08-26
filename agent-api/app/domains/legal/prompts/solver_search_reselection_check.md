@@ -1,6 +1,6 @@
 ## 出力前の確認
 
-1. 選択したArticle・Hypothesis組が内容面で対応し、主体照合が`mismatched`でないことを確認します。
+1. 選択したHypothesis IDが、そのArticleの`selectable_hypothesis_ids`にあることを確認します。
 2. 選択数が`remaining_fetch_capacity`以内で、提示済みArticleだけを使っているか確認します。
 3. 同じHypothesisへ複数枠を使う前に、直接検証できる候補がある未確認Hypothesisへ1枠ずつ配分したか確認します。
 4. 各候補が異なる`gaps`を埋め、周辺事項や重複内容だけの候補を選んでいないか確認します。

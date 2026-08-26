@@ -3,13 +3,23 @@
 ## 目的
 
 OpenSearchで見つかった候補の見出しと検索抜粋を読み、各候補がどのHypothesisの調査に役立ちそうか整理します。
-本文取得前の予備判定であり、Hypothesisの正否や回答根拠は判断しません。
+検索抜粋は本文取得候補を整理するための情報であり、回答根拠ではありません。
 
 ## 出力
 
-- `search_request_ids`：今回評価する検索要求ID
-- `assessments`：全候補の抜粋要約、法的機能、対応するHypothesis
+- `search_request_ids`：`required_search_review_request_ids`をそのまま返す
+- `assessments`：全`search_candidates`を`article_id`ごとに1件ずつ評価する
 - `reason`：評価件数と、候補に含まれていた法的機能の要約
+
+この3項目だけを返します。
+
+## 判断しないこと
+
+- 行為者の一致
+- 本文取得候補の最終選択
+- Hypothesisの正否
+- 状態更新
+- ToolRequest
 
 ## 完了条件
 
@@ -51,10 +61,3 @@ OpenSearchで見つかった候補の見出しと検索抜粋を読み、各候�
 - `exception`：規律を適用しない場合、免除する場合または特則を定める。
 - `procedure`：規律に従うための公告、届出、申請、期限、方法、様式または記載事項を定める。
 - `scope`：規律の対象となる物、行為または者の意味や範囲を定める。
-
-検索抜粋は本文取得候補を整理するための情報であり、回答根拠ではありません。
-この処理では、行為者の一致、本文取得候補の最終選択、Hypothesisの正否、状態更新、ToolRequestを判断しません。
-
-`search_request_ids`は`required_search_review_request_ids`をそのまま返します。
-`assessments`には全`search_candidates`の`article_id`をキーとして1件ずつ返します。
-この3項目以外は返しません。

@@ -28,6 +28,7 @@ from app.agent_framework.contract_rendering import (
 from app.agent_framework.contracts import (
     CaseUpdate,
     CycleCloseDecision,
+    DependencyActionDecision,
     DependencyAssessmentDecision,
     EvidenceIntegrationDecision,
     HypothesisUpdate,
@@ -126,6 +127,7 @@ class StructuredJSONModelAdapter:
             return self._solve_observation_only(context, profile)
         if profile.context_projection == "cycle_close":
             return self._solve_cycle_close(context, profile)
+        dependency_action_call = _is_dependency_action_call(context, profile)
         rendered = render_solver_model_call(context, profile, provider=provider)
         transport_schema = rendered.output_schema
         prompt = rendered.request
@@ -196,6 +198,11 @@ class StructuredJSONModelAdapter:
                         decision = normalize_staged_research_decision(
                             result.payload,
                             projection=profile.context_projection,
+                            context=context,
+                        )
+                    elif dependency_action_call:
+                        decision = normalize_dependency_action_decision(
+                            result.payload,
                             context=context,
                         )
                     else:
@@ -918,6 +925,7 @@ class StructuredJSONModelAdapter:
                 assessment_result.payload,
                 batch_context,
             )
+            _validate_search_assessment_payload(batch_payload, batch_context)
             actor_result = None
             if _search_actor_pairs(batch_payload):
                 actor_call = render_search_actor_classification_model_call(
@@ -1212,11 +1220,7 @@ def render_solver_model_call(
         if provider == "anthropic"
         else _solver_common_transport_schema(projected_context)
     )
-    dependency_action = bool(
-        projected_context.required_dependency_work_item_ids
-        and profile.context_projection == "full"
-        and profile.dependency_action_system_prompt is not None
-    )
+    dependency_action = _is_dependency_action_call(projected_context, profile)
     return _render_solver_model_call(
         context,
         (
@@ -1229,17 +1233,42 @@ def render_solver_model_call(
             if dependency_action
             else profile.completion_check_prompt
         ),
-        output_schema=output_schema,
+        output_schema=(
+            _dependency_action_transport_schema(
+                projected_context,
+                json_transport=provider == "anthropic",
+            )
+            if dependency_action
+            else output_schema
+        ),
         input_payload=_solver_context_payload(
             projected_context,
             projection=profile.context_projection,
         ),
         minimal_contract=(
-            _INITIAL_RESEARCH_SOLVER_CONTRACT
+            _DEPENDENCY_ACTION_CONTRACT
+            if dependency_action
+            else _INITIAL_RESEARCH_SOLVER_CONTRACT
             if initial_research
             else _MINIMAL_SOLVER_CONTRACT
         ),
+        normalized_schema=(
+            DependencyActionDecision.model_json_schema()
+            if dependency_action
+            else SolverDecision.model_json_schema()
+        ),
         stage=stage,
+    )
+
+
+def _is_dependency_action_call(
+    context: SolverContext,
+    profile: ModelCallProfile,
+) -> bool:
+    return bool(
+        context.required_dependency_work_item_ids
+        and profile.context_projection == "full"
+        and profile.dependency_action_system_prompt is not None
     )
 
 
@@ -1311,6 +1340,7 @@ def _render_solver_model_call(
     output_schema: dict[str, Any] | None = None,
     input_payload: dict[str, Any] | None = None,
     minimal_contract: str = "",
+    normalized_schema: dict[str, Any] | None = None,
     stage: str = "solver",
 ) -> RenderedModelCall:
     if output_schema is None:
@@ -1349,7 +1379,9 @@ def _render_solver_model_call(
         input_tag="solver_context",
         input_payload=input_payload,
         output_schema=output_schema,
-        normalized_schema=SolverDecision.model_json_schema(),
+        normalized_schema=(
+            normalized_schema or SolverDecision.model_json_schema()
+        ),
         prompt_assets=_solver_prompt_assets(context),
     )
     _ensure_solver_prompt_capacity(rendered.request, context.max_solver_input_chars)
@@ -1879,6 +1911,19 @@ def _solver_transport_instruction(
             "契約に従うSolverDecisionをJSON object形式の文字列として返してください。"
             "AdapterがJSONを復元し、既知ID、件数、参照整合を含む共通契約で"
             "完全検証します。\n"
+        )
+    encoded_fields = tuple(
+        name
+        for name in (output_schema or {}).get("properties", {})
+        if name.endswith("_json")
+    )
+    if encoded_fields:
+        encoded_field_names = "、".join(f"`{name}`" for name in encoded_fields)
+        return (
+            "以下は現在のSolverContextです。出力schemaに従ってください。"
+            f"{encoded_field_names}には、各descriptionが指定する値をJSON形式の"
+            "文字列として返し、同名の`_json`なし項目は返しません。"
+            "AdapterがJSONを復元し、既知ID、件数、参照整合を検証します。\n"
         )
     return (
         "以下は現在のSolverContextです。コンパクト輸送schemaに従い、"
@@ -3181,11 +3226,31 @@ def render_search_reselection_model_call(
 ) -> RenderedModelCall:
     if profile.followup_system_prompt is None:
         raise ModelProtocolError("search reselection prompt is unavailable")
-    eligible_assessments = [
-        item
-        for item in assessment_payload.get("assessments") or []
-        if isinstance(item, dict) and item.get("matched_hypothesis_ids")
-    ]
+    eligible_assessments = []
+    eligible_hypothesis_ids_by_article: dict[str, tuple[str, ...]] = {}
+    for item in assessment_payload.get("assessments") or []:
+        if not isinstance(item, dict):
+            continue
+        article_id = item.get("article_id")
+        if not isinstance(article_id, str):
+            continue
+        actor_status_by_hypothesis = {
+            actor_match.get("hypothesis_id"): actor_match.get("status")
+            for actor_match in item.get("actor_matches") or []
+            if isinstance(actor_match, dict)
+        }
+        selectable_ids = tuple(
+            hypothesis_id
+            for hypothesis_id in item.get("matched_hypothesis_ids") or []
+            if actor_status_by_hypothesis.get(hypothesis_id)
+            in {"matched", "unknown"}
+        )
+        if not selectable_ids:
+            continue
+        eligible_hypothesis_ids_by_article[article_id] = selectable_ids
+        eligible_assessments.append(
+            {**item, "selectable_hypothesis_ids": list(selectable_ids)}
+        )
     eligible_article_ids = tuple(
         item["article_id"]
         for item in eligible_assessments
@@ -3225,6 +3290,7 @@ def render_search_reselection_model_call(
         output_schema=_search_reselection_transport_schema(
             context,
             candidate_ids=eligible_article_ids,
+            hypothesis_ids_by_article=eligible_hypothesis_ids_by_article,
         ),
         normalized_schema=SearchReselectionDecision.model_json_schema(),
     )
@@ -3246,12 +3312,6 @@ def render_search_actor_classification_model_call(
     candidate_by_id = {
         item.article_id: item for item in context.search_candidates
     }
-    candidate_ids = tuple(
-        dict.fromkeys(
-            article_id for article_id, _ in _search_actor_pairs(assessment_payload)
-        )
-    )
-    hypothesis_ids = tuple(item.hypothesis_id for item in context.hypotheses)
     expected_pairs = _search_actor_pairs(assessment_payload)
     schema = _strict_object(
         {
@@ -3259,8 +3319,6 @@ def render_search_actor_classification_model_call(
                 "type": "array",
                 "items": _strict_object(
                     {
-                        "article_id": _enum_string(candidate_ids),
-                        "hypothesis_id": _enum_string(hypothesis_ids),
                         "status": {
                             "type": "string",
                             "enum": ["matched", "mismatched", "unknown"],
@@ -3274,43 +3332,43 @@ def render_search_actor_classification_model_call(
                 ),
                 "minItems": len(expected_pairs),
                 "maxItems": len(expected_pairs),
+                "description": (
+                    "inputのpairsと同じ順序で返す主体照合結果。IDはProgramが"
+                    "対応付けるため出力しない。"
+                ),
             }
         }
     )
     work_item_by_id = {item.work_item_id: item for item in context.work_tree}
     input_payload = {
         "question": context.question,
-        "candidates": [
+        "pairs": [
             {
                 "article_id": item["article_id"],
                 "headings": list(
                     candidate_by_id[item["article_id"]].headings
                 ),
                 "summary": item["summary"],
-                "content_matched_hypotheses": [
-                    {
-                        "hypothesis_id": hypothesis.hypothesis_id,
-                        "action_actor": (
-                            work_item_by_id[hypothesis.work_item_id].action_actor
-                            if hypothesis.work_item_id in work_item_by_id
-                            else None
-                        ),
-                        "work_item_question": (
-                            work_item_by_id[hypothesis.work_item_id].question
-                            if hypothesis.work_item_id in work_item_by_id
-                            else None
-                        ),
-                        "statement": hypothesis.statement,
-                        "gaps": list(hypothesis.gaps),
-                    }
-                    for hypothesis in context.hypotheses
-                    if hypothesis.hypothesis_id
-                    in (item.get("matched_hypothesis_ids") or ())
-                ],
+                "hypothesis_id": hypothesis.hypothesis_id,
+                "action_actor": (
+                    work_item_by_id[hypothesis.work_item_id].action_actor
+                    if hypothesis.work_item_id in work_item_by_id
+                    else None
+                ),
+                "work_item_question": (
+                    work_item_by_id[hypothesis.work_item_id].question
+                    if hypothesis.work_item_id in work_item_by_id
+                    else None
+                ),
+                "statement": hypothesis.statement,
+                "gaps": list(hypothesis.gaps),
             }
             for item in assessments
             if isinstance(item, dict)
             and item.get("article_id") in candidate_by_id
+            for hypothesis in context.hypotheses
+            if hypothesis.hypothesis_id
+            in (item.get("matched_hypothesis_ids") or ())
         ],
     }
     instructions = (
@@ -4302,41 +4360,63 @@ def _search_reselection_transport_schema(
     context: SolverContext,
     *,
     candidate_ids: tuple[str, ...] | None = None,
+    hypothesis_ids_by_article: Mapping[str, tuple[str, ...]] | None = None,
 ) -> dict[str, Any]:
     if candidate_ids is None:
         candidate_ids = tuple(item.article_id for item in context.search_candidates)
+    if hypothesis_ids_by_article is None:
+        all_hypothesis_ids = tuple(
+            item.hypothesis_id for item in context.hypotheses
+        )
+        hypothesis_ids_by_article = {
+            article_id: all_hypothesis_ids for article_id in candidate_ids
+        }
+    selection_variants = [
+        _strict_object(
+            {
+                "article_id": _described(
+                    _enum_string((article_id,)),
+                    SearchCandidateSelection,
+                    "article_id",
+                ),
+                "reason": _described(
+                    {"type": "string", "minLength": 1},
+                    SearchCandidateSelection,
+                    "reason",
+                ),
+                "matched_hypothesis_ids": _described(
+                    {
+                        **_bounded_enum_array(
+                            hypothesis_ids_by_article.get(article_id, ())
+                        ),
+                        "minItems": 1,
+                    },
+                    SearchCandidateSelection,
+                    "matched_hypothesis_ids",
+                ),
+            }
+        )
+        for article_id in candidate_ids
+    ]
+    selection_item_schema = (
+        selection_variants[0]
+        if len(selection_variants) == 1
+        else {"anyOf": selection_variants}
+        if selection_variants
+        else _strict_object(
+            {
+                "article_id": {"type": "string"},
+                "reason": {"type": "string"},
+                "matched_hypothesis_ids": _empty_array_schema(),
+            }
+        )
+    )
     return _strict_object(
         {
             "selections": _described(
                 {
                     "type": "array",
-                    "items": _strict_object(
-                        {
-                            "article_id": _described(
-                                _enum_string(candidate_ids),
-                                SearchCandidateSelection,
-                                "article_id",
-                            ),
-                            "reason": _described(
-                                {"type": "string", "minLength": 1},
-                                SearchCandidateSelection,
-                                "reason",
-                            ),
-                            "matched_hypothesis_ids": _described(
-                                {
-                                    **_bounded_enum_array(
-                                        tuple(
-                                            item.hypothesis_id
-                                            for item in context.hypotheses
-                                        )
-                                    ),
-                                    "minItems": 1,
-                                },
-                                SearchCandidateSelection,
-                                "matched_hypothesis_ids",
-                            ),
-                        }
-                    ),
+                    "items": selection_item_schema,
                     "maxItems": min(
                         len(candidate_ids),
                         context.remaining_fetch_capacity,
@@ -4349,6 +4429,62 @@ def _search_reselection_transport_schema(
                 {"type": "string", "minLength": 1},
                 SearchReselectionDecision,
                 "reason",
+            ),
+        }
+    )
+
+
+def _dependency_action_transport_schema(
+    context: SolverContext,
+    *,
+    json_transport: bool = False,
+) -> dict[str, Any]:
+    """下位規範の次Actionだけを返す専用契約。"""
+
+    if json_transport:
+        return _strict_object(
+            {
+                "decision_reason": _described(
+                    {"type": "string", "minLength": 1, "maxLength": 1200},
+                    DependencyActionDecision,
+                    "decision_reason",
+                ),
+                "tool_requests_json": {
+                    "type": "string",
+                    "description": "ToolRequest array encoded as one JSON array string",
+                },
+            }
+        )
+    required_ids = set(context.required_dependency_work_item_ids)
+    action_context = context.model_copy(
+        update={
+            "work_tree": tuple(
+                item
+                for item in context.work_tree
+                if item.work_item_id in required_ids
+            ),
+            "hypotheses": tuple(
+                item
+                for item in context.hypotheses
+                if item.work_item_id in required_ids
+            ),
+        }
+    )
+    tool_requests = _tool_requests_transport_schema(action_context)
+    required_count = len(context.required_dependency_work_item_ids)
+    tool_requests["minItems"] = required_count
+    tool_requests["maxItems"] = required_count
+    return _strict_object(
+        {
+            "decision_reason": _described(
+                {"type": "string", "minLength": 1, "maxLength": 1200},
+                DependencyActionDecision,
+                "decision_reason",
+            ),
+            "tool_requests": _described(
+                tool_requests,
+                DependencyActionDecision,
+                "tool_requests",
             ),
         }
     )
@@ -5820,6 +5956,79 @@ def normalize_staged_research_decision(
     return decision
 
 
+def normalize_dependency_action_decision(
+    payload: dict[str, Any],
+    *,
+    context: SolverContext,
+) -> SolverDecision:
+    """専用のAction出力を、既存のDependency判断を保ったDecisionへ包む。"""
+
+    decoded_payload = dict(payload)
+    if "tool_requests_json" in decoded_payload:
+        decoded_payload["tool_requests"] = _decode_transport_json(
+            decoded_payload.pop("tool_requests_json"),
+            expected_type=list,
+            label="tool_requests_json",
+        )
+    try:
+        action = DependencyActionDecision.model_validate(decoded_payload)
+    except ValidationError as exc:
+        detail = exc.errors(include_url=False, include_input=False)[0]
+        raise ModelProtocolError(
+            f"dependency action contract invalid: {detail['msg']}"
+        ) from exc
+
+    required_ids = set(context.required_dependency_work_item_ids)
+    requests_by_work_item: dict[str, list[ToolRequest]] = {}
+    for request in action.tool_requests:
+        requests_by_work_item.setdefault(request.work_item_id, []).append(request)
+    if set(requests_by_work_item) != required_ids or any(
+        len(requests) != 1 for requests in requests_by_work_item.values()
+    ):
+        raise ModelProtocolError(
+            "dependency action requires exactly one ToolRequest per needs_action "
+            "WorkItem"
+        )
+
+    active_dependencies = []
+    for dependency in context.dependency_decisions:
+        if dependency.work_item_id not in required_ids:
+            continue
+        request = requests_by_work_item[dependency.work_item_id][0]
+        active_dependencies.append(
+            dependency.model_copy(
+                update={"action_request_id": request.request_id}
+            ).model_dump(mode="json")
+        )
+    if {item["work_item_id"] for item in active_dependencies} != required_ids:
+        raise ModelProtocolError(
+            "dependency action is missing the prior needs_action decision"
+        )
+
+    normalized = _normalize_solver_payload(
+        {
+            "next": "continue",
+            "decision_reason": action.decision_reason,
+            "start_next_cycle": False,
+            "update": {},
+            "next_focus_work_item_ids": list(
+                context.required_dependency_work_item_ids
+            ),
+            "dependency_decisions": active_dependencies,
+            "tool_requests": [
+                request.model_dump(mode="json")
+                for request in action.tool_requests
+            ],
+            "answer": None,
+        }
+    )
+    _assign_tool_request_ids(normalized, context)
+    _normalize_absent_context_branches(normalized, context)
+    decision = SolverDecision.model_validate(normalized)
+    _validate_hypothesis_update_evidence(decision)
+    return decision
+
+
 def _assign_tool_request_ids(
     normalized: dict[str, Any],
     context: SolverContext,
@@ -5958,31 +6167,36 @@ def _apply_search_actor_classification(
         raise ModelProtocolError(
             "search actor classification requires actor_matches"
         )
-    expected_pairs = set(_search_actor_pairs(assessment_payload))
-    actual_pairs: list[tuple[str, str]] = []
-    for item in actor_matches:
-        if not isinstance(item, dict):
-            raise ModelProtocolError("search actor classification item invalid")
-        article_id = item.get("article_id")
-        hypothesis_id = item.get("hypothesis_id")
-        if not isinstance(article_id, str) or not isinstance(
-            hypothesis_id, str
-        ):
-            raise ModelProtocolError(
-                "search actor classification pair IDs are invalid"
-            )
-        actual_pairs.append((article_id, hypothesis_id))
-    if len(actual_pairs) != len(set(actual_pairs)):
-        raise ModelProtocolError(
-            "search actor classification pairs must be unique"
-        )
-    if set(actual_pairs) != expected_pairs:
+    expected_pairs = _search_actor_pairs(assessment_payload)
+    if len(actor_matches) != len(expected_pairs):
         raise ModelProtocolError(
             "search actor classification must cover every content-matched pair"
         )
+    normalized_matches: list[dict[str, Any]] = []
+    for expected_pair, item in zip(expected_pairs, actor_matches, strict=True):
+        if not isinstance(item, dict):
+            raise ModelProtocolError("search actor classification item invalid")
+        supplied_pair = (item.get("article_id"), item.get("hypothesis_id"))
+        if any(value is not None for value in supplied_pair) and supplied_pair != (
+            expected_pair
+        ):
+            raise ModelProtocolError(
+                "search actor classification changed the input pair order"
+            )
+        normalized_matches.append(
+            {
+                "article_id": expected_pair[0],
+                "hypothesis_id": expected_pair[1],
+                **{
+                    key: value
+                    for key, value in item.items()
+                    if key not in {"article_id", "hypothesis_id"}
+                },
+            }
+        )
 
     matches_by_article: dict[str, list[dict[str, Any]]] = {}
-    for item in actor_matches:
+    for item in normalized_matches:
         matches_by_article.setdefault(item["article_id"], []).append(
             {
                 key: value
@@ -6486,4 +6700,14 @@ updateの状態契約:
 - reviewer_findingsがあれば、review_finding_resolutionsで全finding_idを1回ずつ処理する。指摘を受け入れて回答修正または追加調査へ反映する場合はaddressed、提示済み本文と照合して指摘を採用しない場合だけdisputedとし、reasonと実際に使ったbasis_evidence_idsを返す。reviewer_findingsがなければ空配列にする。
 - statusの意味、根拠の十分性、追加調査、Graph候補の採否はsystem promptに従ってSolverが判断する。
 - 対象がない任意配列は空、任意objectはnull、更新がなければupdateは空objectにする。
+""".strip()
+
+
+_DEPENDENCY_ACTION_CONTRACT = """
+出力原則:
+- 今回の処理では`decision_reason`と`tool_requests`だけを返す。
+- ToolRequestは、対応するopen WorkItemと未確認Hypothesisへ結び付ける。
+- 各`needs_action` WorkItemについて、未確認事項を直接進めるToolRequestを1件返す。
+- request_idは同じ出力内で重複しない短い局所IDにする。Programが永続化用IDへ置き換え、既存のDependencyDecisionへ対応付ける。
+- Tool名とargumentsは`available_tools`に従う。
 """.strip()

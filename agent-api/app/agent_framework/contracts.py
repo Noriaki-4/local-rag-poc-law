@@ -270,6 +270,17 @@ class DependencyAssessmentDecision(FrameworkModel):
     dependency_decisions: tuple[DependencyDecision, ...] = Field(default=())
 
 
+class DependencyActionDecision(FrameworkModel):
+    decision_reason: str = Field(
+        min_length=1,
+        max_length=1200,
+        description="未確認の下位規範に対して今回のToolを選んだ短い理由。",
+    )
+    tool_requests: tuple[ToolRequest, ...] = Field(
+        description="各needs_action WorkItemを進める今回のTool要求。",
+    )
+
+
 class CycleCloseDecision(FrameworkModel):
     outcome: Literal["start_next_cycle", "finalize"] = Field(
         description="未確認事項を次Cycleへ送るか、既知根拠で回答を完了するか。",

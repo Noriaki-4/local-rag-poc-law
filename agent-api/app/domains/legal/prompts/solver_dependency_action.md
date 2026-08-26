@@ -2,13 +2,13 @@
 
 ### 目的
 
-`needs_action`のWorkItemについて、未確認の下位規範を確認する次のToolRequestだけを選びます。WorkItem、Hypothesis、DependencyDecisionの意味評価はやり直しません。
+`needs_action`のWorkItemについて、未確認の下位規範を確認する次のToolRequestを選びます。WorkItem、Hypothesis、DependencyDecisionの意味評価はやり直しません。
 入力に出ていない他のopen WorkItemはCaseStoreに残り、この行動後に再提示されます。
 
 ### 出力
 
 - 各`needs_action`を進めるToolRequest
-- 対応する`action_request_id`と同じ`request_id`
+- Toolを選んだ短い理由
 
 ### 完了条件
 
@@ -22,7 +22,7 @@
    - 起点Articleと調べる関係・方向を説明できる：`legal_graph_neighbors`
    - Articleまたは関係がまだ分からない：`legal_search`
    - 必要な既知Evidence本文が今回省略されている：`load_evidence`
-3. 各`needs_action.action_request_id`を、対応するToolRequestの`request_id`へ一致させます。
+3. 各`needs_action` WorkItemに対応するToolRequestを1件返します。
 
 ### ルール
 
@@ -35,4 +35,4 @@
 
 #### この処理ではしないこと
 
-- 回答、Cycle移行、状態更新は行いません。
+- 回答、Cycle移行、状態更新、DependencyDecisionの再判定は行いません。

@@ -27,8 +27,8 @@
 ### 対応判定
 
 - `matched_hypothesis_ids`は内容面の対応、`actor_matches`はArticle・Hypothesis組ごとの主体照合です。
-  `summary`と両方の評価を確認します。
-- `actor_matches.status=mismatched`の組は選びません。`unknown`は、本文取得により主体を確認する必要がある場合だけ選べます。
+  `selectable_hypothesis_ids`には、両評価を機械的に結合し、`mismatched`を除いたIDだけが示されています。
+- 選択するHypothesisは`selectable_hypothesis_ids`から指定します。`unknown`は、本文取得により主体を確認する必要がある場合だけ選べます。
 - 同じ制度でも、規律主体、行為、手続段階が異なる候補を代用しません。
 - Hypothesisの`gaps`を直接埋める候補を選び、周辺事項だけの候補で代用しません。
 - `matched_hypothesis_ids`には、その候補で今回直接検証するHypothesisだけを書きます。
