@@ -79,6 +79,7 @@ from app.agent_framework.state import (
     UnreviewedGraphResolution,
     ToolRequest,
     WorkItem,
+    merge_hypothesis_evidence_ids,
 )
 from app.agent_framework.tool_contracts import ToolDefinition
 from app.llm import LLMClient
@@ -2724,7 +2725,10 @@ def _project_observation_integration_state(
         hypotheses[update.hypothesis_id] = current.model_copy(
             update={
                 "judgment": update.judgment,
-                "evidence_ids": update.evidence_ids,
+                "evidence_ids": merge_hypothesis_evidence_ids(
+                    current.evidence_ids,
+                    update.evidence_ids,
+                ),
                 "gaps": update.gaps,
             }
         )

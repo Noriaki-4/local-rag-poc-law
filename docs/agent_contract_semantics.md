@@ -34,11 +34,11 @@ Hypothesisがすべて根拠付きで判定済みで、`gaps`と`needs_action`�
 | `WorkItem.question` | 1つの完了判定で閉じられる確認事項 | ID、一意性、親子循環、状態整合を検証 | 質問を重複しない確認事項へ分解 | `solver_common.md`、`solver_question_decomposition.md` |
 | `Hypothesis.work_item_id` | Hypothesisが検証する所属WorkItem | 既知WorkItemとの完全一致を検証 | WorkItemごとに本文で支持・否定できる命題を置く | `solver_common.md`、`solver_hypothesis_generation.md` |
 | `WorkItem.basis_hypothesis_ids` | openでは作業の作成・継続を前提づけるHypothesis、resolvedでは所属する判定済みHypothesis | openの前提IDを検証し、resolved時は所属・判定・Evidenceから機械集約する | open子WorkItemを作る場合の前提だけを選ぶ | `solver_common.md`、`solver_cycle_close.md` |
-| `Hypothesis.judgment` | `unresolved`は未確認、`supported`は本文が支持、`contradicted`は本文が否定 | 判定済みならEvidence必須、既知ID、反証時の影響処理を検証 | 提示されたgrounding本文から判定 | `solver_common.md`、`solver_integration.md` |
-| `Hypothesis.evidence_ids` | 現在の判定と`gaps`の判断に使った取得本文 | 既知かつ提示済みのgrounding Evidence IDを検証。判定済みでは1件以上必須 | `unresolved`でも一部確認に使った本文を残し、未確認の結論を支持したことにはしない | `solver_observation_integration.md` |
-| `Hypothesis.gaps` | 本文観察後も命題を判定するために残った未確認情報 | 文字列として保存・引継ぎ。初回仮説立案では空で初期化 | 取得本文を評価した後に未確認事項を具体化し、次の探索へ使う | `solver_observation_integration.md`、`solver_integration.md` |
-| `Evidence` | Toolから得た保存済み情報 | 来歴、本文提示有無、引用可能性を投影 | `material_evidence`に本文があるgrounding Evidenceだけで意味判断 | `solver_common.md`、`solver_integration.md` |
-| `evidence_hypothesis_candidates` | 取得Articleと、本文取得前に対応候補と判断されたHypothesisの来歴 | 保存済みArticle・Hypothesis IDを結合してObservationへ投影 | 手掛かりとして本文を再評価し、支持・反証または部分確認を判断する | `solver_observation_integration.md` |
+| `Hypothesis.judgment` | `unresolved`は未確認、`supported`は本文が支持、`contradicted`は本文が否定 | 判定済みならEvidence必須、既知ID、反証時の影響処理を検証 | 提示されたgrounding本文から判定 | `solver_evidence_integration.md` |
+| `Hypothesis.evidence_ids` | 現在までの判定と`gaps`の判断に使った取得本文 | 既存対応をCaseStoreに保持し、`HypothesisUpdate.evidence_ids`の新規IDを追記する。既知かつ提示済みのgrounding Evidence IDを検証し、判定済みでは1件以上必須 | 今回の評価で新たに使った本文だけを差分へ指定する。`unresolved`でも一部確認に使った本文は指定する | `solver_evidence_integration.md` |
+| `Hypothesis.gaps` | 本文観察後も命題を判定するために残った未確認情報 | 文字列として保存・引継ぎ。初回仮説立案では空で初期化 | 取得本文を評価した後に未確認事項を具体化し、次の探索へ使う | `solver_evidence_integration.md` |
+| `Evidence` | Toolから得た保存済み情報 | 来歴、本文提示有無、引用可能性を投影 | `material_evidence`に本文があるgrounding Evidenceだけで意味判断 | `solver_evidence_integration.md`、`solver_finalization.md` |
+| `evidence_hypothesis_candidates` | 取得Articleと、本文取得前に対応候補と判断されたHypothesisの来歴 | 保存済みArticle・Hypothesis IDを結合してObservationへ投影 | 手掛かりとして本文を再評価し、支持・反証または部分確認を判断する | `solver_evidence_integration.md` |
 | `ToolRequest` | open WorkItem・Hypothesisを検証するread-only Tool要求 | Tool名、引数Schema、既知ID、件数、重複scopeを検証して実行 | Hypothesisと、観察後に残ったgapに応じてToolと引数を選ぶ | `solver_tools.md`、各モードPrompt |
 | `DependencyDecision` | 質問に関係する下位規範確認の状態 | 対象WorkItem全件性、Evidence、ToolRequest対応を検証 | 本文から`not_required / needs_action / resolved`を判断 | `solver_completion.md`、`solver_integration.md` |
 | `SearchCandidateReview` | OpenSearch候補の本文取得対象、対応Hypothesis、保留候補 | 候補ID、Hypothesis ID、重複、全件性、取得上限を検証 | 検索抜粋をHypothesisに照らして選別 | `solver_search_review.md`、`solver_search_reselection.md` |

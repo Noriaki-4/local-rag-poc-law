@@ -620,7 +620,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "381"
+    assert diagnostic_records[0]["profileVersion"] == "382"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -628,7 +628,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "381"
+    assert transport_input["profileVersion"] == "382"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -1064,7 +1064,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "381"
+    assert profile.version == "382"
     assert profile.solver_graph_review is not None
     assert profile.solver_graph_review.max_output_tokens == (
         profile.solver_integration.max_output_tokens
@@ -1339,7 +1339,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "381"
+    assert profile.version == "382"
     assert prompt.rindex("## 出力") > prompt.rindex(
         "</solver_context>"
     )
@@ -1390,7 +1390,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "381"
+    assert profile.version == "382"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -3407,6 +3407,111 @@ def test_observation_projects_article_to_hypothesis_candidate_links() -> None:
     assert projected["judgment"] == "unresolved"
     assert projected["evidence_ids"] == ["e-1"]
     assert projected["gaps"] == ["本文でまだ確認できない条件"]
+
+
+def test_hypothesis_evidence_binding_is_carried_into_later_observation() -> None:
+    state = CaseState(
+        case_id="case-carry-hypothesis-evidence",
+        question="確認する",
+        research_cycle_count=2,
+        work_items=(WorkItem(work_item_id="wi-1", question="確認事項"),),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h-1",
+                work_item_id="wi-1",
+                statement="確認する命題",
+                evidence_ids=("e-prior",),
+                gaps=("追加条件",),
+            ),
+        ),
+        evidence=(
+            Evidence(
+                evidence_id="e-prior",
+                source_ref="fixture:e-prior",
+                content="前Cycleで取得した本文",
+                created_cycle=1,
+                metadata={"articleId": "article-prior"},
+            ),
+            Evidence(
+                evidence_id="e-new",
+                source_ref="fixture:e-new",
+                content="現在Cycleで取得した本文",
+                created_cycle=2,
+                metadata={"articleId": "article-new"},
+            ),
+        ),
+        tool_requests=(
+            ToolRequest(
+                request_id="fetch-new",
+                work_item_id="wi-1",
+                tool_name="fetch_articles",
+                arguments={"article_ids": ["article-new"]},
+                purpose="追加条件を確認する",
+                hypothesis_ids=("h-1",),
+            ),
+        ),
+        tool_results=(
+            ToolResult(
+                request_id="fetch-new",
+                status="succeeded",
+                evidence_ids=("e-new",),
+                cycle_no=2,
+            ),
+        ),
+    )
+    context = build_solver_context(
+        state,
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+    )
+    observation = ObservationIntegrationDecision(
+        decision_reason="現在Cycleの本文を追加した",
+        update_hypotheses=(
+            HypothesisUpdate(
+                hypothesis_id="h-1",
+                judgment="supported",
+                evidence_ids=("e-new",),
+                gaps=(),
+            ),
+        ),
+    )
+    profile = legal_profiles.legal_agent_profile().solver_cycle_close
+    assert profile is not None
+
+    rendered = render_cycle_close_model_call(context, observation, profile)
+    projected = rendered.input_payload["hypotheses_after_observation"][0]
+    assert projected["evidence_ids"] == ["e-prior", "e-new"]
+
+    applied = apply_solver_decision(
+        state,
+        SolverDecision(
+            next="continue",
+            decision_reason="現在Cycleの本文を保存する",
+            update={"update_hypotheses": observation.update_hypotheses},
+        ),
+        limits=AgentLimits(),
+        known_tool_names={"fetch_articles"},
+        material_evidence_ids=("e-new",),
+        finalize_only=False,
+    )
+    assert applied.hypotheses[0].evidence_ids == ("e-prior", "e-new")
+
+    next_cycle_context = build_solver_context(
+        applied.model_copy(update={"research_cycle_count": 3}),
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+    )
+    assert next_cycle_context.hypotheses[0].evidence_ids == (
+        "e-prior",
+        "e-new",
+    )
+    assert {item.evidence_id for item in next_cycle_context.material_evidence} >= {
+        "e-prior",
+        "e-new",
+    }
+
 
 def test_cycle_boundary_requires_a_structural_resolution_for_every_deferred_frontier(
 ) -> None:

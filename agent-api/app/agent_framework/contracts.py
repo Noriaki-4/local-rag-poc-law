@@ -63,8 +63,10 @@ class HypothesisUpdate(FrameworkModel):
     evidence_ids: tuple[str, ...] = Field(
         default=(),
         description=(
-            "現在の判定とgapsの判断に直接使用した"
+            "今回の本文評価で、現在の判定とgapsの判断に新たに使用した"
             "grounding_evidence[].evidence_idの最小集合。"
+            "既にHypothesis.evidence_idsにあるIDは再出力しなくてよく、"
+            "Programが既存IDを保持して追記する。"
             "metadata.articleIdやmetadata.sourceContentUnitIdは入れない。"
             "関連するだけのParagraph・Itemを全件入れない。"
             "unresolvedでも本文で確認できた部分があれば保持できる。"

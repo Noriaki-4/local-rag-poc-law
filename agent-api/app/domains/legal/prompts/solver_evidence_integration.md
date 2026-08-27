@@ -46,6 +46,8 @@
 - `gaps`には未確認事項だけを書き、確認済み内容を繰り返しません。
 - 各理由は判断を区別できる短い1文とし、`gaps`や本文の要約を繰り返しません。
 - `evidence_ids`と`basis_evidence_ids`には`grounding_evidence[].evidence_id`だけを使います。
+- `update_hypotheses[].evidence_ids`には今回新たに判断へ使ったEvidenceだけを書きます。既存の
+  `hypotheses[].evidence_ids`はProgramが保持するため、繰り返しません。
 - `terminal_text_confirmed`では、起点規範から末端規範までを上位順に示します。
 - 入力にないHypothesisを更新せず、新規作成もしません。
 - WorkItemの完了状態は出力しません。Tool、Cycle移行、最終回答も出力しません。

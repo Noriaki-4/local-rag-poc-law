@@ -46,6 +46,15 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def merge_hypothesis_evidence_ids(
+    existing: tuple[str, ...],
+    additions: tuple[str, ...],
+) -> tuple[str, ...]:
+    """既存の意味対応を保ったまま、LLMが今回選んだEvidenceを追記する。"""
+
+    return tuple(dict.fromkeys((*existing, *additions)))
+
+
 class FrameworkModel(BaseModel):
     model_config = ConfigDict(
         extra="forbid",

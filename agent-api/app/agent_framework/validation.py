@@ -16,6 +16,7 @@ from .state import (
     Hypothesis,
     ToolRequest,
     WorkItem,
+    merge_hypothesis_evidence_ids,
     utc_now,
 )
 
@@ -169,6 +170,7 @@ def apply_solver_decision(
                 f"{sorted(unknown_resolution_evidence)}"
             )
     changed_hypothesis_ids: set[str] = set()
+    evidence_ids_requiring_material: dict[str, set[str]] = {}
     added_work_item_ids = {item.work_item_id for item in decision.update.add_work_items}
     dependency_scope_ids = (
         set(required_dependency_work_item_ids)
@@ -210,6 +212,9 @@ def apply_solver_decision(
             )
         hypotheses[new_hypothesis.hypothesis_id] = new_hypothesis
         changed_hypothesis_ids.add(new_hypothesis.hypothesis_id)
+        evidence_ids_requiring_material[new_hypothesis.hypothesis_id] = set(
+            new_hypothesis.evidence_ids
+        )
 
     newly_contradicted: set[str] = set()
     affected_source_items = dict(work_items)
@@ -236,10 +241,16 @@ def apply_solver_decision(
         hypotheses[hypothesis_update.hypothesis_id] = _validated_copy(
             current_hypothesis,
             judgment=hypothesis_update.judgment,
-            evidence_ids=hypothesis_update.evidence_ids,
+            evidence_ids=merge_hypothesis_evidence_ids(
+                current_hypothesis.evidence_ids,
+                hypothesis_update.evidence_ids,
+            ),
             gaps=hypothesis_update.gaps,
         )
         changed_hypothesis_ids.add(hypothesis_update.hypothesis_id)
+        evidence_ids_requiring_material[hypothesis_update.hypothesis_id] = set(
+            hypothesis_update.evidence_ids
+        )
         if (
             current_hypothesis.judgment != "contradicted"
             and hypothesis_update.judgment == "contradicted"
@@ -284,6 +295,7 @@ def apply_solver_decision(
         material_evidence_ids=material_ids,
         citable_evidence_ids=citable_evidence_ids,
         changed_hypothesis_ids=changed_hypothesis_ids,
+        evidence_ids_requiring_material=evidence_ids_requiring_material,
     )
 
     retained_ids = tuple(dict.fromkeys(decision.retain_evidence_ids))
@@ -1351,6 +1363,7 @@ def _validate_hypotheses(
     material_evidence_ids: set[str],
     citable_evidence_ids: set[str],
     changed_hypothesis_ids: set[str],
+    evidence_ids_requiring_material: Mapping[str, set[str]],
 ) -> None:
     for item in hypotheses.values():
         if item.work_item_id not in work_items:
@@ -1363,13 +1376,17 @@ def _validate_hypotheses(
                 f"hypothesis has unknown evidence IDs: {sorted(unknown_evidence)}"
             )
         if item.hypothesis_id in changed_hypothesis_ids and item.evidence_ids:
-            unseen = set(item.evidence_ids) - material_evidence_ids
+            changed_evidence_ids = evidence_ids_requiring_material.get(
+                item.hypothesis_id,
+                set(),
+            )
+            unseen = changed_evidence_ids - material_evidence_ids
             if unseen:
                 raise ContractViolation(
                     f"hypothesis update uses evidence not shown in full: "
                     f"{sorted(unseen)}"
                 )
-            navigation_only = set(item.evidence_ids) - citable_evidence_ids
+            navigation_only = changed_evidence_ids - citable_evidence_ids
             if navigation_only:
                 raise ContractViolation(
                     "hypothesis update uses navigation-only evidence: "

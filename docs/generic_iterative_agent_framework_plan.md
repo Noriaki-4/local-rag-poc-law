@@ -1137,7 +1137,8 @@ Decisionに現れないfrontierは`reject`と解釈しない。
 ### 5.3 Solver契約
 
 SolverはCaseState全体を再出力しない。追加と更新の差分だけを返し、出力に現れなかった
-WorkItem、Hypothesis、EvidenceをCaseStateから削除しない。
+WorkItem、Hypothesis、EvidenceをCaseStateから削除しない。`HypothesisUpdate.evidence_ids`は
+今回の観察で新たに対応付けたEvidence IDだけを返し、ProgramがCaseStore内の既存対応へ追記する。
 
 ```python
 class CaseUpdate:
