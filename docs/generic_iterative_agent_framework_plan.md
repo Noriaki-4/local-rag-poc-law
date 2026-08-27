@@ -229,7 +229,8 @@ Projector、Explorer、Integrator、Answerer、Schedulerを独立した登場人
 
 | 判断・処理 | 担当 |
 |---|---|
-| WorkItem分解、Hypothesis、検索語、Graph selector、候補の関連性、Evidence採否、完了判断 | Solver |
+| WorkItem分解、Hypothesis、検索語、Graph selector、候補の関連性、Evidence採否、下位規範確認 | Solver |
+| WorkItem進捗、Cycle遷移、根拠Hypothesisの集約 | Program（Solverの意味判断済み状態から機械導出） |
 | 最終回答の指摘と差戻し | Reviewer（有効時のみ） |
 | 既知ID、enum、件数、権限、予算、参照整合、status遷移、Tool実行事実 | Program |
 | 検索候補生成、本文取得、Graph scope実行 | Tool Adapter |
@@ -313,7 +314,9 @@ Reviewer無効時のSolver呼び出しは次の範囲になる。
 プログラムは各LLM・Tool実行前に、現Cycleを評価して閉じる時間、残りCycleの最小実行時間、
 最終回答時間を別々予約する。残り時間が現actionの実行予算と予約の合計を下回る場合、
 新しいGraph ReviewやToolを開始せず、`cycle_close_required=true`をSolverへ渡す。
-Solverはまず専用のObservation Integrationで取得本文をWorkItem・Hypothesis・下位規範確認へ反映する。
+Solverはまず専用のObservation Integrationで取得本文をHypothesisへ反映する。
+続くDependency Assessmentが下位規範確認を更新した後、ProgramはHypothesisの判定、
+`gaps`、Evidence参照及びDependency状態からWorkItemの完了差分を機械的に導出する。
 検索候補選別時にSolverが返したArticleとHypothesisの候補対応はCaseStateへ保存し、本文取得後の
 Observationへ再投影する。プログラムは既知IDを結合するだけで、本文がHypothesisを支持・反証するかは
 ObservationのSolverが判断する。本文で命題の一部だけ確認できた場合は`unresolved`を維持し、確認に使った
@@ -444,9 +447,10 @@ class Hypothesis:
   要件、例外構造または手続行為の候補を含め、質問の言い換えだけを命題にしない。
   `gaps`には判定に必要な未確認の法的内容を置き、探す条文や検索作業は置かない。
 - `WorkItem.basis_hypothesis_ids`は所属関係の逆引きではない。open WorkItemでは作成・継続を
-  前提づけるHypothesis、resolved WorkItemではresolutionを支える判定済みHypothesisを表す。
+  前提づけるHypothesisを表す。resolvedへ機械更新するときは、Programが当該WorkItemに所属する
+  判定済みHypothesis IDを設定する。
   元の質問から直接作るopen WorkItemでは通常は空にし、別Hypothesisを前提に作る子WorkItemでは
-  その前提IDを設定する。resolvedへ更新するときは、resolutionの根拠とした判定済みHypothesis IDへ更新する。
+  その前提IDを設定する。
 - Evidenceは複数HypothesisからIDで共有参照し、WorkItemごとに複製しない。
 - Hypothesisのstatementを別の意味へ上書きしない。見立てを変更する場合は新しいHypothesisを作る。
 - WorkItemのquestionを別の問いへ上書きしない。問いを変更する場合は旧WorkItemを`dropped`にし、
@@ -960,7 +964,8 @@ statusは「実行事実」と「意味判断」を分離する。同じ文字�
 | Frontier review | `selected / relevant_deferred / rejected` | Solver |
 | Cycle budget flag | `cycle_budget_reached / cycle_close_required / cycle_step_timeout` | プログラム |
 | Solverの次動作 | `start_cycle / continue_cycle / start_next_cycle / finalize` | Solver |
-| WorkItem | `open / resolved / dropped` | Solver |
+| WorkItem進捗 | `open / resolved` | プログラム（Hypothesis・Evidence・Dependency状態から導出） |
+| WorkItem構造変更 | `dropped` | Solver（replace / drop時のみ） |
 | Hypothesis | `supported / contradicted / unresolved` | Solver |
 | Frontier action | `select / defer / reject` | Solver |
 | Deferred Frontier resolution | `carry_forward / no_longer_needed / unresolved_at_limit` | Solver |
@@ -1088,8 +1093,8 @@ Solverが決める意味status・action:
 | `continue_cycle` | 同じCycleの仮説・探索方針を維持し、次のaction-observation stepへ進む |
 | `start_next_cycle` | 現Cycleを理由付きで評価して閉じ、構造化した引継ぎを残す。次Cycleの計画は次の`start_cycle`で決める |
 | `finalize` | 必要な根拠を探し切ったと判断し、新しいToolを実行せず回答を確定する |
-| WorkItem `open` | 問いが未完了で、追加作業が必要 |
-| WorkItem `resolved` | 問いへ結論が出ており、`resolution`に結論を持つ |
+| WorkItem `open` | 属するHypothesis、子WorkItemまたは下位規範確認に未完了がある |
+| WorkItem `resolved` | 属するHypothesisと有効な子WorkItemが完了し、下位規範確認も残っていない |
 | WorkItem `dropped` | 前提否定、重複、質問との無関係により対象外とし、`resolution`に理由を持つ |
 | Hypothesis `supported` | 今回提示されたgrounding Evidenceがstatementを支持する |
 | Hypothesis `contradicted` | 今回提示されたgrounding Evidenceがstatementを否定する |
@@ -1101,8 +1106,10 @@ Solverが決める意味status・action:
 | `no_longer_needed` | 後続Evidenceを踏まえ、質問への回答には不要と判断する |
 | `unresolved_at_limit` | 新しいCycleを開始できない上限時に未確認として残し、limitationsへ示す |
 
-`supported`はWorkItem全体の完了を意味せず、`content=succeeded`や`expansion=complete`から
-プログラムが自動生成してはならない。Decisionに現れないfrontierは`reject`と解釈しない。
+1件の`supported`はWorkItem全体の完了を意味しない。ProgramはWorkItemに属する全Hypothesisと
+有効な子WorkItemを確認し、`unresolved`、`gaps`または`needs_action`が一つでも残る間は
+`open`に保つ。`content=succeeded`や`expansion=complete`をHypothesisの意味判断に読み替えない。
+Decisionに現れないfrontierは`reject`と解釈しない。
 
 次は導入しない。
 
@@ -1267,10 +1274,9 @@ Commandとの許可組合せは`apply_case_command`の実行時検証とCommand�
 - LLMが参照できるのは、当該呼び出しへ提示されたIDだけとする。
 - 検証違反は`protocol_error`であり、プログラムが意味statusを書き換えて補正しない。
 
-子WorkItemがすべて終了しても、プログラムは親を自動的に`resolved`へしない。Solverが親を
-`resolved`へする場合、残る子を同じCaseUpdateで`resolved`または`dropped`へし、resolutionを返す。
-プログラムは親が終了しているのに`open`な子が残る構造を契約違反として拒否するだけで、
-子の結論や破棄を決めない。
+Programは、親自身に属するHypothesisと有効な子WorkItemがすべて完了し、下位規範確認も残っていない場合に
+親を`resolved`へする。子を`dropped`または別WorkItemへ`replace`する意味判断はSolverが行い、Programは
+親の完了条件を満たすために子の結論や破棄を補わない。
 
 ### 5.3.1 仮説が反証された場合
 
@@ -1419,21 +1425,23 @@ WorkTree案内とCaseStoreには残る。
 更新してからCycleを閉じ、未評価のToolResultを残したまま次Cycleまたは回答へ進まない。
 
 各Cycleの`start_cycle`はresearch profileを使う。Tool実行後のstep判断とReviewer差戻し後の判断は
-integration profileを使う。Cycle境界では、Observation Integrationが直前結果を意味評価して
-WorkItem・Hypothesis状態を更新し、Programがopen WorkItemの有無と次Cycle可否から
+integration profileを使う。Cycle境界では、Observation Integrationが直前結果を意味評価してHypothesisを更新し、
+Dependency Assessment後にProgramがWorkItem進捗を導出する。Programはopen WorkItemの有無と次Cycle可否から
 `start_next_cycle / finalize`を導出する。Cycle CloseのLLM出力に同じ遷移を重複して持たせない。
 `start_next_cycle`後の次呼出しで、research profileが引継ぎを読んで新しいCycle計画を作る。
 通常終了のためだけの独立Integrator呼び出しは設けない。上限到達時はintegration profileへ
 `finalize_only=true`を渡し、追加ToolRequestだけを禁止する。
 
-通常の`finalize`では、Solver自身がすべてのWorkItemを`resolved`または`dropped`へ更新する。
+通常の`finalize`では、Programがすべての有効なWorkItemを`resolved`と導出できなければならない。
+`dropped`はSolverが質問分解の修正として明示した場合だけ使用する。
 実行上限で新Cycleを開始できない限定`finalize`だけは、open WorkItemとunresolved Hypothesisを保持し、
-対応IDと回答への影響をlimitationsへ明示する。プログラムはどちらの意味状態にするかを判断せず、
-通常終了と限定終了それぞれの参照整合だけを検証する。
+対応IDと回答への影響をlimitationsへ明示する。ProgramはHypothesisやDependencyの法的意味を変更せず、
+通常終了と限定終了それぞれの参照整合を検証する。
 
 下位法令・委任先の未確認事項も、WorkItem、Hypothesis、gaps、ExplorationIntentで管理する。
-取得本文に質問へ関係する委任があれば、Solverは対応するHypothesisを`unresolved`、WorkItemを`open`の
-まま追加調査する。Graph結果だけでは根拠にせず、端点Articleを`fetch_articles`で取得して評価する。
+取得本文に質問へ関係する委任があれば、Solverは対応するHypothesisを`unresolved`に保ち、Dependencyを
+`needs_action`にする。Programはその状態からWorkItemを`open`に保つ。Graph結果だけでは根拠にせず、
+端点Articleを`fetch_articles`で取得して評価する。
 どの委任が質問に関係するか、どの本文で確認できたかはSolverが判断し、プログラムは既知ID、
 ToolRequest、grounding Evidenceの参照整合だけを検証する。
 
@@ -1864,7 +1872,7 @@ research・integrationの両方へ必ず合成する。次の契約語彙には�
   必要と判断した未取得Evidenceが残る場合にstart_next_cycleを選ぶ。
 - cycle_budget_reached=true、cycle_step_limit_reached=true、またはcycle_close_required=trueなら、
   現Cycleに新しいToolRequestを追加しない。Observation Integrationで直前までのToolResultを評価して
-  WorkItem・Hypothesisを更新する。Programは、その差分を適用した後にopen WorkItemがなくなれば
+  Hypothesisを更新する。続く下位規範確認後、ProgramはWorkItem進捗を導出し、open WorkItemがなくなれば
   finalize、open WorkItemが残り次Cycleを開始できればstart_next_cycleを導出する。Cycle Closeは指定された
   遷移に応じて回答または引継ぎ内容を返す。次のgoal・strategyは次のstart_cycleで決める。
 - cycle_step_timeoutは中間呼出しがCycle予算で時間切れになった実行事実であり、仮説の否定、
@@ -1988,7 +1996,7 @@ Graph Review差分処理やCycle境界処理を混入させず、IntegrationとG
 | `solver_hypothesis_generation.md` | 初回Step 2。Hypothesisがない既知WorkItemを1件ずつ処理し、検索対象を選べる未確認の法的命題を作って逐次保存する。初回`gaps`は空で初期化し、本文観察後に残る未確認事項だけを後続処理で記録する。 |
 | `solver_search_planning.md` | 初回Step 3。既知Hypothesisに対する今回の`legal_search`要求を作る。 |
 | `solver_integration.md` | 新しいToolResultを評価して状態を逐次更新し、未確認事項に対する次の行動を選ぶ。Graphの関係種別を説明できなければ全種別を要求せず、OpenSearchで根拠または起点を発見する。 |
-| `solver_observation_integration.md` | Cycle境界で、提示された取得本文を既存WorkItem・Hypothesis・下位規範確認へ反映する。Tool選択、Cycle移行、回答は扱わない。 |
+| `solver_observation_integration.md` | 提示された取得本文を既存Hypothesisへ反映する。WorkItem完了、下位規範確認、Tool選択、Cycle移行、回答は扱わない。 |
 | `solver_cycle_close.md` | 直前の本文評価を前提に、active Frontierの引継ぎと`finalize / start_next_cycle`だけを扱う。本文再評価や次Cycleの詳細なTool計画は行わない。 |
 | `solver_finalization.md` | `finalize_only=true`で追加Toolを要求せず、確認済み範囲と未確認範囲を分けた回答を作る。 |
 | `solver_reviewer_revision.md` | 全Findingを本文と照合し、`addressed / disputed`を全件返す。回答修正か追加調査かはSolverが判断する。 |
@@ -2032,7 +2040,8 @@ Cycle開始時はgoal・strategy・completion criteriaを検証して`CycleRecor
 
 1. SolverのToolRequestを検証して`StepRecord.phase=planned`を保存する。
 2. 全ToolResult・Evidence・探索Node/Linkを保存して`StepRecord.phase=observed`にする。
-3. 次のSolverによるHypothesis・WorkItem・frontier更新を検証し、`StepRecord.phase=completed`にする。
+3. 次のSolverによるHypothesis・frontier更新を検証し、Dependency状態を反映した後でProgramが
+   WorkItem進捗を導出して`StepRecord.phase=completed`にする。
 
 Solverが`continue_cycle`を返した場合は、同じ`CycleRecord`へ次のStepを追加する。
 `start_next_cycle`または`finalize`を返した場合だけ現在Cycleを`completed`にし、

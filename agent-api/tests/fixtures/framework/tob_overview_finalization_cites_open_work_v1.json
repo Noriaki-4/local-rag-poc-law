@@ -1,0 +1,77 @@
+{
+  "caseState": {
+    "case_id": "fixture-overview-finalization-cites-open-work",
+    "question": "公開買付けの条件、範囲、例外、必要手続を根拠条文とともに説明してください。",
+    "research_cycle_count": 2,
+    "work_items": [
+      {
+        "work_item_id": "wi-resolved",
+        "question": "公開買付けが必要になる条件は何か。",
+        "state": "resolved",
+        "resolution": "取得本文で条件を確認した。",
+        "basis_hypothesis_ids": ["h-resolved"]
+      },
+      {
+        "work_item_id": "wi-open",
+        "question": "公開買付けに必要な手続は何か。"
+      }
+    ],
+    "hypotheses": [
+      {
+        "hypothesis_id": "h-resolved",
+        "work_item_id": "wi-resolved",
+        "statement": "取得割合が基準を超える場合に公開買付けが必要になる。",
+        "judgment": "supported",
+        "evidence_ids": ["e-resolved"]
+      },
+      {
+        "hypothesis_id": "h-open-supported",
+        "work_item_id": "wi-open",
+        "statement": "公開買付開始公告を行う。",
+        "judgment": "supported",
+        "evidence_ids": ["e-open"]
+      },
+      {
+        "hypothesis_id": "h-open-unresolved",
+        "work_item_id": "wi-open",
+        "statement": "必要な手続をすべて確認できる。",
+        "gaps": ["届出書の提出時期"]
+      }
+    ],
+    "evidence": [
+      {
+        "evidence_id": "e-resolved",
+        "source_ref": "fixture:e-resolved",
+        "content": "取得割合が基準を超える場合は公開買付けによらなければならない。",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "article-resolved",
+          "citationEligible": true
+        }
+      },
+      {
+        "evidence_id": "e-open",
+        "source_ref": "fixture:e-open",
+        "content": "公開買付開始公告に関する規定。",
+        "created_cycle": 2,
+        "metadata": {
+          "articleId": "article-open",
+          "citationEligible": true
+        }
+      }
+    ],
+    "retained_evidence_ids": ["e-resolved", "e-open"]
+  },
+  "observedDecision": {
+    "next": "finalize",
+    "decision_reason": "確認済み部分だけを回答する。",
+    "answer": {
+      "text": "成立条件と必要手続を回答する。",
+      "citation_ids": ["e-resolved", "e-open"],
+      "limitations": ["届出書の提出時期は未確認。"],
+      "unresolved_work_item_ids": ["wi-open"],
+      "unresolved_hypothesis_ids": ["h-open-unresolved"]
+    }
+  },
+  "expectedViolation": "answer citations require resolved WorkItem basis: ['e-open']"
+}

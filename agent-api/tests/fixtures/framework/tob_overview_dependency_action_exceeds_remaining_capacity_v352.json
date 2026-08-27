@@ -1,0 +1,37 @@
+{
+  "source": {
+    "caseId": "legal-652e5e69a1b1442c99e8de6c54b3cb85",
+    "profileVersion": "352",
+    "purpose": "integration"
+  },
+  "requiredDependencyWorkItemIds": [
+    "wi-2",
+    "wi-4"
+  ],
+  "remainingFetchCapacity": 1,
+  "observedAction": {
+    "decision_reason": "残り本文取得枠でwi-2を先に確認し、wi-4は次stepへ残す。",
+    "start_next_cycle": false,
+    "tool_requests": [
+      {
+        "request_id": "req-1",
+        "work_item_id": "wi-2",
+        "tool_name": "fetch_articles",
+        "arguments": {
+          "article_ids": [
+            "law-340CO0000000321-article-6"
+          ]
+        },
+        "purpose": "対象となる株券等を定める施行令本文を確認する。",
+        "hypothesis_ids": [
+          "h-4"
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "toolRequestCount": 1,
+    "selectedWorkItemId": "wi-2",
+    "deferredWorkItemId": "wi-4"
+  }
+}

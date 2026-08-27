@@ -72,7 +72,7 @@ def test_render_uses_production_search_prompt_tool_and_schema() -> None:
     assert rendered.input_payload["hypotheses"][0]["hypothesis_id"] == "h-1"
     assert rendered.input_payload["available_tools"][0]["name"] == "legal_search"
     assert context.available_tools[0].name == "legal_search"
-    assert "`gaps`がある場合" in rendered.instructions
+    assert "`gaps`を未確認事項として読み分けます" in rendered.instructions
     assert "別々の検索にすることは強制しません" in rendered.instructions
     assert "Hypothesisまたは`gaps`を検証" not in rendered.instructions
     request_properties = rendered.output_schema["properties"]["search_requests"][

@@ -25,7 +25,7 @@ def legal_agent_profile() -> AgentProfile:
     timeout_sec = settings.agent_framework_model_timeout_sec
     return AgentProfile(
         name="legal-default",
-        version="320",
+        version="375",
         provider=settings.llm_provider,
         solver_research=_model_profile(
             model=settings.agent_framework_research_model,
@@ -122,8 +122,6 @@ def legal_agent_profile() -> AgentProfile:
             prompts=(
                 solver_identity_prompt,
                 _read_prompt("solver_finalization.md"),
-                common_solver_prompt,
-                completion_prompt,
             ),
             completion_check_prompt=_read_prompt("solver_finalization_check.md"),
             available_tool_names=(),
@@ -184,7 +182,7 @@ def legal_agent_profile() -> AgentProfile:
             ToolListArgumentLimit(
                 tool_name="fetch_articles",
                 argument_name="article_ids",
-                max_items=4,
+                max_items=5,
             ),
             ToolListArgumentLimit(
                 tool_name="legal_graph_neighbors",

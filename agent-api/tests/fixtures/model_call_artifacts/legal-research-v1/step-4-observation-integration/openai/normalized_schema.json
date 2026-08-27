@@ -5,7 +5,7 @@
       "properties": {
         "evidence_ids": {
           "default": [],
-          "description": "現在の判定とgapsの判断に直接必要な、最小集合の取得済みgrounding Evidence ID。関連するだけのParagraph・Itemを全件入れない。unresolvedでも本文で確認できた部分があれば保持できる。",
+          "description": "現在の判定とgapsの判断に直接使用したgrounding_evidence[].evidence_idの最小集合。metadata.articleIdやmetadata.sourceContentUnitIdは入れない。関連するだけのParagraph・Itemを全件入れない。unresolvedでも本文で確認できた部分があれば保持できる。",
           "items": {
             "type": "string"
           },
@@ -45,57 +45,6 @@
       ],
       "title": "HypothesisUpdate",
       "type": "object"
-    },
-    "WorkItemUpdate": {
-      "additionalProperties": false,
-      "properties": {
-        "basis_hypothesis_ids": {
-          "default": [],
-          "description": "更新後のbasis。openでは作成・継続の前提Hypothesis ID、resolvedではresolutionを支える判定済みHypothesis ID。Hypothesis.work_item_idは所属先を表す別項目。",
-          "items": {
-            "type": "string"
-          },
-          "title": "Basis Hypothesis Ids",
-          "type": "array"
-        },
-        "resolution": {
-          "anyOf": [
-            {
-              "maxLength": 2000,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "resolvedまたはdroppedにする理由・結論。openではnull。",
-          "title": "Resolution"
-        },
-        "state": {
-          "description": "更新後のWorkItem状態。",
-          "enum": [
-            "open",
-            "resolved",
-            "dropped"
-          ],
-          "title": "State",
-          "type": "string"
-        },
-        "work_item_id": {
-          "description": "更新する既存WorkItemの完全一致ID。",
-          "maxLength": 160,
-          "minLength": 1,
-          "title": "Work Item Id",
-          "type": "string"
-        }
-      },
-      "required": [
-        "work_item_id",
-        "state"
-      ],
-      "title": "WorkItemUpdate",
-      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -113,14 +62,6 @@
         "$ref": "#/$defs/HypothesisUpdate"
       },
       "title": "Update Hypotheses",
-      "type": "array"
-    },
-    "update_work_items": {
-      "default": [],
-      "items": {
-        "$ref": "#/$defs/WorkItemUpdate"
-      },
-      "title": "Update Work Items",
       "type": "array"
     }
   },

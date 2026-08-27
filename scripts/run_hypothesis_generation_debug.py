@@ -94,6 +94,16 @@ def _load_input(path: Path) -> tuple[str, list[Any], list[str], str | None]:
         work_items = _first_list(case_state, "work_items", "workItems")
     if not work_items:
         raise ValueError("fixture requires normalized WorkItems with IDs")
+    work_items = [
+        {
+            key: value
+            for key, value in item.items()
+            if key not in {"hypothesis_ids", "evidence_count"}
+        }
+        if isinstance(item, dict)
+        else item
+        for item in work_items
+    ]
 
     requirements = _first_list(
         normalized,

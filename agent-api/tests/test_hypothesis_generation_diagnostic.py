@@ -68,27 +68,32 @@ def test_render_uses_only_production_hypothesis_generation_stage() -> None:
     assert "# 法令調査Solver：法的仮説の立案" in rendered.instructions
     assert "## 出力前の確認" in rendered.instructions
     assert "`work_items[].action_actor`" in rendered.instructions
-    assert "独立して検証できる命題が複数ある場合" in (
+    assert "WorkItem自体に独立した確認事項が複数ある場合だけ" in (
         rendered.instructions
     )
     assert "`gaps`" in rendered.instructions
     assert "WorkItemにない行為者" in rendered.instructions
-    assert "具体的な数値又は条文番号" in rendered.instructions
+    assert "数値又は条文番号" in rendered.instructions
     assert "命題ごとにHypothesisを分けて`statement`へ書きます" in (
         rendered.instructions
     )
     assert "独立して適用され得る条件、義務又は回答事項を1つだけ" in (
         rendered.instructions
     )
+    assert "未知の種類、範囲又は一覧" in rendered.instructions
+    assert "回答に含まれそうな事項を予想しただけでは" in (
+        rendered.instructions
+    )
     properties = rendered.output_schema["properties"]["hypotheses"][
         "items"
     ]["properties"]
-    assert "条件、義務又は回答事項ごとに返す" in rendered.output_schema["properties"][
-        "hypotheses"
-    ]["description"]
+    assert "WorkItem自体に独立した確認事項が複数ある場合だけ" in (
+        rendered.output_schema["properties"]["hypotheses"]["description"]
+    )
     assert "maxItems" not in rendered.output_schema["properties"]["hypotheses"]
     assert set(properties) == {"work_item_id", "statement", "gaps"}
     assert "minItems" not in properties["gaps"]
+    assert properties["gaps"]["maxItems"] == 1
 
 
 def test_run_calls_model_once_and_normalizes_without_actor_copy() -> None:
@@ -241,5 +246,25 @@ def test_v269_observed_failures_are_preserved_as_prompt_regression() -> None:
     assert "WorkItemを確認します" in prompt
     assert "`gaps`" in prompt
     assert "WorkItemにない行為者" in prompt
-    assert "具体的な数値又は条文番号" in prompt
-    assert "各`statement`を1つの法的命題に分けた" in completion
+    assert "数値又は条文番号" in prompt
+    assert "暫定的な法的効果を示す1つの文" in completion
+
+
+def test_overview_hypothesis_overexpansion_fixture_is_covered() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures/framework/tob_overview_hypothesis_overexpansion_v357.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    failure = fixture["observedFailure"]
+    assert failure["profileVersion"] == "357"
+    assert len(failure["scopeHypotheses"]) == 3
+    assert len(failure["procedureHypotheses"]) == 4
+
+    profile = legal_agent_profile().solver_hypothesis_generation
+    assert profile is not None
+    prompt = profile.system_prompt
+    completion = profile.completion_check_prompt or ""
+    assert "未知の種類、範囲又は一覧" in prompt
+    assert "構成要素を予想してHypothesisへ追加しません" in prompt
+    assert "未知の答えを予想した内訳、例、括弧書き" in completion

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from pathlib import Path
 from threading import Barrier
 
 import pytest
@@ -297,6 +298,123 @@ def test_one_cycle_passes_every_result_to_closing_solver_decision() -> None:
     ]
 
 
+def test_cycle_close_marks_its_integrated_tool_results_as_consumed() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_overview_cycle_close_replays_integrated_result_v353.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    request_id = fixture["observed"]["requestId"]
+    model = FakeModel(
+        [
+            SolverDecision(
+                next="continue",
+                start_next_cycle=True,
+                next_focus_work_item_ids=("w1",),
+                retain_evidence_ids=(f"e_{request_id}",),
+            ),
+            SolverDecision(
+                next="finalize",
+                update=CaseUpdate(
+                    update_work_items=(
+                        WorkItemUpdate(
+                            work_item_id="w1",
+                            state="resolved",
+                            resolution="本文を確認した",
+                            basis_hypothesis_ids=("h1",),
+                        ),
+                    ),
+                    update_hypotheses=(
+                        HypothesisUpdate(
+                            hypothesis_id="h1",
+                            judgment="supported",
+                            evidence_ids=(f"e_{request_id}",),
+                        ),
+                    ),
+                ),
+                answer=FinalAnswer(
+                    text="確認済み",
+                    citation_ids=(f"e_{request_id}",),
+                ),
+            ),
+        ]
+    )
+    profile = _profile().model_copy(
+        update={
+            "solver_cycle_close": ModelCallProfile(
+                model="integration-model",
+                system_prompt="cycle close",
+            ),
+            "limits": AgentLimits(
+                max_wall_time_sec=120,
+                next_solver_call_reserve_sec=30,
+                max_fetched_resources_per_cycle=1,
+            ),
+        }
+    )
+
+    initial_state = CaseState(
+        case_id="case-1",
+        question="質問",
+        research_cycle_count=1,
+        work_items=(WorkItem(work_item_id="w1", question="根拠を確認する"),),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h1",
+                work_item_id="w1",
+                statement="根拠が存在する",
+            ),
+        ),
+        tool_requests=(
+            ToolRequest(
+                request_id=request_id,
+                work_item_id="w1",
+                tool_name="fetch_articles",
+                arguments={"article_ids": ["article-1"]},
+                purpose="本文を確認する",
+                hypothesis_ids=("h1",),
+            ),
+        ),
+        tool_results=(
+            ToolResult(
+                request_id=request_id,
+                status="succeeded",
+                evidence_ids=(f"e_{request_id}",),
+                cycle_no=1,
+            ),
+        ),
+        evidence=(
+            Evidence(
+                evidence_id=f"e_{request_id}",
+                source_ref=f"fake://{request_id}",
+                content="取得本文",
+                created_cycle=1,
+            ),
+        ),
+    )
+    store = InMemoryCaseStore()
+    store.create(initial_state)
+    result = AgentLoop(
+        store=store,
+        model=model,
+        tools=ToolRegistry(()),
+        profile=profile,
+    ).run("case-1")
+    state = result.state
+
+    assert model.solver_contexts[0].cycle_close_required is True
+    assert tuple(
+        item.request_id for item in model.solver_contexts[0].recent_tool_results
+    ) == (request_id,)
+    assert (
+        bool(model.solver_contexts[1].recent_tool_results)
+        is fixture["expected"]["wasPresentedAgainAfterCycleClose"]
+    )
+    assert request_id in state.integrated_tool_result_request_ids
+
+
 def test_solver_can_explicitly_start_three_research_cycles() -> None:
     def after_first(context: SolverContext, _: ModelCallProfile) -> SolverDecision:
         return SolverDecision(
@@ -572,6 +690,160 @@ def test_contract_repair_budget_exhaustion_returns_to_reserved_finalization() ->
     assert model.solver_contexts[-1].finalize_only is True
     assert model.solver_contexts[-1].cycle_step_timeout is True
     assert result.trace.failure_code is None
+
+
+def test_cycle_step_timeout_enters_finalization_above_time_reserve() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_overview_cycle_step_timeout_requires_finalization_v348.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+
+    class ManualClock:
+        now = 0.0
+
+        def __call__(self) -> float:
+            return self.now
+
+    clock = ManualClock()
+    limits = AgentLimits(
+        max_wall_time_sec=240,
+        finalization_reserve_sec=fixture["observedBoundary"][
+            "finalization_reserve_sec"
+        ],
+    )
+
+    class TimeoutOnceModel(FakeModel):
+        def solve(
+            self,
+            context: SolverContext,
+            profile: ModelCallProfile,
+        ) -> SolverCallResult:
+            self.solver_contexts.append(context)
+            self.solver_profiles.append(profile)
+            if len(self.solver_contexts) == 2:
+                clock.now = (
+                    limits.max_wall_time_sec
+                    - fixture["observedBoundary"]["remaining_wall_time_sec"]
+                )
+                raise TimeoutError("cycle close timed out")
+            item = self.decisions.pop(0)
+            decision = item(context, profile) if callable(item) else item
+            return SolverCallResult(
+                decision=decision,
+                input_tokens=10,
+                output_tokens=20,
+            )
+
+    model = TimeoutOnceModel(
+        [
+            _first_research((_request("r1"),)),
+            SolverDecision(
+                next="finalize",
+                answer=FinalAnswer(
+                    text="確認できた範囲の回答",
+                    limitations=("残る確認事項",),
+                    unresolved_work_item_ids=("w1",),
+                    unresolved_hypothesis_ids=("h1",),
+                ),
+            ),
+        ]
+    )
+    profile = _profile().model_copy(update={"limits": limits})
+    store = InMemoryCaseStore()
+    store.create(CaseState(case_id=fixture["source"]["caseId"], question="質問"))
+
+    result = AgentLoop(
+        store=store,
+        model=model,
+        tools=ToolRegistry((FakeReadTool(),)),
+        profile=profile,
+        clock=clock,
+    ).run(fixture["source"]["caseId"])
+
+    assert result.state.run_status == "completed"
+    assert model.solver_contexts[-1].cycle_step_timeout is True
+    assert model.solver_contexts[-1].finalize_only is fixture["expected"][
+        "finalize_only"
+    ]
+
+
+def test_completion_window_does_not_start_an_underbudget_integration() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_overview_finalization_window_timeout_v355.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+
+    class ManualClock:
+        now = 0.0
+
+        def __call__(self) -> float:
+            return self.now
+
+    clock = ManualClock()
+    boundary = fixture["observedBoundary"]
+    limits = AgentLimits(
+        max_wall_time_sec=240,
+        finalization_reserve_sec=boundary["finalization_reserve_sec"],
+        cycle_close_reserve_sec=boundary["cycle_close_reserve_sec"],
+        min_next_cycle_budget_sec=boundary["min_next_cycle_budget_sec"],
+    )
+
+    class BoundaryModel(FakeModel):
+        def solve(
+            self,
+            context: SolverContext,
+            profile: ModelCallProfile,
+        ) -> SolverCallResult:
+            self.solver_contexts.append(context)
+            self.solver_profiles.append(profile)
+            item = self.decisions.pop(0)
+            decision = item(context, profile) if callable(item) else item
+            if len(self.solver_contexts) == 1:
+                clock.now = (
+                    limits.max_wall_time_sec
+                    - boundary["remaining_wall_time_sec"]
+                )
+            return SolverCallResult(
+                decision=decision,
+                input_tokens=10,
+                output_tokens=20,
+            )
+
+    model = BoundaryModel(
+        [
+            _first_research((_request("r1"),)),
+            SolverDecision(
+                next="finalize",
+                answer=FinalAnswer(
+                    text="確認できた範囲の回答",
+                    limitations=("残る確認事項",),
+                    unresolved_work_item_ids=("w1",),
+                    unresolved_hypothesis_ids=("h1",),
+                ),
+            ),
+        ]
+    )
+    profile = _profile().model_copy(update={"limits": limits})
+    store = InMemoryCaseStore()
+    store.create(CaseState(case_id=fixture["source"]["caseId"], question="質問"))
+
+    result = AgentLoop(
+        store=store,
+        model=model,
+        tools=ToolRegistry((FakeReadTool(),)),
+        profile=profile,
+        clock=clock,
+    ).run(fixture["source"]["caseId"])
+
+    assert result.state.run_status == "completed"
+    assert len(model.solver_contexts) == 2
+    assert model.solver_contexts[-1].finalize_only is True
 
 
 def test_completed_observation_checkpoint_survives_later_model_timeout() -> None:
@@ -2609,7 +2881,7 @@ def test_graph_review_persists_llm_selection_without_duplicate_fetch_request() -
         )
 
 
-def test_graph_review_cannot_defer_every_relevant_fetchable_candidate_with_capacity() -> None:
+def test_graph_review_may_defer_relevant_fetchable_candidate_with_capacity() -> None:
     state = CaseState(
         case_id="case-1",
         question="質問",
@@ -2638,34 +2910,103 @@ def test_graph_review_cannot_defer_every_relevant_fetchable_candidate_with_capac
         reason="関連候補を後続へ保留する",
     )
 
-    with pytest.raises(
-        ContractViolation,
-        match="deferred every relevant fetchable Article",
-    ):
-        apply_solver_decision(
-            state,
-            SolverDecision(
-                next="continue",
-                next_focus_work_item_ids=("w1",),
-                graph_candidate_review=review,
+    updated = apply_solver_decision(
+        state,
+        SolverDecision(
+            next="continue",
+            next_focus_work_item_ids=("w1",),
+            graph_candidate_review=review,
+        ),
+        limits=AgentLimits(),
+        known_tool_names={"fetch_articles"},
+        material_evidence_ids=(),
+        fetchable_article_ids=("law-ordinance-article-10",),
+        required_graph_review_request_ids=("graph-request",),
+        graph_candidate_article_ids=("law-ordinance-article-10",),
+        graph_review_frontiers={
+            "frontier-1": ("law-ordinance-article-10", "w1", "h1")
+        },
+        graph_review_link_ids=("link-1",),
+        graph_selectable_frontiers={
+            "frontier-1": ("law-ordinance-article-10", "w1", "h1")
+        },
+        graph_review_fetch_tool_name="fetch_articles",
+        remaining_fetch_capacity=1,
+        finalize_only=False,
+    )
+
+    assert updated.graph_candidate_reviews[-1].frontier_decisions[0].action == (
+        "defer"
+    )
+
+
+def test_graph_review_may_select_fewer_relevant_articles_than_capacity() -> None:
+    state = CaseState(
+        case_id="case-graph-underfill",
+        question="質問",
+        work_items=(WorkItem(work_item_id="w1", question="下位法令を確認する"),),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h1",
+                work_item_id="w1",
+                statement="下位法令に具体化規定がある",
             ),
-            limits=AgentLimits(),
-            known_tool_names={"fetch_articles"},
-            material_evidence_ids=(),
-            fetchable_article_ids=("law-ordinance-article-10",),
-            required_graph_review_request_ids=("graph-request",),
-            graph_candidate_article_ids=("law-ordinance-article-10",),
-            graph_review_frontiers={
-                "frontier-1": ("law-ordinance-article-10", "w1", "h1")
-            },
-            graph_review_link_ids=("link-1",),
-            graph_selectable_frontiers={
-                "frontier-1": ("law-ordinance-article-10", "w1", "h1")
-            },
-            graph_review_fetch_tool_name="fetch_articles",
-            remaining_fetch_capacity=1,
-            finalize_only=False,
-        )
+        ),
+    )
+    review = GraphCandidateReview(
+        graph_request_ids=("graph-request",),
+        reviewed_link_ids=("link-1", "link-2"),
+        frontier_decisions=(
+            GraphFrontierDecision(
+                frontier_item_id="frontier-1",
+                article_id="article-1",
+                work_item_id="w1",
+                hypothesis_id="h1",
+                action="select",
+                reason="具体化規定なので本文を確認する",
+            ),
+            GraphFrontierDecision(
+                frontier_item_id="frontier-2",
+                article_id="article-2",
+                work_item_id="w1",
+                hypothesis_id="h1",
+                action="defer",
+                reason="関連する具体化規定だが保留する",
+            ),
+        ),
+        reason="二つの関連候補を評価した",
+    )
+
+    updated = apply_solver_decision(
+        state,
+        SolverDecision(
+            next="continue",
+            next_focus_work_item_ids=("w1",),
+            graph_candidate_review=review,
+        ),
+        limits=AgentLimits(max_selected_frontier_per_step=3),
+        known_tool_names={"fetch_articles"},
+        material_evidence_ids=(),
+        fetchable_article_ids=("article-1", "article-2"),
+        required_graph_review_request_ids=("graph-request",),
+        graph_candidate_article_ids=("article-1", "article-2"),
+        graph_review_frontiers={
+            "frontier-1": ("article-1", "w1", "h1"),
+            "frontier-2": ("article-2", "w1", "h1"),
+        },
+        graph_review_link_ids=("link-1", "link-2"),
+        graph_selectable_frontiers={
+            "frontier-1": ("article-1", "w1", "h1"),
+            "frontier-2": ("article-2", "w1", "h1"),
+        },
+        graph_review_fetch_tool_name="fetch_articles",
+        remaining_fetch_capacity=2,
+        finalize_only=False,
+    )
+
+    assert updated.graph_candidate_reviews[-1].selected_article_ids == (
+        "article-1",
+    )
 
 
 def test_cycle_cannot_restart_after_every_declared_task_is_resolved() -> None:

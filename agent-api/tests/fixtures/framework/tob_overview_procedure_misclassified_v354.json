@@ -1,0 +1,54 @@
+{
+  "fixtureId": "tob-overview-procedure-misclassified-v354",
+  "question": "上場会社の株式を、市場を通さずに多数の株主から買い集めたいのですが、公開買付けの手続が必要になるのはどのような場合ですか。対象となる株券等の範囲、主な例外、必要な手続も含めて、根拠となる条文とともに説明してください。",
+  "source": {
+    "diagnosticsMode": "snapshot",
+    "diagnosticCaseId": "legal-80fd8047d6cf4f238e4d95684a44c012",
+    "purpose": "research",
+    "model": "claude-haiku-4-5-20251001",
+    "profileVersion": "354"
+  },
+  "observedOutput": {
+    "work_items": [
+      {
+        "question": "公開買付けの手続が必要になるのはどのような場合か。",
+        "action_actor": "株式を買い集める者"
+      },
+      {
+        "question": "公開買付けの対象となる株券等の範囲は何か。",
+        "action_actor": "不明"
+      },
+      {
+        "question": "公開買付けの主な例外は何か。",
+        "action_actor": "不明"
+      }
+    ],
+    "non_work_item_requirements": [
+      "根拠となる条文を提示すること",
+      "公開買付けの必要な手続を説明すること"
+    ]
+  },
+  "expectedOutput": {
+    "work_items": [
+      {
+        "question": "公開買付けの手続が必要になるのはどのような場合か。",
+        "action_actor": "株式を買い集める者"
+      },
+      {
+        "question": "公開買付けの対象となる株券等の範囲は何か。",
+        "action_actor": "不明"
+      },
+      {
+        "question": "公開買付けの主な例外は何か。",
+        "action_actor": "不明"
+      },
+      {
+        "question": "公開買付けが必要な場合、どのような手続を行う必要があるか。",
+        "action_actor": "公開買付けを行う者"
+      }
+    ],
+    "non_work_item_requirements": [
+      "根拠となる条文を提示すること"
+    ]
+  }
+}

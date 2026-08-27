@@ -69,15 +69,10 @@ def test_render_uses_only_production_search_assessment_prompt_and_schema() -> No
     )
 
     assert rendered.stage == "search_assessment"
-    assert "# 法令調査Solver：本文取得候補の内容評価" in rendered.instructions
+    assert "# 法令調査Solver：本文取得候補の内容整理" in rendered.instructions
     assert "# 法令調査Solver：検索候補の主体照合" not in rendered.instructions
     assert "# 法令調査Solver：検索候補の選択" not in rendered.instructions
-    assert set(rendered.input_payload) == {
-        "question",
-        "work_tree",
-        "hypotheses",
-        "search_candidates",
-    }
+    assert set(rendered.input_payload) == {"search_candidates"}
     assert "`search_candidates[]`: legal_searchの検索結果" in (
         rendered.instructions
     )

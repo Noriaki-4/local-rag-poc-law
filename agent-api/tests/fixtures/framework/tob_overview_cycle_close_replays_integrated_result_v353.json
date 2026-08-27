@@ -1,0 +1,14 @@
+{
+  "source": {
+    "caseId": "legal-b7e20ba7ef0d41929064354130d757e5",
+    "profileVersion": "353",
+    "purpose": "cycle_close"
+  },
+  "observed": {
+    "requestId": "fetch-1",
+    "wasPresentedAgainAfterCycleClose": true
+  },
+  "expected": {
+    "wasPresentedAgainAfterCycleClose": false
+  }
+}

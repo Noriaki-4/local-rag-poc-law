@@ -1,0 +1,37 @@
+{
+  "source": {
+    "caseId": "legal-f98245b6712c4c4591e248e7e8fcd5ee",
+    "model": "claude-haiku-4-5-20251001",
+    "profileVersion": "349",
+    "questionId": "tob-overview",
+    "purpose": "search_reselection"
+  },
+  "workItem": {
+    "work_item_id": "wi-3",
+    "question": "公開買付けによる買付けを要しない主な例外は何か。"
+  },
+  "hypothesis": {
+    "hypothesis_id": "h-3",
+    "work_item_id": "wi-3",
+    "statement": "公開買付けによる買付けを要しない例外が定められている。",
+    "gaps": [
+      "例外となる取引とその条件"
+    ]
+  },
+  "assessments": [
+    {
+      "article_id": "law-340CO0000000321-article-7",
+      "legal_function": "exception",
+      "summary": "金融商品取引法第27条の2第1項ただし書の適用除外買付け等を定める。"
+    },
+    {
+      "article_id": "law-340CO0000000321-article-12",
+      "legal_function": "exception",
+      "summary": "金融商品取引法第27条の5の公開買付期間中における別途買付け禁止の例外を定める。"
+    }
+  ],
+  "expected": {
+    "selectedArticleId": "law-340CO0000000321-article-7",
+    "excludedArticleId": "law-340CO0000000321-article-12"
+  }
+}

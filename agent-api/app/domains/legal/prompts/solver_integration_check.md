@@ -7,4 +7,5 @@
 5. `action_feedback`がある場合、出力する各検索・Graph要求を`rejected_tool_requests`と比較します。
    `work_item_id`、`hypothesis_ids`、Tool引数がすべて同じ要求は返しません。
    `request_id`または`purpose`だけの変更は同じscopeです。
-6. 全確認事項と必要な下位規範を確認した場合だけ完了しているか確認します。
+6. WorkItemを`resolved`にする場合、その根拠に指定するHypothesisを同じ出力で判定済みにしているか確認します。
+7. 全確認事項と必要な下位規範を確認した場合だけ完了しているか確認します。

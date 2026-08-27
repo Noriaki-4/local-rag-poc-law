@@ -1,0 +1,24 @@
+{
+  "source": {
+    "caseId": "legal-ddb0683d7b0f444b9113914db27bb8bc",
+    "model": "claude-haiku-4-5-20251001",
+    "profileVersion": "347",
+    "questionId": "tob-overview",
+    "purpose": "finalization"
+  },
+  "observedSolverDecision": {
+    "next": "finalize",
+    "decision_reason": "確認済み事項だけで限定回答する。",
+    "retain_evidence_ids": [
+      "evidence-1",
+      "evidence-2",
+      "evidence-3",
+      "evidence-4",
+      "evidence-5",
+      "evidence-6"
+    ]
+  },
+  "expected": {
+    "retain_evidence_ids": []
+  }
+}

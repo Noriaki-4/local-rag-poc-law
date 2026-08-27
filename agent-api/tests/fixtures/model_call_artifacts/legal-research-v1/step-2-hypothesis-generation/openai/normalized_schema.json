@@ -43,7 +43,7 @@
             }
           ],
           "default": null,
-          "description": "初回の質問分解で、独立した法的結論を要するWorkItem以外に残った明示要求を設定する。nullは変更なし。",
+          "description": "初回の質問分解で、根拠・出典の提示や表現・出力形式等、法令の内容自体ではない回答要件を設定する。nullは変更なし。",
           "title": "Set Non Work Item Requirements"
         },
         "update_hypotheses": {
@@ -502,7 +502,7 @@
       "properties": {
         "evidence_ids": {
           "default": [],
-          "description": "現在の判定とgapsの判断に直接必要な、最小集合の取得済みgrounding Evidence ID。関連するだけのParagraph・Itemを全件入れない。unresolvedでも本文で確認できた部分があれば保持できる。",
+          "description": "現在の判定とgapsの判断に直接使用したgrounding_evidence[].evidence_idの最小集合。metadata.articleIdやmetadata.sourceContentUnitIdは入れない。関連するだけのParagraph・Itemを全件入れない。unresolvedでも本文で確認できた部分があれば保持できる。",
           "items": {
             "type": "string"
           },
@@ -873,7 +873,7 @@
         },
         "basis_hypothesis_ids": {
           "default": [],
-          "description": "openではWorkItemの作成・継続を前提づけるHypothesis ID、resolvedではresolutionを支える判定済みHypothesis ID。Hypothesis.work_item_idは所属先を表す別項目であり、単なる逆参照には使わない。元の質問から直接作るopen WorkItemでは通常は空。",
+          "description": "openではWorkItemの作成・継続を前提づけるHypothesis ID、resolvedではProgramが集約した所属先の判定済みHypothesis ID。Hypothesis.work_item_idは所属先を表す別項目であり、単なる逆参照には使わない。元の質問から直接作るopen WorkItemでは通常は空。",
           "items": {
             "type": "string"
           },
@@ -926,12 +926,12 @@
             }
           ],
           "default": null,
-          "description": "WorkItemをresolvedまたはdroppedへ閉じた理由・結論。",
+          "description": "resolvedではProgramが記録する機械的な完了理由、droppedではSolverが記録する除外理由。法的な回答本文はFinalAnswerに持つ。",
           "title": "Resolution"
         },
         "state": {
           "default": "open",
-          "description": "openは未完了、resolvedは回答済み、droppedは不要と判断済み。",
+          "description": "openは未完了、resolvedは所属Hypothesis等からProgramが導出した完了、droppedはSolverが不要と判断した構造変更。",
           "enum": [
             "open",
             "resolved",
@@ -1025,7 +1025,7 @@
       "properties": {
         "basis_hypothesis_ids": {
           "default": [],
-          "description": "更新後のbasis。openでは作成・継続の前提Hypothesis ID、resolvedではresolutionを支える判定済みHypothesis ID。Hypothesis.work_item_idは所属先を表す別項目。",
+          "description": "更新後のbasis。openでは作成・継続の前提Hypothesis ID、resolvedではProgramが集約した所属先の判定済みHypothesis ID。Hypothesis.work_item_idは所属先を表す別項目。",
           "items": {
             "type": "string"
           },
@@ -1043,11 +1043,11 @@
             }
           ],
           "default": null,
-          "description": "resolvedまたはdroppedにする理由・結論。openではnull。",
+          "description": "resolvedの機械的完了理由またはdroppedの除外理由。openではnull。",
           "title": "Resolution"
         },
         "state": {
-          "description": "更新後のWorkItem状態。",
+          "description": "resolvedはProgramが導出した完了、droppedはSolverが判断した構造変更。",
           "enum": [
             "open",
             "resolved",

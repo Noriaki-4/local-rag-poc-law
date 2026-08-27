@@ -259,10 +259,17 @@ class AgentLoop:
             cycle_limit_reached = (
                 state.research_cycle_count >= self._profile.limits.max_research_cycles
             )
-            time_reserve_reached = (
-                remaining <= self._profile.limits.finalization_reserve_sec
+            completion_reserve = (
+                self._profile.limits.finalization_reserve_sec
+                + self._profile.limits.cycle_close_reserve_sec
+                + self._profile.limits.min_next_cycle_budget_sec
             )
-            finalize_only = cycle_limit_reached or time_reserve_reached
+            time_reserve_reached = remaining <= completion_reserve
+            finalize_only = (
+                cycle_limit_reached
+                or time_reserve_reached
+                or state.cycle_step_timeout
+            )
             stop_reason = None
             if cycle_limit_reached:
                 stop_reason = "max_research_cycles"
@@ -642,9 +649,10 @@ class AgentLoop:
                         finalize_only=finalize_only,
                         allow_dependency_action_without_tool=(
                             purpose == "observation_integration"
+                            or bool(context.required_dependency_work_item_ids)
                         ),
                     )
-                    if purpose == "observation_integration":
+                    if purpose in {"observation_integration", "cycle_close"}:
                         integrated_request_ids = tuple(
                             dict.fromkeys(
                                 [

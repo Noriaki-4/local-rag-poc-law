@@ -83,18 +83,24 @@ class WorkItem(FrameworkModel):
     )
     state: WorkItemState = Field(
         default="open",
-        description="openは未完了、resolvedは回答済み、droppedは不要と判断済み。",
+        description=(
+            "openは未完了、resolvedは所属Hypothesis等からProgramが導出した完了、"
+            "droppedはSolverが不要と判断した構造変更。"
+        ),
     )
     resolution: str | None = Field(
         default=None,
         max_length=2000,
-        description="WorkItemをresolvedまたはdroppedへ閉じた理由・結論。",
+        description=(
+            "resolvedではProgramが記録する機械的な完了理由、droppedではSolverが"
+            "記録する除外理由。法的な回答本文はFinalAnswerに持つ。"
+        ),
     )
     basis_hypothesis_ids: tuple[str, ...] = Field(
         default=(),
         description=(
             "openではWorkItemの作成・継続を前提づけるHypothesis ID、"
-            "resolvedではresolutionを支える判定済みHypothesis ID。"
+            "resolvedではProgramが集約した所属先の判定済みHypothesis ID。"
             "Hypothesis.work_item_idは所属先を表す別項目であり、単なる逆参照には使わない。"
             "元の質問から直接作るopen WorkItemでは通常は空。"
         ),

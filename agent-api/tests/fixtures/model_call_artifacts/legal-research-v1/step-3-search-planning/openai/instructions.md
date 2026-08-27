@@ -15,7 +15,7 @@
 
 ## 手順
 
-1. 各Hypothesisの命題を確認します。`gaps`がある場合は、残る未確認事項として検索語へ反映します。
+1. WorkItemの事実を検索範囲、Hypothesisの法的効果を確認対象、`gaps`を未確認事項として読み分けます。
 2. `available_tools`で`legal_search`の用途、入力項目、戻り値を確認します。
 3. 今回の上限内で、未検証Hypothesisを調べる検索要求を作ります。
 4. 完了条件を確認します。
@@ -40,7 +40,8 @@
   - 委任：`政令で定める`、`府令で定める`
   - 手続：対象となる`公告`、`届出`、`提出`等の行為
 - `に関する法令`、`必要になる条件`、`具体的条件`、`確認する`のような説明は`purpose`に書き、`query`には入れません。
-- 法令表現へ言い換えても、Hypothesisの主体、場所、行為方法、人数、数量、割合、期間等の識別に必要な事実は落とさず、別の判定軸へ変えません。
+- 法令表現へ言い換えても、WorkItemの主体、場所、行為方法、人数、数量、割合、期間等の識別に必要な事実は落としません。
+- WorkItemにない判定軸をHypothesisまたは`gaps`だけが含む場合、その判定軸を検索語へ入れません。
 - Hypothesisが行為者と対象に結び付く主体を別の役割としている場合、その区別が消える検索語にしません。
 
 ### 例
@@ -65,9 +66,9 @@
 - `hypotheses`: 作成済みの未確認Hypothesis。各要素は所属WorkItem、命題、gapsを持つ。
   - `hypotheses[].hypothesis_id`: Programが付与した既知Hypothesis ID。
   - `hypotheses[].work_item_id`: このHypothesisが属する既知WorkItem ID。
-  - `hypotheses[].statement`: WorkItemへの回答を構成し得る、法令本文で検証する1つの法的命題。
+  - `hypotheses[].statement`: WorkItemの範囲内で、法令本文により支持又は否定する1つの法的命題。
   - `hypotheses[].action_actor`: 所属WorkItemで確定した、規制対象となる行為をする者。
-  - `hypotheses[].gaps`: statementに残る、法令本文で確定すべき具体的な規律要素。該当する要素がなければ空。
+  - `hypotheses[].gaps`: statementを判定するため、WorkItemの範囲内で法令本文による確認が必要な事項。該当する事項がなければ空。
 - `available_tools`: 現在のStepで要求できるTool一覧。
   - `available_tools[].name`: SolverDecision.tool_requestsで使う正規のTool名。
   - `available_tools[].description`: Toolが何を行い、いつ使い、何を行わないかを説明するLLM向け契約。

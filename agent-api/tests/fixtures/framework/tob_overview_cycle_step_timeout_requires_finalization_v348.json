@@ -1,0 +1,18 @@
+{
+  "source": {
+    "caseId": "legal-f98245b6712c4c4591e248e7e8fcd5ee",
+    "model": "claude-haiku-4-5-20251001",
+    "profileVersion": "348",
+    "questionId": "tob-overview",
+    "purpose": "cycle_close"
+  },
+  "observedBoundary": {
+    "remaining_wall_time_sec": 35.111668155004736,
+    "finalization_reserve_sec": 35.0,
+    "cycle_step_timeout": true,
+    "finalize_only": false
+  },
+  "expected": {
+    "finalize_only": true
+  }
+}

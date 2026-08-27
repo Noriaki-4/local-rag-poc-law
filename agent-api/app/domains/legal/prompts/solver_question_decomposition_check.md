@@ -1,3 +1,5 @@
-## 出力
+## 出力前の確認
 
-上の手順で作成した`work_items`と`non_work_item_requirements`をschemaに従って返してください。
+1. 法令本文を調べて答える要求が、すべて`work_items`にあるか確認します。
+2. `non_work_item_requirements`に、回答の示し方以外を入れていないか確認します。
+3. 問題があれば修正し、schemaに従う出力だけを返します。

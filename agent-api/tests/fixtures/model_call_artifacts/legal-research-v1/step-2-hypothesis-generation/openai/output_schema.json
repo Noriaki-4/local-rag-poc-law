@@ -2,21 +2,21 @@
   "additionalProperties": false,
   "properties": {
     "hypotheses": {
-      "description": "提示されたWorkItemを検証するHypothesis。独立して適用され得る条件、義務又は回答事項ごとに返す。",
+      "description": "提示されたWorkItemを検証するHypothesis。WorkItem自体に独立した確認事項が複数ある場合だけ分ける。",
       "items": {
         "additionalProperties": false,
         "properties": {
           "gaps": {
-            "description": "statementに残る、法令本文で確認すべき具体的な規律要素。該当する要素がなければ空にする。行為者が不明で結論を左右する場合は、その役割の確認も含める。根拠条文の提示や検索作業は書かない。",
+            "description": "statementを判定するため、WorkItemの範囲内で法令本文による確認が必要な事項。未知の分類、要件又は手続の候補を予想して追加せず、WorkItemで問われた未確認内容を1項目にまとめる。未知の答え全体は予想した内訳、例又は括弧書きへ分けない。前提、例外又は周辺事項へ広げない。該当しなければ空にする。",
             "items": {
               "minLength": 1,
               "type": "string"
             },
-            "maxItems": 8,
+            "maxItems": 1,
             "type": "array"
           },
           "statement": {
-            "description": "WorkItemへの回答を構成し得る、法令本文の一つの規定内容で個別に支持又は否定できる1つの法的命題。一般的な法的知識を使ってよいが、WorkItemにない行為者、具体的な数値又は条文番号を確定事項として作らない。規定の存在や検索方針ではなく、確認する法的命題を書く。",
+            "description": "WorkItemの範囲内で、法令本文の一つの規定内容により個別に支持又は否定できる1つの法的命題。WorkItemから分からない分類、要件、手続、数値又は条文番号を予想して追加せず、暫定的な法的効果を1つの文で示す。",
             "maxLength": 2000,
             "minLength": 1,
             "type": "string"

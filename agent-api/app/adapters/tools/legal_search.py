@@ -23,7 +23,8 @@ from app.opensearch_client import OpenSearchClient, RequirementSearchSpec
 
 _SEARCH_NAVIGATION_TEXT_LIMIT = 400
 _DETAILED_ARTICLE_NAVIGATION_TEXT_LIMIT = 5000
-_MAX_ARTICLES_PER_FETCH = 4
+_MAX_ARTICLES_PER_FETCH = 5
+_MAX_GRAPH_ROOT_ARTICLES = 4
 
 
 class _LegalSearchArguments(BaseModel):
@@ -72,7 +73,7 @@ class _GraphNeighborsArgumentsBase(BaseModel):
 
     article_ids: tuple[str, ...] = Field(
         min_length=1,
-        max_length=_MAX_ARTICLES_PER_FETCH,
+        max_length=_MAX_GRAPH_ROOT_ARTICLES,
         description="1ホップの起点にする既知Article ID。",
     )
     max_relations: int = Field(
@@ -107,7 +108,8 @@ class _ExplicitReferenceGraphNeighborsArguments(_GraphNeighborsArgumentsBase):
     )
     direction: Literal["outgoing", "incoming"] = Field(
         description=(
-            "起点Articleを参照元または参照先のどちらとして探索するか。"
+            "outgoingは起点本文が明示参照する先を探す。incomingは起点を"
+            "明示参照する条文を探し、Article IDが不明な下位規範を逆引きする。"
         ),
     )
 

@@ -125,8 +125,10 @@ flowchart TD
     C --> D[read-only Toolを実行]
     D --> E[ToolResult・Evidenceを保存]
     E --> F[Solverが観察し
-    Hypothesis・WorkItem・Frontierを更新]
-    F --> G{同じ方針を続けるか}
+    Hypothesis・Frontierを更新]
+    F --> F2[ProgramがHypothesis・依存状態から
+    WorkItem進捗を導出]
+    F2 --> G{同じ方針を続けるか}
     G -->|続ける| B
     G -->|完了| H[finalize]
     G -->|方針変更・Cycle境界| I[現Cycleを評価して閉じる]

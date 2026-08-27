@@ -100,7 +100,7 @@ def test_question_decomposition_uses_only_question_and_small_contract() -> None:
         rendered.output_schema["properties"]["work_items"]["items"]
         ["properties"]["question"]["description"]
     )
-    assert "法的論点ではない要求" in (
+    assert "回答の示し方を指定する要求" in (
         rendered.output_schema["properties"]["non_work_item_requirements"]
         ["description"]
     )

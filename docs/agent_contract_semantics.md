@@ -23,8 +23,9 @@ LLMが返した意味判断の構造だけを検証する。
 
 契約の構造制約と、Profile固有の作業手順は区別する。例えば汎用契約は、
 `basis_hypothesis_ids`に値があれば既知IDか、状態と矛盾しないか、必要な引用があるかを検証する。
-一方、Legal Profileは調査して`resolved`にするWorkItemについて、結論を支える判定済みHypothesisを
-Solverに選ばせる。どのHypothesisが結論を十分に支えるかは意味判断なので、Programは選ばない。
+一方、Legal Profileは各Hypothesisの意味と下位規範確認をSolverに判断させる。Programは登録済みの
+Hypothesisがすべて根拠付きで判定済みで、`gaps`と`needs_action`が残らない場合にWorkItemを
+`resolved`へ更新し、当該WorkItemに所属する判定済みHypothesisを根拠IDとして集約する。
 
 ## 中核項目の対応
 
@@ -32,7 +33,7 @@ Solverに選ばせる。どのHypothesisが結論を十分に支えるかは意�
 |---|---|---|---|---|
 | `WorkItem.question` | 1つの完了判定で閉じられる確認事項 | ID、一意性、親子循環、状態整合を検証 | 質問を重複しない確認事項へ分解 | `solver_common.md`、`solver_question_decomposition.md` |
 | `Hypothesis.work_item_id` | Hypothesisが検証する所属WorkItem | 既知WorkItemとの完全一致を検証 | WorkItemごとに本文で支持・否定できる命題を置く | `solver_common.md`、`solver_hypothesis_generation.md` |
-| `WorkItem.basis_hypothesis_ids` | openでは作業の作成・継続を前提づけるHypothesis、resolvedではresolutionを支える判定済みHypothesis | 値がある場合の既知ID、反証時の影響対象、resolved時の未判定basis、最終引用を検証する。十分なHypothesisをProgramが選ぶことはしない | openの前提、またはresolvedの判断根拠を選ぶ | `solver_common.md`、`solver_cycle_close.md`、`solver_completion.md` |
+| `WorkItem.basis_hypothesis_ids` | openでは作業の作成・継続を前提づけるHypothesis、resolvedでは所属する判定済みHypothesis | openの前提IDを検証し、resolved時は所属・判定・Evidenceから機械集約する | open子WorkItemを作る場合の前提だけを選ぶ | `solver_common.md`、`solver_cycle_close.md` |
 | `Hypothesis.judgment` | `unresolved`は未確認、`supported`は本文が支持、`contradicted`は本文が否定 | 判定済みならEvidence必須、既知ID、反証時の影響処理を検証 | 提示されたgrounding本文から判定 | `solver_common.md`、`solver_integration.md` |
 | `Hypothesis.evidence_ids` | 現在の判定と`gaps`の判断に使った取得本文 | 既知かつ提示済みのgrounding Evidence IDを検証。判定済みでは1件以上必須 | `unresolved`でも一部確認に使った本文を残し、未確認の結論を支持したことにはしない | `solver_observation_integration.md` |
 | `Hypothesis.gaps` | 本文観察後も命題を判定するために残った未確認情報 | 文字列として保存・引継ぎ。初回仮説立案では空で初期化 | 取得本文を評価した後に未確認事項を具体化し、次の探索へ使う | `solver_observation_integration.md`、`solver_integration.md` |
@@ -43,7 +44,7 @@ Solverに選ばせる。どのHypothesisが結論を十分に支えるかは意�
 | `SearchCandidateReview` | OpenSearch候補の本文取得対象、対応Hypothesis、保留候補 | 候補ID、Hypothesis ID、重複、全件性、取得上限を検証 | 検索抜粋をHypothesisに照らして選別 | `solver_search_review.md`、`solver_search_reselection.md` |
 | `GraphCandidateReview` | Graph候補の`select / defer / reject`判断 | Link・Frontier・Request ID、全件性、上限を検証 | Relationの種類・方向とHypothesisから関連性を判断 | `solver_graph_review.md` |
 | `SolverDecision.next` | 次のaction-observationを続けるか、回答を確定するか | actionまたはanswerの有無、Cycle境界を検証 | 根拠、gap、上限から`continue / finalize`を判断 | 全Solverモード |
-| `required_transition` | Observation反映後に必要なCycle遷移 | LLMが確定したWorkItem状態と次Cycle可否から`start_next_cycle / finalize`を導出 | 指定された遷移に応じて引継ぎ内容または最終回答を作る | `solver_cycle_close.md` |
+| `required_transition` | Observation・Dependency反映後に必要なCycle遷移 | Hypothesis等から導出したWorkItem進捗と次Cycle可否から`start_next_cycle / finalize`を導出 | 指定された遷移に応じて引継ぎ内容または最終回答を作る | `solver_cycle_close.md` |
 | `start_next_cycle` | 内部`SolverDecision`で現Cycleを閉じて次Cycleへ移ることを表す | `required_transition`から設定し、Cycle上限と境界処理との整合を検証 | 直接出力しない | なし |
 | `FinalAnswer` | 根拠付き回答、引用、制約、未解決ID | 引用可能Evidence、open WorkItemとの一致、下位規範根拠を検証 | 取得本文が示す範囲で回答を統合 | `solver_completion.md`、`solver_finalization.md` |
 
@@ -60,17 +61,17 @@ Solverに選ばせる。どのHypothesisが結論を十分に支えるかは意�
 H1を前提に追加したopen子WorkItem W2
 └─ basis_hypothesis_ids = [H1]
 
-W1を本文に基づきresolvedへ更新
-├─ resolution = 本文から得た結論
-└─ basis_hypothesis_ids = [結論を支える判定済みHypothesis]
+W1の全HypothesisとDependency確認が完了
+├─ state = resolved（Programが導出）
+└─ basis_hypothesis_ids = [W1に属する判定済みHypothesis]
 ```
 
 open WorkItemのbasisが新たに`contradicted`になった場合、ProgramはそのWorkItemを自動変更せず、
 `WorkItemImpactDecision`の対象IDを決定的に要求する。維持・置換・破棄の意味判断はSolverが行う。
 
-Cycle Closeではopen WorkItemを未完了の正本とする。resolvedまたはdroppedのWorkItemに属する未採用の
-unresolved Hypothesisだけを理由に、次Cycleを開始しない。法的な完了可否はObservation Integrationで
-SolverがWorkItem状態として判断し、Programはその状態と実行上限から遷移だけを導出する。
+Cycle Closeではopen WorkItemを未完了の正本とする。Observation IntegrationはHypothesisだけを更新し、
+Dependency Assessment後にProgramがWorkItem進捗を導出する。どの法的命題が必要か、本文が命題を
+支持・否定するか、下位規範確認が必要かはSolverが判断し、Programはその意味判断を補わない。
 
 ## 変更時の確認順序
 

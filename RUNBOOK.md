@@ -1411,10 +1411,10 @@ CaseStore、最終回答、検索結果を更新しない。返るのは内部�
 Legal ProfileのGraph要求は1回1ホップである。SolverがHypothesisに対応するpredicate・方向・起点を
 明示して`legal_graph_neighbors`を要求する。Graph候補Articleの本文取得後、その先が必要なら、Solverは
 そのArticleを新しい起点にして次の1ホップを要求できる。Programは累積depthや発見元を理由に除外しない。
-`fetch_articles`1回のArticle IDは物理上限4個、1 Cycleの本文取得成功数は
+`fetch_articles`1回のArticle IDは物理上限5個、1 Cycleの本文取得成功数は
 `AGENT_FRAMEWORK_MAX_FETCHED_RESOURCES_PER_CYCLE`（現行既定5件）で制限する。
 Legal Profileの1 Solver Decisionは検索系Toolを最大4要求、`fetch_articles`を最大1要求とし、
-合計上限は5要求である。本文取得量の4 Article上限とは別の制約である。
+合計上限は5要求である。本文取得量の5 Article上限とは別の制約である。
 Graph Reviewから1 stepで選ぶ候補は最大3件とし、残りの関連候補はdeferして後続stepまたは次Cycleへ残す。
 プログラムは超過分を選別せず契約違反として返す。
 `modelCalls[].purpose`は`research / hypothesis_generation / search_planning / integration / cycle_close / finalization /

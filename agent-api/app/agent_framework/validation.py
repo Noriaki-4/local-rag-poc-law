@@ -703,16 +703,6 @@ def apply_solver_decision(
                 "graph review selected Article count exceeds the remaining limit "
                 f"of {max_selected} items"
             )
-        has_fetchable_deferred = any(
-            item.action == "defer"
-            and item.frontier_item_id in selectable_frontiers
-            for item in graph_review.frontier_decisions
-        )
-        if max_selected > 0 and not selected_ids and has_fetchable_deferred:
-            raise ContractViolation(
-                "graph review deferred every relevant fetchable Article despite "
-                f"a remaining selection limit of {max_selected} items"
-            )
         if decision.tool_requests:
             raise ContractViolation(
                 "Graph candidate review returns selections only; AgentLoop executes "
@@ -995,26 +985,25 @@ def apply_solver_decision(
             raise ContractViolation(
                 f"answer cites navigation-only evidence: {sorted(navigation_citations)}"
             )
-        resolved_basis_evidence_ids = {
+        verified_basis_evidence_ids = {
             evidence_id
-            for item in work_items.values()
-            if item.state == "resolved"
-            for hypothesis_id in item.basis_hypothesis_ids
-            for evidence_id in hypotheses[hypothesis_id].evidence_ids
+            for hypothesis in hypotheses.values()
+            if hypothesis.judgment in {"supported", "contradicted"}
+            for evidence_id in hypothesis.evidence_ids
         }
-        resolved_basis_evidence_ids.update(
+        verified_basis_evidence_ids.update(
             evidence_id
             for dependency in dependency_by_key.values()
-            if work_items[dependency.work_item_id].state == "resolved"
-            and dependency.status == "resolved"
+            if dependency.status == "resolved"
             for evidence_id in dependency.basis_evidence_ids
         )
         unsupported_citations = (
-            set(decision.answer.citation_ids) - resolved_basis_evidence_ids
+            set(decision.answer.citation_ids) - verified_basis_evidence_ids
         )
         if unsupported_citations:
             raise ContractViolation(
-                "answer citations require resolved WorkItem basis: "
+                "answer citations require verified Hypothesis or resolved "
+                "dependency basis: "
                 f"{sorted(unsupported_citations)}"
             )
         citation_article_ids = {
@@ -1083,15 +1072,21 @@ def apply_solver_decision(
             for dependency in dependency_by_key.values()
             if dependency.status == "needs_action"
         }
+        unresolved_frontier_work_items = {
+            resolution.work_item_id
+            for resolution in deferred_resolutions
+            if resolution.action == "unresolved_at_limit"
+        }
         missing_unresolved_hypotheses = (
             unresolved_work_item_ids
             - unresolved_hypothesis_work_items
             - unresolved_dependency_work_items
+            - unresolved_frontier_work_items
         )
         if missing_unresolved_hypotheses:
             raise ContractViolation(
                 "each unresolved WorkItem requires an unresolved Hypothesis or "
-                "needs_action dependency: "
+                "needs_action dependency or unresolved Frontier: "
                 f"{sorted(missing_unresolved_hypotheses)}"
             )
 

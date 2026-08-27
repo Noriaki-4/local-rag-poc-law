@@ -1,0 +1,23 @@
+{
+  "fixtureId": "tob-overview-finalization-window-timeout-v355",
+  "source": {
+    "caseId": "legal-4c3fe56864484128af1d612f469e0e71",
+    "profileVersion": "355",
+    "purpose": "integration"
+  },
+  "observedBoundary": {
+    "remaining_wall_time_sec": 61.30072337699676,
+    "finalization_reserve_sec": 35.0,
+    "cycle_close_reserve_sec": 15.0,
+    "min_next_cycle_budget_sec": 25.0,
+    "integration_timeout_sec": 26.300723376996757
+  },
+  "observedFailure": {
+    "integration": "model_timeout",
+    "finalization": "model_timeout"
+  },
+  "expected": {
+    "finalize_only": true,
+    "ordinary_integration_started": false
+  }
+}

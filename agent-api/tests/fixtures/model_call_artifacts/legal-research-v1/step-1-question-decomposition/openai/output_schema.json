@@ -2,7 +2,7 @@
   "additionalProperties": false,
   "properties": {
     "non_work_item_requirements": {
-      "description": "質問の明示要求のうち法的論点ではない要求。法的結論を裏付ける根拠条文・出典・引用の提示や出力形式等を含む。法的根拠自体が質問対象ならwork_itemsに入れる。",
+      "description": "法令の内容自体ではなく、回答の示し方を指定する要求。根拠条文・出典・引用の提示や、文体・長さ・表等の出力形式だけを含む。「説明」「列挙」「示す」等の表現でも、法令本文を調べて答える内容はwork_itemsに入れる。",
       "items": {
         "minLength": 1,
         "type": "string"

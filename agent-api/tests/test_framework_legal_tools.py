@@ -305,23 +305,40 @@ def test_fetch_articles_returns_citation_eligible_text_with_source_id() -> None:
     assert execution.evidence[0].metadata["evidenceRole"] == "retrieved_text"
 
 
-def test_fetch_articles_rejects_more_than_four_article_ids() -> None:
+def test_fetch_articles_accepts_five_and_rejects_more_article_ids() -> None:
+    tool = LegalFetchArticlesTool(
+        FakeArticleSearch(),  # type: ignore[arg-type]
+        user_clearance_level=2,
+    )
+
+    article_ids_schema = tool.definition.input_schema["properties"]["article_ids"]
+    assert article_ids_schema["maxItems"] == 5
+
     with pytest.raises(ValueError, match="tool arguments violate schema"):
-        LegalFetchArticlesTool(
-            FakeArticleSearch(),  # type: ignore[arg-type]
-            user_clearance_level=2,
-        ).execute(
+        tool.execute(
             _request(
                 "fetch_articles",
                 {
                     "article_ids": [
-                        f"law-a-article-{index}" for index in range(1, 6)
+                        f"law-a-article-{index}" for index in range(1, 7)
                     ]
                 },
             ),
             cycle_no=2,
             timeout_sec=12.5,
         )
+
+
+def test_explicit_reference_direction_schema_explains_lookup_semantics() -> None:
+    explicit_reference = next(
+        variant
+        for variant in LegalGraphNeighborsTool.definition.input_schema["anyOf"]
+        if variant["properties"]["mode"].get("const") == "explicit_reference"
+    )
+    description = explicit_reference["properties"]["direction"]["description"]
+
+    assert "outgoingは起点本文が明示参照する先" in description
+    assert "Article IDが不明な下位規範を逆引き" in description
 
 
 def test_graph_tool_returns_selected_semantic_relation_as_navigation_only() -> None:

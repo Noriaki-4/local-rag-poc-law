@@ -1,0 +1,24 @@
+{
+  "source": {
+    "caseId": "legal-87800179d0e641e2acfaa1b57926b3b7",
+    "model": "claude-haiku-4-5-20251001",
+    "profileVersion": "350",
+    "questionId": "tob-overview",
+    "purpose": "finalization"
+  },
+  "observedAnswerKeys": [
+    "summary",
+    "answer_body",
+    "limitations",
+    "citation_ids",
+    "unresolved_work_item_ids",
+    "unresolved_hypothesis_ids"
+  ],
+  "expectedAnswerKeys": [
+    "text",
+    "citation_ids",
+    "limitations",
+    "unresolved_work_item_ids",
+    "unresolved_hypothesis_ids"
+  ]
+}

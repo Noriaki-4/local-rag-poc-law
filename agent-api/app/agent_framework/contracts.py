@@ -31,17 +31,23 @@ class WorkItemUpdate(FrameworkModel):
         max_length=160,
         description="更新する既存WorkItemの完全一致ID。",
     )
-    state: WorkItemState = Field(description="更新後のWorkItem状態。")
+    state: WorkItemState = Field(
+        description=(
+            "resolvedはProgramが導出した完了、droppedはSolverが判断した構造変更。"
+        )
+    )
     resolution: str | None = Field(
         default=None,
         max_length=2000,
-        description="resolvedまたはdroppedにする理由・結論。openではnull。",
+        description=(
+            "resolvedの機械的完了理由またはdroppedの除外理由。openではnull。"
+        ),
     )
     basis_hypothesis_ids: tuple[str, ...] = Field(
         default=(),
         description=(
             "更新後のbasis。openでは作成・継続の前提Hypothesis ID、"
-            "resolvedではresolutionを支える判定済みHypothesis ID。"
+            "resolvedではProgramが集約した所属先の判定済みHypothesis ID。"
             "Hypothesis.work_item_idは所属先を表す別項目。"
         ),
     )
@@ -57,9 +63,11 @@ class HypothesisUpdate(FrameworkModel):
     evidence_ids: tuple[str, ...] = Field(
         default=(),
         description=(
-            "現在の判定とgapsの判断に直接必要な、最小集合の取得済み"
-            "grounding Evidence ID。関連するだけのParagraph・Itemを全件"
-            "入れない。unresolvedでも本文で確認できた部分があれば保持できる。"
+            "現在の判定とgapsの判断に直接使用した"
+            "grounding_evidence[].evidence_idの最小集合。"
+            "metadata.articleIdやmetadata.sourceContentUnitIdは入れない。"
+            "関連するだけのParagraph・Itemを全件入れない。"
+            "unresolvedでも本文で確認できた部分があれば保持できる。"
         ),
     )
     gaps: tuple[str, ...] = Field(
@@ -183,8 +191,8 @@ class CaseUpdate(FrameworkModel):
     set_non_work_item_requirements: tuple[str, ...] | None = Field(
         default=None,
         description=(
-            "初回の質問分解で、独立した法的結論を要するWorkItem以外に残った"
-            "明示要求を設定する。nullは変更なし。"
+            "初回の質問分解で、根拠・出典の提示や表現・出力形式等、"
+            "法令の内容自体ではない回答要件を設定する。nullは変更なし。"
         ),
     )
     add_work_items: tuple[WorkItem, ...] = Field(
@@ -229,7 +237,10 @@ class ObservationIntegrationDecision(FrameworkModel):
     )
     update_work_items: tuple[WorkItemUpdate, ...] = Field(
         default=(),
-        description="取得本文の評価により状態を変更する既存WorkItem。",
+        description=(
+            "ProgramがHypothesisと下位規範確認の状態から機械的に"
+            "導出した既存WorkItemの完了差分。LLMの直接出力ではない。"
+        ),
     )
     update_hypotheses: tuple[HypothesisUpdate, ...] = Field(
         default=(),
@@ -247,7 +258,6 @@ class EvidenceIntegrationDecision(FrameworkModel):
         max_length=1200,
         description="提示された取得本文をどの確認事項へ反映したかの短い説明。",
     )
-    update_work_items: tuple[WorkItemUpdate, ...] = Field(default=())
     update_hypotheses: tuple[HypothesisUpdate, ...] = Field(default=())
 
 
@@ -276,7 +286,8 @@ class DependencyActionDecision(FrameworkModel):
     tool_requests: tuple[ToolRequest, ...] = Field(
         default=(),
         description=(
-            "start_next_cycle=falseのとき、各needs_action WorkItemを進める今回のTool要求。"
+            "start_next_cycle=falseのとき、処理上限内で選んだneeds_action "
+            "WorkItemを進める今回のTool要求。"
         ),
     )
 

@@ -1,0 +1,24 @@
+{
+  "source": {
+    "caseId": "legal-7f91ac5130c444b4948c2d77c0924a89",
+    "profileVersion": "351",
+    "purpose": "integration",
+    "failureCode": "model_protocol:solver decision violates schema: reviewer_findings: Extra inputs are not permitted"
+  },
+  "observedInvalidAnswerKeys": [
+    "summary",
+    "citation_ids",
+    "limitations",
+    "unresolved_work_item_ids"
+  ],
+  "expectedAnswerKeys": [
+    "text",
+    "citation_ids",
+    "limitations",
+    "unresolved_work_item_ids",
+    "unresolved_hypothesis_ids"
+  ],
+  "forbiddenTopLevelInputFields": [
+    "reviewer_findings"
+  ]
+}

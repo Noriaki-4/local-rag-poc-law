@@ -7,13 +7,13 @@
 
 ### 出力
 
-- 各`needs_action`を進めるToolRequest
+- 処理上限内で選んだ`needs_action`を進めるToolRequest
 - 現在Cycleに有効なTool要求がない場合の`start_next_cycle=true`
 - Toolを選んだ短い理由
 
 ### 完了条件
 
-各`needs_action`に未確認事項を進めるToolRequestが対応しているか、重複しない有効な要求がない場合に次Cycleへの見直しを選んでいることです。
+選んだ`needs_action`に未確認事項を進めるToolRequestが対応しているか、重複しない有効な要求がない場合に次Cycleへの見直しを選んでいることです。
 
 ### 手順
 
@@ -24,7 +24,7 @@
    - 起点Articleと調べる関係・方向を説明できる：`legal_graph_neighbors`
    - Articleまたは関係がまだ分からない：`legal_search`
    - 必要な既知Evidence本文が今回省略されている：`load_evidence`
-4. 有効な行動がある場合は、各`needs_action` WorkItemに対応するToolRequestを1件返し、`start_next_cycle=false`にします。
+4. 有効な行動がある場合は、処理上限内で今回進める`needs_action` WorkItemを選び、各WorkItemにToolRequestを1件返して`start_next_cycle=false`にします。今回選ばないWorkItemは次stepへ残します。
 5. 成功済みscope以外に未確認事項を進める行動がない場合は、ToolRequestを返さず`start_next_cycle=true`にします。
 
 ### ルール
@@ -36,6 +36,7 @@
 - 成功済みの検索・Graph scopeを繰り返しません。
 - `action_feedback`にあるTool種類は、今回の修復では使いません。別種のToolが適切でなければ`start_next_cycle=true`にします。
 - 未確認Hypothesisに対応する本文未取得の既知候補がある間は、その候補を確認してから再検索します。
+- `available_tools`が`legal_graph_neighbors`だけの場合は、処理上限内で今回進める`needs_action`についてGraph要求を返します。今回選ばないWorkItemは後続stepへ残し、Graphを使わずに次Cycleへ移りません。
 - `start_next_cycle`は`can_start_next_cycle=true`の場合だけ選べます。検索語をわずかに変えただけの要求を作る代わりには使いません。
 
 #### この処理ではしないこと

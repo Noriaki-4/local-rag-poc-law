@@ -31,6 +31,9 @@ Article IDまたは探索すべき関係がまだ分からない場合に、Open
 
 起点Articleと、Hypothesisに必要な関係・方向を説明できる場合に1ホップ先を発見します。
 
+- 取得本文が「政令で定める」「府令で定める」等と下位規範へ委ね、委任先Article IDが不明な場合は、当該Articleを起点に`mode=explicit_reference`、`direction=incoming`で探索します。下位規範から委任元への明示参照を逆引きするためです。
+- 取得本文に確認対象の法令名・条番号が明記され、そのArticle IDを発見する場合は、当該Articleを起点に`mode=explicit_reference`、`direction=outgoing`で探索します。本文に書かれた参照先を順引きするためです。
+- 「政令で定める」「府令で定める」だけでは参照先Articleは特定されていません。この場合は前者です。
 - 1要求は1 mode、1 directionです。`semantic_assertion`では1 predicateを指定します。
 - Graphで発見したArticleも、本文確認後に必要なら次の1ホップ探索の起点にできます。
 - 結果はnavigationです。関係ラベルだけで法的結論を確定しません。

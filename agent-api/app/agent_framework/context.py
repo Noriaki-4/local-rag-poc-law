@@ -38,15 +38,18 @@ class WorkTreeItem(FrameworkModel):
         description="確認事項で規制対象となる行為をする者。未指定ならnull。"
     )
     state: str = Field(
-        description="openは未完了、resolvedは回答済み、droppedは不要と判断済み。"
+        description=(
+            "openは未完了、resolvedはProgramが導出した完了、"
+            "droppedはSolverが判断した構造変更。"
+        )
     )
     resolution: str | None = Field(
-        description="resolvedまたはdroppedの理由・結論。openではnull。"
+        description="resolvedの機械的完了理由またはdroppedの除外理由。openではnull。"
     )
     basis_hypothesis_ids: tuple[str, ...] = Field(
         description=(
-            "openでは作成・継続の前提Hypothesis ID、resolvedではresolutionを支える"
-            "判定済みHypothesis ID。Hypothesisの所属一覧ではない。"
+            "openでは作成・継続の前提Hypothesis ID、resolvedではProgramが集約した"
+            "所属先の判定済みHypothesis ID。"
         )
     )
     replaces_work_item_id: str | None = Field(
@@ -85,6 +88,13 @@ class EvidenceHypothesisCandidate(FrameworkModel):
         ),
     )
     reason: str = Field(description="本文取得対象にした時点での短い選択理由。")
+    assessment_summary: str | None = Field(
+        default=None,
+        description=(
+            "Hypothesisとの照合前に、見出しと検索抜粋だけから作成した候補内容の要約。"
+            "支持・反証の判定結果ではない。"
+        ),
+    )
 
 
 class EvidenceManifestItem(FrameworkModel):
@@ -329,6 +339,17 @@ class SearchAssessmentCandidate(FrameworkModel):
     )
 
 
+class SearchCandidateContentAssessmentInput(FrameworkModel):
+    """Hypothesisの影響を受けず候補自身の内容を読むためのread model。"""
+
+    search_candidates: tuple[SearchAssessmentCandidate, ...] = Field(
+        description=(
+            "legal_searchの検索結果をArticle単位にまとめた本文取得候補。"
+            "見出しと検索抜粋から候補自身の規律だけを評価する。"
+        )
+    )
+
+
 class SearchAssessmentWorkItem(FrameworkModel):
     work_item_id: str = Field(description="評価対象の既知WorkItem ID。")
     question: str = Field(description="このWorkItemで確認する1つの法的事項。")
@@ -374,7 +395,9 @@ class ResearchStepHypothesis(FrameworkModel):
     hypothesis_id: str = Field(description="Programが付与した既知Hypothesis ID。")
     work_item_id: str = Field(description="このHypothesisが属する既知WorkItem ID。")
     statement: str = Field(
-        description="WorkItemへの回答を構成し得る、法令本文で検証する1つの法的命題。"
+        description=(
+            "WorkItemの範囲内で、法令本文により支持又は否定する1つの法的命題。"
+        )
     )
     action_actor: str | None = Field(
         default=None,
@@ -382,8 +405,8 @@ class ResearchStepHypothesis(FrameworkModel):
     )
     gaps: tuple[str, ...] = Field(
         description=(
-            "statementに残る、法令本文で確定すべき具体的な規律要素。"
-            "該当する要素がなければ空。"
+            "statementを判定するため、WorkItemの範囲内で法令本文による確認が"
+            "必要な事項。該当する事項がなければ空。"
         )
     )
 
@@ -1110,6 +1133,11 @@ def _evidence_hypothesis_candidates(
         for article_id in _evidence_article_ids(evidence)
     }
     candidates: dict[str, dict[str, Any]] = {}
+    assessment_summary_by_article = {
+        assessment.article_id: assessment.summary
+        for review in state.search_candidate_reviews
+        for assessment in review.assessments
+    }
 
     def merge(
         article_id: str,
@@ -1120,7 +1148,13 @@ def _evidence_hypothesis_candidates(
             return
         candidate = candidates.setdefault(
             article_id,
-            {"hypothesis_ids": [], "reason": reason},
+            {
+                "hypothesis_ids": [],
+                "reason": reason,
+                "assessment_summary": assessment_summary_by_article.get(
+                    article_id
+                ),
+            },
         )
         for hypothesis_id in hypothesis_ids:
             if hypothesis_id not in candidate["hypothesis_ids"]:
@@ -1169,6 +1203,7 @@ def _evidence_hypothesis_candidates(
             article_id=article_id,
             hypothesis_ids=tuple(item["hypothesis_ids"]),
             reason=item["reason"],
+            assessment_summary=item["assessment_summary"],
         )
         for article_id, item in candidates.items()
     )

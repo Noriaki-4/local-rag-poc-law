@@ -59,8 +59,9 @@
 1. WorkItem・Hypothesis・`gaps`から、まだ本文で確認できていない事項とその法的な役割（条件、対象範囲、例外、手続、期間等）を特定します。
 2. 各候補が何を定めるArticleかを、見出しとRelationの両端の引用・説明から特定します。候補ごとの`reason`にも、その内容を具体的に書きます。
 3. 未確認事項と同じ役割を直接扱う候補から順に並べます。制度名が共通するだけで、異なる役割を扱う候補を優先しません。「規制によらずにできる場合」「適用されない場合」は、適用除外・例外を扱う候補と照合します。
-4. 本文未取得の関連候補は、先頭から`graph_review_selection_limit`件を`select`し、残りを`defer`にします。本文取得済みの関連候補は上限に数えず`select`できます。
-5. 現在のWorkItem・Hypothesisに関係しない候補だけを`reject`にします。
+4. 複数のWorkItemに本文未取得の直接候補がある場合は、各WorkItemから1件ずつ選んでから、残りの取得枠を優先度順に使います。
+5. 本文未取得の関連候補から、現在の検証に使うものを`graph_review_selection_limit`以内で`select`し、今回は使わないものを`defer`にします。本文取得済みの関連候補は上限に数えず`select`できます。
+6. 現在のWorkItem・Hypothesisに関係しない候補だけを`reject`にします。
 
 `select`は現在の検証で使う判断であり、法的内容の確定ではありません。`content_status`が`not_requested`、`failed`、`timeout`の`select`だけをProgramが本文取得します。`pending`または`succeeded`でも、現在の検証で使うなら`select`にします。同じArticleの重複は1件と数えます。
 
