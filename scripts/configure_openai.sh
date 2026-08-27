@@ -23,6 +23,7 @@ provider_written=false
 model_written=false
 key_written=false
 base_url_written=false
+reasoning_effort_written=false
 ceiling_written=false
 
 if [[ -f "${env_file}" ]]; then
@@ -36,7 +37,7 @@ if [[ -f "${env_file}" ]]; then
         ;;
       LLM_MODEL=*)
         if [[ "${model_written}" == false ]]; then
-          printf 'LLM_MODEL=gpt-4o-mini\n' >>"${temp_file}"
+          printf 'LLM_MODEL=gpt-5.6-luna\n' >>"${temp_file}"
           model_written=true
         fi
         ;;
@@ -50,6 +51,12 @@ if [[ -f "${env_file}" ]]; then
         if [[ "${base_url_written}" == false ]]; then
           printf 'OPENAI_BASE_URL=https://api.openai.com/v1\n' >>"${temp_file}"
           base_url_written=true
+        fi
+        ;;
+      OPENAI_REASONING_EFFORT=*)
+        if [[ "${reasoning_effort_written}" == false ]]; then
+          printf 'OPENAI_REASONING_EFFORT=low\n' >>"${temp_file}"
+          reasoning_effort_written=true
         fi
         ;;
       OPENAI_MAX_TOKENS_CEILING=*)
@@ -69,13 +76,16 @@ if [[ "${provider_written}" == false ]]; then
   printf 'LLM_PROVIDER=openai\n' >>"${temp_file}"
 fi
 if [[ "${model_written}" == false ]]; then
-  printf 'LLM_MODEL=gpt-4o-mini\n' >>"${temp_file}"
+  printf 'LLM_MODEL=gpt-5.6-luna\n' >>"${temp_file}"
 fi
 if [[ "${key_written}" == false ]]; then
   printf 'OPENAI_API_KEY=%s\n' "${api_key}" >>"${temp_file}"
 fi
 if [[ "${base_url_written}" == false ]]; then
   printf 'OPENAI_BASE_URL=https://api.openai.com/v1\n' >>"${temp_file}"
+fi
+if [[ "${reasoning_effort_written}" == false ]]; then
+  printf 'OPENAI_REASONING_EFFORT=low\n' >>"${temp_file}"
 fi
 if [[ "${ceiling_written}" == false ]]; then
   printf 'OPENAI_MAX_TOKENS_CEILING=16384\n' >>"${temp_file}"

@@ -537,6 +537,7 @@ class LLMClient:
             "researchStageModel": settings.llm_research_stage_model,
             "researchIntegrationModel": settings.llm_research_integration_model,
             "researchModel": settings.llm_research_model,
+            "reasoningEffort": settings.openai_reasoning_effort,
             "relationClassifierProvider": settings.relation_classifier_provider,
             "relationClassifierModel": settings.relation_classifier_model,
             "relationClassifierReviewerModel": (
@@ -1653,24 +1654,32 @@ def _post_openai_chat_completion(
 ) -> dict[str, Any]:
     """OpenAI Chat CompletionsのStructured Outputsを共通JSON契約へ接続する。"""
 
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_completion_tokens": max_tokens,
+        "store": False,
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "legal_agent_response",
+                "strict": True,
+                "schema": _to_openai_schema(schema),
+            },
+        },
+    }
+    # GPT-5系はtemperature=0を受け付けない。指定しなければProviderの
+    # 対応値が使われるため、非対応パラメータを輸送層から除く。
+    if model.lower().startswith("gpt-5"):
+        if settings.openai_reasoning_effort:
+            payload["reasoning_effort"] = settings.openai_reasoning_effort
+    else:
+        payload["temperature"] = 0
+
     response = requests.post(
         f"{settings.openai_base_url.rstrip('/')}/chat/completions",
         headers=_openai_headers(),
-        json={
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "max_completion_tokens": max_tokens,
-            "temperature": 0,
-            "store": False,
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "legal_agent_response",
-                    "strict": True,
-                    "schema": _to_openai_schema(schema),
-                },
-            },
-        },
+        json=payload,
         timeout=timeout_sec,
     )
     if not response.ok:

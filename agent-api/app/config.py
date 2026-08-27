@@ -138,8 +138,17 @@ class Settings:
     anthropic_version = os.getenv("ANTHROPIC_VERSION", "2023-06-01")
     openai_base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
     openai_api_key = os.getenv("OPENAI_API_KEY")
-    # gpt-4o-miniの最大出力は16,384 token。APIへ上限超過値を送らないため、
-    # OpenAI transport内でこの値を天井として使う。
+    _openai_reasoning_effort = os.getenv(
+        "OPENAI_REASONING_EFFORT", "low"
+    ).strip().lower()
+    openai_reasoning_effort = (
+        _openai_reasoning_effort
+        if _openai_reasoning_effort
+        in {"none", "low", "medium", "high", "xhigh", "max"}
+        else None
+    )
+    # 現行Profileが要求する出力上限を満たすアプリ側の天井。
+    # OpenAI transportは各呼出しの要求値をこの範囲へ収める。
     openai_max_tokens_ceiling = max(
         1, min(int(os.getenv("OPENAI_MAX_TOKENS_CEILING", "16384")), 16384)
     )
@@ -153,7 +162,7 @@ class Settings:
     _default_answer_model = (
         "claude-sonnet-5"
         if llm_provider == "anthropic"
-        else "gpt-4o-mini"
+        else "gpt-5.6-luna"
         if llm_provider == "openai"
         else "gemma4:e4b"
     )
@@ -527,7 +536,7 @@ class Settings:
     agent_framework_max_wall_time_sec = max(
         agent_framework_finalization_reserve_sec + 1,
         min(
-            int(os.getenv("AGENT_FRAMEWORK_MAX_WALL_TIME_SEC", "240")),
+            int(os.getenv("AGENT_FRAMEWORK_MAX_WALL_TIME_SEC", "300")),
             600,
         ),
     )

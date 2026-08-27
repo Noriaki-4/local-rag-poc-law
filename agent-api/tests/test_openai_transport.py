@@ -57,6 +57,7 @@ def test_openai_json_transport_uses_chat_completions_structured_outputs(
     assert captured["timeout"] == 30
     assert captured["payload"]["model"] == "gpt-4o-mini"
     assert captured["payload"]["max_completion_tokens"] == 4096
+    assert captured["payload"]["temperature"] == 0
     assert captured["payload"]["store"] is False
     response_format = captured["payload"]["response_format"]
     assert response_format["type"] == "json_schema"
@@ -94,6 +95,39 @@ def test_openai_transport_clamps_output_tokens_to_model_limit(monkeypatch) -> No
     assert captured["max_tokens"] == 16384
 
 
+def test_openai_transport_omits_unsupported_temperature_for_gpt5(
+    monkeypatch,
+) -> None:
+    captured: dict = {}
+
+    def fake_post(url, *, headers, json, timeout):
+        captured["payload"] = json
+        return SimpleNamespace(
+            ok=True,
+            status_code=200,
+            json=lambda: {
+                "choices": [
+                    {
+                        "message": {"content": '{"ok":true,"note":null}'},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {},
+            },
+        )
+
+    monkeypatch.setattr("app.llm.settings.openai_api_key", "test-key")
+    monkeypatch.setattr("app.llm.settings.openai_reasoning_effort", "low")
+    monkeypatch.setattr("app.llm.requests.post", fake_post)
+
+    LLMClient(provider="openai")._openai_json(
+        "prompt", SCHEMA, "gpt-5.6-luna", 4096, 30
+    )
+
+    assert "temperature" not in captured["payload"]
+    assert captured["payload"]["reasoning_effort"] == "low"
+
+
 def test_openai_transport_requires_api_key(monkeypatch) -> None:
     monkeypatch.setattr("app.llm.settings.openai_api_key", None)
 
@@ -123,6 +157,7 @@ def test_openai_health_checks_each_configured_api_model_once(monkeypatch) -> Non
     ):
         monkeypatch.setattr(f"app.llm.settings.{setting_name}", "gpt-4o-mini")
     monkeypatch.setattr("app.llm.settings.relation_classifier_provider", "ollama")
+    monkeypatch.setattr("app.llm.settings.openai_reasoning_effort", "low")
     monkeypatch.setattr("app.llm.requests.get", fake_get)
 
     health = LLMClient(provider="openai").health()
@@ -130,6 +165,7 @@ def test_openai_health_checks_each_configured_api_model_once(monkeypatch) -> Non
     assert health["ok"] is True
     assert requested_urls == ["https://api.openai.com/v1/models/gpt-4o-mini"]
     assert health["modelChecks"] == [{"model": "gpt-4o-mini", "available": True}]
+    assert health["reasoningEffort"] == "low"
 
 
 def test_openai_schema_makes_optional_properties_required_and_nullable() -> None:

@@ -45,10 +45,10 @@ print(json.dumps({
     return json.loads(completed.stdout)
 
 
-def test_openai_provider_defaults_all_roles_to_gpt_4o_mini() -> None:
+def test_openai_provider_defaults_all_roles_to_gpt_5_6_luna() -> None:
     models = _load_models(LLM_PROVIDER="openai")
 
-    assert set(models.values()) == {"gpt-4o-mini"}
+    assert set(models.values()) == {"gpt-5.6-luna"}
 
 
 def test_llm_model_overrides_stale_role_specific_settings() -> None:

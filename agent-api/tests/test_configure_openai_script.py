@@ -13,6 +13,8 @@ def test_configure_openai_script_updates_env_without_printing_key(
         "LLM_MODEL=claude-haiku-old\n"
         "OPENAI_API_KEY=old-key\n"
         "OPENAI_API_KEY=duplicate-old-key\n"
+        "OPENAI_REASONING_EFFORT=high\n"
+        "OPENAI_REASONING_EFFORT=max\n"
         "ANSWER_MODEL=claude-haiku-old\n",
         encoding="utf-8",
     )
@@ -31,9 +33,11 @@ def test_configure_openai_script_updates_env_without_printing_key(
 
     content = env_file.read_text(encoding="utf-8")
     assert "LLM_PROVIDER=openai" in content
-    assert "LLM_MODEL=gpt-4o-mini" in content
+    assert "LLM_MODEL=gpt-5.6-luna" in content
     assert "OPENAI_API_KEY=sk-test-secret" in content
     assert content.count("OPENAI_API_KEY=") == 1
+    assert "OPENAI_REASONING_EFFORT=low" in content
+    assert content.count("OPENAI_REASONING_EFFORT=") == 1
     assert "ANSWER_MODEL=claude-haiku-old" in content
     assert "sk-test-secret" not in completed.stdout
     assert "sk-test-secret" not in completed.stderr

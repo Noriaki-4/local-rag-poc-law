@@ -22,7 +22,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--fixture", required=True, type=Path)
     parser.add_argument("--provider", default="openai")
-    parser.add_argument("--model", default="gpt-4o-mini")
+    parser.add_argument("--model", default="gpt-5.6-luna")
     args = parser.parse_args()
 
     fixture = json.loads(args.fixture.read_text(encoding="utf-8"))

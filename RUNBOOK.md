@@ -17,7 +17,7 @@
 実装はサンプルデータで起動確認できる。lawqa_jp 本体は同梱せず、全問評価時は公開データをURLまたはローカルファイルから読む。
 
 初期 LLM は有料 API ではなく、ホストで動く Ollama の `gemma4:e4b` を使う。Docker 内の Agent API からは `http://host.docker.internal:11434` に接続する。
-Claude は `LLM_PROVIDER=anthropic`、OpenAI APIの`gpt-4o-mini`は
+Claude は `LLM_PROVIDER=anthropic`、OpenAI APIの`gpt-5.6-luna`は
 `LLM_PROVIDER=openai`へ切り替える。`LLM_MODEL`を指定すると、探索・統合・回答・Reviewerを
 1つのモデルへ一括で切り替えられる。未指定時だけ役割別のmodel設定を使う。
 
@@ -104,15 +104,22 @@ curl -s https://api.anthropic.com/v1/messages \
 
 `404 model not found` の場合は、そのキーではモデルIDが使えない。契約プランで利用可能な別のモデルIDに変える。
 
-OpenAI APIの`gpt-4o-mini`へ全役割を一括で切り替える`.env`例:
+OpenAI APIでは`gpt-5.6-luna`、reasoning effort `low`を基準設定とする。
+全役割を一括で切り替える`.env`例:
 
 ```bash
 LLM_PROVIDER=openai
-LLM_MODEL=gpt-4o-mini
+LLM_MODEL=gpt-5.6-luna
+OPENAI_REASONING_EFFORT=low
 OPENAI_API_KEY=sk-...
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MAX_TOKENS_CEILING=16384
 ```
+
+`OPENAI_REASONING_EFFORT`は`none / low / medium / high / xhigh / max`のみを受け付ける。
+GPT-5系は`temperature=0`を受け付けないため、OpenAI輸送はGPT-5系へ
+`temperature`を送らない。GPT-4o系は従来どおり`temperature=0`を使う。
+`/health`の`llm.reasoningEffort`で実効設定を確認する。
 
 API keyを画面へ表示せず、上記設定を既存`.env`へ反映する場合は次を実行する。
 同じコマンドを再実行すると既存値を置き換え、重複行は残さない。`.env`のpermissionは`600`になる。
@@ -123,8 +130,8 @@ API keyを画面へ表示せず、上記設定を既存`.env`へ反映する場�
 
 `LLM_MODEL`は`ANSWER_MODEL`、`REVIEWER_MODEL`、探索・統合modelなどの役割別設定より優先する。
 役割ごとに異なるモデルを使う場合は`LLM_MODEL`を空にして、従来の役割別設定を指定する。
-`gpt-4o-mini`はChat CompletionsのStructured Outputsへ接続し、既存の共通JSON契約を使う。
-モデルのAPI仕様は[OpenAI公式のgpt-4o-mini説明](https://developers.openai.com/api/docs/models/gpt-4o-mini)を参照する。
+`gpt-5.6-luna`は現行adapterからChat CompletionsのStructured Outputsへ接続し、既存の共通JSON契約を使う。
+モデルのAPI仕様は[OpenAI公式のGPT-5.6 Luna説明](https://developers.openai.com/api/docs/models/gpt-5.6-luna)を参照する。
 ChatGPTの月額サブスクリプションはOpenAI API利用料に充当されないため、API Platform側の
 APIキーと支払い設定が別途必要である。
 
@@ -1079,11 +1086,12 @@ Reviewerは`AGENT_FRAMEWORK_REVIEWER_ENABLED=true`を明示した場合だけ有
 `ReviewerView`を機械投影する。Reviewerは`accept`または構造化Findingを返し、差戻し後のSolverは
 全finding IDへ`addressed / disputed`を1回ずつ返す。Programは既知IDと全件性だけを検証し、
 回答修正か追加調査かを決めない。既定の差戻し上限は1回で、再確認も`revise`なら`review_failed`となる。
-検索時LLMの現在の基準検証はOpenAI API `gpt-4o-mini`をresearchとintegrationの両方へ設定して行う。
-共通fixtureと公開買付け3問が安定するまでは、Haiku比較を同時に進めない。不具合時はモデル性能だけを原因とせず、
+検索時LLMの現在の基準検証はOpenAI API `gpt-5.6-luna`、reasoning effort `low`を
+researchとintegrationの両方へ設定して行う。共通fixtureと公開買付け3問が安定するまでは、
+Haiku比較を同時に進めない。不具合時はモデル性能だけを原因とせず、
 実装、契約の`description`、Prompt、Provider輸送、入力、`trace.agentFramework`を先に調べる。
-`gpt-4o-mini`で合格後、同じfixtureと合格条件のままHaikuへ変更し、Provider差だけを確認する。
-これはLunaを使う非同期Relation分類とは別の運用である。
+Lunaで合格後、必要な場合だけ同じfixtureと合格条件のままHaikuへ変更し、Provider差だけを確認する。
+検索時のLuna利用は、非同期Relation分類とは別の運用である。
 初回の作業分解とTool選択には`AGENT_FRAMEWORK_RESEARCH_MODEL`、ToolResult取得後の意味評価・
 状態統合・追加調査または終了の判断には`AGENT_FRAMEWORK_INTEGRATION_MODEL`を使う。
 旧`AGENT_FRAMEWORK_FINALIZE_MODEL`も互換設定として読めるが、新規設定ではintegration名を使う。
@@ -1099,11 +1107,12 @@ cycle_close / finalization / reviewer_revision / search_selection / graph_select
 また、ローカルのSource、Prompt、契約またはProfileを変更した後は、起動中の`agent-api`をそのまま
 使わない。コンテナの作成時刻が新しく見えても、最後の変更前にbuildされたImageである可能性がある。
 実モデル検証前に、必ず最後の変更を含めて`--build --force-recreate`する。
-次は全Solverを`gpt-4o-mini`にし、診断snapshotを保存する例である。
+次は全SolverをLuna `low`にし、診断snapshotを保存する例である。
 
 ```bash
 LLM_PROVIDER=openai \
-LLM_MODEL=gpt-4o-mini-2024-07-18 \
+LLM_MODEL=gpt-5.6-luna \
+OPENAI_REASONING_EFFORT=low \
 AGENT_FRAMEWORK_REVIEWER_ENABLED=false \
 AGENT_FRAMEWORK_DIAGNOSTICS_MODE=snapshot \
 docker compose up --build -d --force-recreate agent-api
@@ -1287,15 +1296,14 @@ python3 scripts/promote_agent_diagnostic_fixture.py \
 Prompt全体はfixtureへ複製しない。現在の`after-search` fixtureは本文取得前の失敗分析用であり、
 LR-004が求める「Cycle 1で3 Article取得直後」のfixtureとは区別する。
 
-承認済みcheckpointから先のSolver呼出しだけを安価なmodelで再生する場合は、次を使う。このコマンドは
-外部APIを呼ぶため通常のpytestやCIには含めない。`gpt-4o-mini`の結果はPrompt・契約・Program境界の
-切り分けに使い、最終合格は同じcheckpointのHaiku再生とHaiku E2Eで確認する。
+承認済みcheckpointから先のSolver呼出しだけをLunaで再生する場合は、次を使う。このコマンドは
+外部APIを呼ぶため通常のpytestやCIには含めない。最終合格は同じmodel設定のE2Eで確認する。
 
 ```bash
 python3 scripts/replay_agent_checkpoint.py \
   --fixture agent-api/tests/fixtures/framework/tob_overview_cycle1_after_search_v1.json \
   --provider openai \
-  --model gpt-4o-mini-2024-07-18 \
+  --model gpt-5.6-luna \
   --stage integration \
   --output eval-results/checkpoint-replay/tob-overview-openai.json
 ```
@@ -1315,7 +1323,7 @@ Hypothesis生成、検索、Graph、統合、契約修復は実行しない。�
 agent-api/.venv/bin/python scripts/run_question_decomposition_debug.py \
   --question '公開買付けの手続が必要になる条件を、根拠条文とともに説明してください。' \
   --provider openai \
-  --model gpt-4o-mini-2024-07-18 \
+  --model gpt-5.6-luna \
   --output eval-results/question-decomposition/openai
 ```
 
@@ -1334,7 +1342,7 @@ fixture直下の`question`または`solverContext.question`だけを読み、保
 agent-api/.venv/bin/python scripts/run_hypothesis_generation_debug.py \
   --fixture eval-results/question-decomposition/20260825/overview/result.json \
   --provider openai \
-  --model gpt-4o-mini-2024-07-18 \
+  --model gpt-5.6-luna \
   --output eval-results/hypothesis-generation/overview
 ```
 
@@ -1352,7 +1360,7 @@ OpenSearch候補の検索抜粋整理だけを診断する場合は次を使う�
 agent-api/.venv/bin/python scripts/run_search_assessment_debug.py \
   --fixture agent-api/tests/fixtures/framework/tob_actor_relation_search_v191.json \
   --provider openai \
-  --model gpt-4o-mini-2024-07-18 \
+  --model gpt-5.6-luna \
   --article-id law-323AC0000000025-article-27_2 \
   --output eval-results/search-assessment/article-27-2
 ```
@@ -1372,12 +1380,12 @@ Schema、実入力、応答、token数を保存する。
 agent-api/.venv/bin/python scripts/run_minimal_legal_hypothesis_test.py \
   --fixture agent-api/tests/fixtures/framework/tob_minimal_legal_hypothesis_v1.json \
   --provider openai \
-  --model gpt-4o-mini \
-  --output eval-results/minimal-legal-hypothesis/gpt-4o-mini
+  --model gpt-5.6-luna \
+  --output eval-results/minimal-legal-hypothesis/gpt-5.6-luna
 ```
 
-同じfixtureを新規呼出しでHaikuへ渡す場合は、`--provider anthropic`と使用するHaikuのmodel IDへ
-変更する。両者ともAPI呼出しは会話履歴を渡さず、出力のJSON形状だけをProgramが検証する。
+同じfixtureを比較目的でHaikuへ渡す場合は、`--provider anthropic`と使用するHaikuのmodel IDへ
+変更する。いずれもAPI呼出しは会話履歴を渡さず、出力のJSON形状だけをProgramが検証する。
 WorkItemの漏れやHypothesisの具体性は意味判断であるため、自動keyword採点を行わず人間が比較する。
 
 各Solver呼出しは、内部思考の逐語記録ではなく、そのStepで`continue`または`finalize`を選ぶ直接の理由を
@@ -1480,7 +1488,7 @@ SolverDecisionが未知ID、上限超過、未終了WorkItem等の構造契約�
 
 各`prompt-section`とPython側の適用registryはテストで完全一致を確認する。Prompt編集時はsection markerと
 `${...}`形式のtemplate変数を変更せず、`agent-api/tests/test_prompt_assets.py`を実行する。
-Legal Profileの全体上限は既定240秒である。通常探索・契約修復用の時間を使い切った場合も、予約済みの
+Legal Profileの全体上限は既定300秒である。通常探索・契約修復用の時間を使い切った場合も、予約済みの
 最終化時間へ制御を戻し、未確認事項を限定回答として明示する。時間切れを法的完了へ読み替えない。
 
 新FrameworkのLegal Domainは、法令検索の第1位Articleについて取得済み一致chunkを検索順位どおり

@@ -153,8 +153,8 @@ if st.button("質問する", type="primary"):
         "rerankTopK": rerank_top_k,
     }
     try:
-        with st.spinner("検索・回答生成中（最大2分程度かかる場合があります）"):
-            response = requests.post(f"{API_URL}/answer", json=payload, timeout=240)
+        with st.spinner("検索・回答生成中（最大5分程度かかる場合があります）"):
+            response = requests.post(f"{API_URL}/answer", json=payload, timeout=360)
             response.raise_for_status()
         result = response.json()
 
