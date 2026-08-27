@@ -2460,10 +2460,27 @@ def _merge_observation_integrations(
 def _active_observation_items(
     context: SolverContext,
 ) -> tuple[tuple[WorkTreeItem, ...], tuple[Hypothesis, ...]]:
-    """通常の逐次統合対象を、現在openの作業へ限定する。"""
+    """逐次統合対象を、直近Tool結果に対応するopenの作業へ限定する。"""
 
+    hypothesis_work_item_ids = {
+        item.hypothesis_id: item.work_item_id for item in context.hypotheses
+    }
+    recent_work_item_ids = set()
+    for request in context.recent_tool_requests:
+        recent_work_item_ids.add(request.work_item_id)
+        recent_work_item_ids.update(
+            hypothesis_work_item_ids[hypothesis_id]
+            for hypothesis_id in request.hypothesis_ids
+            if hypothesis_id in hypothesis_work_item_ids
+        )
     work_items = tuple(
-        item for item in context.work_tree if item.state == "open"
+        item
+        for item in context.work_tree
+        if item.state == "open"
+        and (
+            not recent_work_item_ids
+            or item.work_item_id in recent_work_item_ids
+        )
     )
     work_item_ids = {item.work_item_id for item in work_items}
     hypotheses = tuple(

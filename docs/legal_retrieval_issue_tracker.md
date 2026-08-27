@@ -86,6 +86,7 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-024` | P0 | 完了 | Hypothesisが支持された内容と未確認事項を同時に保持する | Haiku・Profile v375では、H-3は府令2条の5、H-4は府令10条を未取得だった。それぞれ上位規定から一部内容を確認できたが、`judgment=supported`への更新と同時に`gaps=[]`となった。WorkItemは下位規範Dependencyにより`open`を維持したものの、Hypothesis単体では必要な具体的内容を確認済みのように見える不整合が残った | Profile v383で`judgment`をstatementの判定、`gaps`をWorkItemへの回答に必要な未確認事項として契約・Promptへ明記した。Evidence Integrationでは下位規範状態を先に判断し、`terminal_text_missing`と同時に更新したWorkItemの全Hypothesisで`gaps=[]`となる矛盾だけをProgramが拒否する。固定fixtureで誤出力の拒否と、`supported`のまま府令の具体的条件を`gaps`へ保持する更新を確認した |
 | `LR-025` | P0 | 完了 | 取得済みEvidenceとHypothesisの対応付けを後続処理へ引き継ぐ | Profile v382で`HypothesisUpdate.evidence_ids`を今回新たに対応付けたEvidenceの差分とし、CaseStore保存時とCycle Close向け投影時の両方で既存対応へ追記する共通処理へ変更した。意味的な対応付けはLLM、既存対応の保持・既知ID検証・重複除去はProgramが担当する | 前CycleのEvidenceをLLMが再出力せず、現在CycleのEvidenceだけを返すfixtureで、両方の対応が後続入力とCaseStoreに保持されることを確認済み |
 | `LR-026` | P0 | 完了 | Graphで選択したArticle本文を、残りのGraph候補より先に統合する | Profile v383の総合問題では、府令2条の5を本文取得した後も未処理Graph候補のレビューを続けたため、取得本文をHypothesisへ統合できないまま時間上限へ到達した。Profile v384では未統合の取得本文を機械的に検出し、Graph・検索候補をCaseStoreに保持したままEvidence Integrationを優先する。統合後は処理済みIDを除いた未処理候補を再投影する。候補順序は固定せず、未処理候補はCycle境界でも保持する | 回帰テストに加え、Luna `high`の総合問題で`graph_selection → observation_integration`を2回連続して確認した。府令2条の5・10条を含む必要Article 6/6を取得・統合した。最終回答のtimeoutはLR-004で扱う |
+| `LR-027` | P0 | 完了 | 同じCycleで一つのHypothesisのGraph候補を追い続けない | Graph ReviewをWorkItem・Hypothesis単位に分け、各単位で本文取得バッチを1回統合したら、そのCycleでは別Hypothesisを処理する。同じ単位の未処理候補はIDを保持して次Cycleへ戻す。v386では同一単位の残候補を理由にProgramがCycleを閉じる不備が残ったため、v387で完了単位だけをSolverへ提示し、別HypothesisまたはCycle移行の判断をSolverへ戻した。候補の採否はLLM、取得済み単位・Cycle・参照IDの投影はProgramが扱う | fixtureとLuna `high`総合問題で、Cycle 2の`h-3`取得・統合後に同じCycleの`h-4`へ移り、府令2条の5・10条を取得した。最終回答の時間切れはLR-004で扱う |
 
 ### 3.1 LR-016 Tool観察とCycle Closeの単一責務化
 
@@ -740,6 +741,20 @@ Evidence Integrationを優先する。統合後にCaseStoreからGraph候補を�
 - 最終Cycleで未処理候補が残る場合は、回答上の未確認事項として扱う。
 - Graph候補の採否と取得本文の意味評価はLLMが行い、Programは未統合結果の検出と処理順だけを管理する。
 
+### LR-027 Hypothesis単位のGraph探索
+
+Graph Reviewの単位をWorkItem・Hypothesisの組とする。一つの単位で本文取得対象を選んだ後は、
+本文取得とEvidence Integrationを完了してから別のHypothesisへ進む。同じ単位の未処理候補は
+現在Cycleで再提示せず、次Cycleへ引き継ぐ。
+
+- 一回の取得は一Articleではなく、選択上限内の一バッチとする。
+- Graphが不要なHypothesisには取得を強制しない。
+- 候補と処理順は固定せず、処理済み・未処理をIDで区別する。
+- 次Cycleでは更新済みHypothesisを使い、残候補がまだ必要かをLLMが判断する。
+- ProgramはCycle番号、Tool結果、既知IDから同一Cycleの取得済み単位を判定し、候補の法的関連性を判断しない。
+- 同一単位の残候補だけを理由にProgramがCycleを閉じない。現在Cycleで別Hypothesisを処理するか、
+  Cycleを閉じるかは、残り取得枠と未確認事項を見たSolverが判断する。
+
 ### LR-019 統合契約と意味的行動選択の分離
 
 - 構造契約は、JSON形状、既知ID、型、件数・予算、参照整合、同一成功済み要求の二重実行防止を検証する。
@@ -936,6 +951,8 @@ LR-010  必要性と費用を再評価して全件分類を再開
 | 2026-08-27 | Profile v379・公開買付け総合・Luna `high` | Search SelectionとWorkItem別Evidence Integrationを統合し、独立WorkItemを最大4件並列化した。Graph Reviewは現在batchだけを入出力し、理由を短文化した。3 Cycleを`protocol_error`なく完了し、必要Article 6/6を取得した。回答は確認済み範囲を引用したが、「必要な手続」を広く分解した未確認Hypothesisが残り完全回答は未達 | `eval-results/agent-framework-diagnostics/legal-4d8c773f37004c9caf86a46664a4a22e.jsonl` |
 | 2026-08-27 | Profile v384・LR-026 | 未統合のArticle取得結果がある場合、Graph候補の次pageよりEvidence Integrationを優先するよう変更。候補2件を1件ずつ処理する回帰で、各本文の統合後に未処理候補へ戻ることを確認。全1065テスト合格 | `agent-api/tests/test_agent_framework.py::test_new_graph_candidates_use_dedicated_solver_profile` |
 | 2026-08-27 | Profile v384・公開買付け総合・Luna `high` | 2回のGraph Reviewの各本文取得直後にEvidence Integrationを実行し、必要Article 6/6を取得・統合した。契約違反はなかった。Cycle Close開始時の残り81秒でstep timeoutとなり、Finalizationも残り35秒でtimeoutしたため最終回答は未生成 | `eval-results/e2e-v384-luna-overview/response.json`、`eval-results/agent-framework-diagnostics/legal-608f323c69e2403eacf995a4735d964b.jsonl` |
+| 2026-08-27 | Profile v385・公開買付け総合・Luna `high` | Graph ReviewをHypothesis単位にし、Cycle 2で`h-1`の本文統合後に`h-3`へ移動した。約287秒まで短縮したが、2回目の統合が全4 WorkItemを再評価し、無関係な`h-4`出力が16,384 tokenで不完全JSONとなったため`protocol_error`。v386で直近Tool結果の参照先だけを統合するよう修正した | `eval-results/e2e-v385-luna-overview/response.json`、`eval-results/agent-framework-diagnostics/legal-444459581ade4ba6b3a75f2c122cfcf2.jsonl` |
+| 2026-08-27 | Profile v387・LR-027・公開買付け総合・Luna `high` | 全1067テストに合格。実モデルではCycle 1の`h-1`取得後、Cycle 2で`h-3`、同じCycle内の`h-4`へ順に移り、府令2条の5・10条を本文取得した。同一Hypothesisの残候補を追い続ける問題と早期Cycle Closeを解消した。Cycle 2終了後のEvidence統合チェックが約95秒かかり、全体420秒で`model_timeout`となったため最終回答は未生成 | `eval-results/e2e-v387-luna-overview/response.json`、`eval-results/agent-framework-diagnostics/legal-f0a2a26cc4204d2b9a0d9555ced6b019.jsonl` |
 ### 2026-08-25: 質問分解と仮説立案の主体表現を分離
 
 - WorkItemの主体情報を`action_actor`、`target_actor`、`actor_relation`へ分離し、Hypothesisには重複保存しない。

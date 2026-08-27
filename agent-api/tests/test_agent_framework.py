@@ -52,6 +52,7 @@ from app.agent_framework.state import (
     ReviewResult,
     ToolRequest,
     ToolResult,
+    UnreviewedGraphResolution,
     WorkItem,
 )
 from app.agent_framework.validation import ContractViolation, apply_solver_decision
@@ -1386,6 +1387,10 @@ def test_new_graph_candidates_use_dedicated_solver_profile() -> None:
                 model="graph-model",
                 system_prompt="graph-selection",
             ),
+            "solver_cycle_close": ModelCallProfile(
+                model="cycle-close-model",
+                system_prompt="cycle-close",
+            ),
             "graph_review_fetch_tool_name": "fetch_articles",
             "tool_list_argument_limits": (
                 ToolListArgumentLimit(
@@ -1443,6 +1448,15 @@ def test_new_graph_candidates_use_dedicated_solver_profile() -> None:
                     )
                 ),
             ),
+            SolverDecision(
+                next="continue",
+                start_next_cycle=True,
+                next_focus_work_item_ids=("w1",),
+                unreviewed_graph_resolution=UnreviewedGraphResolution(
+                    action="review_next_cycle",
+                    reason="同じ仮説の残候補は次Cycleで確認する",
+                ),
+            ),
             select_graph_candidate,
             SolverDecision(
                 next="finalize",
@@ -1476,15 +1490,33 @@ def test_new_graph_candidates_use_dedicated_solver_profile() -> None:
     ]
     assert [item.purpose for item in trace.model_calls] == [
         "research",
+        "observation_integration",
+        "observation_integration",
+        "graph_selection",
+        "observation_integration",
         "integration",
-        "observation_integration",
         "graph_selection",
         "observation_integration",
-        "graph_selection",
-        "observation_integration",
+    ], [
+        (
+            trace_item.purpose,
+            context.cycle_close_required,
+            context.graph_review_batch.remaining_unreviewed_count,
+            tuple(item.hypothesis_id for item in context.graph_review_batch.candidates),
+        )
+        for trace_item, context in zip(
+            trace.model_calls,
+            model.solver_contexts,
+            strict=True,
+        )
     ]
     assert model.solver_profiles[3].system_prompt == "graph-selection"
-    assert model.solver_profiles[5].system_prompt == "graph-selection"
+    assert model.solver_profiles[6].system_prompt == "graph-selection"
+    assert model.solver_contexts[5].cycle_close_required is False
+    assert (
+        model.solver_contexts[5].graph_fetch_completed_hypothesis_ids_this_cycle
+        == ("h1",)
+    )
     assert [
         tuple(item.article_id for item in context.graph_review_batch.candidates)
         for context, trace_item in zip(
@@ -1498,7 +1530,7 @@ def test_new_graph_candidates_use_dedicated_solver_profile() -> None:
         ("law-order-article-3",),
     ]
     assert len(graph.calls) == 1
-    assert state.research_cycle_count == 1
+    assert state.research_cycle_count == 2
 
 
 def test_hidden_automatic_tool_cannot_be_requested_by_solver() -> None:
@@ -2700,10 +2732,11 @@ def test_context_keeps_all_graph_candidates_outside_material_limit() -> None:
     assert context.required_graph_review_request_ids == ("graph-request",)
     assert {
         item.work_item_id for item in context.graph_review_batch.candidates
-    } == {"w1", "w2"}
+    } == {"w1"}
     assert "law-ordinance-article-2_5" in context.fetchable_article_ids
     frontiers = context.graph_review_batch.candidates
-    assert len(frontiers) == 2
+    assert len(frontiers) == 1
+    assert context.graph_review_batch.remaining_unreviewed_count == 1
     assert {item.article_id for item in frontiers} == {
         "law-ordinance-article-2_5"
     }
@@ -2777,7 +2810,10 @@ def test_context_keeps_all_graph_candidates_outside_material_limit() -> None:
         remaining_wall_time_sec=60,
         finalize_only=False,
     )
-    assert pending_context.required_graph_review_request_ids == ()
+    assert pending_context.required_graph_review_request_ids == ("graph-request",)
+    assert tuple(
+        item.hypothesis_id for item in pending_context.graph_review_batch.candidates
+    ) == ("h2",)
     assert any(
         item.frontier_item_id == frontier.frontier_item_id
         and item.review_status == "relevant_deferred"
@@ -2809,7 +2845,10 @@ def test_context_keeps_all_graph_candidates_outside_material_limit() -> None:
         remaining_wall_time_sec=60,
         finalize_only=False,
     )
-    assert revised_context.required_graph_review_request_ids == ()
+    assert revised_context.required_graph_review_request_ids == ("graph-request",)
+    assert tuple(
+        item.hypothesis_id for item in revised_context.graph_review_batch.candidates
+    ) == ("h2",)
     assert any(
         item.frontier_item_id == frontier.frontier_item_id
         and item.review_status == "rejected"

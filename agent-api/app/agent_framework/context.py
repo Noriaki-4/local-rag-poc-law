@@ -27,6 +27,9 @@ from .state import (
 from .tool_contracts import ToolDefinition
 
 
+GRAPH_REVIEW_FETCH_REQUEST_PREFIX = "graph-review-fetch-"
+
+
 class WorkTreeItem(FrameworkModel):
     work_item_id: str = Field(description="投影元WorkItemのCase内一意ID。")
     parent_work_item_id: str | None = Field(
@@ -230,7 +233,10 @@ class GraphReviewLedgerItem(FrameworkModel):
 class GraphReviewBatch(FrameworkModel):
     candidates: tuple[GraphReviewCandidate, ...] = Field(
         default=(),
-        description="今回の専用Graph Reviewで意味評価する未評価差分。",
+        description=(
+            "今回の専用Graph Reviewで意味評価する、同じWorkItem・Hypothesisに"
+            "属する未評価差分。"
+        ),
     )
     remaining_unreviewed_count: int = Field(
         default=0,
@@ -638,6 +644,13 @@ class SolverContext(FrameworkModel):
             "入力引数。候補0件も履歴に含み、同じ3要素をscopeとして再要求しない。"
         ),
     )
+    graph_fetch_completed_hypothesis_ids_this_cycle: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "現在CycleでGraph候補本文の取得・統合を1バッチ完了したHypothesis ID。"
+            "同じHypothesisの残候補は次Cycleで扱う。"
+        ),
+    )
     evidence_manifest: tuple[EvidenceManifestItem, ...] = Field(
         description="Caseで既知のEvidenceと、今回本文が提示されているかの一覧。",
     )
@@ -885,10 +898,17 @@ def build_solver_context(
         <= limits.finalization_reserve_sec + limits.cycle_close_reserve_sec
     )
     graph_candidate_catalog = _graph_candidate_catalog(state)
+    completed_graph_units = _completed_graph_review_units_for_cycle(state)
     graph_review_batch, graph_review_ledger = _graph_review_projection(
         state,
         graph_candidate_catalog,
         max_candidates=limits.max_graph_candidates_per_review_batch,
+    )
+    graph_fetch_completed_hypothesis_ids = tuple(
+        hypothesis.hypothesis_id
+        for hypothesis in state.hypotheses
+        if (hypothesis.work_item_id, hypothesis.hypothesis_id)
+        in completed_graph_units
     )
     if remaining_fetch_capacity == 0 or time_requires_cycle_close:
         graph_review_batch = GraphReviewBatch(
@@ -1109,6 +1129,9 @@ def build_solver_context(
         recent_tool_results=solver_recent_results,
         completed_legal_searches=completed_legal_searches,
         completed_graph_searches=completed_graph_searches,
+        graph_fetch_completed_hypothesis_ids_this_cycle=(
+            graph_fetch_completed_hypothesis_ids
+        ),
         evidence_manifest=manifest,
         graph_review_batch=graph_review_batch,
         graph_review_ledger=graph_review_ledger,
@@ -1555,7 +1578,7 @@ def _graph_review_projection(
     *,
     max_candidates: int,
 ) -> tuple[GraphReviewBatch, tuple[GraphReviewLedgerItem, ...]]:
-    """全履歴から、意味選別せず差分batchと短い最新台帳を作る。"""
+    """全履歴から、Hypothesis単位の差分batchと短い最新台帳を作る。"""
 
     articles_by_id = {item.article_id: item for item in catalog.articles}
     hypothesis_work_ids = {
@@ -1678,7 +1701,25 @@ def _graph_review_projection(
             )
         )
 
-    batch_candidates = tuple(pending[:max_candidates])
+    completed_units = _completed_graph_review_units_for_cycle(state)
+    eligible_pending = tuple(
+        item
+        for item in pending
+        if (item.work_item_id, item.hypothesis_id) not in completed_units
+    )
+    active_unit = (
+        (
+            eligible_pending[0].work_item_id,
+            eligible_pending[0].hypothesis_id,
+        )
+        if eligible_pending
+        else None
+    )
+    batch_candidates = tuple(
+        item
+        for item in eligible_pending
+        if (item.work_item_id, item.hypothesis_id) == active_unit
+    )[:max_candidates]
     ledger = tuple(
         GraphReviewLedgerItem(
             frontier_item_id=frontier_id,
@@ -1726,6 +1767,33 @@ def _graph_review_projection(
         ),
         ledger,
     )
+
+
+def _completed_graph_review_units_for_cycle(
+    state: CaseState,
+) -> frozenset[tuple[str, str | None]]:
+    """現在CycleでGraph由来本文を統合済みの探索単位を返す。"""
+
+    requests_by_id = {item.request_id: item for item in state.tool_requests}
+    completed: set[tuple[str, str | None]] = set()
+    for result in state.tool_results:
+        request = requests_by_id.get(result.request_id)
+        if (
+            result.cycle_no != state.research_cycle_count
+            or result.status != "succeeded"
+            or result.request_id not in state.integrated_tool_result_request_ids
+            or request is None
+            or not request.request_id.startswith(GRAPH_REVIEW_FETCH_REQUEST_PREFIX)
+        ):
+            continue
+        if request.hypothesis_ids:
+            completed.update(
+                (request.work_item_id, hypothesis_id)
+                for hypothesis_id in request.hypothesis_ids
+            )
+        else:
+            completed.add((request.work_item_id, None))
+    return frozenset(completed)
 
 
 def _frontier_status(action: str) -> Literal[

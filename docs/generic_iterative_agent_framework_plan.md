@@ -1482,10 +1482,12 @@ Solverがfrontierから選んだArticle本文を同じCycleの次stepで取得�
 Solverは5つの`proposedPredicate`、原文`REFERENCES / EXPLAINS`、起点から見た
 `from_subject / to_subject`を共通Promptの定義どおりに解釈する。候補表示だけで法的結論を出さず、
 質問と現在のHypothesisに関係すると判断した既知frontier IDだけを、Profileの少数上限内で次の本文取得へ
-`select`する。Graph Reviewの初期選択上限は3件とし、関連するが今回の取得枠に入れない候補は
-`defer`として短いledgerへ残す。同じhopの未評価候補や別枝も削除せず、機械的pageまたは
-次Cycleへ残す。候補の関連性、取得順、
+`select`する。Graph ReviewはWorkItem・Hypothesis単位で提示し、初期選択上限は3件とする。
+一つの単位で選択した本文取得バッチを統合した後は、同じCycleでは別Hypothesisへ進む。
+同じ単位の未処理候補や別枝は削除せず、次Cycleへ残す。関連するが今回の取得枠に入れない候補は
+`defer`として短いledgerへ残す。候補の関連性、取得順、
 `reject`はSolver、Node・Linkの重複排除、scope、取得済み判定、Tool実行はプログラムが担当する。
+プログラムは同じ単位の未処理候補が残ることだけを理由にCycleを閉じない。
 
 Graphは発見経路の1つであり、必要条文到達の唯一の経路にしない。質問で明示された観点に対応する
 open WorkItemが残り、関連するGraph候補がない、または既存のGraph方針を探し切った場合、
@@ -1493,7 +1495,7 @@ SolverはそのWorkItem、確認済み本文の委任・参照表現、法令名
 その検索結果は新しい探索起点となる。検索語の作成と検索へ切り替える判断はSolverが行い、
 プログラムは未解決WorkItemから検索語や必要条文を生成しない。
 
-Solverは`graph_review_batch`に提示された新規・再評価差分について、質問と現在のHypothesisとの
+Solverは`graph_review_batch`に提示された同じWorkItem・Hypothesisの新規・再評価差分について、質問と現在のHypothesisとの
 関係を判断する。過去判断が必要な場合はbatch自身の`prior_review_status`と`review_trigger`を使う。
 ledgerの`relevant_deferred`、`selected + failed/timeout`の再採用又は再試行は、Cycle境界と
 後続Integrationの専用出力で扱う。
@@ -2458,7 +2460,8 @@ publishする別単位とする。Graph schema、抽出規則、入力データ�
   ExpansionSliceのscopeへ対応付ける。
 - Graphの全Article・Link・Review履歴をCaseStoreに保持し、SolverContextへは
   `graph_review_batch`と`graph_review_ledger`を差分投影する。
-- Graph Reviewは1回最大3件のArticle本文を選び、Cycleの残り本文取得枠を超えないようにする。
+- Graph ReviewはHypothesisごとに1回最大3件のArticle本文を選び、Cycleの残り本文取得枠を超えないようにする。
+  選択本文を統合した後、同じHypothesisの未処理候補は次Cycleまで再提示しない。
 - 7.4の通り、最小の`solver_common.md`、共有fragment、処理モード別Prompt、Provider schemaを
   型・Profile version・契約テストと同時に更新する。構造値から選ばれないモードの手順を混入させない。
 - `/answer`に新経路のFeature Flagを追加する。

@@ -620,7 +620,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "384"
+    assert diagnostic_records[0]["profileVersion"] == "387"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -628,7 +628,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "384"
+    assert transport_input["profileVersion"] == "387"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -1061,10 +1061,110 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
     ]
 
 
+def test_graph_review_moves_to_another_hypothesis_after_integrated_fetch() -> None:
+    state = CaseState(
+        case_id="case-1",
+        question="質問",
+        research_cycle_count=1,
+        work_items=(WorkItem(work_item_id="w1", question="確認する"),),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h1",
+                work_item_id="w1",
+                statement="条件を確認する",
+            ),
+            Hypothesis(
+                hypothesis_id="h2",
+                work_item_id="w1",
+                statement="手続を確認する",
+            ),
+        ),
+        tool_requests=(
+            ToolRequest(
+                request_id="graph-review-fetch-completed",
+                work_item_id="w1",
+                tool_name="fetch_articles",
+                arguments={"article_ids": ["article-h1-a"]},
+                purpose="Graph候補本文を取得する",
+                hypothesis_ids=("h1",),
+            ),
+        ),
+        tool_results=(
+            ToolResult(
+                request_id="graph-review-fetch-completed",
+                status="succeeded",
+                evidence_ids=("evidence-h1",),
+                cycle_no=1,
+            ),
+        ),
+        integrated_tool_result_request_ids=("graph-review-fetch-completed",),
+    )
+    catalog = GraphCandidateCatalog(
+        articles=tuple(
+            GraphCandidateArticle(
+                article_id=article_id,
+                document_id=None,
+                title=None,
+                heading=None,
+                content_status="not_requested",
+            )
+            for article_id in ("article-h1-a", "article-h1-b", "article-h2")
+        ),
+        links=(
+            GraphCandidateLink(
+                link_id="link-h1-a",
+                seed_article_id="seed",
+                candidate_article_id="article-h1-a",
+                work_item_ids=("w1",),
+                hypothesis_ids=("h1",),
+                relations=(),
+                graph_request_ids=("graph-h1",),
+            ),
+            GraphCandidateLink(
+                link_id="link-h1-b",
+                seed_article_id="seed",
+                candidate_article_id="article-h1-b",
+                work_item_ids=("w1",),
+                hypothesis_ids=("h1",),
+                relations=(),
+                graph_request_ids=("graph-h1",),
+            ),
+            GraphCandidateLink(
+                link_id="link-h2",
+                seed_article_id="seed",
+                candidate_article_id="article-h2",
+                work_item_ids=("w1",),
+                hypothesis_ids=("h2",),
+                relations=(),
+                graph_request_ids=("graph-h2",),
+            ),
+        ),
+    )
+
+    current_batch, _ = _graph_review_projection(
+        state,
+        catalog,
+        max_candidates=2,
+    )
+    next_cycle_batch, _ = _graph_review_projection(
+        state.model_copy(update={"research_cycle_count": 2}),
+        catalog,
+        max_candidates=2,
+    )
+
+    assert [item.article_id for item in current_batch.candidates] == ["article-h2"]
+    assert current_batch.remaining_unreviewed_count == 2
+    assert [item.article_id for item in next_cycle_batch.candidates] == [
+        "article-h1-a",
+        "article-h1-b",
+    ]
+    assert next_cycle_batch.remaining_unreviewed_count == 1
+
+
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "384"
+    assert profile.version == "387"
     assert profile.solver_graph_review is not None
     assert profile.solver_graph_review.max_output_tokens == (
         profile.solver_integration.max_output_tokens
@@ -1339,7 +1439,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "384"
+    assert profile.version == "387"
     assert prompt.rindex("## 出力") > prompt.rindex(
         "</solver_context>"
     )
@@ -1390,7 +1490,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "384"
+    assert profile.version == "387"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -4699,6 +4799,38 @@ def test_observation_does_not_fallback_to_unmapped_articles() -> None:
     assert by_work_item["wi-1"].evidence_hypothesis_candidates == ()
     assert by_work_item["wi-1"].material_evidence == ()
     assert by_work_item["wi-1"].grounding_evidence_ids == ()
+
+
+def test_observation_only_revisits_work_items_from_recent_tool_results() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_exceptions_observation_misses_scoped_evidence_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    context = SolverContext.model_validate(fixture["solverContext"])
+    graph_fetch = next(
+        item
+        for item in context.recent_tool_requests
+        if item.request_id.startswith("graph-review-fetch-")
+    )
+    graph_result = next(
+        item
+        for item in context.recent_tool_results
+        if item.request_id == graph_fetch.request_id
+    )
+    scoped = context.model_copy(
+        update={
+            "recent_tool_requests": (graph_fetch,),
+            "recent_tool_results": (graph_result,),
+        }
+    )
+
+    projected = _observation_work_item_contexts(scoped)
+
+    assert [item.work_tree[0].work_item_id for item in projected] == ["wi-1"]
+    assert [item.hypothesis_id for item in projected[0].hypotheses] == ["h-1"]
 
 
 def test_dependency_assessment_is_projected_one_work_item_at_a_time() -> None:
@@ -9909,10 +10041,15 @@ def test_anthropic_finalization_exposes_the_nested_answer_contract() -> None:
     assert "answer_body" not in answer_schema["properties"]
 
 
-def test_graph_review_prompt_covers_each_work_item_before_reusing_slots() -> None:
+def test_graph_review_prompt_limits_each_batch_to_one_hypothesis() -> None:
     profile = legal_profiles.legal_agent_profile().solver_graph_review
 
-    assert "各WorkItemから1件ずつ選んでから" in profile.system_prompt
+    assert "同じWorkItem・Hypothesisについて今回判断する候補" in (
+        profile.system_prompt
+    )
+    assert "同じHypothesisの残り候補は、必要なら次Cycle" in (
+        profile.system_prompt
+    )
 
 
 def test_anthropic_integration_describes_the_nested_answer_contract() -> None:

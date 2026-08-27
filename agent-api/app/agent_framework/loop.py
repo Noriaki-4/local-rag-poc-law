@@ -12,6 +12,7 @@ from time import monotonic
 from pydantic import ValidationError
 
 from .context import (
+    GRAPH_REVIEW_FETCH_REQUEST_PREFIX,
     ContextCapacityExceeded,
     GraphReviewBatch,
     SearchCandidateArticle,
@@ -969,7 +970,7 @@ class AgentLoop:
         )
         digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
         return ToolRequest(
-            request_id=f"graph-review-fetch-{digest}",
+            request_id=f"{GRAPH_REVIEW_FETCH_REQUEST_PREFIX}{digest}",
             work_item_id=primary_work_item_id,
             tool_name=self._profile.graph_review_fetch_tool_name or "fetch_articles",
             arguments={"article_ids": list(selected_ids)},
