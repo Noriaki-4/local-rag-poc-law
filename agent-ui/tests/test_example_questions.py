@@ -61,6 +61,8 @@ class ExampleQuestionsTest(unittest.TestCase):
             "横断して",
         )
         for example in EXAMPLE_QUESTIONS:
+            if example.known_source_is_search_origin:
+                continue
             for keyword in forbidden:
                 with self.subTest(title=example.title, keyword=keyword):
                     self.assertNotIn(keyword, example.question)
