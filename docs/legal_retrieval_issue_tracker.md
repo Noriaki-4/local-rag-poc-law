@@ -82,7 +82,7 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-020` | P1 | 要設計 | 検索又は結論を変える質問の欠落・曖昧さを一方的に補わず、利用者へ確認する | 現在は行為者が不明でも`action_actor=不明`として調査を続ける。これは一般論の質問には適切だが、確認対象となる行為や主体の欠落により複数の検索経路・法的結論が成立する場合を、検索前に止める契約がない。検索後に候補本文から異なる規律主体が判明する場合もある | まず検索前の独立した質問確認をStreamlitへ追加し、必要な場合だけ確認・質問文修正・利用者確認を行う。検索後の分岐で必要となるCaseの確認待ち・再開は次段階として設計する |
 | `LR-021` | P0 | 対応中 | 検索候補の内容評価と取得選択を整合させる | v376でSearch AssessmentとReselectionを一つのSearch Selectionへ統合した。LLMは全候補を比較するが、出力は選択した最大5件の内容評価・対応Hypothesis・選択理由だけとする。Programはこの単一出力を保存用評価と本文取得選択へ分け、非選択IDを入力候補との差集合として保留する。意味上の採否はLLM、既知ID・件数・構造変換はProgramが扱う | Luna `high`の総合問題で、対応Hypothesisと選択Articleが同じ判断内で整合し、必要候補が後段で脱落しないことを確認する |
 | `LR-022` | P0 | 未着手 | 後続Cycleで既存WorkItemへ代替Hypothesisを追加する | 設計ではHypothesisの`statement`を別の意味へ上書きせず、見立てを変える場合は新しいHypothesisを追加する。しかし現行の段階別経路は、Hypothesisが1件もないopen WorkItemだけを生成処理へ送り、本文評価は既存Hypothesisの更新だけを許す。そのため、初期仮説が反証された場合も、同じWorkItemへ新しい見立てを追加して次Cycleで仕切り直せない | H1が`contradicted`または新しい規律構造が判明したfixtureで、H1と根拠を履歴として保持し、Cycle 2で同じWorkItemへ新IDのH2を追加できることを確認する。検索方法だけを変える場合は不要なHypothesisを追加しない |
-| `LR-023` | P0 | 対応中 | Hypothesisに合うGraph方向と候補の対応先を安定して選ぶ | Haiku・Profile v375では一部の下位規範探索を`outgoing`として失敗した。Luna `low`では金商法27条の2・27条の3から`incoming`を選び、府令2条の5・10条を発見できた。一方、定義府令14条の2から上位規定を探す要求にも`incoming`を選び、0件となった。府令10条の本文未取得は方向ではなく、Graph Reviewの取得優先順位と後続Cycleでの再採用不足である | `REFERENCES`の物理方向と探索目的の対応をfixtureで固定する。Lunaの方向選択、Graph候補の全open Hypothesisへの再対応付け、`relevant_deferred`候補の後続再採用を別々に検証する |
+| `LR-023` | P0 | 完了 | Hypothesisに合うGraph方向と候補の対応先を安定して選ぶ | Profile v381で`explicit_reference`のLLM-visible契約から物理方向`outgoing / incoming`を除き、`follow_reference_in_text / find_articles_referencing_this`という探索目的へ置換した。Tool Adapterだけが探索目的を物理方向へ機械変換する。旧誤方向checkpointのLuna `high`隔離再生では、金商法27条の2と施行令7条の双方で`find_articles_referencing_this`を初回選択した | 2探索目的から物理方向への対応を契約テストで固定する。Graph候補の全open Hypothesisへの再対応付けと`relevant_deferred`候補の後続再採用は方向選択と分けて回帰確認する |
 | `LR-024` | P0 | 対応中 | Hypothesisが支持された内容と未確認事項を同時に保持する | Haiku・Profile v375では、H-3は府令2条の5、H-4は府令10条を未取得だった。それぞれ上位規定から一部内容を確認できたが、`judgment=supported`への更新と同時に`gaps=[]`となった。WorkItemは下位規範Dependencyにより`open`を維持したものの、Hypothesis単体では必要な具体的内容を確認済みのように見える不整合が残った | 取得本文が命題の一部を支持しても、WorkItemへの回答に必要な未取得の具体的内容を`gaps`へ残す。府令2条の5・10条を未取得のfixtureでH-3・H-4の`gaps`が保持され、取得後にだけ解消されることを確認する |
 
 ### 3.1 LR-016 Tool観察とCycle Closeの単一責務化
@@ -669,15 +669,16 @@ Haiku・Profile v375の公開買付け総合問題では、Graphの起点Article
 `outgoing`である。同じLuna実行内で両方を`incoming`としたことから、「順引き・逆引き」等の説明と
 Neo4jの物理方向を混同した可能性がある。
 
-LLMに物理名を直接選ばせる契約が不安定なら、LLMには「起点に書かれた参照先をたどる」又は
-「起点を参照するArticleを探す」を選ばせ、adapterがそれぞれ`outgoing / incoming`へ機械変換する。
-この変換は法的関係の意味をProgramが決めるものではなく、選択済み探索目的をGraph APIへ写す処理とする。
+Profile v381では、LLMには`follow_reference_in_text`又は`find_articles_referencing_this`を選ばせ、
+adapterがそれぞれ`outgoing / incoming`へ機械変換する。この変換は法的関係の意味をProgramが決めるものではなく、
+選択済み探索目的をGraph APIへ写す処理である。旧誤方向checkpointをLuna `high`で再生すると、金商法27条の2と
+施行令7条から未知の下位規範を探す2要求はいずれも`find_articles_referencing_this`となり、修復なしで契約を通過した。
 
 完了条件は次のとおりとする。
 
 - SolverがHypothesisと本文中の参照表現に基づき、参照先をたどるか、参照元を探すかを選ぶ。
 - Graph候補は発見元のHypothesisだけに固定せず、全open Hypothesisとの意味的対応をSolverが再評価できる。
-- Programは既知ID、方向値、件数及び参照整合だけを検証し、法的関係や候補の対応先を決めない。
+- Programは既知ID、探索目的、件数及び参照整合だけを検証し、法的関係や候補の対応先を決めない。
 - 固定fixture、Luna及びHaiku回帰で、上位規定から下位規範を探す`incoming`と、下位規範から
   明示参照先をたどる`outgoing`をそれぞれ確認する。
 - 施行令7条から府令2条の5、金商法27条の3から府令10条へ到達し、対応するHypothesisの
@@ -786,8 +787,9 @@ OpenAI TPM上限の429で停止したため、最終回答品質はこの実行�
 ToolRequestのWorkItem IDから`action_request_id`を決定的に対応付け、共通`SolverDecision`へ正規化する。
 
 Graph Toolの入力schemaは、`semantic_assertion`では`from_subject / to_subject`とpredicateを、
-`explicit_reference / explains`では`outgoing / incoming`と`predicate=null`を許す分岐契約にした。
-これにより、LLMが選んだ意味をProgramが補正せず、無効なmode・directionの組合せをProvider出力時点で防ぐ。
+`explicit_reference`では2つの`reference_lookup`と`predicate=null`を、`explains`では
+`outgoing / incoming`と`predicate=null`を許す分岐契約にした。明示参照の物理方向はadapterが探索目的から変換し、
+無効なmode・探索目的の組合せをProvider出力時点で防ぐ。
 
 ### LR-012 Prompt・契約の最終成果物
 

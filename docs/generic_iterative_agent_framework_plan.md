@@ -43,9 +43,11 @@
 - Reviewerの既定値は無効で、新経路のFeature Flagも既定では無効である。
 - 現行Legal Profileは本文取得後の自動Graph連動を持たず、`automatic_tools=()`である。
   Solverは`legal_graph_neighbors`へ、既知起点Article、`semantic_assertion / explicit_reference / explains`の
-  いずれか1 mode、意味関係なら5 predicateのうち1つ、方向を明示する。意味方向は
-  `from_subject / to_subject`、原文関係は`outgoing / incoming`で、1要求は1ホップである。
-  Graph由来Articleも後続stepの新しい起点にできる。Programはpredicate、方向、次の起点を補完しない。
+  いずれか1 modeを指定する。意味関係では5 predicateのうち1つと`from_subject / to_subject`を選ぶ。
+  明示参照では、起点本文の参照先をたどる`follow_reference_in_text`又は起点を参照するArticleを探す
+  `find_articles_referencing_this`を選び、Tool Adapterが`outgoing / incoming`へ機械変換する。
+  1要求は1ホップで、Graph由来Articleも後続stepの新しい起点にできる。Programはpredicate、
+  探索目的又は次の起点を補完しない。
 - 現行CaseStateはWorkItem、Hypothesis、Evidence、Graph review履歴を保持するが、
   本書の`ExplorationState / CycleRecord / StepRecord`と説明付きstatus契約は未実装である。
 - schema version 9のseedは、同じsnapshotのOpenSearch本文とNeo4jの構造・
@@ -909,13 +911,13 @@ Legal ToolはLLM生成Cypherを受け付けず、次の固定modeをparameterize
 | mode | 必須scope | 用途 |
 |---|---|---|
 | `semantic_assertion` | 起点Article、`proposedPredicate` 1件、direction 1件、`classificationRunId` | 仮説に沿った意味候補検索。通常経路 |
-| `explicit_reference` | 起点Article、direction 1件 | 原文上の明示参照をたどる。通常は`from_subject`だけ |
+| `explicit_reference` | 起点Article、`reference_lookup` 1件 | 起点本文の参照先をたどるか、起点を参照するArticleを探す |
 | `explains` | 起点DocumentまたはArticle、direction 1件 | ガイドの明示対応をたどる |
 
 `semantic_assertion`は必要な場合だけsame law family、target authority type、document ID等の構造filterを追加できる。
-意味predicate、direction、構造filterはSolverがHypothesisから選び、Programは補完しない。同じIntentで複数predicate、
-両方向、全modeを一括指定せず、必要なら別selectorに分ける。`explicit_reference/to_subject`は高fan-inになるため
-通常QAの既定経路にせず、十分限定された監査目的だけ許可する。
+意味predicate、意味方向、明示参照の探索目的、構造filterはSolverがHypothesisから選び、Programは補完しない。
+同じIntentで複数predicate、両方向、全modeを一括指定せず、必要なら別selectorに分ける。
+`find_articles_referencing_this`は高fan-inになり得るため、起点Articleと未確認事項を限定して使う。
 
 Tool Adapterは結果をmaterializeする前に候補件数を確認する。安全上限を超える場合は任意の上位N件へ切り捨てず、
 `scope_too_broad`と構造facet別件数を返す。scopeを変更するかOpenSearchへ戻るかはSolverが判断する。
@@ -2021,7 +2023,7 @@ Graph Review差分処理やCycle境界処理を混入させず、IntegrationとG
 | Provider schema | Deferred解消はledgerの既知IDだけを許可する。Programは全件性と次動作との矛盾だけを拒否し、関連性・必要性を補正しない。 |
 | Provider schema | Graph Reviewモードで必ず空になるre-adoption、deferred解消、answerは空配列またはnullの簡易schemaとし、未使用の動的enumをコンパイルさせない。 |
 | Provider schema | Search Selectionは既知候補全件を入力として比較し、選択上限内の候補だけに内容要約、法的機能、対応Hypothesis、選択理由を返す。Programは既知ID、対応Hypothesis ID、重複、件数を検証し、選択外候補を入力候補との差集合として機械的に`defer`する。非選択候補の意味評価は保存せず、再提示時に改めてLLMが判断する。 |
-| Provider schema | ExplorationIntentのWorkItem・Hypothesis・起点Articleは既知ID enum、Graph mode、predicateまたは原文relation、direction、構造filterはLegal Tool allowlistへ限定する。predicateは5種、directionは`from_subject / to_subject`だけを許可し、空・all・複数predicateの一括指定を許可しない。`APPLIED_BY / MENTIONS`をenumへ含めない。 |
+| Provider schema | ExplorationIntentのWorkItem・Hypothesis・起点Articleは既知ID enum、Graph mode、predicate、意味方向又は明示参照の探索目的、構造filterはLegal Tool allowlistへ限定する。意味関係は5 predicateと`from_subject / to_subject`、明示参照は2探索目的だけを許可し、空・all・複数predicateの一括指定を許可しない。`APPLIED_BY / MENTIONS`をenumへ含めない。 |
 
 Prompt契約テストでは、共通Prompt、処理モード別Prompt、Provider schemaが上表と同じCommand、status、
 上限、Graph差分投影を使用することを検査する。
@@ -2429,12 +2431,12 @@ publishする別単位とする。Graph schema、抽出規則、入力データ�
 - Case開始時に`sourceSnapshotId / graphSchemaVersion / classificationRunId`を固定し、検索時案件判断は
   CaseStoreだけへ保存する。分類jobと検索時Solverの責務を混同しない。
 - OpenSearch・Graphの各ToolRequestを既知の`ExplorationIntent`へ結び付け、Solverが明示したHypothesis由来の
-  query・filter、または起点・mode・1 predicateまたは原文relation・1 direction・構造filterだけをbackendへ渡す。
+  query・filter、または起点・mode・1 predicateと意味方向、若しくは原文relationの探索目的・構造filterだけをbackendへ渡す。
   現行Profileの固定`[REFERENCES, IMPLEMENTS, APPLIED_BY]`による無条件Graph取得は廃止する。
-- Legal Tool Adapterは自由Cypherを受け付けず、modeとdirection別の固定parameterized Cypherを使う。
+- Legal Tool Adapterは自由Cypherを受け付けず、modeと物理方向別の固定parameterized Cypherを使う。
   materialize前の候補件数が安全上限を超えた場合は上位N件へ切り捨てず、`scope_too_broad`とfacet件数を返す。
-- Graph方向の外部契約を`from_subject / to_subject`へ統一する。Tool AdapterはNeo4jのfrom/toと検索起点から
-  directionを決定し、旧称をPrompt、Provider schema、ToolResult、CaseStoreの新規データへ出さない。
+- 意味関係の外部契約は`from_subject / to_subject`とする。明示参照では物理方向を外部契約にせず、
+  `follow_reference_in_text / find_articles_referencing_this`からTool Adapterが`outgoing / incoming`へ機械変換する。
 - `APPLIED_BY / MENTIONS`をLegal ontology、seed、Neo4j、Graph Tool allowlist、Promptから削除する。
   現行`legal_ontology.py`で`implemented=False`の`DEFINES / USES_TERM / EXCEPTION_TO`も物理Relationの
   積み残しとして実装せず、旧registryから削除する。定義利用と例外の意味候補は、それぞれ
@@ -2496,10 +2498,10 @@ publishする別単位とする。Graph schema、抽出規則、入力データ�
 - 新規取得Articleの全Evidence chunkが次のSolver判断へ一度提示され、ProjectorがArticle途中を切って
   全文提示済みに見せない。全文がmodel contextへ収まらないfixtureは`context_capacity_exceeded`になる。
 - 5つの意味predicateと原文`REFERENCES / EXPLAINS`の意味をFrameworkが判断しない。
-- 同じ起点Articleに複数predicateがあるfixtureで、Solverが指定したmode・1 predicate・1 direction・構造filter以外を
+- 同じ起点Articleに複数predicateがあるfixtureで、Solverが指定したmode・1 predicate・1意味方向・構造filter以外を
   Tool Adapterが返さず、Programが未指定predicateを追加しない。
-- directionの契約テストで`from_subject / to_subject`だけが入出力可能で、旧称がPrompt・schema・ToolResultへ
-  現れないことを確認する。Neo4jのfrom/toは変更せず、起点がfromなら`from_subject`、toなら`to_subject`になる。
+- 意味関係の契約テストで`from_subject / to_subject`だけが指定可能であることを確認する。明示参照の契約テストでは
+  2つの探索目的だけが指定可能で、Tool Adapterがそれぞれ`outgoing / incoming`へ変換することを確認する。
 - seed後のGraph inventory、Legal Tool allowlist、Prompt、Provider schemaに`APPLIED_BY / MENTIONS`が存在せず、
   明示的なガイド・条文対応の`EXPLAINS`は維持されることを確認する。
 - 公開買付けfixtureで、`IMPLEMENTS/from_subject`と`EXCEPTION_TO/to_subject`の双方により

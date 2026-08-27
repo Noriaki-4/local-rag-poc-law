@@ -102,6 +102,13 @@ class GraphSearchMode(StrEnum):
     EXPLAINS = "explains"
 
 
+class ExplicitReferenceLookup(StrEnum):
+    """明示参照GraphでLLMが選ぶ探索目的。"""
+
+    FOLLOW_REFERENCE_IN_TEXT = "follow_reference_in_text"
+    FIND_ARTICLES_REFERENCING_THIS = "find_articles_referencing_this"
+
+
 PHYSICAL_NODE_LABELS = frozenset(
     {
         "Document",

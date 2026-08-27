@@ -329,16 +329,50 @@ def test_fetch_articles_accepts_five_and_rejects_more_article_ids() -> None:
         )
 
 
-def test_explicit_reference_direction_schema_explains_lookup_semantics() -> None:
+def test_explicit_reference_schema_exposes_lookup_intent_not_physical_direction() -> None:
     explicit_reference = next(
         variant
         for variant in LegalGraphNeighborsTool.definition.input_schema["anyOf"]
         if variant["properties"]["mode"].get("const") == "explicit_reference"
     )
-    description = explicit_reference["properties"]["direction"]["description"]
+    properties = explicit_reference["properties"]
+    description = properties["reference_lookup"]["description"]
 
-    assert "outgoingは起点本文が明示参照する先" in description
-    assert "Article IDが不明な下位規範を逆引き" in description
+    assert "follow_reference_in_text" in description
+    assert "find_articles_referencing_this" in description
+    assert "direction" not in properties
+
+
+@pytest.mark.parametrize(
+    ("reference_lookup", "expected_direction"),
+    (
+        ("follow_reference_in_text", "outgoing"),
+        ("find_articles_referencing_this", "incoming"),
+    ),
+)
+def test_explicit_reference_lookup_maps_mechanically_to_graph_direction(
+    reference_lookup: str,
+    expected_direction: str,
+) -> None:
+    graph = FakeGraph()
+
+    LegalGraphNeighborsTool(
+        graph,  # type: ignore[arg-type]
+        user_clearance_level=2,
+    ).execute(
+        _request(
+            "legal_graph_neighbors",
+            {
+                "article_ids": ["law-act-article-27_2"],
+                "mode": "explicit_reference",
+                "reference_lookup": reference_lookup,
+            },
+        ),
+        cycle_no=2,
+        timeout_sec=10,
+    )
+
+    assert graph.formal_args["direction"] == expected_direction
 
 
 def test_graph_tool_returns_selected_semantic_relation_as_navigation_only() -> None:
@@ -391,7 +425,7 @@ def test_graph_tool_keeps_an_independent_relation_window_for_each_seed() -> None
                     "law-act-article-27_3",
                 ],
                 "mode": "explicit_reference",
-                "direction": "incoming",
+                "reference_lookup": "find_articles_referencing_this",
             },
         ),
         cycle_no=2,
@@ -418,7 +452,7 @@ def test_graph_tool_collapses_duplicate_relations_into_one_article_pair() -> Non
             {
                 "article_ids": ["law-act-article-27_2"],
                 "mode": "explicit_reference",
-                "direction": "incoming",
+                "reference_lookup": "find_articles_referencing_this",
             },
         ),
         cycle_no=2,
@@ -445,7 +479,7 @@ def test_graph_tool_collapses_duplicate_relations_into_one_article_pair() -> Non
             "article_ids": ["law-act-article-27_2"],
             "mode": "explicit_reference",
             "predicate": "IMPLEMENTS",
-            "direction": "incoming",
+            "reference_lookup": "find_articles_referencing_this",
         },
         {
             "article_ids": ["law-act-article-27_2"],

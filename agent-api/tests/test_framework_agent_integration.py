@@ -620,7 +620,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "380"
+    assert diagnostic_records[0]["profileVersion"] == "381"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -628,7 +628,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "380"
+    assert transport_input["profileVersion"] == "381"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -1064,7 +1064,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "380"
+    assert profile.version == "381"
     assert profile.solver_graph_review is not None
     assert profile.solver_graph_review.max_output_tokens == (
         profile.solver_integration.max_output_tokens
@@ -1339,7 +1339,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "380"
+    assert profile.version == "381"
     assert prompt.rindex("## 出力") > prompt.rindex(
         "</solver_context>"
     )
@@ -1390,7 +1390,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "380"
+    assert profile.version == "381"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -2924,6 +2924,16 @@ def test_dependency_action_projection_focuses_required_work_items() -> None:
     )
     fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
     context = SolverContext.model_validate(fixture["solverContext"])
+    context = context.model_copy(
+        update={
+            "available_tools": tuple(
+                LegalGraphNeighborsTool.definition
+                if item.name == "legal_graph_neighbors"
+                else item
+                for item in context.available_tools
+            )
+        }
+    )
     rendered = render_solver_model_call(
         context,
         legal_profiles.legal_agent_profile().solver_integration,
@@ -2957,14 +2967,15 @@ def test_dependency_action_projection_focuses_required_work_items() -> None:
         "explicit_reference"
     )
     assert set(
-        graph_tool["input_schema"]["properties"]["direction"]["enum"]
-    ) == {"incoming", "outgoing"}
+        graph_tool["input_schema"]["properties"]["reference_lookup"]["enum"]
+    ) == {"follow_reference_in_text", "find_articles_referencing_this"}
+    assert "direction" not in graph_tool["input_schema"]["properties"]
     assert "他のopen" in rendered.instructions
     assert "## 下位規範を確認する次の行動" in rendered.instructions
     assert "## Tool結果の統合と次の行動" not in rendered.instructions
 
 
-def test_dependency_action_allows_outgoing_named_reference() -> None:
+def test_dependency_action_allows_following_named_reference() -> None:
     fixture_path = (
         Path(__file__).parent
         / "fixtures"
@@ -3009,7 +3020,7 @@ def test_dependency_action_allows_outgoing_named_reference() -> None:
                         "max_relations": 10,
                         "mode": "explicit_reference",
                         "predicate": None,
-                        "direction": "outgoing",
+                        "reference_lookup": "follow_reference_in_text",
                     },
                     "purpose": "本文に書かれた参照先Articleを発見する。",
                     "hypothesis_ids": [hypothesis_id],
@@ -3019,7 +3030,9 @@ def test_dependency_action_allows_outgoing_named_reference() -> None:
         context=context,
     )
 
-    assert decision.tool_requests[0].arguments["direction"] == "outgoing"
+    assert decision.tool_requests[0].arguments["reference_lookup"] == (
+        "follow_reference_in_text"
+    )
 
     with pytest.raises(ModelProtocolError, match="must inspect the available"):
         normalize_dependency_action_decision(
@@ -3073,7 +3086,7 @@ def test_dependency_action_may_advance_part_of_needs_action_scope() -> None:
                         "max_relations": 10,
                         "mode": "explicit_reference",
                         "predicate": None,
-                        "direction": "incoming",
+                        "reference_lookup": "find_articles_referencing_this",
                     },
                     "purpose": "今回選んだ下位規範のArticleを逆引きする。",
                     "hypothesis_ids": [hypothesis_id],
@@ -3104,6 +3117,16 @@ def test_dependency_action_prompt_distinguishes_unknown_lower_norm_lookup() -> N
     )
     fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
     context = SolverContext.model_validate(fixture["solverContext"])
+    context = context.model_copy(
+        update={
+            "available_tools": tuple(
+                LegalGraphNeighborsTool.definition
+                if item.name == "legal_graph_neighbors"
+                else item
+                for item in context.available_tools
+            )
+        }
+    )
     rendered = render_solver_model_call(
         context,
         legal_profiles.legal_agent_profile().solver_integration,
@@ -3111,9 +3134,16 @@ def test_dependency_action_prompt_distinguishes_unknown_lower_norm_lookup() -> N
         stage="integration",
     )
 
-    assert "「政令で定める」「府令で定める」だけの場合は前者" in (
+    assert "「政令で定める」「府令で定める」だけでは参照先Article" in (
         rendered.instructions
     )
+    graph_tool = next(
+        item
+        for item in rendered.input_payload["available_tools"]
+        if item["name"] == "legal_graph_neighbors"
+    )
+    assert "reference_lookup" in graph_tool["input_schema"]["properties"]
+    assert "direction" not in graph_tool["input_schema"]["properties"]
 
     observed = json.loads(
         fixture["observedTransportOutput"]["payload"]["tool_requests_json"]
@@ -8045,10 +8075,15 @@ def test_dependency_action_uses_dedicated_contract_and_preserves_prior_decision(
     }
     assert "continueまたはfinalize" not in rendered.instructions
     assert "DependencyDecisionの再判定は行いません" in rendered.instructions
-    assert "`mode=explicit_reference`、`direction=incoming`" in (
+    assert (
+        "`mode=explicit_reference`、"
+        "`reference_lookup=find_articles_referencing_this`"
+    ) in (
         rendered.instructions
     )
-    assert "`mode=explicit_reference`、`direction=outgoing`" in (
+    assert (
+        "`mode=explicit_reference`、`reference_lookup=follow_reference_in_text`"
+    ) in (
         rendered.instructions
     )
     assert "重複しない有効なTool要求がなく次Cycleを開始できる場合" in (

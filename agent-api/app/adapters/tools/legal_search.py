@@ -14,6 +14,7 @@ from app.agent_framework.state import Evidence, ToolRequest, ToolResult
 from app.agent_framework.tool_contracts import model_input_schema
 from app.config import settings
 from app.domains.legal.graph_schema import (
+    ExplicitReferenceLookup,
     GraphDirection,
     GraphSearchMode,
     ProposedPredicate,
@@ -106,10 +107,10 @@ class _ExplicitReferenceGraphNeighborsArguments(_GraphNeighborsArgumentsBase):
         default=None,
         description="物理参照の探索ではnull。",
     )
-    direction: Literal["outgoing", "incoming"] = Field(
+    reference_lookup: ExplicitReferenceLookup = Field(
         description=(
-            "outgoingは起点本文が明示参照する先を探す。incomingは起点を"
-            "明示参照する条文を探し、Article IDが不明な下位規範を逆引きする。"
+            "follow_reference_in_textは起点本文に明記された参照先Articleを探す。"
+            "find_articles_referencing_thisは起点Articleを明示参照するArticleを探す。"
         ),
     )
 
@@ -148,6 +149,11 @@ class _GraphNeighborsArguments(
 
     @property
     def direction(self) -> str:
+        if isinstance(self.root, _ExplicitReferenceGraphNeighborsArguments):
+            return {
+                ExplicitReferenceLookup.FOLLOW_REFERENCE_IN_TEXT: "outgoing",
+                ExplicitReferenceLookup.FIND_ARTICLES_REFERENCING_THIS: "incoming",
+            }[self.root.reference_lookup]
         value = self.root.direction
         return value.value if isinstance(value, GraphDirection) else value
 

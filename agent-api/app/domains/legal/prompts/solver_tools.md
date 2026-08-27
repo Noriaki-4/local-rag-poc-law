@@ -29,12 +29,12 @@ Article IDまたは探索すべき関係がまだ分からない場合に、Open
 
 ### `legal_graph_neighbors`
 
-起点Articleと、Hypothesisに必要な関係・方向を説明できる場合に1ホップ先を発見します。
+起点Articleと、Hypothesisに必要な関係・探索目的を説明できる場合に1ホップ先を発見します。
 
-- 取得本文が「政令で定める」「府令で定める」等と下位規範へ委ね、委任先Article IDが不明な場合は、当該Articleを起点に`mode=explicit_reference`、`direction=incoming`で探索します。下位規範から委任元への明示参照を逆引きするためです。
-- 取得本文に確認対象の法令名・条番号が明記され、そのArticle IDを発見する場合は、当該Articleを起点に`mode=explicit_reference`、`direction=outgoing`で探索します。本文に書かれた参照先を順引きするためです。
+- 取得本文が「政令で定める」「府令で定める」等と下位規範へ委ね、委任先Article IDが不明な場合は、当該Articleを起点に`mode=explicit_reference`、`reference_lookup=find_articles_referencing_this`で探索します。
+- 取得本文に確認対象の法令名・条番号が明記され、そのArticle IDを発見する場合は、当該Articleを起点に`mode=explicit_reference`、`reference_lookup=follow_reference_in_text`で探索します。
 - 「政令で定める」「府令で定める」だけでは参照先Articleは特定されていません。この場合は前者です。
-- 1要求は1 mode、1 directionです。`semantic_assertion`では1 predicateを指定します。
+- 1要求は1 mode、1探索目的です。`semantic_assertion`では1 predicateと1 directionを指定します。
 - Graphで発見したArticleも、本文確認後に必要なら次の1ホップ探索の起点にできます。
 - 結果はnavigationです。関係ラベルだけで法的結論を確定しません。
 
@@ -42,7 +42,7 @@ Article IDまたは探索すべき関係がまだ分からない場合に、Open
 
 - `formal_relation`は原文・構造から登録された関係、`relation_assertion`は非同期LLMが分類した関係候補です。
 - `REFERENCES`はfrom本文がtoを明示参照し、`EXPLAINS`はガイドがto Articleを解説します。
-- `outgoing`は起点がfrom、`incoming`は起点がtoです。
+- 明示参照の物理方向はToolが`reference_lookup`から変換します。LLMは`outgoing / incoming`を指定しません。
 - `relation_assertion`はSUBJECTからOBJECTへ向きます。`from_subject`は起点がSUBJECT、`to_subject`は起点がOBJECTです。
 - `IMPLEMENTS`：親規定から具体化規定へ向く。
 - `INCORPORATES`：準用・読替えする規定から、取り込まれる規定へ向く。
