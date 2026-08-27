@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
@@ -17,6 +18,9 @@ from app.agent_framework.contracts import SearchAssessmentDecision
 from app.agent_framework.model_call_artifacts import RenderedModelCall
 from app.domains.legal.profiles import legal_agent_profile
 from app.domains.legal.staged_research_diagnostic import StructuredJSONClient
+
+
+_PROMPT_DIR = Path(__file__).with_name("prompts")
 
 
 @dataclass(frozen=True)
@@ -38,9 +42,20 @@ def render_search_assessment_call(
     profile = legal_agent_profile().solver_search_review
     if profile is None:
         raise ValueError("search review profile is unavailable")
+    profile = profile.model_copy(
+        update={
+            "model": model,
+            "system_prompt": (
+                _PROMPT_DIR / "solver_search_review.md"
+            ).read_text(encoding="utf-8").strip(),
+            "completion_check_prompt": (
+                _PROMPT_DIR / "solver_search_review_check.md"
+            ).read_text(encoding="utf-8").strip(),
+        }
+    )
     return render_search_assessment_model_call(
         context,
-        profile.model_copy(update={"model": model}),
+        profile,
         provider=provider,
     )
 

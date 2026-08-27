@@ -55,7 +55,7 @@ if [[ -f "${env_file}" ]]; then
         ;;
       OPENAI_REASONING_EFFORT=*)
         if [[ "${reasoning_effort_written}" == false ]]; then
-          printf 'OPENAI_REASONING_EFFORT=low\n' >>"${temp_file}"
+          printf 'OPENAI_REASONING_EFFORT=high\n' >>"${temp_file}"
           reasoning_effort_written=true
         fi
         ;;
@@ -85,7 +85,7 @@ if [[ "${base_url_written}" == false ]]; then
   printf 'OPENAI_BASE_URL=https://api.openai.com/v1\n' >>"${temp_file}"
 fi
 if [[ "${reasoning_effort_written}" == false ]]; then
-  printf 'OPENAI_REASONING_EFFORT=low\n' >>"${temp_file}"
+  printf 'OPENAI_REASONING_EFFORT=high\n' >>"${temp_file}"
 fi
 if [[ "${ceiling_written}" == false ]]; then
   printf 'OPENAI_MAX_TOKENS_CEILING=16384\n' >>"${temp_file}"

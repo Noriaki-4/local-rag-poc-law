@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from time import monotonic
 from typing import Any, Literal
@@ -20,6 +21,7 @@ from app.agent_framework.context import (
     SearchAssessmentCandidate,
     SearchAssessmentExcerpt,
     SearchCandidateContentAssessmentInput,
+    SearchSelectionInput,
     SolverContext,
     WorkTreeItem,
 )
@@ -34,7 +36,6 @@ from app.agent_framework.contracts import (
     CycleCloseDecision,
     DependencyActionDecision,
     DependencyAssessmentDecision,
-    EvidenceIntegrationDecision,
     HypothesisUpdate,
     ObservationIntegrationDecision,
     SearchAssessmentDecision,
@@ -73,6 +74,7 @@ from app.agent_framework.state import (
     Hypothesis,
     ReviewFindingResolution,
     ReviewResult,
+    SearchCandidateReview,
     SearchCandidateSelection,
     UnreviewedGraphResolution,
     ToolRequest,
@@ -378,20 +380,6 @@ class StructuredJSONModelAdapter:
                 started_at=started_at,
             )
         )
-        (
-            observation,
-            dependency_input_tokens,
-            dependency_output_tokens,
-            dependency_attempt_count,
-            dependency_assessed,
-        ) = self._solve_dependency_assessment(
-            context,
-            observation,
-            profile,
-            started_at=started_at,
-            prior_input_tokens=input_tokens,
-            prior_output_tokens=output_tokens,
-        )
         observation = _derive_observation_work_item_updates(context, observation)
         return SolverCallResult(
             decision=SolverDecision(
@@ -403,18 +391,9 @@ class StructuredJSONModelAdapter:
                 ),
                 dependency_decisions=observation.dependency_decisions,
             ),
-            input_tokens=_sum_optional_tokens(
-                input_tokens,
-                dependency_input_tokens,
-            ),
-            output_tokens=_sum_optional_tokens(
-                output_tokens,
-                dependency_output_tokens,
-            ),
-            attempt_count=(
-                attempt_count
-                + dependency_attempt_count
-            ),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            attempt_count=attempt_count,
         )
 
     def _solve_dependency_assessment(
@@ -573,26 +552,11 @@ class StructuredJSONModelAdapter:
             started_at=started_at,
         )
 
-        (
-            observation,
-            dependency_input_tokens,
-            dependency_output_tokens,
-            dependency_attempt_count,
-            dependency_assessed,
-        ) = self._solve_dependency_assessment(
-            context,
-            observation,
-            profile,
-            started_at=started_at,
-            prior_input_tokens=observation_input_tokens,
-            prior_output_tokens=observation_output_tokens,
-        )
         observation = _derive_observation_work_item_updates(context, observation)
-        completed_stage = (
-            "dependency_assessment"
-            if dependency_assessed
-            else "observation_integration"
-        )
+        dependency_input_tokens = 0
+        dependency_output_tokens = 0
+        dependency_attempt_count = 0
+        completed_stage = "evidence_integration"
 
         transition_call = render_cycle_close_model_call(
             context,
@@ -828,13 +792,13 @@ class StructuredJSONModelAdapter:
         *,
         started_at: float,
     ) -> tuple[ObservationIntegrationDecision, int | None, int | None, int]:
-        """各open WorkItemの本文評価を独立した単一タスクとして実行する。"""
+        """WorkItem内の本文評価と下位規範判断を統合し、並列実行する。"""
 
-        observations: list[ObservationIntegrationDecision] = []
-        input_tokens: list[int | None] = []
-        output_tokens: list[int | None] = []
-        attempt_count = 0
-        for projected_context in _observation_work_item_contexts(context):
+        projected_contexts = _observation_work_item_contexts(context)
+
+        def solve_one(
+            projected_context: SolverContext,
+        ) -> tuple[ObservationIntegrationDecision, int | None, int | None, int]:
             rendered = render_observation_integration_model_call(
                 projected_context,
                 profile,
@@ -880,13 +844,32 @@ class StructuredJSONModelAdapter:
                     f"observation integration transport invalid: {error}"
                 )
             try:
-                observations.append(
-                    ObservationIntegrationDecision.model_validate(
-                        _normalize_observation_integration_payload(
-                            result.payload,
-                            context=projected_context,
-                        )
+                observation = ObservationIntegrationDecision.model_validate(
+                    _normalize_observation_integration_payload(
+                        result.payload,
+                        context=projected_context,
                     )
+                )
+                dependency = _downgrade_unproven_dependency_confirmations(
+                    DependencyAssessmentDecision(
+                        decision_reason=observation.decision_reason,
+                        dependency_decisions=observation.dependency_decisions,
+                    ),
+                    article_id_by_evidence={
+                        item.evidence_id: article_id
+                        for item in projected_context.material_evidence
+                        if item.evidence_id
+                        in projected_context.grounding_evidence_ids
+                        and isinstance(
+                            article_id := item.metadata.get("articleId"),
+                            str,
+                        )
+                    },
+                )
+                observation = observation.model_copy(
+                    update={
+                        "dependency_decisions": dependency.dependency_decisions
+                    }
                 )
             except ValidationError as exc:
                 detail = exc.errors(include_url=False, include_input=False)[0]
@@ -894,15 +877,25 @@ class StructuredJSONModelAdapter:
                     "observation integration contract invalid: "
                     f"{detail['msg']}"
                 ) from exc
-            input_tokens.append(result.inputTokens)
-            output_tokens.append(result.outputTokens)
-            attempt_count += 1 + result.retryCount
+            return (
+                observation,
+                result.inputTokens,
+                result.outputTokens,
+                1 + result.retryCount,
+            )
 
+        if not projected_contexts:
+            return ObservationIntegrationDecision(
+                decision_reason="評価対象のopen WorkItemはない。"
+            ), 0, 0, 0
+        max_workers = min(4, len(projected_contexts))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            results = list(executor.map(solve_one, projected_contexts))
         return (
-            _merge_observation_integrations(observations),
-            _sum_optional_tokens(*input_tokens),
-            _sum_optional_tokens(*output_tokens),
-            attempt_count,
+            _merge_observation_integrations([item[0] for item in results]),
+            _sum_optional_tokens(*(item[1] for item in results)),
+            _sum_optional_tokens(*(item[2] for item in results)),
+            sum(item[3] for item in results),
         )
 
     def _solve_search_review(
@@ -910,87 +903,23 @@ class StructuredJSONModelAdapter:
         context: SolverContext,
         profile: ModelCallProfile,
     ) -> SolverCallResult:
-        """候補理解と比較選択を別コンテキストで順に実行する。"""
+        """候補理解、Hypothesis対応、本文取得選択を一度に実行する。"""
 
         provider = getattr(self._client, "provider", None)
-        assessment_results = []
-        assessed_items: list[dict[str, Any]] = []
-        for batch_context in _search_review_batch_contexts(context):
-            assessment_call = render_search_assessment_model_call(
-                batch_context,
-                profile,
-                provider=provider,
-            )
-            if self._diagnostics is not None:
-                self._diagnostics.record_transport_input(
-                    context=batch_context,
-                    profile=profile,
-                    rendered=assessment_call,
-                    repair_index=0,
-                    transport_stage="search_assessment",
-                    provider=provider,
-                )
-            try:
-                assessment_result = self._client.generate_structured_json(
-                    prompt=assessment_call.request,
-                    schema=assessment_call.output_schema,
-                    model=profile.model,
-                    max_tokens=profile.max_output_tokens,
-                    timeout_sec=max(1, round(profile.timeout_sec)),
-                )
-            except requests.Timeout as exc:
-                raise TimeoutError("search assessment timed out") from exc
-            assessment_error = assessment_result.validationError
-            if assessment_result.payload is None and assessment_error is None:
-                assessment_error = "empty"
-            if self._diagnostics is not None:
-                self._diagnostics.record_transport_output(
-                    context=batch_context,
-                    repair_index=0,
-                    payload=assessment_result.payload,
-                    validation_error=assessment_error,
-                    input_tokens=assessment_result.inputTokens,
-                    output_tokens=assessment_result.outputTokens,
-                    provider_retry_count=assessment_result.retryCount,
-                    transport_stage="search_assessment",
-                )
-            if assessment_error is not None or assessment_result.payload is None:
-                raise ModelProtocolError(
-                    f"search assessment transport invalid: {assessment_error}"
-                )
-            batch_payload = _normalize_search_assessment_transport_payload(
-                assessment_result.payload,
-                batch_context,
-            )
-            _validate_search_assessment_payload(batch_payload, batch_context)
-            assessed_items.extend(batch_payload.get("assessments") or [])
-            assessment_results.append(assessment_result)
-
-        assessment_payload = {
-            "assessments": assessed_items,
-        }
-        _validate_search_assessment_payload(assessment_payload, context)
-
-        selection_call = render_search_reselection_model_call(
-            context,
-            assessment_payload,
-            profile,
-        )
-        selection_prompt = selection_call.request
-        selection_schema = selection_call.output_schema
+        selection_call = render_search_selection_model_call(context, profile)
         if self._diagnostics is not None:
             self._diagnostics.record_transport_input(
                 context=context,
                 profile=profile,
                 rendered=selection_call,
                 repair_index=0,
-                transport_stage="search_reselection",
-                provider=getattr(self._client, "provider", None),
+                transport_stage="search_selection",
+                provider=provider,
             )
         try:
             selection_result = self._client.generate_structured_json(
-                prompt=selection_prompt,
-                schema=selection_schema,
+                prompt=selection_call.request,
+                schema=selection_call.output_schema,
                 model=profile.model,
                 max_tokens=profile.max_output_tokens,
                 timeout_sec=max(1, round(profile.timeout_sec)),
@@ -1000,10 +929,10 @@ class StructuredJSONModelAdapter:
                 self._diagnostics.record_transport_timeout(
                     context=context,
                     repair_index=0,
-                    reason="search reselection timed out",
-                    transport_stage="search_reselection",
+                    reason="search selection timed out",
+                    transport_stage="search_selection",
                 )
-            raise TimeoutError("search reselection timed out") from exc
+            raise TimeoutError("search selection timed out") from exc
         selection_error = selection_result.validationError
         if selection_result.payload is None and selection_error is None:
             selection_error = "empty"
@@ -1016,17 +945,24 @@ class StructuredJSONModelAdapter:
                 input_tokens=selection_result.inputTokens,
                 output_tokens=selection_result.outputTokens,
                 provider_retry_count=selection_result.retryCount,
-                transport_stage="search_reselection",
+                transport_stage="search_selection",
             )
         if selection_error is not None or selection_result.payload is None:
             raise ModelProtocolError(
-                f"search reselection transport invalid: {selection_error}"
+                f"search selection transport invalid: {selection_error}"
             )
-        selection_payload = _normalize_search_reselection_transport_payload(
-            selection_result.payload
+        selection_payload = _normalize_search_selection_transport_payload(
+            selection_result.payload,
+            context,
         )
         try:
-            SearchReselectionDecision.model_validate(selection_payload)
+            _validate_selected_search_assessments(selection_payload, context)
+            SearchReselectionDecision.model_validate(
+                {
+                    "selections": selection_payload.get("selections") or [],
+                    "reason": selection_payload.get("reason"),
+                }
+            )
             _validate_search_reselection_payload(
                 selection_payload,
                 context,
@@ -1034,18 +970,12 @@ class StructuredJSONModelAdapter:
         except ValidationError as exc:
             detail = exc.errors(include_url=False, include_input=False)[0]
             raise ModelProtocolError(
-                f"search reselection contract invalid: {detail['msg']}"
+                f"search selection contract invalid: {detail['msg']}"
             ) from exc
-
-        assessment_payload = _attach_selected_hypotheses_to_assessments(
-            assessment_payload,
-            selection_payload,
-        )
         combined_payload = {
             "search_request_ids": list(
                 context.required_search_review_request_ids
             ),
-            **assessment_payload,
             **selection_payload,
         }
         try:
@@ -1060,24 +990,11 @@ class StructuredJSONModelAdapter:
                 f"{location or '<root>'}: {detail.get('msg')}"
             ) from exc
 
-        input_tokens = _sum_optional_tokens(
-            *(result.inputTokens for result in assessment_results),
-            selection_result.inputTokens,
-        )
-        output_tokens = _sum_optional_tokens(
-            *(result.outputTokens for result in assessment_results),
-            selection_result.outputTokens,
-        )
         return SolverCallResult(
             decision=decision,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            attempt_count=(
-                len(assessment_results)
-                + 1
-                + sum(result.retryCount for result in assessment_results)
-                + selection_result.retryCount
-            ),
+            input_tokens=selection_result.inputTokens,
+            output_tokens=selection_result.outputTokens,
+            attempt_count=1 + selection_result.retryCount,
         )
 
     def review(
@@ -1812,7 +1729,6 @@ def _solver_context_payload(
                 if item["hypothesis_id"] in graph_hypothesis_ids
             ],
             "graph_review_batch": payload["graph_review_batch"],
-            "graph_review_ledger": payload["graph_review_ledger"],
             "required_graph_review_request_ids": payload[
                 "required_graph_review_request_ids"
             ],
@@ -2175,7 +2091,7 @@ def render_observation_integration_model_call(
         output_schema=_strip_runtime_id_enums(
             _observation_integration_transport_schema(context)
         ),
-        normalized_schema=EvidenceIntegrationDecision.model_json_schema(),
+        normalized_schema=ObservationIntegrationDecision.model_json_schema(),
     )
     _ensure_solver_prompt_capacity(rendered.request, context.max_solver_input_chars)
     return rendered
@@ -2357,6 +2273,11 @@ def _observation_integration_context_payload(
             for item in context.material_evidence
             if item.evidence_id in grounding_ids
         ],
+        "required_dependency_kind": (
+            context.required_dependency_kind
+            if context.required_dependency_work_item_ids
+            else None
+        ),
     }
     if context.contract_feedback is not None:
         previous = context.contract_feedback.previous_decision
@@ -2442,6 +2363,11 @@ def _observation_work_item_contexts(
                         if item.evidence_id in visible_id_set
                     ),
                     "evidence_hypothesis_candidates": candidates,
+                    "required_dependency_work_item_ids": tuple(
+                        item_id
+                        for item_id in context.required_dependency_work_item_ids
+                        if item_id == work_item.work_item_id
+                    ),
                 }
             )
         )
@@ -2513,8 +2439,9 @@ def _merge_observation_integrations(
             decision_reason="評価対象のopen WorkItemはない。"
         )
     return ObservationIntegrationDecision(
-        decision_reason=" ".join(
-            item.decision_reason for item in observations
+        decision_reason=(
+            f"{len(observations)}件のWorkItemについて、"
+            "取得本文と下位規範状態を統合した。"
         ),
         update_hypotheses=tuple(
             update
@@ -2865,18 +2792,29 @@ def _observation_integration_transport_schema(
                 "evidence_ids",
             ),
             "gaps": _described(
-                {"type": "array", "items": {"type": "string"}, "maxItems": 12},
+                {
+                    "type": "array",
+                    "items": {"type": "string", "maxLength": 300},
+                    "maxItems": 12,
+                },
                 HypothesisUpdate,
                 "gaps",
             ),
         }
+    )
+    dependency_decisions = (
+        _dependency_assessment_transport_schema(context)["properties"][
+            "dependency_decisions"
+        ]
+        if context.required_dependency_work_item_ids
+        else _empty_array_schema()
     )
     return _strict_object(
         {
             "decision_reason": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 1200,
+                "maxLength": 400,
                 "description": ObservationIntegrationDecision.model_fields[
                     "decision_reason"
                 ].description,
@@ -2888,6 +2826,13 @@ def _observation_integration_transport_schema(
                 "description": ObservationIntegrationDecision.model_fields[
                     "update_hypotheses"
                 ].description,
+            },
+            "dependency_decisions": {
+                **dependency_decisions,
+                "description": (
+                    "同じWorkItemについて、起点規範から末端規範までの"
+                    "本文確認状態を判断した結果。"
+                ),
             },
         }
     )
@@ -2910,6 +2855,7 @@ def _normalize_observation_integration_payload(
     context: SolverContext | None = None,
 ) -> dict[str, Any]:
     normalized = deepcopy(payload)
+    normalized.setdefault("dependency_decisions", [])
     if context is not None:
         _normalize_grounding_evidence_aliases(normalized, context)
     for decision in normalized.get("dependency_decisions") or []:
@@ -3139,7 +3085,7 @@ def _dependency_assessment_transport_schema(
                 ),
             },
             "reason": _described(
-                {"type": "string", "minLength": 1},
+                {"type": "string", "minLength": 1, "maxLength": 300},
                 DependencyDecision,
                 "reason",
             ),
@@ -3492,6 +3438,85 @@ def _search_review_context_payload(
                 ),
             )
             for candidate in context.search_candidates
+        ),
+    )
+    return input_model.model_dump(mode="json")
+
+
+def render_search_selection_model_call(
+    context: SolverContext,
+    profile: ModelCallProfile,
+) -> RenderedModelCall:
+    """検索結果の理解と本文取得対象の選択を同じ呼出しへまとめる。"""
+
+    input_payload = _search_selection_context_payload(context)
+    instructions = (
+        f"{profile.system_prompt}\n\n"
+        f"{render_model_input_glossary(SearchSelectionInput)}\n\n"
+        f"{RUNTIME_INPUT_MARKER}"
+        f"{_post_context_completion_check(profile.completion_check_prompt)}"
+    )
+    rendered = build_rendered_model_call(
+        stage="search_selection",
+        instructions=instructions,
+        input_tag="search_selection_input",
+        input_payload=input_payload,
+        output_schema=_search_selection_transport_schema(context),
+        normalized_schema=SearchCandidateReview.model_json_schema(),
+    )
+    _ensure_solver_prompt_capacity(rendered.request, context.max_solver_input_chars)
+    return rendered
+
+
+def _search_selection_context_payload(context: SolverContext) -> dict[str, Any]:
+    evidence_by_id = {
+        item.evidence_id: item for item in context.material_evidence
+    }
+    active_hypotheses = tuple(
+        item for item in context.hypotheses if item.judgment == "unresolved"
+    )
+    active_work_item_ids = {
+        item.work_item_id for item in active_hypotheses
+    }
+    input_model = SearchSelectionInput(
+        question=context.question,
+        work_tree=tuple(
+            {
+                "work_item_id": item.work_item_id,
+                "question": item.question,
+            }
+            for item in context.work_tree
+            if item.work_item_id in active_work_item_ids
+        ),
+        hypotheses=tuple(
+            {
+                "hypothesis_id": item.hypothesis_id,
+                "work_item_id": item.work_item_id,
+                "statement": item.statement,
+                "gaps": item.gaps,
+            }
+            for item in active_hypotheses
+        ),
+        search_candidates=tuple(
+            SearchAssessmentCandidate(
+                article_id=candidate.article_id,
+                title=candidate.title,
+                headings=candidate.headings,
+                search_excerpts=tuple(
+                    SearchAssessmentExcerpt(
+                        content=evidence_by_id[evidence_id].content,
+                    )
+                    for evidence_id in candidate.navigation_evidence_ids
+                    if evidence_id in evidence_by_id
+                ),
+            )
+            for candidate in context.search_candidates
+        ),
+        current_fetch_request_capacity=_tool_array_argument_capacity(
+            context,
+            tool_name="fetch_articles",
+            argument_name="article_ids",
+            fallback=context.remaining_fetch_capacity,
         ),
     )
     return input_model.model_dump(mode="json")
@@ -3972,46 +3997,17 @@ def _solver_transport_schema(context: SolverContext) -> dict:
     graph_review_mode = bool(batch_candidates and not context.finalize_only)
     selection_mode = graph_review_mode
     batch_frontier_ids = tuple(item.frontier_item_id for item in batch_candidates)
-    selectable_ledger = tuple(
-        item
-        for item in context.graph_review_ledger
-        if (
-            item.review_status == "relevant_deferred"
-            and item.content_status in {"not_requested", "failed", "timeout"}
-        )
-        or (
-            item.review_status == "selected"
-            and item.content_status in {"failed", "timeout"}
-        )
-    )
-    selectable_frontier_ids = tuple(
-        dict.fromkeys(
-            [
-                *batch_frontier_ids,
-                *(item.frontier_item_id for item in selectable_ledger),
-            ]
-        )
-    )
+    selectable_frontier_ids = batch_frontier_ids
     graph_article_ids = tuple(
-        dict.fromkeys(
-            [
-                *(item.article_id for item in batch_candidates),
-                *(item.article_id for item in selectable_ledger),
-            ]
-        )
+        dict.fromkeys(item.article_id for item in batch_candidates)
     )
     graph_work_item_ids = tuple(
-        dict.fromkeys(
-            [
-                *(item.work_item_id for item in batch_candidates),
-                *(item.work_item_id for item in selectable_ledger),
-            ]
-        )
+        dict.fromkeys(item.work_item_id for item in batch_candidates)
     )
     graph_hypothesis_ids = tuple(
         dict.fromkeys(
             item.hypothesis_id
-            for item in (*batch_candidates, *selectable_ledger)
+            for item in batch_candidates
             if item.hypothesis_id is not None
         )
     )
@@ -4051,7 +4047,7 @@ def _solver_transport_schema(context: SolverContext) -> dict:
                 "action",
             ),
             "reason": _described(
-                {"type": "string"},
+                {"type": "string", "minLength": 1, "maxLength": 300},
                 GraphFrontierDecision,
                 "reason",
             ),
@@ -4093,13 +4089,13 @@ def _solver_transport_schema(context: SolverContext) -> dict:
                     "type": "array",
                     "items": graph_frontier_decision,
                     "minItems": len(batch_frontier_ids),
-                    "maxItems": len(selectable_frontier_ids),
+                    "maxItems": len(batch_frontier_ids),
                 },
                 GraphCandidateReview,
                 "frontier_decisions",
             ),
             "reason": _described(
-                {"type": "string"},
+                {"type": "string", "minLength": 1, "maxLength": 400},
                 GraphCandidateReview,
                 "reason",
             ),
@@ -4480,7 +4476,7 @@ def _search_review_transport_schema(
                 "legal_function",
             ),
             "summary": _described(
-                {"type": "string", "minLength": 1},
+                {"type": "string", "minLength": 1, "maxLength": 300},
                 SearchCandidateAssessment,
                 "summary",
             ),
@@ -4524,6 +4520,78 @@ def _search_review_transport_schema(
     if not array_transport:
         schema["$defs"] = {"search_candidate_assessment": assessment}
     return schema
+
+
+def _search_selection_transport_schema(context: SolverContext) -> dict[str, Any]:
+    """全候補を比較し、選択した候補の評価だけを返す契約。"""
+
+    candidate_ids = tuple(item.article_id for item in context.search_candidates)
+    hypothesis_ids = tuple(
+        item.hypothesis_id
+        for item in context.hypotheses
+        if item.judgment == "unresolved"
+    )
+    selection_limit = _tool_array_argument_capacity(
+        context,
+        tool_name="fetch_articles",
+        argument_name="article_ids",
+        fallback=context.remaining_fetch_capacity,
+    )
+    selection = _strict_object(
+        {
+            "article_id": _described(
+                _enum_string(candidate_ids),
+                SearchCandidateSelection,
+                "article_id",
+            ),
+            "legal_function": _described(
+                {
+                    "type": "string",
+                    "enum": [
+                        "applicability",
+                        "exception",
+                        "procedure",
+                        "scope",
+                    ],
+                },
+                SearchCandidateAssessment,
+                "legal_function",
+            ),
+            "summary": _described(
+                {"type": "string", "minLength": 1, "maxLength": 300},
+                SearchCandidateAssessment,
+                "summary",
+            ),
+            "matched_hypothesis_ids": _described(
+                _bounded_enum_array(hypothesis_ids),
+                SearchCandidateAssessment,
+                "matched_hypothesis_ids",
+            ),
+            "reason": _described(
+                {"type": "string", "minLength": 1, "maxLength": 300},
+                SearchCandidateSelection,
+                "reason",
+            ),
+        }
+    )
+    return _strict_object(
+        {
+            "selections": {
+                "type": "array",
+                "items": selection,
+                "maxItems": selection_limit,
+                "description": (
+                    "全候補を比較して今回本文を取得すると判断した候補。"
+                    "内容評価は選択した候補についてだけ返す。"
+                ),
+            },
+            "reason": _described(
+                {"type": "string", "minLength": 1, "maxLength": 400},
+                SearchReselectionDecision,
+                "reason",
+            ),
+        }
+    )
 
 
 def _search_reselection_transport_schema(
@@ -6658,6 +6726,74 @@ def _normalize_search_reselection_transport_payload(
     return normalized
 
 
+def _normalize_search_selection_transport_payload(
+    payload: dict[str, Any],
+    context: SolverContext,
+) -> dict[str, Any]:
+    """選択候補の一回答を保存用評価と取得選択へ機械的に分ける。"""
+
+    del context
+    selections: list[dict[str, Any]] = []
+    assessments: list[dict[str, Any]] = []
+    for item in payload.get("selections") or []:
+        if not isinstance(item, dict):
+            continue
+        matched_hypothesis_ids = list(
+            dict.fromkeys(item.get("matched_hypothesis_ids") or ())
+        )
+        selections.append(
+            {
+                "article_id": item.get("article_id"),
+                "reason": item.get("reason"),
+                "matched_hypothesis_ids": matched_hypothesis_ids,
+            }
+        )
+        assessments.append(
+            {
+                "article_id": item.get("article_id"),
+                "legal_function": item.get("legal_function"),
+                "summary": item.get("summary"),
+                "matched_hypothesis_ids": matched_hypothesis_ids,
+            }
+        )
+    normalized = {
+        "selections": selections,
+        "assessments": assessments,
+        "reason": payload.get("reason"),
+    }
+    return _normalize_search_reselection_transport_payload(normalized)
+
+
+def _validate_selected_search_assessments(
+    payload: dict[str, Any],
+    context: SolverContext,
+) -> None:
+    """選択候補だけに意味評価があり、選択と評価が対応するか検証する。"""
+
+    del context
+    selections = payload.get("selections") or []
+    assessments = payload.get("assessments") or []
+    selected_ids = [
+        item.get("article_id") for item in selections if isinstance(item, dict)
+    ]
+    assessment_ids = [
+        item.get("article_id") for item in assessments if isinstance(item, dict)
+    ]
+    if len(selected_ids) != len(set(selected_ids)):
+        raise ModelProtocolError("selected search candidates must be unique")
+    if assessment_ids != selected_ids:
+        raise ModelProtocolError(
+            "selected search candidate assessments must match selections"
+        )
+    try:
+        SearchAssessmentDecision.model_validate({"assessments": assessments})
+    except ValidationError as exc:
+        detail = exc.errors(include_url=False, include_input=False)[0]
+        raise ModelProtocolError(
+            f"search assessment contract invalid: {detail['msg']}"
+        ) from exc
+
+
 def _attach_selected_hypotheses_to_assessments(
     assessment_payload: dict[str, Any],
     selection_payload: dict[str, Any],
@@ -6708,7 +6844,9 @@ def _validate_search_assessment_payload(
                 "search assessment references unknown hypothesis IDs"
             )
     try:
-        SearchAssessmentDecision.model_validate(payload)
+        SearchAssessmentDecision.model_validate(
+            {"assessments": payload.get("assessments") or []}
+        )
     except ValidationError as exc:
         detail = exc.errors(include_url=False, include_input=False)[0]
         raise ModelProtocolError(

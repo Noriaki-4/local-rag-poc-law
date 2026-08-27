@@ -30,7 +30,7 @@ Tool結果取得後
 通常時：solver_identity + integration + solver_common
                               + solver_tools / solver_completion
 
-Cycle境界：取得本文の評価 ──→ 下位規範依存の評価 ──→ Cycleの終了判断
+Cycle境界：取得本文と下位規範依存の統合 ──→ Cycleの終了判断
            各処理 = 専用Prompt + 専用入力 + 専用schema + 専用完了確認
 ```
 
@@ -48,12 +48,11 @@ Cycle境界：取得本文の評価 ──→ 下位規範依存の評価 ──
 | `hypothesis_generation` | hypothesis_generationのみ | HypothesisがないWorkItemを1件受け取り、検索前の暫定的な法的命題を作る。 |
 | `search_planning` | search_planningのみ | 入力済みHypothesisを検証する今回の`legal_search`要求を作る。 |
 | `integration` | 通常はidentity + integration + common + tools + completion。未解決の下位規範依存がある場合はidentity + dependency_action + tools | 通常はToolResultを評価して次の行動または完了を決める。未解決の下位規範依存がある場合は、その依存に対する次のToolRequestだけを専用契約で決める。 |
-| `observation_integration` | observation_integrationのみ | 取得本文を既存Hypothesisへ反映する。WorkItem進捗は後続のDependency Assessment後にProgramが導出し、次の行動は別処理で決める。 |
-| `dependency_assessment` | dependency_assessmentのみ | 本文評価後に、下位規範確認が不要・追加探索が必要・確認済みのいずれかを判断する。 |
+| `evidence_integration` | evidence_integrationのみ | WorkItemごとにHypothesis反映と下位規範確認を一つの判断で行う。独立WorkItemは並列評価し、Programが差分を結合してWorkItem進捗を導出する。 |
 | `cycle_close` | cycle_closeのみ | 直前の本文評価を前提に、完了または次Cycleへの引継ぎだけを決める。 |
 | `finalization` | identity + finalization + common + completion | 実行上限時に追加Toolなしで、確認済み範囲と未確認範囲を分けた回答を作る。 |
 | `reviewer_revision` | identity + reviewer_revision + common + tools + completion | Reviewer Findingを全件処理し、回答修正または追加調査を決める。 |
-| `search_selection` | search_review → search_reselection | OpenSearch候補を全件要約・対応付けし、今回本文取得する候補を決める。規律主体は本文取得後に確認する。 |
+| `search_selection` | search_selectionのみ | OpenSearch候補を全件比較し、同じ判断内で今回本文取得する候補を決める。詳細評価は選択候補だけ返し、非選択候補はProgramが機械的に保留する。 |
 | `graph_selection` | graph_reviewのみ | 新しい1ホップGraph候補を差分評価し、本文取得する候補と保留・除外を決める。 |
 
 `search_selection`と`graph_selection`は同じSolverの処理モードです。任意実行のReviewer Agentではありません。
@@ -92,14 +91,13 @@ Anthropicの「明確で直接的な指示、必要時だけ順序付き手順�
 | `solver_hypothesis_generation.md` | 初回Step 2。Hypothesisがない既知WorkItem 1件から、法的仮説と未確認の`gaps`を立案する。 |
 | `solver_search_planning.md` | 初回Step 3。既知Hypothesisに対する`legal_search`要求の作成。 |
 | `solver_integration.md` | 観察結果の評価、状態更新、下位規範監査、次の行動。 |
-| `solver_observation_integration.md` | 取得本文を既存Hypothesisへ反映する単一責務の判断。WorkItem完了は出力しない。 |
-| `solver_dependency_assessment.md` | 本文評価を前提に、下位規範依存の状態だけを判断する。 |
+| `solver_evidence_integration.md` | 取得本文のHypothesis反映と、同じ確認事項の下位規範確認を一つの判断で行う。WorkItem完了は出力しない。 |
 | `solver_dependency_action.md` | `needs_action`の下位規範依存について、再利用・検索・Graph探索・本文取得の次の行動だけを決める。 |
 | `solver_cycle_close.md` | Cycle終了と次Cycleへの構造化引継ぎ。 |
 | `solver_finalization.md` | `finalize_only=true`時の限定最終化。 |
 | `solver_reviewer_revision.md` | Reviewer Findingの受領、反映、反論、再調査。 |
-| `solver_search_review.md` | OpenSearch候補の見出しと検索抜粋から、候補自身の内容を要約・分類する。Hypothesisを同時に渡さず、その内容に引きずられた要約を防ぐ。 |
-| `solver_search_reselection.md` | 前段の短い候補要約をHypothesisと照合し、本文取得候補と対応Hypothesisを選ぶ。 |
+| `solver_search_selection.md` | OpenSearch候補を全件比較し、選択候補の内容評価、Hypothesis対応、本文取得判断を一つの出力で返す。 |
+| `solver_search_review.md` / `solver_search_reselection.md` | 過去fixtureの単機能診断用。本番経路では使用しない。 |
 | `solver_graph_review.md` | Graph差分候補の`select / defer / reject`と本文取得順。 |
 | `solver_*_check.md` | 対応する処理の入力後に置く、短い出力前完了確認。処理本体の手順や新しい出力項目は定義しない。 |
 | `minimal_hypothesis_diagnostic.md` | 本番Promptを合成せず、質問分解・WorkItem・具体的な法的仮説だけを実モデルで切り分ける診断用Prompt。本番Profileでは使用しない。 |
@@ -117,7 +115,7 @@ Search Reviewで保留した候補と、本文取得が未完了の選択候補�
 2. 未評価OpenSearch候補があるか
 3. Reviewer Findingがあるか
 4. `finalize_only=true`か
-5. `cycle_close_required=true`か。この場合は取得本文の評価、下位規範依存の評価、Cycle終了判断の順に呼び出す
+5. `cycle_close_required=true`か。この場合は取得本文と下位規範依存の統合、Cycle終了判断の順に呼び出す
 6. 初回でWorkItemがまだないか
 7. HypothesisがまだないWorkItemがあるか
 8. 初回HypothesisはあるがToolをまだ実行していないか

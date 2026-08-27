@@ -77,7 +77,7 @@ LLM API要求
 固定した代表fixtureから作る基準成果物だけをGit管理する。成果物は手編集せず、Prompt asset、Pydantic契約、
 Projectorが作る入力から再生成する。API送信処理と成果物出力処理が別々にPromptやschemaを組み立ててはならない。
 
-第二期Step 1では、research、検索候補評価・再選択、Graph候補評価、integration、Cycle終了・最終化、
+第二期Step 1では、research、検索候補評価・取得選択、Graph候補評価、Evidence統合、Cycle終了・最終化、
 契約修復、任意Reviewerの代表入力を対象にする。OpenAI、Anthropic、Ollamaの各輸送方式について、
 実送信内容と成果物のPrompt・schema・hashが一致することをテストする。
 

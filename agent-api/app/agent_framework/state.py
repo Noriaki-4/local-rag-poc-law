@@ -518,7 +518,7 @@ class SearchCandidateReview(FrameworkModel):
     )
     assessments: tuple[SearchCandidateAssessmentRecord, ...] = Field(
         default=(),
-        description="選択・保留を問わず、全候補についてSolverが行った意味評価。",
+        description="本文取得対象に選んだ候補についてSolverが行った意味評価。",
     )
     deferred_article_ids: tuple[str, ...] = Field(
         description="関連する可能性はあるが現在の取得枠では選ばなかった候補Article ID。",

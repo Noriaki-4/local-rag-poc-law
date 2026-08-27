@@ -60,10 +60,10 @@ Neo4jから指定条件の1ホップ候補を取得する
 
 | ID | 優先度 | status | 課題 | 現在地 | 次の確認 |
 |---|---|---|---|---|---|
-| `LR-001` | P0 | 対応中 | 質問から必要な検索仮説を漏れなく作る | Profile v289でHypothesisがないWorkItemを1件ずつ処理する方式へ変更した際、元質問、`action_actor`及び`gaps`をHypothesis生成契約から落としたため、主体の推測と抽象的な命題が再発した。v300で`statement`をWorkItemへの回答を構成する回答項目として定義し、追加の未確認事項がない`gaps=[]`を許可した。v301でWorkItem最大24件、Hypothesis最大4件／WorkItemという意味上の上限をProvider schemaから削除した。v302で分割単位を「法令本文の一つの規定内容で個別に支持又は否定できる命題」と明確化した。v303では1 WorkItemずつ処理するHypothesis生成入力から元質問全体を外し、WorkItemを唯一の作業範囲とした。`gpt-4o-mini`の隔離実行では総合の成立条件へ他WorkItemの論点が混入する問題は解消した。一方、公告は4件に分かれたが一部`statement`に複数事項が残り、広い例外は抽象的な1件に留まった。`action_actor`はWorkItemだけを正本とし、Hypothesisには複製しない | 公開買付けの公告・例外・総合WorkItemを隔離実行し、WorkItem外の論点を混ぜず、検索対象を選べる具体的なHypothesisが生成されることを確認する |
+| `LR-001` | P0 | 対応中 | 質問から必要な検索仮説を漏れなく作る | Profile v289でHypothesisがないWorkItemを1件ずつ処理する方式へ変更した際、元質問、`action_actor`及び`gaps`をHypothesis生成契約から落としたため、主体の推測と抽象的な命題が再発した。v300で`statement`をWorkItemへの回答を構成する回答項目として定義し、追加の未確認事項がない`gaps=[]`を許可した。v301でWorkItem最大24件、Hypothesis最大4件／WorkItemという意味上の上限をProvider schemaから削除した。v302で分割単位を「法令本文の一つの規定内容で個別に支持又は否定できる命題」と明確化した。v303では1 WorkItemずつ処理するHypothesis生成入力から元質問全体を外し、WorkItemを唯一の作業範囲とした。`gpt-4o-mini`の隔離実行では総合の成立条件へ他WorkItemの論点が混入する問題は解消した。Profile v379のLuna総合問題では、質問の「必要な手続」を質問にない7内訳へ展開して未確認範囲を広げたため、v380で広い要求の抽象度を保つよう質問分解Promptを補った。v380のLuna `high`隔離実行は4 WorkItemを維持し、「必要な手続」を内訳へ展開せず合格した。`action_actor`はWorkItemだけを正本とし、Hypothesisには複製しない | 公開買付けの公告・例外・総合WorkItemを隔離実行し、WorkItem外の論点や質問にない内訳を追加せず、検索対象を選べるHypothesisが生成されることを確認する |
 | `LR-002` | P0 | 対応中 | 法令検索表現を作り、同一Cycle内でOpenSearchを適切に再検索する | 検索要求作成だけの隔離診断を追加した。Profile v290で`purpose`を確認内容、`query`を短い法令用語の組合せとして分離した。例外問題では直接例外と委任を1検索にまとめて法令表現を生成できたが、総合問題の検索語はまだ抽象的である | 個別語をPromptへ追加せず、LR-001のHypothesis具体性と実際のOpenSearch候補を合わせて評価する |
 | `LR-003` | P0 | 完了 | Graph由来Articleを起点に連続1ホップ探索する | `gpt-4o-mini`の実モデルtrace v7で、金商法27条の2→施行令7条、施行令7条→府令2条の5を別々の1ホップGraph要求として実行し、府令本文取得後にCycle 1で正常完了した | `lr_003_second_hop_integration_v1.json`、`lr_003_second_hop_graph_review_v1.json`、`lr_003_cycle_close_deferred_frontiers_v1.json`を回帰fixtureとして維持する |
-| `LR-004` | P0 | 対応中 | 複合問題の統合Decisionを成立させ、次の探索または完了へ進む | Observation Integration、Dependency Assessment、Cycle Closeを分離した。v375ではopen WorkItemに属する確認済みHypothesisの本文も最終化へ投影し、WorkItem全体の未確認部分と、本文で確認できた部分を分けた限定回答を可能にした。Haiku総合問題は`protocol_error`なく完了し、条件・対象・例外・基本手続を引用付きで回答した | 府令2条の5・10条をGraph候補選別で保留せず本文取得し、総合問題の必要Articleを満たすことを確認する |
+| `LR-004` | P0 | 対応中 | 複合問題の統合Decisionを成立させ、次の探索または完了へ進む | 細分化した判断間で対応IDと意味状態がずれる問題に対し、v376で候補評価と本文取得選択、取得本文評価と下位規範確認をそれぞれ一つのLLM判断へ統合した。Cycle Closeは状態更新と混ぜず独立させる。Graph候補20件の全件理由が8,192出力tokenを使い切ったため既定pageを10件へ縮小し、要約・理由・gapへ短い上限を設けた。Luna `high`総合問題では、3ページ目に新規10件と過去ledger 20件が同時入力され再び上限へ到達したため、Graph Reviewの入出力を現在batchだけへ限定した。ledgerはCaseStoreに保持し、Cycle境界と後続Integrationへ用途別投影する。10候補の比較は分割せず、Graph Reviewの初期出力枠をintegration共通値へ揃えた | 同じ総合問題で、府令2条の5・10条を含む必要Articleへの到達、Hypothesis・Dependency・Cycle遷移の整合を確認する |
 | `LR-005` | P1 | 検証待ち | Haikuと`gpt-4o-mini`の役割を分けて評価する | `gpt-4o-mini`は単一責務の隔離Promptでは質問分解・具体的Hypothesis生成ができたが、実際の長い入力と複数処理ではHypothesisの抽象化、論点の結合、主体・候補対応の揺れが残った。過去の`protocol_error`、重複行動、ID不整合の多くはPrompt・契約・実装の不備であり、GPT固有の失敗とは扱わない。現在はHaikuを法令検索の主評価モデル、`gpt-4o-mini`を承認済みfixture以降の安価な構造デバッグ用とする | 同じ承認済みcheckpointを両モデルで各1回再生し、意味判断差とProvider・契約不備を分離して記録する。OpenAIの429は回答品質と別に扱う |
 | `LR-006` | P1 | 要設計 | 意味分類coverage不足時にも逆引き検索爆発と取りこぼしを両立させる | publish済み意味関係ならselectorで絞れるが、未分類範囲でraw `REFERENCES/to_subject`を使うと高fan-inになる | 限定fallbackの発動条件、scope上限、coverage不足の表示、限定回答条件を決める |
 | `LR-007` | P1 | 未着手 | CycleとStepを再開可能な状態として保存する | WorkItem、Hypothesis、Evidence、Graph review履歴はあるが、目標の`CycleRecord / StepRecord / ExplorationState`は未実装 | Tool観察後の中断から同じStepを再開し、別Cycleとして数えないfixtureを通す |
@@ -75,21 +75,22 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-013` | P0 | 検証待ち | Provider共通の小さいSolver輸送契約へ統一する | v154で全Providerを同じ処理段階別schemaへ統一し、Anthropic専用sidecarを新規経路から外した。実行時IDはenumへ複製せず共通validatorで検証する。代表Cycle Close schemaは14,494文字から7,014文字へ減少し、全895テストに合格した | 同じcheckpointをHaikuで再生し、Integrationがgrammar complexityの400エラーにならないことを確認する |
 | `LR-014` | P1 | 検証待ち | Haikuで承認した中間状態から安価なモデルで後続処理を再生する | checkpointの明示承認をpromotion時に記録し、指定Provider・modelで1回のSolver処理を再生する`replay_agent_checkpoint.py`を実装した。APIを使わない単体テストは合格した | Haikuの正常中間状態を承認済みfixtureへ昇格し、`gpt-4o-mini`、同じcheckpointのHaikuの順に実モデル再生する |
 | `LR-015` | P0 | 検証待ち | 初回Researchを単一責務のStepへ分け、要求をWorkItemとそれ以外へ欠落なく分解する | Profile v156で同一Cycle内の要求分解、仮説立案、検索要求作成を実装した。各完成Promptは単独で読めるH1を持ち、処理順のStep番号を含めない。一時的な段階比較コードを整理した後の全900テストに合格した | 別分野fixtureと公開買付けE2Eを`gpt-4o-mini`で確認し、最終的にHaikuで品質確認する |
-| `LR-016` | P0 | 検証待ち | Tool観察の意味統合とCycle Closeを単一責務のStepへ分ける | v330でObservation出力をHypothesis差分だけに限定し、ProgramがWorkItem完了を機械導出するようにした。v331ではDependency Assessment Promptを実際の入出力階層に合わせて簡素化した | 同じcheckpointをHaikuで再生し、本文の部分確認、WorkItem機械導出、Cycle判断を確認する |
+| `LR-016` | P0 | 完了 | Tool観察の意味統合とCycle Closeの境界を保つ | v376でObservation IntegrationとDependency AssessmentをEvidence Integrationへ統合した。全open WorkItemの一括処理は総合問題の10 Hypothesis・47 Evidenceで16,384出力tokenを使い切ったため、意味的に独立したWorkItemごとの統合判断へ戻し、最大4件を並列実行する。WorkItem内の本文評価と下位規範判断は分けず、Programは差分結合とWorkItem完了を機械処理する。Cycle Closeは更新済み状態から遷移と回答だけを扱う | Profile v379・Luna `high`の総合問題で、WorkItem別の本文部分確認、下位規範状態、WorkItem機械導出、3 Cycleの遷移が契約違反なく完了した |
 | `LR-017` | P0 | 対応中 | 検索候補の規律主体と行為対象を安定して区別する | Profile v310の隔離診断で、検索抜粋と`action_actor=不明`から行為者を確定する結果が実行ごとに揺れた。Profile v311では本文取得前の専用主体照合を廃止し、内容面でHypothesisに対応する候補を本文取得可能にした。旧主体照合値は保存互換だけに残し、Solver入力と候補選択条件には使わない | 公開買付け3問で、主体未確定の必要Articleが本文取得前に除外されず、取得本文を評価するLLMが主体の一致・分岐を判断できることを確認する。利用者確認と条件付き回答はLR-020で扱う |
 | `LR-018` | P0 | 完了 | Graph探索が必要な未解決事項があってもSolverがGraph検索を要求しない | 次Cycle開始時の保留OpenSearch候補を自動Search Selectionへ戻さず、Integrationで既知候補・Graph・再検索を比較するよう修正した。Graph selectorのmode・predicate・directionを分岐schemaで拘束し、同一Graph要求と本文取得要求は選択内容を保ったまま輸送時に統合する | Cycle 2 fixtureで府令10条を含む既知候補の本文取得へ進むこと、および候補を除いたGraph必須状態で`27条の2 / IMPLEMENTS / from_subject`の1要求を返し共通契約を通過することを`gpt-4o-mini-2024-07-18`で確認済み |
 | `LR-019` | P0 | 検証待ち | 統合の意味的な行動選択を違反別契約からSolver loopへ戻す | v373で、Promptは処理上限内のWorkItem選択を許す一方、validatorが全`needs_action`への同時Graph要求を強制する不整合を再現した。v374で全件同時強制を削除し、LLMが今回選んだWorkItemだけを進め、残りを後続stepへ保持する契約へ統一した。Haiku総合問題でGraph要求と後続Graph Reviewが実行され、`protocol_error`は解消した | 公告・例外の回帰と、総合問題で複数の`needs_action`が次stepへ欠落せず残ることを確認する |
 | `LR-020` | P1 | 要設計 | 検索又は結論を変える質問の欠落・曖昧さを一方的に補わず、利用者へ確認する | 現在は行為者が不明でも`action_actor=不明`として調査を続ける。これは一般論の質問には適切だが、確認対象となる行為や主体の欠落により複数の検索経路・法的結論が成立する場合を、検索前に止める契約がない。検索後に候補本文から異なる規律主体が判明する場合もある | まず検索前の独立した質問確認をStreamlitへ追加し、必要な場合だけ確認・質問文修正・利用者確認を行う。検索後の分岐で必要となるCaseの確認待ち・再開は次段階として設計する |
-| `LR-021` | P0 | 対応中 | 検索候補の内容評価を単一責務にする | Profile v309でSearch Assessmentを本文取得候補の要約・法的機能分類・内容面のHypothesis対応だけに限定した。Profile v311では、その対応結果を候補選択へ直接渡し、検索抜粋に基づく専用主体照合を削除した。既知の検索Request IDはProgramが付与し、意味判断はLLMに残す | 公告、例外、総合の順に内容評価と候補選択を隔離検証し、その後に本文取得後の統合を確認する |
+| `LR-021` | P0 | 対応中 | 検索候補の内容評価と取得選択を整合させる | v376でSearch AssessmentとReselectionを一つのSearch Selectionへ統合した。LLMは全候補を比較するが、出力は選択した最大5件の内容評価・対応Hypothesis・選択理由だけとする。Programはこの単一出力を保存用評価と本文取得選択へ分け、非選択IDを入力候補との差集合として保留する。意味上の採否はLLM、既知ID・件数・構造変換はProgramが扱う | Luna `high`の総合問題で、対応Hypothesisと選択Articleが同じ判断内で整合し、必要候補が後段で脱落しないことを確認する |
 | `LR-022` | P0 | 未着手 | 後続Cycleで既存WorkItemへ代替Hypothesisを追加する | 設計ではHypothesisの`statement`を別の意味へ上書きせず、見立てを変える場合は新しいHypothesisを追加する。しかし現行の段階別経路は、Hypothesisが1件もないopen WorkItemだけを生成処理へ送り、本文評価は既存Hypothesisの更新だけを許す。そのため、初期仮説が反証された場合も、同じWorkItemへ新しい見立てを追加して次Cycleで仕切り直せない | H1が`contradicted`または新しい規律構造が判明したfixtureで、H1と根拠を履歴として保持し、Cycle 2で同じWorkItemへ新IDのH2を追加できることを確認する。検索方法だけを変える場合は不要なHypothesisを追加しない |
 | `LR-023` | P0 | 対応中 | Hypothesisに合うGraph方向と候補の対応先を安定して選ぶ | Haiku・Profile v375では一部の下位規範探索を`outgoing`として失敗した。Luna `low`では金商法27条の2・27条の3から`incoming`を選び、府令2条の5・10条を発見できた。一方、定義府令14条の2から上位規定を探す要求にも`incoming`を選び、0件となった。府令10条の本文未取得は方向ではなく、Graph Reviewの取得優先順位と後続Cycleでの再採用不足である | `REFERENCES`の物理方向と探索目的の対応をfixtureで固定する。Lunaの方向選択、Graph候補の全open Hypothesisへの再対応付け、`relevant_deferred`候補の後続再採用を別々に検証する |
 | `LR-024` | P0 | 対応中 | Hypothesisが支持された内容と未確認事項を同時に保持する | Haiku・Profile v375では、H-3は府令2条の5、H-4は府令10条を未取得だった。それぞれ上位規定から一部内容を確認できたが、`judgment=supported`への更新と同時に`gaps=[]`となった。WorkItemは下位規範Dependencyにより`open`を維持したものの、Hypothesis単体では必要な具体的内容を確認済みのように見える不整合が残った | 取得本文が命題の一部を支持しても、WorkItemへの回答に必要な未取得の具体的内容を`gaps`へ残す。府令2条の5・10条を未取得のfixtureでH-3・H-4の`gaps`が保持され、取得後にだけ解消されることを確認する |
 
 ### 3.1 LR-016 Tool観察とCycle Closeの単一責務化
 
-新しいArticle本文を取得した後は、取得枠を使い切っていても、まず同じSolverのObservation Integration
-で本文を評価し、Hypothesisの意味状態を更新する。Dependency Assessment後、AdapterはHypothesis、Evidence、
-Dependency状態からWorkItem完了差分を機械導出して更新後のread modelへ投影し、続けてCycle Closeを呼ぶ。
+新しいArticle本文を取得した後は、取得枠を使い切っていても、まず同じSolverのEvidence Integration
+でWorkItemごとにHypothesisと下位規範確認を同時に更新する。独立WorkItemは最大4件を並列評価し、
+Adapterはその差分を入力順に結合する。AdapterはHypothesis、Evidence、Dependency状態から
+WorkItem完了差分を機械導出して更新後のread modelへ投影し、続けてCycle Closeを呼ぶ。
 Cycle Closeは本文評価やTool選択を兼務せず、
 通常完了または次Cycleへの引継ぎだけを判断する。2つの結果は1件の`SolverDecision`へ正規化し、共通validatorを
 通過した後にCaseStoreへ一度だけ適用する。
@@ -694,7 +695,7 @@ Profile v375では、例外のH-3と手続のH-4について、上位規定の�
 
 完了条件は次のとおりとする。
 
-- Observation Integrationは、取得本文で確認できた内容と、まだ本文を取得していない内容を分けて評価する。
+- Evidence Integrationは、取得本文で確認できた内容と、まだ本文を取得していない内容を分けて評価する。
 - `judgment=supported`への更新だけを理由に`gaps`を空にしない。
 - `gaps`を解消するかはSolverが本文の意味から判断し、ProgramはID、型及び参照整合だけを検証する。
 - 府令2条の5・10条を取得していない固定fixtureではH-3・H-4の`gaps`が残り、取得後のfixtureでは
@@ -888,6 +889,7 @@ LR-010  必要性と費用を再評価して全件分類を再開
 | 2026-08-25 | Profile v275・公開買付け3問・`gpt-4o-mini` | 公告は必要Article 2/2だが回答要点不足。例外は2/3取得後、総合は0/6取得後に、いずれもCycle 2の`finalize`とTool要求の矛盾で停止。総合では27条の22の2を誤選択 | `tob_announcement_final_answer_incomplete_v275.json`、`tob_exceptions_cycle2_finalize_tool_conflict_v275.json`、`tob_overview_issuer_actor_mismatch_v275.json`、`tob_overview_cycle2_finalize_tool_conflict_v275.json` |
 | 2026-08-25 | Profile v291・公開買付け3問・`gpt-4o-mini` | 公告だけ正常完了。3問合計で必要Article 2/11、回答要点4/12。例外と総合は`next=finalize`、`answer=null`、Tool要求ありの矛盾を修復できず`protocol_error`。候補内容評価と主体照合の対応ID不一致、および取得候補の誤選択を確認 | `eval-results/e2e-v291-gpt4omini/`、`eval-results/agent-framework-diagnostics/legal-beb78a10fd89425eb78de503e5829a93.jsonl`、`legal-07f80109b5074079851b241bccfb32ce.jsonl`、`legal-985c7b715e12438cbf2404d0257625a6.jsonl` |
 | 2026-08-27 | Profile v375・公開買付け総合・Haiku | 全`needs_action`同時Graph要求の矛盾と、open WorkItemの確認済み根拠を最終化から除外する不備を修正。全1059テスト合格。実モデルは2 Cycleで正常完了し、条件・対象・例外・基本手続を引用付きで回答した。府令2条の5・10条は本文未取得のため完全回答は未達 | `eval-results/e2e-v375-haiku-overview.json`、`eval-results/agent-framework-diagnostics/legal-4d596e7ddc0e4a039b96e4be77de48eb.jsonl` |
+| 2026-08-27 | Profile v379・公開買付け総合・Luna `high` | Search SelectionとWorkItem別Evidence Integrationを統合し、独立WorkItemを最大4件並列化した。Graph Reviewは現在batchだけを入出力し、理由を短文化した。3 Cycleを`protocol_error`なく完了し、必要Article 6/6を取得した。回答は確認済み範囲を引用したが、「必要な手続」を広く分解した未確認Hypothesisが残り完全回答は未達 | `eval-results/agent-framework-diagnostics/legal-4d8c773f37004c9caf86a46664a4a22e.jsonl` |
 ### 2026-08-25: 質問分解と仮説立案の主体表現を分離
 
 - WorkItemの主体情報を`action_actor`、`target_actor`、`actor_relation`へ分離し、Hypothesisには重複保存しない。

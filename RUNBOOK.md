@@ -104,13 +104,13 @@ curl -s https://api.anthropic.com/v1/messages \
 
 `404 model not found` の場合は、そのキーではモデルIDが使えない。契約プランで利用可能な別のモデルIDに変える。
 
-OpenAI APIでは`gpt-5.6-luna`、reasoning effort `low`を基準設定とする。
+OpenAI APIでは、統合処理の検証中は`gpt-5.6-luna`、reasoning effort `high`を基準設定とする。
 全役割を一括で切り替える`.env`例:
 
 ```bash
 LLM_PROVIDER=openai
 LLM_MODEL=gpt-5.6-luna
-OPENAI_REASONING_EFFORT=low
+OPENAI_REASONING_EFFORT=high
 OPENAI_API_KEY=sk-...
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MAX_TOKENS_CEILING=16384
@@ -1086,7 +1086,7 @@ Reviewerは`AGENT_FRAMEWORK_REVIEWER_ENABLED=true`を明示した場合だけ有
 `ReviewerView`を機械投影する。Reviewerは`accept`または構造化Findingを返し、差戻し後のSolverは
 全finding IDへ`addressed / disputed`を1回ずつ返す。Programは既知IDと全件性だけを検証し、
 回答修正か追加調査かを決めない。既定の差戻し上限は1回で、再確認も`revise`なら`review_failed`となる。
-検索時LLMの現在の基準検証はOpenAI API `gpt-5.6-luna`、reasoning effort `low`を
+検索時LLMの現在の基準検証はOpenAI API `gpt-5.6-luna`、reasoning effort `high`を
 researchとintegrationの両方へ設定して行う。共通fixtureと公開買付け3問が安定するまでは、
 Haiku比較を同時に進めない。不具合時はモデル性能だけを原因とせず、
 実装、契約の`description`、Prompt、Provider輸送、入力、`trace.agentFramework`を先に調べる。
@@ -1107,14 +1107,16 @@ cycle_close / finalization / reviewer_revision / search_selection / graph_select
 また、ローカルのSource、Prompt、契約またはProfileを変更した後は、起動中の`agent-api`をそのまま
 使わない。コンテナの作成時刻が新しく見えても、最後の変更前にbuildされたImageである可能性がある。
 実モデル検証前に、必ず最後の変更を含めて`--build --force-recreate`する。
-次は全SolverをLuna `low`にし、診断snapshotを保存する例である。
+次は全SolverをLuna `high`にし、診断snapshotを保存する例である。
 
 ```bash
 LLM_PROVIDER=openai \
 LLM_MODEL=gpt-5.6-luna \
-OPENAI_REASONING_EFFORT=low \
+OPENAI_REASONING_EFFORT=high \
 AGENT_FRAMEWORK_REVIEWER_ENABLED=false \
 AGENT_FRAMEWORK_DIAGNOSTICS_MODE=snapshot \
+AGENT_FRAMEWORK_MODEL_TIMEOUT_SEC=180 \
+AGENT_FRAMEWORK_MAX_WALL_TIME_SEC=420 \
 docker compose up --build -d --force-recreate agent-api
 ```
 
@@ -1245,7 +1247,7 @@ agent-api/.venv/bin/python scripts/export_agent_model_call_artifacts.py \
   --fixture agent-api/tests/fixtures/framework/tob_overview_cycle1_three_articles_before_cycle_close_v1.json \
   --provider openai \
   --stage observation_integration \
-  --output eval-results/model-call-review/step-4-observation-integration/openai
+  --output eval-results/model-call-review/step-4-evidence-integration/openai
 
 agent-api/.venv/bin/python scripts/export_agent_model_call_artifacts.py \
   --fixture agent-api/tests/fixtures/framework/tob_overview_cycle1_three_articles_before_cycle_close_v1.json \
@@ -1260,8 +1262,8 @@ agent-api/.venv/bin/python scripts/export_agent_model_call_artifacts.py \
 Step 3の`input.json.available_tools`には、本番の`ToolDefinition`から取得した正規名、用途、入力Schema、
 戻り値説明が含まれる。fixture内に古いTool定義が残っていても、成果物生成時は本番定義を正本とする。
 
-Cycle境界の固定成果物は`step-4-observation-integration`と`step-5-cycle-close`に分ける。
-前者は取得本文を既存状態へ反映する判断、後者はその反映結果を前提に完了または次Cycleへの引継ぎだけを
+Cycle境界の固定成果物は`step-4-evidence-integration`と`step-5-cycle-close`に分ける。
+前者はWorkItemごとに取得本文を既存Hypothesisへ反映し、同じ確認事項の下位規範状態も判断する。後者はその反映結果を前提に完了または次Cycleへの引継ぎだけを
 判断する。両方の`input.json`と`output_schema.json`に、本文取得候補、検索候補、Tool定義が混入していないことを
 確認する。実行時IDの既知性はProvider schemaのenumではなく、共通validatorが検証する。
 
@@ -1459,7 +1461,7 @@ Article本文等のEvidence本文は`AGENT_FRAMEWORK_MAX_MATERIAL_EVIDENCE_CHARS
 `graph_review_batch`と、全評価済みfrontierの短い`graph_review_ledger`だけを載せる。同じGraph navigation情報は
 `evidence_manifest`、`recent_tool_results.evidence_ids`、`navigation_evidence_ids`、`omitted_evidence_ids`へ
 再掲載しない。CaseStateのEvidenceとToolResultは監査用の正本として削除しない。
-差分batchは`AGENT_FRAMEWORK_MAX_GRAPH_CANDIDATES_PER_REVIEW_BATCH`（既定20）で機械的にpage分割し、
+差分batchは`AGENT_FRAMEWORK_MAX_GRAPH_CANDIDATES_PER_REVIEW_BATCH`（既定10）で機械的にpage分割し、
 未提示候補を関連なしまたは不存在として扱わない。
 差分batchの候補はArticle ID、法令名・見出し、起点、relation、取得状態を失わず、過去候補はledgerから消えない。
 候補の法的関連性はSolverが判断する。Prompt全体が
@@ -1488,7 +1490,7 @@ SolverDecisionが未知ID、上限超過、未終了WorkItem等の構造契約�
 
 各`prompt-section`とPython側の適用registryはテストで完全一致を確認する。Prompt編集時はsection markerと
 `${...}`形式のtemplate変数を変更せず、`agent-api/tests/test_prompt_assets.py`を実行する。
-Legal Profileの全体上限は既定300秒である。通常探索・契約修復用の時間を使い切った場合も、予約済みの
+Legal Profileの全体上限は既定420秒、Luna `high`の1回のmodel timeoutは既定180秒である。通常探索・契約修復用の時間を使い切った場合も、予約済みの
 最終化時間へ制御を戻し、未確認事項を限定回答として明示する。時間切れを法的完了へ読み替えない。
 
 新FrameworkのLegal Domainは、法令検索の第1位Articleについて取得済み一致chunkを検索順位どおり

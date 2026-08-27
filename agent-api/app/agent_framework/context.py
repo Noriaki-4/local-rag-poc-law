@@ -382,6 +382,15 @@ class SearchAssessmentInput(FrameworkModel):
     )
 
 
+class SearchSelectionInput(SearchAssessmentInput):
+    """検索候補の理解と本文取得対象の選択を一度に行うread model。"""
+
+    current_fetch_request_capacity: int = Field(
+        ge=0,
+        description="今回1回の本文取得要求で選べるArticle数の上限。",
+    )
+
+
 class ResearchStepWorkItem(FrameworkModel):
     work_item_id: str = Field(description="Programが付与した既知WorkItem ID。")
     question: str = Field(description="このWorkItemで確認する1つの法的事項。")

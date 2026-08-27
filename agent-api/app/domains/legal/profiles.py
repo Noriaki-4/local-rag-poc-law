@@ -25,7 +25,7 @@ def legal_agent_profile() -> AgentProfile:
     timeout_sec = settings.agent_framework_model_timeout_sec
     return AgentProfile(
         name="legal-default",
-        version="375",
+        version="380",
         provider=settings.llm_provider,
         solver_research=_model_profile(
             model=settings.agent_framework_research_model,
@@ -91,10 +91,10 @@ def legal_agent_profile() -> AgentProfile:
             model=integration_model,
             max_output_tokens=integration_max_tokens,
             timeout_sec=timeout_sec,
-            system_prompt=_read_prompt("solver_observation_integration.md"),
+            system_prompt=_read_prompt("solver_evidence_integration.md"),
             followup_system_prompt=_read_prompt("solver_cycle_close.md"),
             completion_check_prompt=_read_prompt(
-                "solver_observation_integration_check.md"
+                "solver_evidence_integration_check.md"
             ),
             followup_completion_check_prompt=_read_prompt(
                 "solver_cycle_close_check.md"
@@ -143,14 +143,15 @@ def legal_agent_profile() -> AgentProfile:
         ),
         solver_search_review=ModelCallProfile(
             model=integration_model,
-            max_output_tokens=min(integration_max_tokens, 4096),
+            max_output_tokens=integration_max_tokens,
             timeout_sec=timeout_sec,
-            system_prompt=_read_prompt("solver_search_review.md"),
+            system_prompt=_read_prompt("solver_search_selection.md"),
+            # 分割済みfixtureの隔離診断互換。実行経路では使用しない。
             followup_system_prompt=_read_prompt(
                 "solver_search_reselection.md"
             ),
             completion_check_prompt=_read_prompt(
-                "solver_search_review_check.md"
+                "solver_search_selection_check.md"
             ),
             followup_completion_check_prompt=_read_prompt(
                 "solver_search_reselection_check.md"
@@ -158,10 +159,7 @@ def legal_agent_profile() -> AgentProfile:
         ),
         solver_graph_review=ModelCallProfile(
             model=integration_model,
-            max_output_tokens=min(
-                integration_max_tokens,
-                4096,
-            ),
+            max_output_tokens=integration_max_tokens,
             timeout_sec=timeout_sec,
             system_prompt=_read_prompt("solver_graph_review.md"),
             completion_check_prompt=_read_prompt(

@@ -88,6 +88,8 @@ def test_question_decomposition_uses_only_question_and_small_contract() -> None:
     assert "Tool結果を受け取った後" not in rendered.instructions
     assert "共通ルール" not in rendered.instructions
     assert "Graph" not in rendered.instructions
+    assert "広い要求はその抽象度を保ち" in rendered.instructions
+    assert "質問にない内訳へ展開していないか" in rendered.instructions
     assert "<input_contract>" in rendered.instructions
     assert "`question`: 利用者が回答を求めている元の質問。" in (
         rendered.instructions
@@ -265,17 +267,10 @@ def test_cycle_boundary_artifacts_are_current() -> None:
         }
     )
     rendered_calls = {
-        "step-4-observation-integration": (
+        "step-4-evidence-integration": (
             render_observation_integration_model_call(context, profile)
         ),
-        "step-5-dependency-assessment": (
-            render_dependency_assessment_model_call(
-                context,
-                observation,
-                profile,
-            )
-        ),
-        "step-6-cycle-close": render_cycle_close_model_call(
+        "step-5-cycle-close": render_cycle_close_model_call(
             context,
             observation_with_dependency,
             profile,

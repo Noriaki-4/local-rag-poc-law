@@ -139,7 +139,7 @@ class Settings:
     openai_base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
     openai_api_key = os.getenv("OPENAI_API_KEY")
     _openai_reasoning_effort = os.getenv(
-        "OPENAI_REASONING_EFFORT", "low"
+        "OPENAI_REASONING_EFFORT", "high"
     ).strip().lower()
     openai_reasoning_effort = (
         _openai_reasoning_effort
@@ -391,7 +391,7 @@ class Settings:
     agent_framework_research_max_tokens = max(
         1024,
         min(
-            int(os.getenv("AGENT_FRAMEWORK_RESEARCH_MAX_TOKENS", "4096")),
+            int(os.getenv("AGENT_FRAMEWORK_RESEARCH_MAX_TOKENS", "8192")),
             anthropic_max_tokens_ceiling,
         ),
     )
@@ -423,7 +423,7 @@ class Settings:
     agent_framework_model_timeout_sec = max(
         10,
         min(
-            int(os.getenv("AGENT_FRAMEWORK_MODEL_TIMEOUT_SEC", "90")),
+            int(os.getenv("AGENT_FRAMEWORK_MODEL_TIMEOUT_SEC", "180")),
             180,
         ),
     )
@@ -465,7 +465,7 @@ class Settings:
             int(
                 os.getenv(
                     "AGENT_FRAMEWORK_MAX_GRAPH_CANDIDATES_PER_REVIEW_BATCH",
-                    "20",
+                    "10",
                 )
             ),
             200,
@@ -536,7 +536,7 @@ class Settings:
     agent_framework_max_wall_time_sec = max(
         agent_framework_finalization_reserve_sec + 1,
         min(
-            int(os.getenv("AGENT_FRAMEWORK_MAX_WALL_TIME_SEC", "300")),
+            int(os.getenv("AGENT_FRAMEWORK_MAX_WALL_TIME_SEC", "420")),
             600,
         ),
     )

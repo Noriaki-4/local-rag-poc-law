@@ -601,31 +601,9 @@ class AgentLoop:
                                 item.work_item_id,
                                 item.hypothesis_id,
                             )
-                            for item in (
-                                *(
-                                    candidate
-                                    for candidate in context.graph_review_batch.candidates
-                                    if candidate.content_status
-                                    in {"not_requested", "failed", "timeout"}
-                                ),
-                                *(
-                                    ledger_item
-                                    for ledger_item in context.graph_review_ledger
-                                    if (
-                                        ledger_item.review_status
-                                        == "relevant_deferred"
-                                        and ledger_item.content_status
-                                        in {"not_requested", "failed", "timeout"}
-                                        and ledger_item.deferred_resolution_action
-                                        != "no_longer_needed"
-                                    )
-                                    or (
-                                        ledger_item.review_status == "selected"
-                                        and ledger_item.content_status
-                                        in {"failed", "timeout"}
-                                    )
-                                ),
-                            )
+                            for item in context.graph_review_batch.candidates
+                            if item.content_status
+                            in {"not_requested", "failed", "timeout"}
                         },
                         deferred_frontiers={
                             item.frontier_item_id: (

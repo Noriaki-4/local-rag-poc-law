@@ -2,11 +2,13 @@
   "additionalProperties": false,
   "properties": {
     "decision_reason": {
-      "maxLength": 1200,
+      "description": "提示された取得本文をどの確認事項へ反映したかの短い説明。",
+      "maxLength": 400,
       "minLength": 1,
       "type": "string"
     },
     "dependency_decisions": {
+      "description": "同じWorkItemについて、起点規範から末端規範までの本文確認状態を判断した結果。",
       "items": {
         "additionalProperties": false,
         "properties": {
@@ -17,38 +19,6 @@
           "basis_evidence_ids": {
             "description": "状態判断に使ったgrounding Evidence ID。terminal_text_confirmedでは、委任元と末端下位規範をそれぞれ示すEvidenceをこの順で含め、両者のmetadata.articleIdが異なる必要がある。terminal_text_missingでは、判断に使える本文がなければ空配列でよい。",
             "items": {
-              "enum": [
-                "law-323AC0000000025-article-27_22_2-paragraph-1",
-                "law-323AC0000000025-article-27_22_2-paragraph-2",
-                "law-323AC0000000025-article-27_22_2-paragraph-3",
-                "law-323AC0000000025-article-27_22_2-paragraph-4",
-                "law-323AC0000000025-article-27_22_2-paragraph-5",
-                "law-323AC0000000025-article-27_22_2-paragraph-6",
-                "law-323AC0000000025-article-27_22_2-paragraph-7",
-                "law-323AC0000000025-article-27_22_2-paragraph-8",
-                "law-323AC0000000025-article-27_22_2-paragraph-9",
-                "law-323AC0000000025-article-27_22_2-paragraph-10",
-                "law-323AC0000000025-article-27_22_2-paragraph-11",
-                "law-323AC0000000025-article-27_22_2-paragraph-12",
-                "law-323AC0000000025-article-27_22_2-paragraph-13",
-                "law-323AC0000000025-article-27_2-paragraph-1",
-                "law-323AC0000000025-article-27_2-paragraph-1-item-1",
-                "law-323AC0000000025-article-27_2-paragraph-1-item-2",
-                "law-323AC0000000025-article-27_2-paragraph-1-item-3",
-                "law-323AC0000000025-article-27_2-paragraph-2",
-                "law-323AC0000000025-article-27_2-paragraph-3",
-                "law-323AC0000000025-article-27_2-paragraph-4",
-                "law-323AC0000000025-article-27_2-paragraph-5",
-                "law-323AC0000000025-article-27_2-paragraph-6",
-                "law-323AC0000000025-article-27_2-paragraph-7",
-                "law-323AC0000000025-article-27_2-paragraph-8",
-                "law-340CO0000000321-article-14_3_3-paragraph-1",
-                "law-340CO0000000321-article-14_3_3-paragraph-2",
-                "law-340CO0000000321-article-14_3_3-paragraph-3",
-                "law-340CO0000000321-article-14_3_3-paragraph-4",
-                "law-340CO0000000321-article-14_3_3-paragraph-5",
-                "law-340CO0000000321-article-14_3_3-paragraph-6"
-              ],
               "type": "string"
             },
             "maxItems": 30,
@@ -63,6 +33,7 @@
           },
           "reason": {
             "description": "statusを選んだ本文に基づく短い理由。",
+            "maxLength": 300,
             "minLength": 1,
             "type": "string"
           },
@@ -77,10 +48,6 @@
           },
           "work_item_id": {
             "description": "この依存判断が属する既知WorkItem ID。",
-            "enum": [
-              "wi-1",
-              "wi-2"
-            ],
             "type": "string"
           }
         },
@@ -97,10 +64,58 @@
       "maxItems": 2,
       "minItems": 2,
       "type": "array"
+    },
+    "update_hypotheses": {
+      "description": "取得本文の評価により判定または未確認事項を変更する既存Hypothesis。",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_ids": {
+            "description": "現在の判定とgapsの判断に直接使用したgrounding_evidence[].evidence_idの最小集合。metadata.articleIdやmetadata.sourceContentUnitIdは入れない。関連するだけのParagraph・Itemを全件入れない。unresolvedでも本文で確認できた部分があれば保持できる。",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 30,
+            "type": "array"
+          },
+          "gaps": {
+            "description": "statementに残る、本文でまだ確認すべき具体的情報。該当する情報がなければ空とする。",
+            "items": {
+              "maxLength": 300,
+              "type": "string"
+            },
+            "maxItems": 12,
+            "type": "array"
+          },
+          "hypothesis_id": {
+            "description": "更新する既存Hypothesisの完全一致ID。",
+            "type": "string"
+          },
+          "judgment": {
+            "description": "本文評価後の判定。",
+            "enum": [
+              "supported",
+              "contradicted",
+              "unresolved"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "hypothesis_id",
+          "judgment",
+          "evidence_ids",
+          "gaps"
+        ],
+        "type": "object"
+      },
+      "maxItems": 5,
+      "type": "array"
     }
   },
   "required": [
     "decision_reason",
+    "update_hypotheses",
     "dependency_decisions"
   ],
   "type": "object"

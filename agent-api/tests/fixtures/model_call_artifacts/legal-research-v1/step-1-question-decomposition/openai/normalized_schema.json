@@ -646,7 +646,7 @@
       "properties": {
         "assessments": {
           "default": [],
-          "description": "選択・保留を問わず、全候補についてSolverが行った意味評価。",
+          "description": "本文取得対象に選んだ候補についてSolverが行った意味評価。",
           "items": {
             "$ref": "#/$defs/SearchCandidateAssessmentRecord"
           },

@@ -36,7 +36,7 @@ def test_configure_openai_script_updates_env_without_printing_key(
     assert "LLM_MODEL=gpt-5.6-luna" in content
     assert "OPENAI_API_KEY=sk-test-secret" in content
     assert content.count("OPENAI_API_KEY=") == 1
-    assert "OPENAI_REASONING_EFFORT=low" in content
+    assert "OPENAI_REASONING_EFFORT=high" in content
     assert content.count("OPENAI_REASONING_EFFORT=") == 1
     assert "ANSWER_MODEL=claude-haiku-old" in content
     assert "sk-test-secret" not in completed.stdout
