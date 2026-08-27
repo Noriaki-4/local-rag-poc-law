@@ -189,8 +189,9 @@ class Hypothesis(FrameworkModel):
     gaps: tuple[str, ...] = Field(
         default=(),
         description=(
-            "statementに残る、法令本文で確定すべき基準、値、範囲その他の"
-            "具体的な規律要素。該当する要素がなければ空とする。抽象的な内容、"
+            "このHypothesisをWorkItemへの回答に使うため、法令本文でさらに確認すべき"
+            "基準、値、範囲その他の具体的な規律要素。statementがsupportedでも、"
+            "必要な下位規範本文が未確認なら保持する。該当する要素がなければ空とする。抽象的な内容、"
             "根拠条文、検索語、検索作業、WorkItemの言い換えは含めない。"
         ),
     )

@@ -75,8 +75,9 @@ class HypothesisUpdate(FrameworkModel):
     gaps: tuple[str, ...] = Field(
         default=(),
         description=(
-            "statementに残る、本文でまだ確認すべき具体的情報。"
-            "該当する情報がなければ空とする。"
+            "このHypothesisをWorkItemへの回答に使うため、本文でまだ確認すべき"
+            "具体的情報。statementがsupportedでも、必要な下位規範本文が未確認なら"
+            "保持する。該当する情報がなければ空とする。"
         ),
     )
 

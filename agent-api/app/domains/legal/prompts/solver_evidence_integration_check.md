@@ -1,6 +1,6 @@
 ## 出力前の確認
 
 1. Hypothesisの判定と`gaps`が、対応する取得本文に基づくか確認します。
-2. 下位規範へ委ねられた内容を、末端本文なしで確認済みにしていないか確認します。
+2. `terminal_text_missing`なのに、同じWorkItemの全Hypothesisで`gaps`を空にしていないか確認します。
 3. Evidence ID、WorkItem ID、Hypothesis IDが入力と一致するか確認します。
 4. 次の検索、Cycle移行、最終回答を出力していないか確認します。

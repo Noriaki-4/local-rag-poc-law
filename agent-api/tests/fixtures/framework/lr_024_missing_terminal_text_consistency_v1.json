@@ -1,0 +1,91 @@
+{
+  "caseState": {
+    "case_id": "case-lr-024",
+    "question": "公開買付けの主な例外について、具体的な条件を説明してください。",
+    "research_cycle_count": 1,
+    "work_items": [
+      {
+        "work_item_id": "wi-3",
+        "question": "公開買付けの主な例外と具体的な条件は何か。"
+      }
+    ],
+    "hypotheses": [
+      {
+        "hypothesis_id": "h-3",
+        "work_item_id": "wi-3",
+        "statement": "公開買付けには法令上の例外がある。",
+        "gaps": [
+          "例外の具体的な条件"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "evidence_id": "e-delegating-rule",
+        "source_ref": "fixture:delegating-rule",
+        "content": "公開買付けの例外を定める。ただし、具体的な条件は内閣府令で定める。",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "article-delegating-rule",
+          "citationEligible": true
+        }
+      }
+    ]
+  },
+  "badDecision": {
+    "next": "continue",
+    "decision_reason": "上位規定から例外の存在を確認した。",
+    "update": {
+      "update_hypotheses": [
+        {
+          "hypothesis_id": "h-3",
+          "judgment": "supported",
+          "evidence_ids": [
+            "e-delegating-rule"
+          ],
+          "gaps": []
+        }
+      ]
+    },
+    "dependency_decisions": [
+      {
+        "dependency_kind": "lower_norm",
+        "work_item_id": "wi-3",
+        "status": "needs_action",
+        "reason": "具体的条件を定める内閣府令本文が未確認。",
+        "basis_evidence_ids": [
+          "e-delegating-rule"
+        ]
+      }
+    ]
+  },
+  "correctedDecision": {
+    "next": "continue",
+    "decision_reason": "例外の存在は支持されたが、府令の具体的条件は未確認。",
+    "update": {
+      "update_hypotheses": [
+        {
+          "hypothesis_id": "h-3",
+          "judgment": "supported",
+          "evidence_ids": [
+            "e-delegating-rule"
+          ],
+          "gaps": [
+            "内閣府令で定める例外の具体的条件"
+          ]
+        }
+      ]
+    },
+    "dependency_decisions": [
+      {
+        "dependency_kind": "lower_norm",
+        "work_item_id": "wi-3",
+        "status": "needs_action",
+        "reason": "具体的条件を定める内閣府令本文が未確認。",
+        "basis_evidence_ids": [
+          "e-delegating-rule"
+        ]
+      }
+    ]
+  }
+}

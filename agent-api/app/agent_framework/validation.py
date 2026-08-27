@@ -931,6 +931,27 @@ def apply_solver_decision(
             f"{closed_dependency_work_items}"
         )
 
+    for dependency in decision.dependency_decisions:
+        if dependency.status != "needs_action":
+            continue
+        work_hypotheses = tuple(
+            hypothesis
+            for hypothesis in hypotheses.values()
+            if hypothesis.work_item_id == dependency.work_item_id
+        )
+        if not any(
+            hypothesis.hypothesis_id in changed_hypothesis_ids
+            for hypothesis in work_hypotheses
+        ):
+            continue
+        if work_hypotheses and not any(
+            hypothesis.gaps for hypothesis in work_hypotheses
+        ):
+            raise ContractViolation(
+                "missing lower-norm text requires a concrete Hypothesis gap "
+                f"for work item {dependency.work_item_id!r}"
+            )
+
     if required_dependency_kind is not None and require_dependency_decisions:
         provided_scope_ids = {
             item.work_item_id

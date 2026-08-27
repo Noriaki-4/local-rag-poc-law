@@ -83,7 +83,7 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-021` | P0 | 対応中 | 検索候補の内容評価と取得選択を整合させる | v376でSearch AssessmentとReselectionを一つのSearch Selectionへ統合した。LLMは全候補を比較するが、出力は選択した最大5件の内容評価・対応Hypothesis・選択理由だけとする。Programはこの単一出力を保存用評価と本文取得選択へ分け、非選択IDを入力候補との差集合として保留する。意味上の採否はLLM、既知ID・件数・構造変換はProgramが扱う | Luna `high`の総合問題で、対応Hypothesisと選択Articleが同じ判断内で整合し、必要候補が後段で脱落しないことを確認する |
 | `LR-022` | P0 | 未着手 | 後続Cycleで既存WorkItemへ代替Hypothesisを追加する | 設計ではHypothesisの`statement`を別の意味へ上書きせず、見立てを変える場合は新しいHypothesisを追加する。しかし現行の段階別経路は、Hypothesisが1件もないopen WorkItemだけを生成処理へ送り、本文評価は既存Hypothesisの更新だけを許す。そのため、初期仮説が反証された場合も、同じWorkItemへ新しい見立てを追加して次Cycleで仕切り直せない | H1が`contradicted`または新しい規律構造が判明したfixtureで、H1と根拠を履歴として保持し、Cycle 2で同じWorkItemへ新IDのH2を追加できることを確認する。検索方法だけを変える場合は不要なHypothesisを追加しない |
 | `LR-023` | P0 | 完了 | Hypothesisに合うGraph方向と候補の対応先を安定して選ぶ | Profile v381で`explicit_reference`のLLM-visible契約から物理方向`outgoing / incoming`を除き、`follow_reference_in_text / find_articles_referencing_this`という探索目的へ置換した。Tool Adapterだけが探索目的を物理方向へ機械変換する。旧誤方向checkpointのLuna `high`隔離再生では、金商法27条の2と施行令7条の双方で`find_articles_referencing_this`を初回選択した | 2探索目的から物理方向への対応を契約テストで固定する。Graph候補の全open Hypothesisへの再対応付けと`relevant_deferred`候補の後続再採用は方向選択と分けて回帰確認する |
-| `LR-024` | P0 | 対応中 | Hypothesisが支持された内容と未確認事項を同時に保持する | Haiku・Profile v375では、H-3は府令2条の5、H-4は府令10条を未取得だった。それぞれ上位規定から一部内容を確認できたが、`judgment=supported`への更新と同時に`gaps=[]`となった。WorkItemは下位規範Dependencyにより`open`を維持したものの、Hypothesis単体では必要な具体的内容を確認済みのように見える不整合が残った | 取得本文が命題の一部を支持しても、WorkItemへの回答に必要な未取得の具体的内容を`gaps`へ残す。府令2条の5・10条を未取得のfixtureでH-3・H-4の`gaps`が保持され、取得後にだけ解消されることを確認する |
+| `LR-024` | P0 | 完了 | Hypothesisが支持された内容と未確認事項を同時に保持する | Haiku・Profile v375では、H-3は府令2条の5、H-4は府令10条を未取得だった。それぞれ上位規定から一部内容を確認できたが、`judgment=supported`への更新と同時に`gaps=[]`となった。WorkItemは下位規範Dependencyにより`open`を維持したものの、Hypothesis単体では必要な具体的内容を確認済みのように見える不整合が残った | Profile v383で`judgment`をstatementの判定、`gaps`をWorkItemへの回答に必要な未確認事項として契約・Promptへ明記した。Evidence Integrationでは下位規範状態を先に判断し、`terminal_text_missing`と同時に更新したWorkItemの全Hypothesisで`gaps=[]`となる矛盾だけをProgramが拒否する。固定fixtureで誤出力の拒否と、`supported`のまま府令の具体的条件を`gaps`へ保持する更新を確認した |
 | `LR-025` | P0 | 完了 | 取得済みEvidenceとHypothesisの対応付けを後続処理へ引き継ぐ | Profile v382で`HypothesisUpdate.evidence_ids`を今回新たに対応付けたEvidenceの差分とし、CaseStore保存時とCycle Close向け投影時の両方で既存対応へ追記する共通処理へ変更した。意味的な対応付けはLLM、既存対応の保持・既知ID検証・重複除去はProgramが担当する | 前CycleのEvidenceをLLMが再出力せず、現在CycleのEvidenceだけを返すfixtureで、両方の対応が後続入力とCaseStoreに保持されることを確認済み |
 
 ### 3.1 LR-016 Tool観察とCycle Closeの単一責務化
@@ -699,7 +699,8 @@ Profile v375では、例外のH-3と手続のH-4について、上位規定の�
 
 - Evidence Integrationは、取得本文で確認できた内容と、まだ本文を取得していない内容を分けて評価する。
 - `judgment=supported`への更新だけを理由に`gaps`を空にしない。
-- `gaps`を解消するかはSolverが本文の意味から判断し、ProgramはID、型及び参照整合だけを検証する。
+- `gaps`を解消するかはSolverが本文の意味から判断する。Programはその意味を補わず、同じ更新で
+  `terminal_text_missing`としたWorkItemの全Hypothesisから`gaps`を消す構造矛盾だけを拒否する。
 - 府令2条の5・10条を取得していない固定fixtureではH-3・H-4の`gaps`が残り、取得後のfixtureでは
   対応する内容を確認した場合だけ解消される。
 

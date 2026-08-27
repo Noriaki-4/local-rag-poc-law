@@ -620,7 +620,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "382"
+    assert diagnostic_records[0]["profileVersion"] == "383"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -628,7 +628,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "382"
+    assert transport_input["profileVersion"] == "383"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -1064,7 +1064,7 @@ def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "382"
+    assert profile.version == "383"
     assert profile.solver_graph_review is not None
     assert profile.solver_graph_review.max_output_tokens == (
         profile.solver_integration.max_output_tokens
@@ -1339,7 +1339,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "382"
+    assert profile.version == "383"
     assert prompt.rindex("## 出力") > prompt.rindex(
         "</solver_context>"
     )
@@ -1390,7 +1390,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "382"
+    assert profile.version == "383"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -3511,6 +3511,45 @@ def test_hypothesis_evidence_binding_is_carried_into_later_observation() -> None
         "e-prior",
         "e-new",
     }
+
+
+def test_missing_terminal_text_cannot_clear_every_hypothesis_gap() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures/framework/lr_024_missing_terminal_text_consistency_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    state = CaseState.model_validate(fixture["caseState"])
+    common = {
+        "limits": AgentLimits(),
+        "known_tool_names": {"fetch_articles"},
+        "material_evidence_ids": ("e-delegating-rule",),
+        "required_dependency_kind": "lower_norm",
+        "required_dependency_work_item_ids": ("wi-3",),
+        "require_dependency_decisions": True,
+        "allow_dependency_action_without_tool": True,
+        "finalize_only": False,
+    }
+
+    with pytest.raises(
+        ContractViolation,
+        match="missing lower-norm text requires a concrete Hypothesis gap",
+    ):
+        apply_solver_decision(
+            state,
+            SolverDecision.model_validate(fixture["badDecision"]),
+            **common,
+        )
+
+    applied = apply_solver_decision(
+        state,
+        SolverDecision.model_validate(fixture["correctedDecision"]),
+        **common,
+    )
+    hypothesis = applied.hypotheses[0]
+    assert hypothesis.judgment == "supported"
+    assert hypothesis.gaps == ("内閣府令で定める例外の具体的条件",)
+    assert applied.work_items[0].state == "open"
 
 
 def test_cycle_boundary_requires_a_structural_resolution_for_every_deferred_frontier(
@@ -7197,7 +7236,16 @@ def test_missing_dependency_fixture_allows_no_unrelated_basis_evidence() -> None
                             }
                         )
                         for item in observed.update.update_work_items
-                    )
+                    ),
+                    "update_hypotheses": tuple(
+                        item.model_copy(
+                            update={
+                                "gaps": item.gaps
+                                or ("未確認の下位規範の具体的内容",)
+                            }
+                        )
+                        for item in observed.update.update_hypotheses
+                    ),
                 }
             ),
             "dependency_decisions": tuple(

@@ -79,7 +79,7 @@
             "type": "array"
           },
           "gaps": {
-            "description": "statementに残る、本文でまだ確認すべき具体的情報。該当する情報がなければ空とする。",
+            "description": "このHypothesisをWorkItemへの回答に使うため、本文でまだ確認すべき具体的情報。statementがsupportedでも、必要な下位規範本文が未確認なら保持する。該当する情報がなければ空とする。",
             "items": {
               "maxLength": 300,
               "type": "string"
