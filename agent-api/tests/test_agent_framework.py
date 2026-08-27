@@ -1288,45 +1288,50 @@ def test_new_graph_candidates_use_dedicated_solver_profile() -> None:
         ) -> ToolExecution:
             del timeout_sec
             self.calls.append(request.request_id)
-            evidence = Evidence(
-                evidence_id=f"graph-{request.request_id}",
-                source_ref="neo4j:article_pair:test",
-                content=json.dumps(
-                    {
-                        "seedArticleId": "law-act-article-1",
-                        "seedDocumentId": "law-act",
-                        "seedTitle": "法律",
-                        "seedHeading": "第一条",
-                        "neighborArticleId": "law-order-article-2",
-                        "neighborDocumentId": "law-order",
-                        "neighborTitle": "政令",
-                        "neighborHeading": "第二条",
-                        "relations": [
-                            {
-                                "kind": "formal_relation",
-                                "edgeType": "REFERENCES",
-                                "direction": "incoming",
-                            }
-                        ],
+            evidence = tuple(
+                Evidence(
+                    evidence_id=f"graph-neighbor-{article_no}",
+                    source_ref=f"neo4j:article_pair:{article_no}",
+                    content=json.dumps(
+                        {
+                            "seedArticleId": "law-act-article-1",
+                            "seedDocumentId": "law-act",
+                            "seedTitle": "法律",
+                            "seedHeading": "第一条",
+                            "neighborArticleId": (
+                                f"law-order-article-{article_no}"
+                            ),
+                            "neighborDocumentId": "law-order",
+                            "neighborTitle": "政令",
+                            "neighborHeading": f"第{article_no}条",
+                            "relations": [
+                                {
+                                    "kind": "formal_relation",
+                                    "edgeType": "REFERENCES",
+                                    "direction": "incoming",
+                                }
+                            ],
+                        },
+                        ensure_ascii=False,
+                    ),
+                    created_cycle=cycle_no,
+                    metadata={
+                        "docType": "graph_navigation",
+                        "citationEligible": False,
+                        "neighborArticleId": f"law-order-article-{article_no}",
                     },
-                    ensure_ascii=False,
-                ),
-                created_cycle=cycle_no,
-                metadata={
-                    "docType": "graph_navigation",
-                    "citationEligible": False,
-                    "neighborArticleId": "law-order-article-2",
-                },
+                )
+                for article_no in (2, 3)
             )
             return ToolExecution(
                 result=ToolResult(
                     request_id=request.request_id,
                     status="succeeded",
-                    evidence_ids=(evidence.evidence_id,),
+                    evidence_ids=tuple(item.evidence_id for item in evidence),
                     elapsed_ms=1,
                     cycle_no=cycle_no,
                 ),
-                evidence=(evidence,),
+                evidence=evidence,
             )
 
     graph = GraphNavigationTool(name="legal_graph_neighbors")
@@ -1363,7 +1368,7 @@ def test_new_graph_candidates_use_dedicated_solver_profile() -> None:
             ),
         )
 
-    profile = _profile(
+    base_profile = _profile(
         automatic_tools=(
             AutomaticToolProfile(
                 trigger_tool_name="fetch_articles",
@@ -1374,7 +1379,8 @@ def test_new_graph_candidates_use_dedicated_solver_profile() -> None:
                 purpose="1ホップ候補を取得する",
             ),
         )
-    ).model_copy(
+    )
+    profile = base_profile.model_copy(
         update={
             "solver_graph_review": ModelCallProfile(
                 model="graph-model",
@@ -1387,6 +1393,9 @@ def test_new_graph_candidates_use_dedicated_solver_profile() -> None:
                     argument_name="article_ids",
                     max_items=4,
                 ),
+            ),
+            "limits": base_profile.limits.model_copy(
+                update={"max_graph_candidates_per_review_batch": 1}
             ),
         }
     )
@@ -1405,6 +1414,33 @@ def test_new_graph_candidates_use_dedicated_solver_profile() -> None:
                         purpose="起点本文を取得する",
                         hypothesis_ids=("h1",),
                     ),
+                ),
+            ),
+            SolverDecision(
+                next="continue",
+                next_focus_work_item_ids=("w1",),
+                update=CaseUpdate(
+                    update_hypotheses=(
+                        HypothesisUpdate(
+                            hypothesis_id="h1",
+                            judgment="unresolved",
+                            gaps=("Graph候補本文の確認",),
+                        ),
+                    )
+                ),
+            ),
+            select_graph_candidate,
+            SolverDecision(
+                next="continue",
+                next_focus_work_item_ids=("w1",),
+                update=CaseUpdate(
+                    update_hypotheses=(
+                        HypothesisUpdate(
+                            hypothesis_id="h1",
+                            judgment="unresolved",
+                            gaps=("次のGraph候補本文の確認",),
+                        ),
+                    )
                 ),
             ),
             select_graph_candidate,
@@ -1432,16 +1468,35 @@ def test_new_graph_candidates_use_dedicated_solver_profile() -> None:
         [item.purpose for item in trace.model_calls],
         [context.required_graph_review_request_ids for context in model.solver_contexts],
     )
-    assert state.graph_candidate_reviews[0].selected_article_ids == (
-        "law-order-article-2",
-    )
+    assert [
+        review.selected_article_ids for review in state.graph_candidate_reviews
+    ] == [
+        ("law-order-article-2",),
+        ("law-order-article-3",),
+    ]
     assert [item.purpose for item in trace.model_calls] == [
         "research",
         "integration",
+        "observation_integration",
         "graph_selection",
-        "integration",
+        "observation_integration",
+        "graph_selection",
+        "observation_integration",
     ]
-    assert model.solver_profiles[2].system_prompt == "graph-selection"
+    assert model.solver_profiles[3].system_prompt == "graph-selection"
+    assert model.solver_profiles[5].system_prompt == "graph-selection"
+    assert [
+        tuple(item.article_id for item in context.graph_review_batch.candidates)
+        for context, trace_item in zip(
+            model.solver_contexts,
+            trace.model_calls,
+            strict=True,
+        )
+        if trace_item.purpose == "graph_selection"
+    ] == [
+        ("law-order-article-2",),
+        ("law-order-article-3",),
+    ]
     assert len(graph.calls) == 1
     assert state.research_cycle_count == 1
 

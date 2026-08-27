@@ -280,6 +280,15 @@ class AgentLoop:
                 self._store.save(state)
 
             integration_call = bool(state.research_cycle_count or reviewer_findings)
+            pending_grounding_observation = bool(
+                integration_call
+                and not finalize_only
+                and not reviewer_findings
+                and _has_unintegrated_article_fetch_result(
+                    state,
+                    tool_name=self._profile.graph_review_fetch_tool_name,
+                )
+            )
             dependency_audit_work_item_ids = _dependency_audit_scope(
                 state,
                 integration_call=integration_call,
@@ -329,6 +338,20 @@ class AgentLoop:
                     ),
                     available_tools=self._solver_tool_definitions,
                 )
+                if pending_grounding_observation:
+                    # A selected Article has already consumed fetch capacity. Integrate
+                    # its text before reviewing more discovery candidates. The complete
+                    # Graph/Search pools remain in CaseState and are projected again on
+                    # the next loop iteration.
+                    context = context.model_copy(
+                        update={
+                            "graph_review_batch": GraphReviewBatch(),
+                            "graph_review_ledger": (),
+                            "required_graph_review_request_ids": (),
+                            "search_candidates": (),
+                            "required_search_review_request_ids": (),
+                        }
+                    )
                 graph_review_call = bool(
                     context.required_graph_review_request_ids
                     and self._profile.solver_graph_review is not None
@@ -394,6 +417,9 @@ class AgentLoop:
                     search_review_call=search_review_call,
                     integration_call=integration_call,
                     has_reviewer_findings=bool(reviewer_findings),
+                    observation_integration_call=(
+                        pending_grounding_observation
+                    ),
                 )
                 call_profile = self._bounded_model_profile(
                     base_call_profile,
@@ -841,6 +867,7 @@ class AgentLoop:
         search_review_call: bool,
         integration_call: bool,
         has_reviewer_findings: bool,
+        observation_integration_call: bool = False,
     ) -> tuple[ModelCallProfile, str]:
         if graph_review_call and self._profile.solver_graph_review is not None:
             return self._profile.solver_graph_review, "graph_selection"
@@ -851,6 +878,17 @@ class AgentLoop:
             and self._profile.solver_reviewer_revision is not None
         ):
             return self._profile.solver_reviewer_revision, "reviewer_revision"
+        if observation_integration_call:
+            observation_profile = (
+                self._profile.solver_cycle_close
+                or self._profile.solver_integration
+            )
+            return (
+                observation_profile.model_copy(
+                    update={"context_projection": "observation_integration"}
+                ),
+                "observation_integration",
+            )
         if context.finalize_only and self._profile.solver_finalization is not None:
             return self._profile.solver_finalization, "finalization"
         if (
@@ -1557,6 +1595,33 @@ def _dependency_audit_work_item_ids(state: CaseState) -> tuple[str, ...]:
             ):
                 projected.append(work_item_id)
     return tuple(projected)
+
+
+def _has_unintegrated_article_fetch_result(
+    state: CaseState,
+    *,
+    tool_name: str | None,
+) -> bool:
+    """現在Cycleに、まだ意味統合していないArticle取得結果があるかを返す。"""
+
+    if tool_name is None:
+        return False
+
+    requests_by_id = {item.request_id: item for item in state.tool_requests}
+    grounding_evidence_ids = {
+        evidence.evidence_id
+        for evidence in state.evidence
+        if evidence.metadata.get("citationEligible") is not False
+    }
+    return any(
+        result.cycle_no == state.research_cycle_count
+        and result.status == "succeeded"
+        and (request := requests_by_id.get(result.request_id)) is not None
+        and request.tool_name == tool_name
+        and result.request_id not in state.integrated_tool_result_request_ids
+        and not grounding_evidence_ids.isdisjoint(result.evidence_ids)
+        for result in state.tool_results
+    )
 
 
 def _dependency_audit_scope(

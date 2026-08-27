@@ -633,7 +633,7 @@ class StepRecord:
     Cycle・Step・本文取得・時間上限で行う。ProgramがCase全体の累積hop数で意味探索を打ち切らない。
 13. 1 stepの選択件数と1回のGraph取得件数はProfileの機械的上限とし、上限超過候補は削除せず
     `partial`なExpansionSliceの未取得page、または未処理frontierとして残す。Neo4jから取得済みの
-    未処理Graph frontierは決定的に分割し、未提示pageを不存在と扱わない。
+    未処理Graph frontierはIDで保持し、未提示候補を不存在と扱わない。候補順序の固定は要件としない。
 14. Graph Reviewは全履歴を毎回再評価せず、新しい`unreviewed`候補、新Hypothesisが既存Nodeを
     再採用したことで新たに作られた`Node × Hypothesis` frontier、既評価frontierへ新しいLinkが
     追加された差分を詳細入力とする。過去の評価済みfrontierは短い台帳で参照する。
@@ -661,8 +661,10 @@ Graph Reviewには差分batchだけを入力する。
 `selected`はSolverが本文取得対象に選んだ意味判断であり、本文取得が成功した意味ではない。
 取得の成否は別の`content_status`で表す。
 
-`graph_review_batch`がProfile上限を超える場合は、Programが安定順で機械的にpage分割し、
-全pageの未評価状態とcursorを保持する。Programは関連度で候補を選ばず、未提示候補を
+`graph_review_batch`がProfile上限を超える場合は、Programが機械的にpage分割し、
+処理済みIDと未処理IDを保持する。本文取得後はEvidence Integrationを先に行い、その後に未処理候補を
+再投影する。候補追加等による順序変更を許容し、未処理候補は必要なら次Cycleへ引き継ぐ。
+Programは関連度で候補を選ばず、未提示候補を
 `reject`または不存在と扱わない。同じArticleに複数Linkがある場合は、当該Review batchでは
 全Linkの短い情報を併記する。ハッシュ化Evidence IDだけを示してLLMが候補を識別できない状態を禁止する。
 
