@@ -63,7 +63,7 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-001` | P0 | 対応中 | 質問から必要な検索仮説を漏れなく作る | Profile v289でHypothesisがないWorkItemを1件ずつ処理する方式へ変更した際、元質問、`action_actor`及び`gaps`をHypothesis生成契約から落としたため、主体の推測と抽象的な命題が再発した。v300で`statement`をWorkItemへの回答を構成する回答項目として定義し、追加の未確認事項がない`gaps=[]`を許可した。v301でWorkItem最大24件、Hypothesis最大4件／WorkItemという意味上の上限をProvider schemaから削除した。v302で分割単位を「法令本文の一つの規定内容で個別に支持又は否定できる命題」と明確化した。v303では1 WorkItemずつ処理するHypothesis生成入力から元質問全体を外し、WorkItemを唯一の作業範囲とした。`gpt-4o-mini`の隔離実行では総合の成立条件へ他WorkItemの論点が混入する問題は解消した。Profile v379のLuna総合問題では、質問の「必要な手続」を質問にない7内訳へ展開して未確認範囲を広げたため、v380で広い要求の抽象度を保つよう質問分解Promptを補った。v380のLuna `high`隔離実行は4 WorkItemを維持し、「必要な手続」を内訳へ展開せず合格した。`action_actor`はWorkItemだけを正本とし、Hypothesisには複製しない | 公開買付けの公告・例外・総合WorkItemを隔離実行し、WorkItem外の論点や質問にない内訳を追加せず、検索対象を選べるHypothesisが生成されることを確認する |
 | `LR-002` | P0 | 対応中 | 法令検索表現を作り、同一Cycle内でOpenSearchを適切に再検索する | 検索要求作成だけの隔離診断を追加した。Profile v290で`purpose`を確認内容、`query`を短い法令用語の組合せとして分離した。例外問題では直接例外と委任を1検索にまとめて法令表現を生成できたが、総合問題の検索語はまだ抽象的である | 個別語をPromptへ追加せず、LR-001のHypothesis具体性と実際のOpenSearch候補を合わせて評価する |
 | `LR-003` | P0 | 完了 | Graph由来Articleを起点に連続1ホップ探索する | `gpt-4o-mini`の実モデルtrace v7で、金商法27条の2→施行令7条、施行令7条→府令2条の5を別々の1ホップGraph要求として実行し、府令本文取得後にCycle 1で正常完了した | `lr_003_second_hop_integration_v1.json`、`lr_003_second_hop_graph_review_v1.json`、`lr_003_cycle_close_deferred_frontiers_v1.json`を回帰fixtureとして維持する |
-| `LR-004` | P0 | 対応中 | 複合問題の統合Decisionを成立させ、次の探索または完了へ進む | 細分化した判断間で対応IDと意味状態がずれる問題に対し、v376で候補評価と本文取得選択、取得本文評価と下位規範確認をそれぞれ一つのLLM判断へ統合した。Cycle Closeは状態更新と混ぜず独立させる。Graph候補20件の全件理由が8,192出力tokenを使い切ったため既定pageを10件へ縮小し、要約・理由・gapへ短い上限を設けた。Luna `high`総合問題では、3ページ目に新規10件と過去ledger 20件が同時入力され再び上限へ到達したため、Graph Reviewの入出力を現在batchだけへ限定した。Profile v384では必要Article 6/6を取得・統合したが、Cycle Close開始時の残り81秒のうち46秒を使ってstep timeoutとなり、残り35秒のFinalizationもtimeoutした | 同じ総合問題で、取得済み6 Articleを再探索せず、制限付き回答を含む最終回答まで時間内に完了することを確認する |
+| `LR-004` | P0 | 完了 | 複合問題の統合Decisionを成立させ、次の探索または完了へ進む | Profile v388で、逐次統合済みEvidenceをCycle Closeで再統合せず、Cycle遷移だけを判断するよう修正した。最終化はProvider共通の小型schemaを使い、処理済みGraph ledgerを除外する。Luna `high`総合問題ではCycle 2境界が約95秒から約22秒へ短縮した。v389では最終化へ70.6秒を与えてもtimeoutしたため、v390で法令アプリの最終化予約を35秒から90秒へ増やした | v390の実モデル総合問題は2 Cycle・17モデル呼出しで正常完了した。必要Article 4/4と関連する府令本文を取得し、入力28,076 token、出力6,468 tokenの最終回答を引用付きで生成した |
 | `LR-005` | P1 | 検証待ち | Haikuと`gpt-4o-mini`の役割を分けて評価する | `gpt-4o-mini`は単一責務の隔離Promptでは質問分解・具体的Hypothesis生成ができたが、実際の長い入力と複数処理ではHypothesisの抽象化、論点の結合、主体・候補対応の揺れが残った。過去の`protocol_error`、重複行動、ID不整合の多くはPrompt・契約・実装の不備であり、GPT固有の失敗とは扱わない。現在はHaikuを法令検索の主評価モデル、`gpt-4o-mini`を承認済みfixture以降の安価な構造デバッグ用とする | 同じ承認済みcheckpointを両モデルで各1回再生し、意味判断差とProvider・契約不備を分離して記録する。OpenAIの429は回答品質と別に扱う |
 | `LR-006` | P1 | 要設計 | 意味分類coverage不足時にも逆引き検索爆発と取りこぼしを両立させる | publish済み意味関係ならselectorで絞れるが、未分類範囲でraw `REFERENCES/to_subject`を使うと高fan-inになる | 限定fallbackの発動条件、scope上限、coverage不足の表示、限定回答条件を決める |
 | `LR-007` | P1 | 未着手 | CycleとStepを再開可能な状態として保存する | WorkItem、Hypothesis、Evidence、Graph review履歴はあるが、目標の`CycleRecord / StepRecord / ExplorationState`は未実装 | Tool観察後の中断から同じStepを再開し、別Cycleとして数えないfixtureを通す |
@@ -87,6 +87,7 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-025` | P0 | 完了 | 取得済みEvidenceとHypothesisの対応付けを後続処理へ引き継ぐ | Profile v382で`HypothesisUpdate.evidence_ids`を今回新たに対応付けたEvidenceの差分とし、CaseStore保存時とCycle Close向け投影時の両方で既存対応へ追記する共通処理へ変更した。意味的な対応付けはLLM、既存対応の保持・既知ID検証・重複除去はProgramが担当する | 前CycleのEvidenceをLLMが再出力せず、現在CycleのEvidenceだけを返すfixtureで、両方の対応が後続入力とCaseStoreに保持されることを確認済み |
 | `LR-026` | P0 | 完了 | Graphで選択したArticle本文を、残りのGraph候補より先に統合する | Profile v383の総合問題では、府令2条の5を本文取得した後も未処理Graph候補のレビューを続けたため、取得本文をHypothesisへ統合できないまま時間上限へ到達した。Profile v384では未統合の取得本文を機械的に検出し、Graph・検索候補をCaseStoreに保持したままEvidence Integrationを優先する。統合後は処理済みIDを除いた未処理候補を再投影する。候補順序は固定せず、未処理候補はCycle境界でも保持する | 回帰テストに加え、Luna `high`の総合問題で`graph_selection → observation_integration`を2回連続して確認した。府令2条の5・10条を含む必要Article 6/6を取得・統合した。最終回答のtimeoutはLR-004で扱う |
 | `LR-027` | P0 | 完了 | 同じCycleで一つのHypothesisのGraph候補を追い続けない | Graph ReviewをWorkItem・Hypothesis単位に分け、各単位で本文取得バッチを1回統合したら、そのCycleでは別Hypothesisを処理する。同じ単位の未処理候補はIDを保持して次Cycleへ戻す。v386では同一単位の残候補を理由にProgramがCycleを閉じる不備が残ったため、v387で完了単位だけをSolverへ提示し、別HypothesisまたはCycle移行の判断をSolverへ戻した。候補の採否はLLM、取得済み単位・Cycle・参照IDの投影はProgramが扱う | fixtureとLuna `high`総合問題で、Cycle 2の`h-3`取得・統合後に同じCycleの`h-4`へ移り、府令2条の5・10条を取得した。最終回答の時間切れはLR-004で扱う |
+| `LR-028` | P0 | 完了 | 同じGraph Articleペアを異なる探索要求から取得してもEvidence IDが衝突しない | Graph navigation Evidence IDはArticleペアから決定する一方、Evidence本文には関係種別と向きが含まれていた。同じペアを別のGraph selectorで再取得すると、同じIDで内容が異なり、CaseStoreが`tool returned conflicting evidence ID`として拒否した。Profile v389ではArticleペアIDを共通接頭辞として保ち、関係内容のhashをEvidence IDへ加えた | 同じArticleペアをREFERENCESとRelationAssertionから取得する回帰とLuna `high`総合問題に合格した。実モデルはGraph衝突なくCycle 3の最終化まで到達した |
 
 ### 3.1 LR-016 Tool観察とCycle Closeの単一責務化
 
@@ -574,11 +575,45 @@ Profile v290の初回隔離診断では、直接の例外規定と下位法令�
 
 ### LR-004 複合問題の完了判断
 
-- `tob-overview`の必要Article 6件をすべてArticle全文として取得する。
+- 現行`agent-ui/example_questions.py`で定義した`tob-overview`の必要Article 4件を、
+  すべてArticle全文として取得する。
 - resolved WorkItemの根拠Hypothesisと回答citationが一致する。
 - open WorkItemまたはunresolved Hypothesisが残る通常実行を完全回答としてfinalizeしない。
 - 時間上限に達した場合は、未確認事項を隠さず限定回答として示す。
 - 契約修復回数、入力・出力token、Tool時間、Cycleごとの取得Articleをtraceから説明できる。
+
+Profile v387のLuna `high`総合問題では必要Article 4/4を取得したが、Cycle 2終了時の
+`cycle_close_evidence_integration_checkpoint_timeout`が約95秒を消費した。記録上の入力は49,111 token、
+出力は11,651 tokenであり、Case全体の420秒上限到達後に最終回答用Solver入力だけが作成された。
+したがって、現在の調査対象は回答文生成ではなく、その直前に行うEvidence統合チェックである。
+
+診断checkpointを再生すると、Cycle 2終了時のArticle取得ToolResultはすべて
+`integrated_tool_result_request_ids`へ記録済みで、未統合Article取得は0件だった。一方、
+`_solve_cycle_close`は無条件に`_solve_observation_integrations`を呼び、直近Tool結果が空の場合は
+全open WorkItemを対象にする。そのため、既に逐次統合した4 WorkItemを再び4並列で評価した。
+この再評価によるWorkItem状態、gap及び下位規範状態の変更はなく、Hypothesis 1件へ既知Article内の
+Evidence IDを追加しただけだった。
+
+時間配分にも次の問題がある。
+
+- `cycle_close_reserve_sec=15`はCycle Close呼出しの上限ではなく、Cycle Closeへ切り替える時刻の判定にしか使わない。
+- 実際のCycle Closeには、全体残り時間から`finalization_reserve_sec=35`を引いた約94秒が与えられ、その全時間を再統合が消費した。
+- その後の最終化入力はPrompt 62,066文字、schema 10,489文字、Evidence 42件で、残り約34秒しかなかった。
+- 過去のLuna実測では同種の最終化に約51秒かかった例があり、35秒固定予約は`high`設定に不足し得る。
+
+Profile v388では、Cycle Closeを逐次統合済み状態からの遷移判断だけに変更した。未統合Articleがある場合は
+既存のEvidence Integrationを先に完了させる。最終化にはProvider共通の専用小型契約を使い、空の`update`、
+`frontier_re_adoptions`及び処理済みGraph ledgerを入力・schemaから除いた。これによりCycle 2境界は約22秒、
+最終化入力は26,558 tokenとなり、約53秒で限定回答本文を生成した。
+
+この最終化では、本文が引用していた府令2条の4のEvidence ID 1件を`citation_ids`から落としたため、契約修復へ
+進んだ。意味判断を再実行せず、解決済みWorkItemへ既に対応付けた根拠IDをProgramが最終回答へ機械反映するよう
+修正し、回帰テストを追加した。後続実行で発生したGraph Evidence ID衝突はLR-028として分離した。
+
+Profile v389ではGraph Evidence ID衝突を解消して最終化へ到達したが、最終化入力48,090文字、schema 5,142文字に
+対して70.6秒を与えてもLuna `high`がtimeoutした。Profile v390では汎用Frameworkの既定値を変えず、法令アプリの
+最終化予約だけを90秒へ変更した。実モデル総合問題は最終化へ113.2秒を確保し、入力28,076 token、
+出力6,468 tokenの引用付き回答を生成して正常完了した。
 
 ### LR-005 GPT-4o mini実モデル評価
 
@@ -953,6 +988,9 @@ LR-010  必要性と費用を再評価して全件分類を再開
 | 2026-08-27 | Profile v384・公開買付け総合・Luna `high` | 2回のGraph Reviewの各本文取得直後にEvidence Integrationを実行し、必要Article 6/6を取得・統合した。契約違反はなかった。Cycle Close開始時の残り81秒でstep timeoutとなり、Finalizationも残り35秒でtimeoutしたため最終回答は未生成 | `eval-results/e2e-v384-luna-overview/response.json`、`eval-results/agent-framework-diagnostics/legal-608f323c69e2403eacf995a4735d964b.jsonl` |
 | 2026-08-27 | Profile v385・公開買付け総合・Luna `high` | Graph ReviewをHypothesis単位にし、Cycle 2で`h-1`の本文統合後に`h-3`へ移動した。約287秒まで短縮したが、2回目の統合が全4 WorkItemを再評価し、無関係な`h-4`出力が16,384 tokenで不完全JSONとなったため`protocol_error`。v386で直近Tool結果の参照先だけを統合するよう修正した | `eval-results/e2e-v385-luna-overview/response.json`、`eval-results/agent-framework-diagnostics/legal-444459581ade4ba6b3a75f2c122cfcf2.jsonl` |
 | 2026-08-27 | Profile v387・LR-027・公開買付け総合・Luna `high` | 全1067テストに合格。実モデルではCycle 1の`h-1`取得後、Cycle 2で`h-3`、同じCycle内の`h-4`へ順に移り、府令2条の5・10条を本文取得した。同一Hypothesisの残候補を追い続ける問題と早期Cycle Closeを解消した。Cycle 2終了後のEvidence統合チェックが約95秒かかり、全体420秒で`model_timeout`となったため最終回答は未生成 | `eval-results/e2e-v387-luna-overview/response.json`、`eval-results/agent-framework-diagnostics/legal-f0a2a26cc4204d2b9a0d9555ced6b019.jsonl` |
+| 2026-08-27 | Profile v388・LR-004・公開買付け総合・Luna `high` | Cycle Closeの重複Evidence統合を除き、Provider共通の小型最終化schemaを導入した。Cycle 2境界は約95秒から約22秒、最終化入力は31,267から26,558 tokenへ減り、約53秒で限定回答本文を生成した。引用ID 1件の転記漏れは機械補完する回帰を追加し、全1068テストに合格した。再検証は別のGraph Evidence ID衝突（LR-028）により最終化前に停止した | `eval-results/e2e-v388-luna-overview/response-retry.json`、`eval-results/agent-framework-diagnostics/legal-ec28fee4d92e4311a0f45ea7369492c7.jsonl`、`eval-results/e2e-v388-luna-overview/response-final.json` |
+| 2026-08-27 | Profile v389・LR-028・公開買付け総合・Luna `high` | Graph navigation Evidence IDへ関係内容hashを加え、同一Articleペアを異なるselectorで取得した際の衝突を解消した。実モデルでは府令2条の5・2条の4・2条の6・10条・9条を取得し、Graph衝突なく最終化へ到達した。最終化は48,090文字・schema 5,142文字、残り70.6秒で`model_timeout`となった | `eval-results/agent-framework-diagnostics/legal-909d02f5df2b42128ac406775005bd2e.jsonl` |
+| 2026-08-27 | Profile v390・LR-004・公開買付け総合・Luna `high` | 法令アプリの最終化予約を35秒から90秒へ変更した。実モデルは2 Cycle・17モデル呼出しで正常完了し、必要Article 4/4と府令2条の4・2条の5・2条の6・10条を取得した。最終化は113.2秒を確保し、入力28,076 token、出力6,468 tokenの引用付き回答を生成した。全1069テスト合格 | `eval-results/agent-framework-diagnostics/legal-368d39950a6b4dd384498172941289dd.jsonl` |
 ### 2026-08-25: 質問分解と仮説立案の主体表現を分離
 
 - WorkItemの主体情報を`action_actor`、`target_actor`、`actor_relation`へ分離し、Hypothesisには重複保存しない。

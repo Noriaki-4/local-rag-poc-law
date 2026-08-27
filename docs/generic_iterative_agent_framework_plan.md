@@ -1685,7 +1685,7 @@ limits:
   max_retained_evidence: 12
   cycle_close_reserve_sec: 15
   min_next_cycle_budget_sec: 25
-  finalization_reserve_sec: 35
+  finalization_reserve_sec: 90
   max_wall_time_sec: 240
 ```
 

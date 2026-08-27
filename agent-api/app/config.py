@@ -525,7 +525,7 @@ class Settings:
         min(
             int(
                 os.getenv("AGENT_FRAMEWORK_FINALIZATION_RESERVE_SEC")
-                or os.getenv("AGENT_FRAMEWORK_NEXT_SOLVER_RESERVE_SEC", "35")
+                or os.getenv("AGENT_FRAMEWORK_NEXT_SOLVER_RESERVE_SEC", "90")
             ),
             179,
         ),

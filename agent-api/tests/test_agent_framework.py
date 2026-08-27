@@ -394,6 +394,15 @@ def test_cycle_close_marks_its_integrated_tool_results_as_consumed() -> None:
                 created_cycle=1,
             ),
         ),
+        dependency_decisions=(
+            DependencyDecision(
+                dependency_kind="lower_norm",
+                work_item_id="w1",
+                status="needs_action",
+                reason="下位規範本文の確認が必要",
+                basis_evidence_ids=(f"e_{request_id}",),
+            ),
+        ),
     )
     store = InMemoryCaseStore()
     store.create(initial_state)
@@ -406,6 +415,7 @@ def test_cycle_close_marks_its_integrated_tool_results_as_consumed() -> None:
     state = result.state
 
     assert model.solver_contexts[0].cycle_close_required is True
+    assert model.solver_contexts[0].required_dependency_work_item_ids == ()
     assert tuple(
         item.request_id for item in model.solver_contexts[0].recent_tool_results
     ) == (request_id,)

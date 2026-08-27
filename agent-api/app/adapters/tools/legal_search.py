@@ -746,12 +746,14 @@ def _graph_navigation_evidence(
             sort_keys=True,
             separators=(",", ":"),
         )
-        identifier = hashlib.sha256(
+        pair_identifier = hashlib.sha256(
             (
                 f"{payload['seedArticleId']}\0"
                 f"{payload['neighborArticleId']}"
             ).encode("utf-8")
         ).hexdigest()[:24]
+        content_identifier = hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]
+        identifier = f"{pair_identifier}:{content_identifier}"
         graph_kinds = tuple(
             dict.fromkeys(
                 str(item.get("kind") or "") for item in payload["relations"]

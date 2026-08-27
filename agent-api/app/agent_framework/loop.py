@@ -422,6 +422,14 @@ class AgentLoop:
                         pending_grounding_observation
                     ),
                 )
+                if purpose == "cycle_close":
+                    # 下位規範状態は逐次統合済みであり、Cycle Closeは遷移だけを判断する。
+                    context = context.model_copy(
+                        update={
+                            "required_dependency_kind": None,
+                            "required_dependency_work_item_ids": (),
+                        }
+                    )
                 call_profile = self._bounded_model_profile(
                     base_call_profile,
                     model_budget,

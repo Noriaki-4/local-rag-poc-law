@@ -10,6 +10,7 @@ from app.adapters.tools.legal_search import (
     LegalFetchArticlesTool,
     LegalGraphNeighborsTool,
     LegalSearchTool,
+    _graph_navigation_evidence,
 )
 from app.agent_framework.contracts import SolverDecision
 from app.agent_framework.profiles import AgentLimits
@@ -465,6 +466,42 @@ def test_graph_tool_collapses_duplicate_relations_into_one_article_pair() -> Non
     assert content.count('"kind":"formal_relation"') == 2
     assert '"kind":"relation_assertion"' not in content
     assert execution.evidence[0].metadata["edgeTypes"] == ("REFERENCES",)
+
+
+def test_graph_navigation_id_distinguishes_relation_content_for_same_pair() -> None:
+    formal = {
+        "graphEdgeId": "edge-reference",
+        "edgeType": "REFERENCES",
+        "fromArticleId": "law-order-article-7",
+        "toArticleId": "law-act-article-27_2",
+    }
+    assertion = {
+        "assertionId": "assertion-implements",
+        "proposedPredicate": "IMPLEMENTS",
+        "subjectArticleId": "law-act-article-27_2",
+        "objectArticleId": "law-order-article-7",
+    }
+
+    formal_evidence = _graph_navigation_evidence(
+        [formal],
+        [],
+        1,
+        seed_article_ids=("law-act-article-27_2",),
+        max_items=10,
+    )[0]
+    assertion_evidence = _graph_navigation_evidence(
+        [],
+        [assertion],
+        1,
+        seed_article_ids=("law-act-article-27_2",),
+        max_items=10,
+    )[0]
+
+    assert formal_evidence.evidence_id != assertion_evidence.evidence_id
+    assert formal_evidence.evidence_id.split(":", 1)[0] == (
+        assertion_evidence.evidence_id.split(":", 1)[0]
+    )
+    assert formal_evidence.content != assertion_evidence.content
 
 
 @pytest.mark.parametrize(

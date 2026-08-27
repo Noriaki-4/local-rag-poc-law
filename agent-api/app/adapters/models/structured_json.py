@@ -215,6 +215,11 @@ class StructuredJSONModelAdapter:
                         )
                     else:
                         normalized = _normalize_solver_payload(result.payload)
+                        if profile.context_projection == "finalization":
+                            _include_required_finalization_citations(
+                                normalized,
+                                context,
+                            )
                         _assign_tool_request_ids(normalized, context)
                         _normalize_absent_context_branches(normalized, context)
                         if _preserve_previous_update_for_contract_repair(context):
@@ -539,25 +544,13 @@ class StructuredJSONModelAdapter:
         context: SolverContext,
         profile: ModelCallProfile,
     ) -> SolverCallResult:
-        """取得本文の意味統合とCycle境界判断を別コンテキストで実行する。"""
+        """逐次統合済みの状態からCycle境界だけを判断する。"""
 
         started_at = monotonic()
-        (
-            observation,
-            observation_input_tokens,
-            observation_output_tokens,
-            observation_attempt_count,
-        ) = self._solve_observation_integrations(
-            context,
-            profile,
-            started_at=started_at,
+        observation = ObservationIntegrationDecision(
+            decision_reason="Cycle内の新規取得本文は逐次統合済み。",
         )
-
-        observation = _derive_observation_work_item_updates(context, observation)
-        dependency_input_tokens = 0
-        dependency_output_tokens = 0
-        dependency_attempt_count = 0
-        completed_stage = "evidence_integration"
+        completed_stage = "cycle_state_ready"
 
         transition_call = render_cycle_close_model_call(
             context,
@@ -570,14 +563,8 @@ class StructuredJSONModelAdapter:
                 "cycle close transition time exhausted",
                 observation=observation,
                 completed_stage=completed_stage,
-                input_tokens=_sum_optional_tokens(
-                    observation_input_tokens,
-                    dependency_input_tokens,
-                ),
-                output_tokens=_sum_optional_tokens(
-                    observation_output_tokens,
-                    dependency_output_tokens,
-                ),
+                input_tokens=0,
+                output_tokens=0,
             )
         if self._diagnostics is not None:
             self._diagnostics.record_transport_input(
@@ -601,14 +588,8 @@ class StructuredJSONModelAdapter:
                 "cycle close transition timed out",
                 observation=observation,
                 completed_stage=completed_stage,
-                input_tokens=_sum_optional_tokens(
-                    observation_input_tokens,
-                    dependency_input_tokens,
-                ),
-                output_tokens=_sum_optional_tokens(
-                    observation_output_tokens,
-                    dependency_output_tokens,
-                ),
+                input_tokens=0,
+                output_tokens=0,
             ) from exc
         transition_error = transition_result.validationError
         if transition_result.payload is None and transition_error is None:
@@ -669,16 +650,8 @@ class StructuredJSONModelAdapter:
                     "final answer check time exhausted",
                     observation=observation,
                     completed_stage="cycle_close",
-                    input_tokens=_sum_optional_tokens(
-                        observation_input_tokens,
-                        dependency_input_tokens,
-                        transition_result.inputTokens,
-                    ),
-                    output_tokens=_sum_optional_tokens(
-                        observation_output_tokens,
-                        dependency_output_tokens,
-                        transition_result.outputTokens,
-                    ),
+                    input_tokens=transition_result.inputTokens,
+                    output_tokens=transition_result.outputTokens,
                 )
             if self._diagnostics is not None:
                 self._diagnostics.record_transport_input(
@@ -702,16 +675,8 @@ class StructuredJSONModelAdapter:
                     "final answer check timed out",
                     observation=observation,
                     completed_stage="cycle_close",
-                    input_tokens=_sum_optional_tokens(
-                        observation_input_tokens,
-                        dependency_input_tokens,
-                        transition_result.inputTokens,
-                    ),
-                    output_tokens=_sum_optional_tokens(
-                        observation_output_tokens,
-                        dependency_output_tokens,
-                        transition_result.outputTokens,
-                    ),
+                    input_tokens=transition_result.inputTokens,
+                    output_tokens=transition_result.outputTokens,
                 ) from exc
             answer_check_error = answer_check_result.validationError
             if answer_check_result.payload is None and answer_check_error is None:
@@ -761,14 +726,10 @@ class StructuredJSONModelAdapter:
         )
 
         input_tokens = _sum_optional_tokens(
-            observation_input_tokens,
-            dependency_input_tokens,
             transition_result.inputTokens,
             answer_check_input_tokens,
         )
         output_tokens = _sum_optional_tokens(
-            observation_output_tokens,
-            dependency_output_tokens,
             transition_result.outputTokens,
             answer_check_output_tokens,
         )
@@ -778,8 +739,6 @@ class StructuredJSONModelAdapter:
             output_tokens=output_tokens,
             attempt_count=(
                 1
-                + observation_attempt_count
-                + dependency_attempt_count
                 + transition_result.retryCount
                 + int(answer_check_attempted)
                 + answer_check_retry_count
@@ -1114,9 +1073,8 @@ def render_solver_model_call(
             _initial_research_transport_schema(projected_context)
         )
         if initial_research
-        else _anthropic_finalization_transport_schema(projected_context)
-        if provider == "anthropic"
-        and profile.context_projection == "finalization"
+        else _finalization_transport_schema(projected_context)
+        if profile.context_projection == "finalization"
         else _solver_anthropic_json_transport_schema(projected_context)
         if provider == "anthropic"
         else _solver_common_transport_schema(projected_context)
@@ -1669,6 +1627,13 @@ def _solver_context_payload(
         ]
         return {name: payload[name] for name in dependency_action_fields}
     if projection == "finalization":
+        payload["graph_review_ledger"] = [
+            item
+            for item in payload["graph_review_ledger"]
+            if item["review_status"] == "relevant_deferred"
+            and item["content_status"] in {"not_requested", "failed", "timeout"}
+            and item["deferred_resolution_action"] != "no_longer_needed"
+        ]
         payload["resolved_work_item_ids"] = [
             item["work_item_id"]
             for item in payload["work_tree"]
@@ -1689,6 +1654,14 @@ def _solver_context_payload(
             for item in payload["hypotheses"]
             if item["judgment"] in {"supported", "contradicted"}
         ]
+        payload["required_answer_evidence_ids"] = list(
+            _required_answer_evidence_ids(
+                context,
+                ObservationIntegrationDecision(
+                    decision_reason="逐次統合済み状態から根拠IDを投影する。"
+                ),
+            )
+        )
         finalization_fields = (
             "question",
             "non_work_item_requirements",
@@ -1703,6 +1676,7 @@ def _solver_context_payload(
             "open_work_item_ids",
             "unresolved_hypothesis_ids",
             "verified_hypothesis_ids",
+            "required_answer_evidence_ids",
         )
         return {name: payload[name] for name in finalization_fields}
     if projection == "full":
@@ -2600,6 +2574,29 @@ def _required_answer_evidence_ids(
                 ),
             ]
         )
+    )
+
+
+def _include_required_finalization_citations(
+    payload: dict[str, Any],
+    context: SolverContext,
+) -> None:
+    """解決済みWorkItemへ対応付けた根拠IDを回答へ機械反映する。"""
+
+    answer = payload.get("answer")
+    if not isinstance(answer, dict):
+        return
+    required_ids = _required_answer_evidence_ids(
+        context,
+        ObservationIntegrationDecision(
+            decision_reason="逐次統合済み状態から根拠IDを投影する。"
+        ),
+    )
+    citation_ids = answer.get("citation_ids")
+    if not isinstance(citation_ids, list):
+        citation_ids = []
+    answer["citation_ids"] = list(
+        dict.fromkeys([*citation_ids, *required_ids])
     )
 
 
@@ -4949,10 +4946,10 @@ def _graph_review_transport_schema(context: SolverContext) -> dict[str, Any]:
     return deepcopy(schema["properties"]["graph_candidate_review"])
 
 
-def _anthropic_finalization_transport_schema(
+def _finalization_transport_schema(
     context: SolverContext,
 ) -> dict[str, Any]:
-    """最終回答に不要な共通Solver枝をAnthropicのgrammarから除く。"""
+    """最終回答に不要な共通Solver枝をProvider共通schemaから除く。"""
 
     common = _solver_common_transport_schema(context)
     included = {
