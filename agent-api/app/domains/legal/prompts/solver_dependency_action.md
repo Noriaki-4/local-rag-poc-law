@@ -24,6 +24,7 @@
    - 起点Articleと調べる関係・方向を説明できる：`legal_graph_neighbors`
    - Articleまたは関係がまだ分からない：`legal_search`
    - 必要な既知Evidence本文が今回省略されている：`load_evidence`
+   - Graphを使う場合は、Hypothesisに合う意味関係を説明できれば`semantic_assertion`を優先し、新規候補が得られなかった場合だけ明示参照へ切り替えます。
 4. 有効な行動がある場合は、処理上限内で今回進める`needs_action` WorkItemを選び、各WorkItemにToolRequestを1件返して`start_next_cycle=false`にします。今回選ばないWorkItemは次stepへ残します。
 5. 成功済みscope以外に未確認事項を進める行動がない場合は、ToolRequestを返さず`start_next_cycle=true`にします。
 
@@ -34,6 +35,7 @@
 - 候補名や関係ラベルだけで下位規範を確認済みにしません。
 - `material_evidence`にある本文を再取得しません。
 - 成功済みの検索・Graph scopeを繰り返しません。
+- `completed_graph_searches`の候補IDと新規候補IDを確認し、進展のなかった探索を引数だけ変えて反復しません。
 - `action_feedback`にあるTool種類は、今回の修復では使いません。別種のToolが適切でなければ`start_next_cycle=true`にします。
 - 未確認Hypothesisに対応する本文未取得の既知候補がある間は、その候補を確認してから再検索します。
 - `available_tools`が`legal_graph_neighbors`だけの場合は、処理上限内で今回進める`needs_action`についてGraph要求を返します。今回選ばないWorkItemは後続stepへ残し、Graphを使わずに次Cycleへ移りません。

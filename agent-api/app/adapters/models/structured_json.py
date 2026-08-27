@@ -1378,7 +1378,7 @@ def _dependency_action_blocked_tool_names(
     }
     if _dependency_action_has_matched_fetch_candidate(context):
         blocked.add("legal_search")
-    elif _dependency_action_requires_reference_graph(context):
+    elif _dependency_action_requires_graph(context):
         blocked.add("legal_search")
     return frozenset(blocked)
 
@@ -1407,7 +1407,7 @@ def _dependency_action_has_matched_fetch_candidate(
 def _dependency_action_has_unexplored_graph_root(
     context: SolverContext,
 ) -> bool:
-    """明示参照Graphをまだ探索していないWorkItemがあるか。"""
+    """Graphをまだ探索していない下位規範WorkItemがあるか。"""
 
     required_ids = set(context.required_dependency_work_item_ids)
     evidence_by_id = {
@@ -1417,7 +1417,6 @@ def _dependency_action_has_unexplored_graph_root(
         item.work_item_id
         for item in context.completed_graph_searches
         if item.work_item_id in required_ids
-        and item.arguments.get("mode") == "explicit_reference"
     }
     return any(
         decision.work_item_id not in completed_ids
@@ -1432,7 +1431,7 @@ def _dependency_action_has_unexplored_graph_root(
     )
 
 
-def _dependency_action_requires_reference_graph(
+def _dependency_action_requires_graph(
     context: SolverContext,
 ) -> bool:
     return (
@@ -1447,36 +1446,11 @@ def _dependency_action_available_tools(
     """現在の下位規範Actionで実行可能なTool契約だけを返す。"""
 
     blocked = _dependency_action_blocked_tool_names(context)
-    force_reference_graph = _dependency_action_requires_reference_graph(
-        context
+    return tuple(
+        definition
+        for definition in context.available_tools
+        if definition.name not in blocked
     )
-    projected: list[ToolDefinition] = []
-    for definition in context.available_tools:
-        if definition.name in blocked:
-            continue
-        if definition.name != "legal_graph_neighbors" or not force_reference_graph:
-            projected.append(definition)
-            continue
-        variants = definition.input_schema.get("anyOf")
-        explicit = next(
-            (
-                deepcopy(item)
-                for item in variants or ()
-                if item.get("properties", {})
-                .get("mode", {})
-                .get("const")
-                == "explicit_reference"
-            ),
-            None,
-        )
-        if explicit is None:
-            raise ModelProtocolError(
-                "legal_graph_neighbors lacks explicit_reference contract"
-            )
-        projected.append(
-            definition.model_copy(update={"input_schema": explicit})
-        )
-    return tuple(projected)
 
 
 def _solver_context_payload(
@@ -4760,7 +4734,7 @@ def _dependency_action_transport_schema(
     """下位規範の次Actionだけを返す専用契約。"""
 
     available_action_tools = _dependency_action_available_tools(context)
-    force_reference_graph = _dependency_action_requires_reference_graph(context)
+    force_graph = _dependency_action_requires_graph(context)
     force_next_cycle = bool(
         context.action_feedback is not None
         and context.can_start_next_cycle
@@ -4782,7 +4756,7 @@ def _dependency_action_transport_schema(
                             [True]
                             if force_next_cycle
                             else [False]
-                            if force_reference_graph
+                            if force_graph
                             else [False, True]
                             if context.can_start_next_cycle
                             else [False]
@@ -4825,7 +4799,7 @@ def _dependency_action_transport_schema(
     )
     required_count = len(context.required_dependency_work_item_ids)
     if not force_next_cycle:
-        tool_requests["minItems"] = 1 if force_reference_graph else 0
+        tool_requests["minItems"] = 1 if force_graph else 0
         tool_requests["maxItems"] = min(
             required_count,
             context.max_tool_requests_per_step,
@@ -4844,7 +4818,7 @@ def _dependency_action_transport_schema(
                         [True]
                         if force_next_cycle
                         else [False]
-                        if force_reference_graph
+                        if force_graph
                         else [False, True]
                         if context.can_start_next_cycle
                         else [False]
@@ -6518,10 +6492,10 @@ def normalize_dependency_action_decision(
         raise ModelProtocolError("next research Cycle is not available")
     if (
         action.start_next_cycle
-        and _dependency_action_requires_reference_graph(context)
+        and _dependency_action_requires_graph(context)
     ):
         raise ModelProtocolError(
-            "dependency action must inspect the available explicit-reference "
+            "dependency action must inspect the available "
             "Graph before starting the next Cycle"
         )
 
@@ -6538,17 +6512,15 @@ def normalize_dependency_action_decision(
             "dependency action cannot use a blocked Tool kind: "
             + ", ".join(repeated_tool_names)
         )
-    if _dependency_action_requires_reference_graph(context):
+    if _dependency_action_requires_graph(context):
         invalid_graph_requests = [
             request.request_id
             for request in action.tool_requests
             if request.tool_name != "legal_graph_neighbors"
-            or request.arguments.get("mode") != "explicit_reference"
         ]
         if invalid_graph_requests:
             raise ModelProtocolError(
-                "lower-norm Graph action requires legal_graph_neighbors with "
-                "mode=explicit_reference"
+                "lower-norm Graph action requires legal_graph_neighbors"
             )
 
     required_ids = set(context.required_dependency_work_item_ids)

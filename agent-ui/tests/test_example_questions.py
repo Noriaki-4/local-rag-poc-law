@@ -99,6 +99,22 @@ class ExampleQuestionsTest(unittest.TestCase):
             prefixes,
         )
 
+    def test_definition_use_example_requires_using_and_defining_articles(self):
+        example = next(
+            item
+            for item in EXAMPLE_QUESTIONS
+            if item.title == "少数所有者の適用除外で使う特別関係者の定義"
+        )
+        prefixes = {
+            prefix
+            for requirement in example.required_evidence
+            for prefix in requirement.content_unit_prefixes
+        }
+
+        self.assertIn("law-402M50000040038-article-2_5", prefixes)
+        self.assertIn("law-323AC0000000025-article-27_2", prefixes)
+        self.assertIn("law-340CO0000000321-article-7", prefixes)
+
 
 
 class ExpectedSourceMatchTest(unittest.TestCase):

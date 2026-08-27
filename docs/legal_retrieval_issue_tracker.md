@@ -89,7 +89,7 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-027` | P0 | 完了 | 同じCycleで一つのHypothesisのGraph候補を追い続けない | Graph ReviewをWorkItem・Hypothesis単位に分け、各単位で本文取得バッチを1回統合したら、そのCycleでは別Hypothesisを処理する。同じ単位の未処理候補はIDを保持して次Cycleへ戻す。v386では同一単位の残候補を理由にProgramがCycleを閉じる不備が残ったため、v387で完了単位だけをSolverへ提示し、別HypothesisまたはCycle移行の判断をSolverへ戻した。候補の採否はLLM、取得済み単位・Cycle・参照IDの投影はProgramが扱う | fixtureとLuna `high`総合問題で、Cycle 2の`h-3`取得・統合後に同じCycleの`h-4`へ移り、府令2条の5・10条を取得した。最終回答の時間切れはLR-004で扱う |
 | `LR-028` | P0 | 完了 | 同じGraph Articleペアを異なる探索要求から取得してもEvidence IDが衝突しない | Graph navigation Evidence IDはArticleペアから決定する一方、Evidence本文には関係種別と向きが含まれていた。同じペアを別のGraph selectorで再取得すると、同じIDで内容が異なり、CaseStoreが`tool returned conflicting evidence ID`として拒否した。Profile v389ではArticleペアIDを共通接頭辞として保ち、関係内容のhashをEvidence IDへ加えた | 同じArticleペアをREFERENCESとRelationAssertionから取得する回帰とLuna `high`総合問題に合格した。実モデルはGraph衝突なくCycle 3の最終化まで到達した |
 | `LR-029` | P0 | 完了 | `supported`かつ`gaps`ありのHypothesisを後続探索と限定回答へ一貫して引き継ぐ | LR-024で`judgment`と`gaps`を独立させた後も、Search Planning・Search Selectionは`judgment=unresolved`だけを未確認対象としていた。このため、追加検索要求が参照するHypothesisを候補選択入力から落とし、空の対応IDを許すschemaと対応ID必須validatorが衝突した。最終化でも、`gaps`によりopenのWorkItemを未解決として表現できなかった。さらに本文評価がDependencyだけを更新した場合、`continue`契約が状態更新と認識せず`schema_validation`になった | Profile v392で探索対象、限定回答検証、Dependency単独更新の3境界を統一した。全1072テストとLuna `high`の社内方針設問に合格し、必要Article 4/4を取得して2 Cycleで正常完了した。意味上の候補選択、`gaps`解消、下位規範判断はLLMに残した |
-| `LR-030` | P0 | 未着手 | Hypothesisに合う意味関係をGraph探索へ使い、意味分類の未被覆時だけ明示参照へフォールバックする | Profile v392の追加Lv.3設問では、Graphに`IMPLEMENTS / EXCEPTION_TO / USES_DEFINITION / OVERRIDES`が登録済みでも、実行したGraph要求は全て`explicit_reference`だった。公告方法の設問ではGraph 4回のうち最初の府令9条発見後は取得済み条文へ戻り、データセットに存在しない準用先をOpenSearchで6回追加検索した。Graph処理自体は合計約0.05秒だが、26回のLLM呼出しに約322.5秒を要した | SolverがHypothesisに対応する意味predicateを説明できる場合は`semantic_assertion`を選び、分類未被覆又は明示参照自体を確認する場合だけ`explicit_reference`を使う。Programはpredicateの意味を選ばず、publish済みcoverage、新規Article ID数、同一scopeの履歴を提示する。新候補がない場合はLLMが別検索又は限定回答を判断し、存在しないArticleを反復検索しないfixtureを通す |
+| `LR-030` | P0 | 実装済み（意味関係実モデル合格） | Hypothesisに合う意味関係をGraph探索へ使い、意味分類の未被覆時だけ明示参照へフォールバックする | Profile v392の追加Lv.3設問では、Graphに`IMPLEMENTS / EXCEPTION_TO / USES_DEFINITION / OVERRIDES`が登録済みでも、実行したGraph要求は全て`explicit_reference`だった。公告方法の設問ではGraph 4回のうち最初の府令9条発見後は取得済み条文へ戻り、データセットに存在しない準用先をOpenSearchで6回追加検索した。Graph処理自体は合計約0.05秒だが、26回のLLM呼出しに約322.5秒を要した | Profile v393で、下位規範Actionの`explicit_reference`固定schemaを廃止した。SolverはHypothesisに対応するpredicateを説明できる場合に`semantic_assertion`を先に選び、新候補がない場合だけ明示参照へ切り替える。Programは意味を選ばず、各Graph要求の返却Article ID、新規Article ID及び同一scope履歴を提示する。Luna `high`総合問題はGraph 4回を全て意味関係・正方向で行い11/11。意味分類coverageのscope別manifestは`LR-006`で扱う |
 
 ### 3.1 LR-016 Tool観察とCycle Closeの単一責務化
 
@@ -871,6 +871,25 @@ DependencyDecisionだけが変化する本文評価も有効な状態更新と�
   列挙しない。
 - 同じHypothesisで意味関係と明示参照の双方から新規Articleを得られなかった場合、同じscopeの反復ではなく、
   Solverが探索方針の変更又は限定回答を選べる。
+
+2026-08-27のProfile v393では、下位規範ActionでProgramがGraph Toolの入力schemaを
+`explicit_reference`だけへ縮小していた処理を削除した。Programが構造上Graphを要求する場合も、
+`semantic_assertion / explicit_reference / explains`のどれを使うか、predicate及び方向はSolverが選ぶ。
+同時に`completed_graph_searches[]`へ、その要求が返した`candidate_article_ids`と、その時点でCaseに初めて現れた
+`new_candidate_article_ids`を追加した。これはIDの集合差だけをProgramが計算し、関係の有用性は判断しない。
+Promptは、Hypothesisに合う意味関係を説明できる場合は意味関係を先に使い、新規候補が得られない場合に
+明示参照へ切り替え、双方で進展しなければ同じGraph探索を反復しない順序へ統一した。
+
+現段階ではGraph Adapterが設定されたpublish済みClassificationRunだけを参照する。候補0件は関係不存在を
+意味しないため、Solverは明示参照等へフォールバックする。ClassificationRunの対象scope別coverageを
+AgentViewへ明示する拡張は`LR-006`の未完了事項として分離する。
+
+同日のLuna `high`による現行の公開買付け総合設問では、3 Cycle、325.8秒で正常完了した。
+Graph要求4回は全て`semantic_assertion / IMPLEMENTS / from_subject`で、`explicit_reference`は0回だった。
+金商法27条の2から施行令6条・7条、施行令7条から公開買付府令2条の4・2条の5・2条の6、
+金商法27条の3・27条の9から公開買付府令10条等を発見した。UIの採点では文書3/3、必須条文4/4、
+回答要点4/4の計11/11である。モデル呼出し18回・試行24回に324.4秒、Tool 14回に4.2秒を要しており、
+意味関係の選択は改善したが、処理時間は引き続きLLM呼出しと契約修復が支配している。
 
 ### LR-019 統合契約と意味的行動選択の分離
 

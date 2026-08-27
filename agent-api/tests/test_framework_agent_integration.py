@@ -639,7 +639,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "392"
+    assert diagnostic_records[0]["profileVersion"] == "393"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -647,7 +647,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "392"
+    assert transport_input["profileVersion"] == "393"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -1183,7 +1183,7 @@ def test_graph_review_moves_to_another_hypothesis_after_integrated_fetch() -> No
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "392"
+    assert profile.version == "393"
     assert profile.solver_graph_review is not None
     assert profile.solver_graph_review.max_output_tokens == (
         profile.solver_integration.max_output_tokens
@@ -1458,7 +1458,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "392"
+    assert profile.version == "393"
     assert prompt.rindex("## 出力") > prompt.rindex(
         "</solver_context>"
     )
@@ -1509,7 +1509,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "392"
+    assert profile.version == "393"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -3166,13 +3166,11 @@ def test_dependency_action_projection_focuses_required_work_items() -> None:
         for item in rendered.input_payload["available_tools"]
         if item["name"] == "legal_graph_neighbors"
     )
-    assert graph_tool["input_schema"]["properties"]["mode"]["const"] == (
-        "explicit_reference"
-    )
-    assert set(
-        graph_tool["input_schema"]["properties"]["reference_lookup"]["enum"]
-    ) == {"follow_reference_in_text", "find_articles_referencing_this"}
-    assert "direction" not in graph_tool["input_schema"]["properties"]
+    graph_variants = graph_tool["input_schema"]["anyOf"]
+    graph_modes = {
+        item["properties"]["mode"]["const"] for item in graph_variants
+    }
+    assert {"semantic_assertion", "explicit_reference"} <= graph_modes
     assert "他のopen" in rendered.instructions
     assert "## 下位規範を確認する次の行動" in rendered.instructions
     assert "## Tool結果の統合と次の行動" not in rendered.instructions
@@ -3246,6 +3244,70 @@ def test_dependency_action_allows_following_named_reference() -> None:
             },
             context=context,
         )
+
+
+def test_dependency_action_allows_hypothesis_aligned_semantic_graph() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_overview_cycle2_repeats_search_before_fetch_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    context = SolverContext.model_validate(fixture["solverContext"])
+    work_item_id = context.required_dependency_work_item_ids[0]
+    context = context.model_copy(
+        update={
+            "required_dependency_work_item_ids": (work_item_id,),
+            "dependency_decisions": tuple(
+                item
+                for item in context.dependency_decisions
+                if item.work_item_id == work_item_id
+            ),
+            "available_tools": tuple(
+                LegalGraphNeighborsTool.definition
+                if item.name == "legal_graph_neighbors"
+                else item
+                for item in context.available_tools
+            ),
+        }
+    )
+    hypothesis_id = next(
+        item.hypothesis_id
+        for item in context.hypotheses
+        if item.work_item_id == work_item_id
+    )
+    article_id = next(
+        item.metadata["articleId"]
+        for item in context.material_evidence
+        if isinstance(item.metadata.get("articleId"), str)
+    )
+
+    decision = normalize_dependency_action_decision(
+        {
+            "decision_reason": "具体化関係に沿って下位規範候補を探す。",
+            "start_next_cycle": False,
+            "tool_requests": [
+                {
+                    "request_id": "graph-semantic",
+                    "work_item_id": work_item_id,
+                    "tool_name": "legal_graph_neighbors",
+                    "arguments": {
+                        "article_ids": [article_id],
+                        "max_relations": 10,
+                        "mode": "semantic_assertion",
+                        "predicate": "IMPLEMENTS",
+                        "direction": "from_subject",
+                    },
+                    "purpose": "仮説に対応する具体化規定を発見する。",
+                    "hypothesis_ids": [hypothesis_id],
+                }
+            ],
+        },
+        context=context,
+    )
+
+    assert decision.tool_requests[0].arguments["mode"] == "semantic_assertion"
 
 
 def test_dependency_action_may_advance_part_of_needs_action_scope() -> None:
@@ -3337,7 +3399,8 @@ def test_dependency_action_prompt_distinguishes_unknown_lower_norm_lookup() -> N
         stage="integration",
     )
 
-    assert "「政令で定める」「府令で定める」だけでは参照先Article" in (
+    assert "まず`semantic_assertion`を使います" in rendered.instructions
+    assert "新規候補が得られず参照関係を確認する場合" in (
         rendered.instructions
     )
     graph_tool = next(
@@ -3345,8 +3408,17 @@ def test_dependency_action_prompt_distinguishes_unknown_lower_norm_lookup() -> N
         for item in rendered.input_payload["available_tools"]
         if item["name"] == "legal_graph_neighbors"
     )
-    assert "reference_lookup" in graph_tool["input_schema"]["properties"]
-    assert "direction" not in graph_tool["input_schema"]["properties"]
+    graph_variants = graph_tool["input_schema"]["anyOf"]
+    assert any(
+        item["properties"]["mode"]["const"] == "semantic_assertion"
+        and "direction" in item["properties"]
+        for item in graph_variants
+    )
+    assert any(
+        item["properties"]["mode"]["const"] == "explicit_reference"
+        and "reference_lookup" in item["properties"]
+        for item in graph_variants
+    )
 
     observed = json.loads(
         fixture["observedTransportOutput"]["payload"]["tool_requests_json"]
@@ -4597,6 +4669,12 @@ def test_lr_003_second_hop_fixture_keeps_graph_replanning_actionable() -> None:
         update={"completed_graph_searches": rebuilt.completed_graph_searches}
     ).model_dump(mode="json")
     assert rebuilt.completed_graph_searches
+    completed_graph = rebuilt.completed_graph_searches[0]
+    assert completed_graph.arguments["mode"] == "semantic_assertion"
+    assert completed_graph.candidate_article_ids
+    assert completed_graph.new_candidate_article_ids == (
+        completed_graph.candidate_article_ids
+    )
     assert rebuilt.fetchable_article_ids == ()
     assert rebuilt.graph_review_selection_limit == 1
     assert any(
@@ -8508,17 +8586,9 @@ def test_dependency_action_uses_dedicated_contract_and_preserves_prior_decision(
     }
     assert "continueまたはfinalize" not in rendered.instructions
     assert "DependencyDecisionの再判定は行いません" in rendered.instructions
-    assert (
-        "`mode=explicit_reference`、"
-        "`reference_lookup=find_articles_referencing_this`"
-    ) in (
-        rendered.instructions
-    )
-    assert (
-        "`mode=explicit_reference`、`reference_lookup=follow_reference_in_text`"
-    ) in (
-        rendered.instructions
-    )
+    assert "まず`semantic_assertion`を使います" in rendered.instructions
+    assert "`find_articles_referencing_this`" in rendered.instructions
+    assert "`follow_reference_in_text`" in rendered.instructions
     assert "重複しない有効なTool要求がなく次Cycleを開始できる場合" in (
         rendered.instructions
     )

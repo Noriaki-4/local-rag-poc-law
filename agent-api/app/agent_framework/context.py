@@ -518,6 +518,20 @@ class CompletedGraphSearch(FrameworkModel):
             "request_idとpurposeはscopeに含めない。"
         ),
     )
+    candidate_article_ids: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "このGraph要求が返した隣接Article ID。Graph関係の意味や本文の"
+            "関連性をProgramが判定した値ではない。"
+        ),
+    )
+    new_candidate_article_ids: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "このGraph要求でCaseに初めて現れた隣接Article ID。空配列は新規候補0件を"
+            "意味し、法的関係が存在しないことは意味しない。"
+        ),
+    )
 
 
 class SolverContext(FrameworkModel):
@@ -1067,11 +1081,95 @@ def build_solver_context(
         if request.tool_name == "legal_search"
         and request.request_id in succeeded_request_ids
     )
+    requests_by_id = {item.request_id: item for item in state.tool_requests}
+    evidence_by_id = {item.evidence_id: item for item in state.evidence}
+    known_article_ids: set[str] = set()
+    result_evidence_ids = {
+        evidence_id
+        for result in state.tool_results
+        for evidence_id in result.evidence_ids
+    }
+    for evidence in state.evidence:
+        if evidence.evidence_id in result_evidence_ids:
+            continue
+        article_id = _nonempty_string(evidence.metadata.get("articleId"))
+        if article_id is not None:
+            known_article_ids.add(article_id)
+        if evidence.metadata.get("docType") != "graph_navigation":
+            continue
+        payload = _graph_navigation_payload(evidence)
+        for graph_article_id in (
+            _nonempty_string(
+                payload.get("seedArticleId")
+                or evidence.metadata.get("seedArticleId")
+            ),
+            _nonempty_string(
+                payload.get("neighborArticleId")
+                or evidence.metadata.get("neighborArticleId")
+            ),
+        ):
+            if graph_article_id is not None:
+                known_article_ids.add(graph_article_id)
+    graph_candidates_by_request: dict[str, tuple[str, ...]] = {}
+    new_graph_candidates_by_request: dict[str, tuple[str, ...]] = {}
+    for result in state.tool_results:
+        if result.status != "succeeded":
+            continue
+        request = requests_by_id.get(result.request_id)
+        result_evidence = tuple(
+            evidence_by_id[evidence_id]
+            for evidence_id in result.evidence_ids
+            if evidence_id in evidence_by_id
+        )
+        graph_candidate_ids: list[str] = []
+        result_article_ids: list[str] = []
+        for evidence in result_evidence:
+            article_id = _nonempty_string(evidence.metadata.get("articleId"))
+            if article_id is not None and article_id not in result_article_ids:
+                result_article_ids.append(article_id)
+            if evidence.metadata.get("docType") != "graph_navigation":
+                continue
+            payload = _graph_navigation_payload(evidence)
+            seed_article_id = _nonempty_string(
+                payload.get("seedArticleId")
+                or evidence.metadata.get("seedArticleId")
+            )
+            neighbor_article_id = _nonempty_string(
+                payload.get("neighborArticleId")
+                or evidence.metadata.get("neighborArticleId")
+            )
+            if seed_article_id is not None:
+                known_article_ids.add(seed_article_id)
+            if (
+                neighbor_article_id is not None
+                and neighbor_article_id not in graph_candidate_ids
+            ):
+                graph_candidate_ids.append(neighbor_article_id)
+        if request is not None and request.tool_name == "legal_graph_neighbors":
+            graph_candidates_by_request[result.request_id] = tuple(
+                graph_candidate_ids
+            )
+            new_graph_candidates_by_request[result.request_id] = tuple(
+                article_id
+                for article_id in graph_candidate_ids
+                if article_id not in known_article_ids
+            )
+        known_article_ids.update(result_article_ids)
+        known_article_ids.update(graph_candidate_ids)
+
     completed_graph_searches = tuple(
         CompletedGraphSearch(
             work_item_id=request.work_item_id,
             hypothesis_ids=request.hypothesis_ids,
             arguments=request.arguments,
+            candidate_article_ids=graph_candidates_by_request.get(
+                request.request_id,
+                (),
+            ),
+            new_candidate_article_ids=new_graph_candidates_by_request.get(
+                request.request_id,
+                (),
+            ),
         )
         for request in state.tool_requests
         if request.tool_name == "legal_graph_neighbors"
