@@ -46,6 +46,22 @@ Worker／Reviewerへ渡し、通常のClassificationRun契約で登録する。
 金商法27条の3と府令10条をEvidenceとして確認する。検索候補や別Articleで代用しない。
 1 Cycleの本文取得上限4 Articleを超えるため、この問題は複数Cycleの引継ぎも検証する。
 
+### 自治体法務の検索構造を代替する追加設問
+
+自治体例規を入手するまでの間、同じ13 Articleだけを使い、自治体法務で必要になる検索構造を
+抽象的に検証する。既存の公告・例外・総合3問はbaselineとして維持し、次の5問を追加する。
+
+| question ID | 抽象化した検索 | 主な対象Article |
+|---|---|---|
+| `tob-delegation-chain` | 上位規範から下位規範への委任・具体化 | 金商法27条の2、施行令7条、府令2条の5 |
+| `tob-permitted-choice` | 選択可能な範囲と、選択に伴う拘束条件 | 金商法27条の3、施行令9条の3、府令9条・10条 |
+| `tob-policy-compliance` | 独自方針と上位規範の整合 | 金商法27条の3、施行令9条の3、府令9条・10条 |
+| `tob-amendment-impact` | 上位規範の改正から下位規範を逆引き | 金商法27条の3、施行令9条の3、府令9条・10条 |
+| `tob-internal-procedure` | 上位規範から内部手順を組み立てる | 金商法27条の3、施行令9条の3、府令9条・10条・11条 |
+
+`tob-amendment-impact`が求めるのは見直し候補と関係の説明であり、仮定した改正内容がないまま
+改正要否を断定することではない。追加設問もgoldを検索、Graph、Solver Promptへ投入しない。
+
 ## snapshot
 
 元XMLを複製せず、content-addressed pathとSHA-256を`manifest.json`で固定する。subsetの

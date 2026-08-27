@@ -1711,6 +1711,23 @@ def _solver_context_payload(
                 context.graph_review_selection_limit
             ),
         }
+    follow_up_hypotheses = tuple(
+        item for item in context.hypotheses if item.requires_follow_up
+    )
+    follow_up_work_item_ids = {
+        item.work_item_id for item in follow_up_hypotheses
+    }
+    research_work_items = tuple(context.work_tree)
+    if projection == "research_search":
+        research_work_items = tuple(
+            item
+            for item in context.work_tree
+            if item.state == "open"
+            and item.work_item_id in follow_up_work_item_ids
+        )
+    research_work_item_ids = {
+        item.work_item_id for item in research_work_items
+    }
     work_item_by_id = {item.work_item_id: item for item in context.work_tree}
     research_input = ResearchStepInput(
         question=context.question,
@@ -1720,7 +1737,7 @@ def _solver_context_payload(
                 question=item.question,
                 action_actor=item.action_actor,
             )
-            for item in context.work_tree
+            for item in research_work_items
         ),
         non_work_item_requirements=context.non_work_item_requirements,
         hypotheses=tuple(
@@ -1735,8 +1752,8 @@ def _solver_context_payload(
                 ),
                 gaps=item.gaps,
             )
-            for item in context.hypotheses
-            if item.judgment == "unresolved"
+            for item in follow_up_hypotheses
+            if item.work_item_id in research_work_item_ids
         ),
         available_tools=context.available_tools,
         max_tool_requests_per_step=context.max_tool_requests_per_step,
@@ -1833,6 +1850,18 @@ def _staged_research_transport_schema(
             }
         )
     work_item_ids = tuple(item.work_item_id for item in context.work_tree)
+    if projection == "research_search":
+        follow_up_work_item_ids = {
+            item.work_item_id
+            for item in context.hypotheses
+            if item.requires_follow_up
+        }
+        work_item_ids = tuple(
+            item.work_item_id
+            for item in context.work_tree
+            if item.state == "open"
+            and item.work_item_id in follow_up_work_item_ids
+        )
     if projection == "research_hypothesis":
         hypothesis = _strict_object(
             {
@@ -1879,7 +1908,7 @@ def _staged_research_transport_schema(
         hypothesis_ids = tuple(
             item.hypothesis_id
             for item in context.hypotheses
-            if item.judgment == "unresolved"
+            if item.requires_follow_up
         )
         search_request = _strict_object(
             {
@@ -3490,8 +3519,14 @@ def _search_selection_context_payload(context: SolverContext) -> dict[str, Any]:
     evidence_by_id = {
         item.evidence_id: item for item in context.material_evidence
     }
+    open_work_item_ids = {
+        item.work_item_id for item in context.work_tree if item.state == "open"
+    }
     active_hypotheses = tuple(
-        item for item in context.hypotheses if item.judgment == "unresolved"
+        item
+        for item in context.hypotheses
+        if item.requires_follow_up
+        and item.work_item_id in open_work_item_ids
     )
     active_work_item_ids = {
         item.work_item_id for item in active_hypotheses
@@ -4544,10 +4579,14 @@ def _search_selection_transport_schema(context: SolverContext) -> dict[str, Any]
     """全候補を比較し、選択した候補の評価だけを返す契約。"""
 
     candidate_ids = tuple(item.article_id for item in context.search_candidates)
+    open_work_item_ids = {
+        item.work_item_id for item in context.work_tree if item.state == "open"
+    }
     hypothesis_ids = tuple(
         item.hypothesis_id
         for item in context.hypotheses
-        if item.judgment == "unresolved"
+        if item.requires_follow_up
+        and item.work_item_id in open_work_item_ids
     )
     selection_limit = _tool_array_argument_capacity(
         context,
@@ -6381,7 +6420,7 @@ def _normalize_staged_research_payload(
         known_hypotheses = {
             item.hypothesis_id: item
             for item in context.hypotheses
-            if item.judgment == "unresolved"
+            if item.requires_follow_up
         }
         requests = []
         for index, item in enumerate(payload.get("search_requests") or [], start=1):

@@ -48,6 +48,7 @@ from app.adapters.models.structured_json import (
     render_observation_integration_model_call,
     render_search_assessment_model_call,
     render_search_reselection_model_call,
+    render_search_selection_model_call,
     render_solver_model_call,
     render_solver_transport_repair_model_call,
     normalize_dependency_action_decision,
@@ -124,6 +125,24 @@ from app.domains.legal import profiles as legal_profiles
 from app.framework_agent import LegalFrameworkAgentService
 from app.llm import StructuredJSONResult
 from app.models import AnswerRequest, AnswerResponse
+
+
+def test_continue_accepts_dependency_decision_as_state_update() -> None:
+    decision = SolverDecision(
+        next="continue",
+        decision_reason="下位規範の本文確認が残っている。",
+        dependency_decisions=(
+            DependencyDecision(
+                dependency_kind="lower_norm",
+                work_item_id="w1",
+                status="needs_action",
+                reason="末端規定の本文が未確認である。",
+                basis_evidence_ids=("e1",),
+            ),
+        ),
+    )
+
+    assert decision.dependency_decisions[0].status == "needs_action"
 
 
 def test_solver_contract_glossary_is_generated_from_field_descriptions() -> None:
@@ -620,7 +639,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "390"
+    assert diagnostic_records[0]["profileVersion"] == "392"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -628,7 +647,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "390"
+    assert transport_input["profileVersion"] == "392"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -1164,7 +1183,7 @@ def test_graph_review_moves_to_another_hypothesis_after_integrated_fetch() -> No
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "390"
+    assert profile.version == "392"
     assert profile.solver_graph_review is not None
     assert profile.solver_graph_review.max_output_tokens == (
         profile.solver_integration.max_output_tokens
@@ -1439,7 +1458,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "390"
+    assert profile.version == "392"
     assert prompt.rindex("## 出力") > prompt.rindex(
         "</solver_context>"
     )
@@ -1490,7 +1509,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "390"
+    assert profile.version == "392"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -2876,6 +2895,90 @@ def test_search_selection_prompt_combines_candidate_understanding_and_choice() -
     assert "matched_hypothesis_ids" in prompt
     assert "規律主体を確定できなくても" in prompt
     assert "検索抜粋は候補選択用" in prompt
+
+
+def test_supported_hypothesis_with_gaps_remains_available_for_search() -> None:
+    state = CaseState(
+        case_id="case-supported-gap-search",
+        question="確認事項",
+        work_items=(WorkItem(work_item_id="w1", question="具体的内容を確認する"),),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h-follow-up",
+                work_item_id="w1",
+                statement="上位規定が方針を認める",
+                judgment="supported",
+                evidence_ids=("e1",),
+                gaps=("下位規定の具体的内容",),
+            ),
+            Hypothesis(
+                hypothesis_id="h-complete",
+                work_item_id="w1",
+                statement="確認済みの別命題",
+                judgment="supported",
+                evidence_ids=("e1",),
+            ),
+        ),
+        evidence=(
+            Evidence(
+                evidence_id="e1",
+                source_ref="fixture:e1",
+                content="上位規定の本文",
+                created_cycle=1,
+            ),
+        ),
+    )
+    context = build_solver_context(
+        state,
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+        available_tools=(LegalSearchTool.definition,),
+    ).model_copy(
+        update={
+            "search_candidates": (
+                SearchCandidateArticle(
+                    article_id="article-1",
+                    document_id="document-1",
+                    title="候補法令",
+                    headings=("第一条",),
+                    discovery_work_item_ids=("w1",),
+                    discovery_hypothesis_ids=("h-follow-up",),
+                    search_request_ids=("search-1",),
+                    navigation_evidence_ids=(),
+                ),
+            ),
+            "remaining_fetch_capacity": 1,
+        }
+    )
+    profile = legal_profiles.legal_agent_profile()
+
+    selection = render_search_selection_model_call(
+        context,
+        profile.solver_search_review,
+    )
+    assert [
+        item["hypothesis_id"] for item in selection.input_payload["hypotheses"]
+    ] == ["h-follow-up"]
+    matched_schema = selection.output_schema["properties"]["selections"][
+        "items"
+    ]["properties"]["matched_hypothesis_ids"]
+    assert matched_schema["items"]["enum"] == ["h-follow-up"]
+
+    planning_profile = profile.solver_search_planning
+    assert planning_profile is not None
+    planning = render_solver_model_call(
+        context,
+        planning_profile,
+        provider="openai",
+        stage="search_planning",
+    )
+    assert [
+        item["hypothesis_id"] for item in planning.input_payload["hypotheses"]
+    ] == ["h-follow-up"]
+    assert [
+        item["work_item_id"] for item in planning.input_payload["work_items"]
+    ] == ["w1"]
 
 
 def test_search_review_selects_and_defers_every_candidate_once() -> None:
@@ -9607,6 +9710,76 @@ def test_limited_answer_allows_supported_hypothesis_with_open_dependency() -> No
     )
     assert rendered.input_payload["open_work_item_ids"] == ["w1"]
     assert rendered.input_payload["unresolved_hypothesis_ids"] == []
+
+
+def test_limited_answer_allows_supported_hypothesis_with_gaps() -> None:
+    state = CaseState(
+        case_id="case-supported-gap-finalization",
+        question="具体的内容まで確認する",
+        research_cycle_count=4,
+        work_items=(WorkItem(work_item_id="w1", question="具体的内容を確認する"),),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h1",
+                work_item_id="w1",
+                statement="上位規定が方針を認める",
+                judgment="supported",
+                evidence_ids=("e1",),
+                gaps=("下位規定の具体的内容",),
+            ),
+        ),
+        evidence=(
+            Evidence(
+                evidence_id="e1",
+                source_ref="fixture:e1",
+                content="上位規定の本文",
+                created_cycle=4,
+                metadata={"articleId": "article-1"},
+            ),
+        ),
+    )
+    decision = SolverDecision(
+        next="finalize",
+        answer=FinalAnswer(
+            text="上位規定は確認できたが、具体的内容は確認できなかった。",
+            citation_ids=("e1",),
+            limitations=("下位規定の具体的内容は未確認",),
+            unresolved_work_item_ids=("w1",),
+            unresolved_hypothesis_ids=(),
+        ),
+    )
+
+    finalized = apply_solver_decision(
+        state,
+        decision,
+        limits=AgentLimits(max_research_cycles=4),
+        known_tool_names=set(),
+        material_evidence_ids=("e1",),
+        finalize_only=True,
+        can_start_next_cycle=False,
+    )
+
+    assert finalized.final_answer is not None
+    assert finalized.final_answer.unresolved_work_item_ids == ("w1",)
+    assert finalized.final_answer.unresolved_hypothesis_ids == ()
+
+    context = build_solver_context(
+        state,
+        AgentLimits(max_research_cycles=4),
+        remaining_wall_time_sec=60,
+        finalize_only=True,
+    )
+    profile = legal_profiles.legal_agent_profile().solver_finalization
+    assert profile is not None
+    rendered = render_solver_model_call(
+        context,
+        profile,
+        provider="openai",
+        stage="finalization",
+    )
+    assert rendered.input_payload["open_work_item_ids"] == ["w1"]
+    assert rendered.input_payload["unresolved_hypothesis_ids"] == []
+    assert "`supported`でも`gaps`が残るHypothesis" in rendered.instructions
 
 
 def test_limited_answer_allows_supported_hypothesis_with_unresolved_frontier(

@@ -1110,16 +1110,23 @@ def apply_solver_decision(
             for resolution in deferred_resolutions
             if resolution.action == "unresolved_at_limit"
         }
+        supported_gap_work_items = {
+            hypothesis.work_item_id
+            for hypothesis in hypotheses.values()
+            if hypothesis.judgment == "supported" and hypothesis.gaps
+        }
         missing_unresolved_hypotheses = (
             unresolved_work_item_ids
             - unresolved_hypothesis_work_items
             - unresolved_dependency_work_items
             - unresolved_frontier_work_items
+            - supported_gap_work_items
         )
         if missing_unresolved_hypotheses:
             raise ContractViolation(
                 "each unresolved WorkItem requires an unresolved Hypothesis or "
-                "needs_action dependency or unresolved Frontier: "
+                "supported Hypothesis with gaps or needs_action dependency or "
+                "unresolved Frontier: "
                 f"{sorted(missing_unresolved_hypotheses)}"
             )
 

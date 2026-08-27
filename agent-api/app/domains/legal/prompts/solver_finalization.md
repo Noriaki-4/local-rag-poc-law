@@ -47,6 +47,7 @@
 - `finalize_only=true`ではToolRequestと次Cycle開始を返しません。
 - WorkItemとHypothesisの状態は変更しません。
 - `unresolved_hypothesis_ids`にはjudgmentが`unresolved`のIDだけを含めます。open WorkItemに属していても、`supported`または`contradicted`のHypothesis IDは含めません。
+- `supported`でも`gaps`が残るHypothesisのWorkItemは未解決です。WorkItem IDと`limitations`へ未確認内容を反映し、そのHypothesis IDを`unresolved_hypothesis_ids`へ読み替えません。
 - supported Hypothesisがあっても下位規範の`needs_action`が残るWorkItemは未解決です。そのWorkItem IDは含めますが、supported Hypothesisをunresolvedへ読み替えません。
 - open WorkItemがある場合は、対応する未確認内容をlimitationsへ書きます。
 - `verified_hypothesis_ids=[]`なら、`citation_ids=[]`にします。

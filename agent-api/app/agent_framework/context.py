@@ -366,7 +366,10 @@ class SearchAssessmentHypothesis(FrameworkModel):
     work_item_id: str = Field(description="このHypothesisが属する既知WorkItem ID。")
     statement: str = Field(description="法令本文で検証する1つの法的命題。")
     gaps: tuple[str, ...] = Field(
-        description="statementを判定するために法令本文で未確認の内容。"
+        description=(
+            "WorkItemへの回答に必要だが法令本文で未確認の内容。"
+            "statementが支持済みでも残ることがある。"
+        )
     )
 
 
@@ -420,8 +423,8 @@ class ResearchStepHypothesis(FrameworkModel):
     )
     gaps: tuple[str, ...] = Field(
         description=(
-            "statementを判定するため、WorkItemの範囲内で法令本文による確認が"
-            "必要な事項。該当する事項がなければ空。"
+            "WorkItemへの回答に必要だが、法令本文による確認が残る事項。"
+            "statementが支持済みでも残ることがある。該当しなければ空。"
         )
     )
 
@@ -445,7 +448,8 @@ class ResearchStepInput(FrameworkModel):
     hypotheses: tuple[ResearchStepHypothesis, ...] = Field(
         default=(),
         description=(
-            "作成済みの未確認Hypothesis。各要素は所属WorkItem、命題、gapsを持つ。"
+            "未判定、または支持済みでもgapsが残るHypothesis。"
+            "各要素は所属WorkItem、命題、gapsを持つ。"
         ),
     )
     available_tools: tuple[ToolDefinition, ...] = Field(

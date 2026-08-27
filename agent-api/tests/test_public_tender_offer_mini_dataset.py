@@ -36,7 +36,7 @@ def test_public_tender_offer_dataset_is_frozen_complete_and_gold_separated():
     assert report["expectedReferenceCount"] == 4
     assert report["requiredNavigationCount"] == 4
     assert report["forbiddenNavigationCount"] == 1
-    assert report["questionCount"] == 3
+    assert report["questionCount"] == 8
     assert report["goldIncludedInIngestInputs"] is False
 
 

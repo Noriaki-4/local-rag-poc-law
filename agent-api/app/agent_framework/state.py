@@ -196,6 +196,14 @@ class Hypothesis(FrameworkModel):
         ),
     )
 
+    @property
+    def requires_follow_up(self) -> bool:
+        """未判定、または支持済みでも未確認事項が残るかを返す。"""
+
+        return self.judgment == "unresolved" or (
+            self.judgment == "supported" and bool(self.gaps)
+        )
+
     @model_validator(mode="before")
     @classmethod
     def discard_legacy_actor_copy(cls, value: object) -> object:

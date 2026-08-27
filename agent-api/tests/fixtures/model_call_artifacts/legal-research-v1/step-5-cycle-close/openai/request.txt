@@ -55,6 +55,7 @@
 - `required_transition=finalize`では`answer`を返します。
 - 全WorkItemが終了済みなら、`limitations`、`unresolved_work_item_ids`、`unresolved_hypothesis_ids`はすべて空にします。
 - 実行上限で未解決のまま`finalize`する場合だけ、未確認内容を`limitations`に書き、対応する未解決IDを返します。
+- `supported`でも`gaps`が残るHypothesisのWorkItemは未解決です。そのWorkItem IDと未確認内容を返し、Hypothesis IDは`unresolved_hypothesis_ids`へ読み替えません。
 - `finalize`では`required_answer_evidence_ids`を`answer.citation_ids`へ全件入れ、各Evidenceが示す規定内容を回答本文へ反映します。
 - `non_work_item_requirements`は法的結論の根拠にせず、根拠・出典の提示や表現・出力形式等の回答要件として適用します。
 - 複数のEvidenceが一つの要件を構成する場合は、「かつ」等の結合関係を保ち、一部の条件だけで結論を出しません。

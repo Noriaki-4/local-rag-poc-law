@@ -417,6 +417,7 @@ class SolverDecision(FrameworkModel):
             if (
                 not self.tool_requests
                 and self.update == CaseUpdate()
+                and not self.dependency_decisions
                 and self.graph_candidate_review is None
                 and self.search_candidate_review is None
                 and not self.frontier_re_adoptions
