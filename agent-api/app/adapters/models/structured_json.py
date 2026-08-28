@@ -637,7 +637,10 @@ class StructuredJSONModelAdapter:
                 "cycle close contract invalid: finalize requires an answer"
             )
 
-        if transition.answer is not None:
+        if (
+            transition.answer is not None
+            and profile.final_answer_check_system_prompt is not None
+        ):
             answer_check_call = render_final_answer_check_model_call(
                 context,
                 observation,
@@ -698,10 +701,6 @@ class StructuredJSONModelAdapter:
                     f"{answer_check_error}"
                 )
             checked_text = answer_check_result.payload.get("text")
-            required_answer_ids = _required_answer_evidence_ids(
-                context,
-                observation,
-            )
             if not isinstance(checked_text, str) or not checked_text.strip():
                 raise ModelProtocolError("final answer check requires answer text")
             transition = transition.model_copy(
@@ -709,7 +708,6 @@ class StructuredJSONModelAdapter:
                     "answer": transition.answer.model_copy(
                         update={
                             "text": checked_text,
-                            "citation_ids": required_answer_ids,
                         }
                     )
                 }
@@ -718,6 +716,20 @@ class StructuredJSONModelAdapter:
             answer_check_output_tokens = answer_check_result.outputTokens
             answer_check_retry_count = answer_check_result.retryCount
             answer_check_attempted = True
+
+        if transition.answer is not None:
+            transition = transition.model_copy(
+                update={
+                    "answer": transition.answer.model_copy(
+                        update={
+                            "citation_ids": _required_answer_evidence_ids(
+                                context,
+                                observation,
+                            )
+                        }
+                    )
+                }
+            )
 
         decision = _normalize_cycle_close_decisions(
             context,

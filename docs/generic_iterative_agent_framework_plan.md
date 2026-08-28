@@ -2014,11 +2014,10 @@ Graph Review差分処理やCycle境界処理を混入させず、IntegrationとG
 | `solver_search_planning.md` | 初回Step 3。既知Hypothesisに対する今回の`legal_search`要求を作る。 |
 | `solver_integration.md` | 新しいToolResultを評価して状態を逐次更新し、未確認事項に対する次の行動を選ぶ。Graphの関係種別を説明できなければ全種別を要求せず、OpenSearchで根拠または起点を発見する。 |
 | `solver_evidence_integration.md` | 提示された取得本文を既存Hypothesisへ反映し、同じ確認事項の下位規範確認も判断する。WorkItem完了、Tool選択、Cycle移行、回答は扱わない。 |
-| `solver_cycle_close.md` | 直前の本文評価を前提に、active Frontierの引継ぎと`finalize / start_next_cycle`だけを扱う。本文再評価や次Cycleの詳細なTool計画は行わない。 |
+| `solver_cycle_close.md` | 直前の本文評価を前提に、active Frontierの引継ぎ、`finalize / start_next_cycle`及び最終回答を扱う。最終回答はこの呼出し内で根拠・限定・回答要件を確認し、別の回答書換えLLMは呼ばない。本文再評価や次Cycleの詳細なTool計画は行わない。 |
 | `solver_finalization.md` | `finalize_only=true`で追加Toolを要求せず、確認済み範囲と未確認範囲を分けた回答を作る。 |
 | `solver_reviewer_revision.md` | 全Findingを本文と照合し、`addressed / disputed`を全件返す。回答修正か追加調査かはSolverが判断する。 |
 | `solver_search_selection.md` | 全検索候補を比較し、選択した候補の内容評価、Hypothesis対応、本文取得判断を一つの出力で返す。非選択候補の詳細評価は出力しない。 |
-| `solver_final_answer_check.md` | WorkItemごとの取得本文に照らして回答案を確認し、`non_work_item_requirements`を全件反映する。回答要件を法的根拠として扱わない。 |
 | `solver_graph_review.md` | `graph_review_batch`の`review_trigger`、`prior_review_status`及びLinkを読み、今回のbatchだけを評価・出力する。全ledgerは入力しない。 |
 | `solver_graph_review.md` | 各batchの全候補をWorkItem・Hypothesis別に評価し、最大3件を`select`、関連する残りを`defer`、無関係と判断したものだけを`reject`する。 |
 | `solver_graph_review.md` | `remaining_fetch_capacity=0`なら新たにselectせず、関連候補をdeferしてCycle終了判断へ戻す。Graph Reviewから直接次Cycleの法的方針を決めない。 |

@@ -44,7 +44,6 @@ from app.adapters.models.structured_json import (
     _validate_search_reselection_payload,
     render_cycle_close_model_call,
     render_dependency_assessment_model_call,
-    render_final_answer_check_model_call,
     render_observation_integration_model_call,
     render_search_assessment_model_call,
     render_search_reselection_model_call,
@@ -639,7 +638,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "393"
+    assert diagnostic_records[0]["profileVersion"] == "394"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -647,7 +646,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "393"
+    assert transport_input["profileVersion"] == "394"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -1183,7 +1182,7 @@ def test_graph_review_moves_to_another_hypothesis_after_integrated_fetch() -> No
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "393"
+    assert profile.version == "394"
     assert profile.solver_graph_review is not None
     assert profile.solver_graph_review.max_output_tokens == (
         profile.solver_integration.max_output_tokens
@@ -1458,7 +1457,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "393"
+    assert profile.version == "394"
     assert prompt.rindex("## 出力") > prompt.rindex(
         "</solver_context>"
     )
@@ -1509,7 +1508,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "393"
+    assert profile.version == "394"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -2839,7 +2838,6 @@ def test_complete_model_prompts_define_one_role_and_one_purpose() -> None:
         profile.solver_cycle_close.system_prompt,
         profile.solver_cycle_close.followup_system_prompt,
         profile.solver_cycle_close.dependency_system_prompt,
-        profile.solver_cycle_close.final_answer_check_system_prompt,
         profile.solver_finalization.system_prompt,
         profile.solver_reviewer_revision.system_prompt,
         profile.solver_search_review.system_prompt,
@@ -3308,6 +3306,51 @@ def test_dependency_action_allows_hypothesis_aligned_semantic_graph() -> None:
     )
 
     assert decision.tool_requests[0].arguments["mode"] == "semantic_assertion"
+
+
+def test_uses_definition_graph_checkpoint_isolates_semantic_lookup() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_uses_definition_graph_isolated_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    context = SolverContext.model_validate(fixture["solverContext"])
+    expected = fixture["expectations"]["expectedGraphRequest"]
+
+    assert {item.name for item in context.available_tools} == {
+        "legal_graph_neighbors"
+    }
+    assert {
+        item.metadata.get("articleId") for item in context.material_evidence
+    } == {expected["articleId"]}
+    assert expected["expectedNeighborArticleId"] not in json.dumps(
+        context.model_dump(mode="json"),
+        ensure_ascii=False,
+    )
+
+    rendered = render_solver_model_call(
+        context,
+        legal_profiles.legal_agent_profile().solver_integration,
+        provider="openai",
+        stage="integration",
+    )
+    assert [item["name"] for item in rendered.input_payload["available_tools"]] == [
+        "legal_graph_neighbors"
+    ]
+
+    observed = SolverDecision.model_validate(fixture["observedSolverDecision"])
+    assert len(observed.tool_requests) == 1
+    request = observed.tool_requests[0]
+    assert request.tool_name == "legal_graph_neighbors"
+    assert request.arguments == {
+        "article_ids": [expected["articleId"]],
+        "max_relations": 20,
+        "mode": expected["mode"],
+        "predicate": expected["predicate"],
+        "direction": expected["direction"],
+    }
 
 
 def test_dependency_action_may_advance_part_of_needs_action_scope() -> None:
@@ -4862,46 +4905,11 @@ def test_graph_review_can_select_fetched_article_without_refetching() -> None:
     assert request is None
 
 
-def test_final_answer_check_requires_every_enumerated_source_item() -> None:
-    fixture_path = (
-        Path(__file__).parent
-        / "fixtures"
-        / "framework"
-        / "tob_announcement_final_answer_omits_last_list_item_v1.json"
-    )
-    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
-    source_text = json.dumps(
-        fixture["observedTransportInput"]["inputPayload"],
-        ensure_ascii=False,
-    )
-    old_answer = fixture["observedTransportOutput"]["payload"]["text"]
-    assert "公開買付届出書の写しを縦覧に供する場所" in source_text
-    assert "公開買付届出書の写しを縦覧に供する場所" not in old_answer
-
+def test_legal_cycle_close_disables_separate_final_answer_check() -> None:
     profile = legal_profiles.legal_agent_profile().solver_cycle_close
     assert profile is not None
-    assert "「など」「その他」で本文の個別項目を省略しません" in (
-        profile.final_answer_check_system_prompt or ""
-    )
-    assert "本文の末尾まで確認" in (
-        profile.final_answer_check_completion_prompt or ""
-    )
-    context = SolverContext.model_validate(fixture["solverContext"])
-    observed = SolverDecision.model_validate(fixture["observedSolverDecision"])
-    final_answer_call = render_final_answer_check_model_call(
-        context,
-        ObservationIntegrationDecision(
-            decision_reason="取得本文を評価した",
-            update_work_items=observed.update.update_work_items,
-            update_hypotheses=observed.update.update_hypotheses,
-        ),
-        observed.answer,
-        profile,
-    )
-    assert final_answer_call.input_payload["non_work_item_requirements"] == [
-        "根拠条文とともに説明すること。"
-    ]
-    assert "法的結論の根拠として使いません" in final_answer_call.instructions
+    assert profile.final_answer_check_system_prompt is None
+    assert profile.final_answer_check_completion_prompt is None
 
 
 def test_integration_uses_selected_fetched_graph_article_before_more_tools() -> None:

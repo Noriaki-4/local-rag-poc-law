@@ -1,0 +1,719 @@
+{
+  "fixtureId": "tob-uses-definition-graph-isolated-v1",
+  "questionId": "tob-uses-definition-graph",
+  "source": {
+    "diagnosticsMode": "snapshot",
+    "diagnosticCaseId": "legal-2e0f19045c9c4435bb7b896feb0eba88",
+    "sequence": 21,
+    "purpose": "integration",
+    "model": "gpt-5.6-luna",
+    "profileName": "legal-default",
+    "profileVersion": "394"
+  },
+  "checkpoint": {
+    "resumeFrom": "integration",
+    "approved": true,
+    "approvedBy": "user-requested-isolated-graph-debug",
+    "sourceProvider": "openai",
+    "sourceModel": "gpt-5.6-luna"
+  },
+  "expectations": {
+    "researchCycleCount": 1,
+    "remainingFetchCapacity": 4,
+    "workItemCount": 1,
+    "hypothesisCount": 1,
+    "materialEvidenceCount": 5,
+    "recentToolResultCount": 0,
+    "fetchableArticleCount": 0,
+    "fetchedResourceCount": 1,
+    "evidenceRoleCounts": {
+      "retrieved_text": 5
+    },
+    "expectedGraphRequest": {
+      "articleId": "law-402M50000040038-article-2_5",
+      "mode": "semantic_assertion",
+      "predicate": "USES_DEFINITION",
+      "direction": "from_subject",
+      "expectedNeighborArticleId": "law-323AC0000000025-article-27_2"
+    }
+  },
+  "caseState": {
+    "case_id": "fixture-tob-uses-definition-graph-isolated-v1",
+    "question": "公開買付府令第2条の5を起点として、同条が用いている用語のうち別の条文で定義されているものを見つけ、定義規定とその内容を説明してください。",
+    "non_work_item_requirements": [],
+    "run_status": "running",
+    "research_cycle_count": 1,
+    "work_items": [
+      {
+        "work_item_id": "wi-1",
+        "parent_work_item_id": null,
+        "question": "公開買付府令第2条の5で用いられている用語のうち、別の条文で定義されているものは何か。また、それぞれの定義規定と定義内容は何か。",
+        "action_actor": "不明",
+        "state": "open",
+        "resolution": null,
+        "basis_hypothesis_ids": [],
+        "replaces_work_item_id": null
+      }
+    ],
+    "hypotheses": [
+      {
+        "hypothesis_id": "h-1",
+        "work_item_id": "wi-1",
+        "statement": "公開買付府令第2条の5で用いられる用語のうち別の条文で定義されているものは、それぞれの定義規定における定義内容により意味が定まる。",
+        "judgment": "unresolved",
+        "evidence_ids": [
+          "law-402M50000040038-article-2_5-paragraph-1",
+          "law-402M50000040038-article-2_5-paragraph-2",
+          "law-402M50000040038-article-2_5-paragraph-3",
+          "law-402M50000040038-article-2_5-paragraph-4",
+          "law-402M50000040038-article-2_5-paragraph-5"
+        ],
+        "gaps": [
+          "府令第2条の5が別条文の定義を参照している用語、その定義規定及び定義内容"
+        ]
+      }
+    ],
+    "tool_requests": [],
+    "evidence": [
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-1",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-1",
+        "content": "令第七条第一項第九号に規定する株券等の所有者が少数である場合として内閣府令で定める場合は、当該株券等の所有者が二十五名未満である場合とする。",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_5",
+          "sourceContentUnitId": "law-402M50000040038-article-2_5-paragraph-1",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二条の五 （株券等の所有者が少数である場合） 第1項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-2",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-2",
+        "content": "２令第七条第一項第九号に規定する全ての所有者が同意している場合として内閣府令で定める場合は、次の各号に掲げる区分に応じ、当該各号に定める場合とする。当該株券等の買付け等の後における当該株券等の買付け等を行う者の所有に係る株券等の株券等所有割合とその者の特別関係者（法第二十七条の二第一項第一号に規定する特別関係者をいう。）の株券等所有割合を合計した割合が三分の二以上となる場合であって、当該株券等の買付け等の対象とならない株券等（以下この号において「買付け等対象外株券等」という。）があるとき当該株券等の買付け等の対象となる株券等に係る買付け等を公開買付けによらないで行うことに同意する旨を記載した書面が当該株券等の買付け等の対象となる株券等の全ての所有者から提出され、かつ、買付け等対象外株券等についてイ又はロの条件が満たされている場合当該株券等の買付け等を公開買付けによらないで行うことに同意することにつき、当該買付け等対象外株券等に係る種類株主総会（会社法第二条第十四号に規定する種類株主総会をいう。第五条第三項第一号において同じ。）の決議が行われていること。買付け等対象外株券等の所有者が二十五名未満である場合であって、当該株券等の買付け等を公開買付けによらないで行うことにつき、当該買付け等対象外株券等の全ての所有者が同意し、その旨を記載した書面を提出していること。前号に掲げる場合以外の場合当該株券等の買付け等の対象となる株券等に係る買付け等を公開買付けによらないで行うことに同意する旨を記載した書面が当該株券等の買付け等の対象となる株券等の全ての所有者から提出された場合",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_5",
+          "sourceContentUnitId": "law-402M50000040038-article-2_5-paragraph-2",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二条の五 （株券等の所有者が少数である場合） 第2項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-3",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-3",
+        "content": "３株券等の所有者（以下この条において「所有者」という。）は、前項第一号本文及び同号ロ又は同項第二号の規定による書面の提出に代えて、同項の規定により書面に記載する事項（以下この項において「記載事項」という。）を電子情報処理組織を使用する方法その他の情報通信の技術を利用する方法であって次に掲げるものにより提供することができる。この場合において、当該所有者は、当該書面を提出したものとみなす。電子情報処理組織を使用する方法のうちイ又はロに掲げるもの所有者の使用に係る電子計算機と株券等の買付け等を行う者の使用に係る電子計算機とを接続する電気通信回線を通じて送信し、受信者の使用に係る電子計算機に備えられたファイルに記録する方法所有者の使用に係る電子計算機に備えられたファイルに記録された記載事項を電気通信回線を通じて株券等の買付け等を行う者の閲覧に供し、当該株券等の買付け等を行う者の使用に係る電子計算機に備えられたファイルに記載事項を記録する方法電磁的記録媒体（法第十三条第五項に規定する電磁的記録に係る記録媒体をいう。第五条第八項第二号及び第三十三条の三第二項第二号において同じ。）をもって調製するファイルに記載事項を記録したものを交付する方法",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_5",
+          "sourceContentUnitId": "law-402M50000040038-article-2_5-paragraph-3",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二条の五 （株券等の所有者が少数である場合） 第3項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-4",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-4",
+        "content": "４前項各号に掲げる方法は、株券等の買付け等を行う者がファイルへの記録を出力することにより書面を作成することができるものでなければならない。",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_5",
+          "sourceContentUnitId": "law-402M50000040038-article-2_5-paragraph-4",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二条の五 （株券等の所有者が少数である場合） 第4項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-5",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-5",
+        "content": "５第三項の「電子情報処理組織」とは、所有者の使用に係る電子計算機と、株券等の買付け等を行う者の使用に係る電子計算機とを電気通信回線で接続した電子情報処理組織をいう。",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_5",
+          "sourceContentUnitId": "law-402M50000040038-article-2_5-paragraph-5",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二条の五 （株券等の所有者が少数である場合） 第5項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      }
+    ],
+    "dependency_decisions": [],
+    "graph_candidate_reviews": [],
+    "search_candidate_reviews": [
+      {
+        "search_request_ids": [
+          "solver-tool-5658b57ece9b49299dd4e7a6b017ff04",
+          "solver-tool-b9f8239a7558464c9467e19bc934710f",
+          "solver-tool-56a255d6f553492f82311e45eb2b69d0",
+          "solver-tool-d3124ee6343246e3aa05d3b6011addb2",
+          "solver-tool-b950165e30644080bf115aed933bf5fd"
+        ],
+        "selections": [
+          {
+            "article_id": "law-402M50000040038-article-2_5",
+            "reason": "対象条文そのものであり、使用されている用語と別条文への参照関係を特定するため本文確認が必要である。",
+            "matched_hypothesis_ids": [
+              "h-1"
+            ]
+          },
+          {
+            "article_id": "law-323AC0000000025-article-27_2",
+            "reason": "第二条の五に現れる株券等・買付け等・特別関係者等の法令上の意味を直接確認する中心的な定義規定である。",
+            "matched_hypothesis_ids": [
+              "h-1"
+            ]
+          }
+        ],
+        "assessments": [
+          {
+            "article_id": "law-402M50000040038-article-2_5",
+            "legal_function": "exception",
+            "summary": "令第七条第一項第九号にいう全所有者の同意がある場合について、株券等所有割合や書面による同意等の要件を定める規定である。",
+            "matched_hypothesis_ids": [
+              "h-1"
+            ],
+            "matched_non_work_item_requirements": []
+          },
+          {
+            "article_id": "law-323AC0000000025-article-27_2",
+            "legal_function": "scope",
+            "summary": "「株券等」「買付け等」「公開買付け」を定義し、特別関係者や株券等所有割合に関する規律を置くため、第二条の五が参照する用語の意味を確認できる。",
+            "matched_hypothesis_ids": [
+              "h-1"
+            ],
+            "matched_non_work_item_requirements": []
+          }
+        ],
+        "deferred_article_ids": [
+          "law-323AC0000000025-article-27_3",
+          "law-340CO0000000321-article-9_3",
+          "law-323AC0000000025-article-27_4",
+          "law-402M50000040038-article-10",
+          "law-340CO0000000321-article-8",
+          "law-340CO0000000321-article-7",
+          "law-340CO0000000321-article-6",
+          "law-402M50000040038-article-2_4",
+          "law-402M50000040038-article-11"
+        ],
+        "reason": "未確認のh-1について、まず対象条文である第二条の五を取得し、次に同条が用いる主要用語を定義する金融商品取引法第二十七条の二を取得する。その他の候補は、提示抜粋上では対象条文の用語の定義を直接確認する規律を示していないため保留する。",
+        "reviewed_cycle": 1
+      }
+    ],
+    "frontier_re_adoptions": [],
+    "deferred_frontier_resolutions": [],
+    "unreviewed_graph_resolutions": [],
+    "tool_results": [],
+    "integrated_tool_result_request_ids": [],
+    "focus_work_item_ids": [],
+    "retained_evidence_ids": [],
+    "final_answer": null,
+    "review": null,
+    "review_finding_resolutions": [],
+    "stop_reason": null,
+    "cycle_step_timeout": false,
+    "created_at": "2026-08-27T14:57:21.167108Z",
+    "updated_at": "2026-08-27T14:58:35.367886Z"
+  },
+  "solverContext": {
+    "case_id": "fixture-tob-uses-definition-graph-isolated-v1",
+    "question": "公開買付府令第2条の5を起点として、同条が用いている用語のうち別の条文で定義されているものを見つけ、定義規定とその内容を説明してください。",
+    "non_work_item_requirements": [],
+    "research_cycle_count": 1,
+    "remaining_research_cycles": 3,
+    "remaining_wall_time_sec": 180,
+    "min_next_cycle_budget_sec": 25.0,
+    "can_start_next_cycle": true,
+    "max_tool_requests_per_step": 5,
+    "max_fetched_resources_per_cycle": 5,
+    "fetched_resource_ids_this_cycle": [
+      "law-402M50000040038-article-2_5"
+    ],
+    "remaining_fetch_capacity": 4,
+    "max_selected_frontier_per_step": 3,
+    "cycle_budget_reached": false,
+    "cycle_close_required": false,
+    "cycle_step_timeout": false,
+    "max_retained_evidence": 12,
+    "max_material_evidence_chars": 50000,
+    "max_solver_input_chars": 240000,
+    "finalize_only": false,
+    "available_tools": [
+      {
+        "name": "legal_graph_neighbors",
+        "description": "既知Articleを起点に、仮説に合う法令関係を1ホップだけ探索する。関係のmode、意味predicate、向きを説明できる場合に使う。返す候補は本文ではなくnavigation情報であり、関連性と次の取得対象はSolverが判断する。",
+        "input_schema": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "article_ids": {
+                  "description": "1ホップの起点にする既知Article ID。",
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 4,
+                  "minItems": 1,
+                  "type": "array"
+                },
+                "max_relations": {
+                  "description": "起点Articleごとに返すnavigation関係数の上限。",
+                  "maximum": 50,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "mode": {
+                  "const": "semantic_assertion",
+                  "description": "意味分類済みRelationAssertionを探索する。",
+                  "type": "string"
+                },
+                "predicate": {
+                  "description": "現在の仮説に合う1つの意味関係。",
+                  "enum": [
+                    "IMPLEMENTS",
+                    "INCORPORATES",
+                    "USES_DEFINITION",
+                    "EXCEPTION_TO",
+                    "OVERRIDES"
+                  ],
+                  "type": "string"
+                },
+                "direction": {
+                  "description": "起点ArticleをSUBJECTまたはOBJECTのどちらとして探索するか。",
+                  "enum": [
+                    "from_subject",
+                    "to_subject"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "article_ids",
+                "max_relations",
+                "mode",
+                "predicate",
+                "direction"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "article_ids": {
+                  "description": "1ホップの起点にする既知Article ID。",
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 4,
+                  "minItems": 1,
+                  "type": "array"
+                },
+                "max_relations": {
+                  "description": "起点Articleごとに返すnavigation関係数の上限。",
+                  "maximum": 50,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "mode": {
+                  "const": "explicit_reference",
+                  "description": "本文に明示されたREFERENCESを探索する。",
+                  "type": "string"
+                },
+                "predicate": {
+                  "description": "物理参照の探索ではnull。",
+                  "type": "null"
+                },
+                "reference_lookup": {
+                  "description": "follow_reference_in_textは起点本文に明記された参照先Articleを探す。find_articles_referencing_thisは起点Articleを明示参照するArticleを探す。",
+                  "enum": [
+                    "follow_reference_in_text",
+                    "find_articles_referencing_this"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "article_ids",
+                "max_relations",
+                "mode",
+                "predicate",
+                "reference_lookup"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "article_ids": {
+                  "description": "1ホップの起点にする既知Article ID。",
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 4,
+                  "minItems": 1,
+                  "type": "array"
+                },
+                "max_relations": {
+                  "description": "起点Articleごとに返すnavigation関係数の上限。",
+                  "maximum": 50,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "mode": {
+                  "const": "explains",
+                  "description": "ガイドからArticleへのEXPLAINSを探索する。",
+                  "type": "string"
+                },
+                "predicate": {
+                  "description": "EXPLAINSの探索ではnull。",
+                  "type": "null"
+                },
+                "direction": {
+                  "description": "起点を解説元または解説先のどちらとして探索するか。",
+                  "enum": [
+                    "outgoing",
+                    "incoming"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "article_ids",
+                "max_relations",
+                "mode",
+                "predicate",
+                "direction"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "result_description": "起点と隣接Articleの関係、向き、根拠所在をGraph navigation Evidenceとして返す。隣接Articleの本文は返さない。",
+        "read_only": true,
+        "parallel_safe": true
+      }
+    ],
+    "grounding_evidence_ids": [
+      "law-402M50000040038-article-2_5-paragraph-1",
+      "law-402M50000040038-article-2_5-paragraph-2",
+      "law-402M50000040038-article-2_5-paragraph-3",
+      "law-402M50000040038-article-2_5-paragraph-4",
+      "law-402M50000040038-article-2_5-paragraph-5"
+    ],
+    "navigation_evidence_ids": [],
+    "fetchable_article_ids": [],
+    "search_candidates": [],
+    "work_tree": [
+      {
+        "work_item_id": "wi-1",
+        "parent_work_item_id": null,
+        "question": "公開買付府令第2条の5で用いられている用語のうち、別の条文で定義されているものは何か。また、それぞれの定義規定と定義内容は何か。",
+        "action_actor": "不明",
+        "state": "open",
+        "resolution": null,
+        "basis_hypothesis_ids": [],
+        "replaces_work_item_id": null,
+        "hypothesis_ids": [
+          "h-1"
+        ],
+        "evidence_count": 0
+      }
+    ],
+    "hypotheses": [
+      {
+        "hypothesis_id": "h-1",
+        "work_item_id": "wi-1",
+        "statement": "公開買付府令第2条の5で用いられる用語のうち別の条文で定義されているものは、それぞれの定義規定における定義内容により意味が定まる。",
+        "judgment": "unresolved",
+        "evidence_ids": [
+          "law-402M50000040038-article-2_5-paragraph-1",
+          "law-402M50000040038-article-2_5-paragraph-2",
+          "law-402M50000040038-article-2_5-paragraph-3",
+          "law-402M50000040038-article-2_5-paragraph-4",
+          "law-402M50000040038-article-2_5-paragraph-5"
+        ],
+        "gaps": [
+          "府令第2条の5が別条文の定義を参照している用語、その定義規定及び定義内容"
+        ]
+      }
+    ],
+    "evidence_hypothesis_candidates": [
+      {
+        "article_id": "law-402M50000040038-article-2_5",
+        "hypothesis_ids": [
+          "h-1"
+        ],
+        "reason": "対象条文そのものであり、使用されている用語と別条文への参照関係を特定するため本文確認が必要である。",
+        "assessment_summary": "令第七条第一項第九号にいう全所有者の同意がある場合について、株券等所有割合や書面による同意等の要件を定める規定である。"
+      }
+    ],
+    "focus_work_items": [],
+    "affected_work_items": [],
+    "recent_tool_requests": [],
+    "recent_tool_results": [],
+    "completed_legal_searches": [
+      {
+        "work_item_id": "wi-1",
+        "hypothesis_ids": [
+          "h-1"
+        ],
+        "arguments": {
+          "query": "公開買付府令 第二条の五",
+          "doc_types": [
+            "law"
+          ],
+          "document_ids": []
+        }
+      }
+    ],
+    "completed_graph_searches": [],
+    "graph_fetch_completed_hypothesis_ids_this_cycle": [],
+    "evidence_manifest": [
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-1",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-1",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "content_chars": 70,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-2",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-2",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "content_chars": 692,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-3",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-3",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "content_chars": 522,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-4",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-4",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "content_chars": 69,
+        "created_cycle": 1,
+        "material_included": true
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-5",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-5",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "content_chars": 82,
+        "created_cycle": 1,
+        "material_included": true
+      }
+    ],
+    "graph_review_batch": {
+      "candidates": [],
+      "remaining_unreviewed_count": 0
+    },
+    "graph_review_ledger": [],
+    "required_graph_review_request_ids": [],
+    "required_search_review_request_ids": [],
+    "material_evidence": [
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-1",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-1",
+        "content": "令第七条第一項第九号に規定する株券等の所有者が少数である場合として内閣府令で定める場合は、当該株券等の所有者が二十五名未満である場合とする。",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_5",
+          "sourceContentUnitId": "law-402M50000040038-article-2_5-paragraph-1",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二条の五 （株券等の所有者が少数である場合） 第1項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-2",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-2",
+        "content": "２令第七条第一項第九号に規定する全ての所有者が同意している場合として内閣府令で定める場合は、次の各号に掲げる区分に応じ、当該各号に定める場合とする。当該株券等の買付け等の後における当該株券等の買付け等を行う者の所有に係る株券等の株券等所有割合とその者の特別関係者（法第二十七条の二第一項第一号に規定する特別関係者をいう。）の株券等所有割合を合計した割合が三分の二以上となる場合であって、当該株券等の買付け等の対象とならない株券等（以下この号において「買付け等対象外株券等」という。）があるとき当該株券等の買付け等の対象となる株券等に係る買付け等を公開買付けによらないで行うことに同意する旨を記載した書面が当該株券等の買付け等の対象となる株券等の全ての所有者から提出され、かつ、買付け等対象外株券等についてイ又はロの条件が満たされている場合当該株券等の買付け等を公開買付けによらないで行うことに同意することにつき、当該買付け等対象外株券等に係る種類株主総会（会社法第二条第十四号に規定する種類株主総会をいう。第五条第三項第一号において同じ。）の決議が行われていること。買付け等対象外株券等の所有者が二十五名未満である場合であって、当該株券等の買付け等を公開買付けによらないで行うことにつき、当該買付け等対象外株券等の全ての所有者が同意し、その旨を記載した書面を提出していること。前号に掲げる場合以外の場合当該株券等の買付け等の対象となる株券等に係る買付け等を公開買付けによらないで行うことに同意する旨を記載した書面が当該株券等の買付け等の対象となる株券等の全ての所有者から提出された場合",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_5",
+          "sourceContentUnitId": "law-402M50000040038-article-2_5-paragraph-2",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二条の五 （株券等の所有者が少数である場合） 第2項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-3",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-3",
+        "content": "３株券等の所有者（以下この条において「所有者」という。）は、前項第一号本文及び同号ロ又は同項第二号の規定による書面の提出に代えて、同項の規定により書面に記載する事項（以下この項において「記載事項」という。）を電子情報処理組織を使用する方法その他の情報通信の技術を利用する方法であって次に掲げるものにより提供することができる。この場合において、当該所有者は、当該書面を提出したものとみなす。電子情報処理組織を使用する方法のうちイ又はロに掲げるもの所有者の使用に係る電子計算機と株券等の買付け等を行う者の使用に係る電子計算機とを接続する電気通信回線を通じて送信し、受信者の使用に係る電子計算機に備えられたファイルに記録する方法所有者の使用に係る電子計算機に備えられたファイルに記録された記載事項を電気通信回線を通じて株券等の買付け等を行う者の閲覧に供し、当該株券等の買付け等を行う者の使用に係る電子計算機に備えられたファイルに記載事項を記録する方法電磁的記録媒体（法第十三条第五項に規定する電磁的記録に係る記録媒体をいう。第五条第八項第二号及び第三十三条の三第二項第二号において同じ。）をもって調製するファイルに記載事項を記録したものを交付する方法",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_5",
+          "sourceContentUnitId": "law-402M50000040038-article-2_5-paragraph-3",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二条の五 （株券等の所有者が少数である場合） 第3項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-4",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-4",
+        "content": "４前項各号に掲げる方法は、株券等の買付け等を行う者がファイルへの記録を出力することにより書面を作成することができるものでなければならない。",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_5",
+          "sourceContentUnitId": "law-402M50000040038-article-2_5-paragraph-4",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二条の五 （株券等の所有者が少数である場合） 第4項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      },
+      {
+        "evidence_id": "law-402M50000040038-article-2_5-paragraph-5",
+        "source_ref": "opensearch:law-402M50000040038-article-2_5-paragraph-5",
+        "content": "５第三項の「電子情報処理組織」とは、所有者の使用に係る電子計算機と、株券等の買付け等を行う者の使用に係る電子計算機とを電気通信回線で接続した電子情報処理組織をいう。",
+        "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令",
+        "created_cycle": 1,
+        "metadata": {
+          "articleId": "law-402M50000040038-article-2_5",
+          "sourceContentUnitId": "law-402M50000040038-article-2_5-paragraph-5",
+          "documentId": "law-402M50000040038",
+          "docType": "law",
+          "citationEligible": true,
+          "evidenceRole": "retrieved_text",
+          "heading": "第二条の五 （株券等の所有者が少数である場合） 第5項",
+          "sourceObjectUri": "dataset://public-tender-offer-three-layer-mini-v1/402M50000040038",
+          "sourcePage": null,
+          "matchedChunkCount": null,
+          "navigationTextTruncated": false
+        }
+      }
+    ],
+    "omitted_evidence_ids": [],
+    "required_dependency_kind": null,
+    "required_dependency_work_item_ids": [],
+    "dependency_decisions": [],
+    "reviewer_findings": [],
+    "contract_feedback": null,
+    "action_feedback": null
+  },
+  "observedSolverDecision": {
+    "next": "continue",
+    "decision_reason": "第2条の5本文は確認できたものの、同条が用いる用語のうち別条文で定義されるものと定義内容は未確認であり、起点条文からUSES_DEFINITION関係を1ホップ探索する必要があるため。",
+    "start_next_cycle": false,
+    "update": {
+      "set_non_work_item_requirements": null,
+      "add_work_items": [],
+      "update_work_items": [],
+      "add_hypotheses": [],
+      "update_hypotheses": [],
+      "impact_decisions": []
+    },
+    "next_focus_work_item_ids": [
+      "wi-1"
+    ],
+    "retain_evidence_ids": [
+      "law-402M50000040038-article-2_5-paragraph-1",
+      "law-402M50000040038-article-2_5-paragraph-2",
+      "law-402M50000040038-article-2_5-paragraph-3",
+      "law-402M50000040038-article-2_5-paragraph-4",
+      "law-402M50000040038-article-2_5-paragraph-5"
+    ],
+    "review_finding_resolutions": [],
+    "dependency_decisions": [],
+    "graph_candidate_review": null,
+    "search_candidate_review": null,
+    "frontier_re_adoptions": [],
+    "deferred_frontier_resolutions": [],
+    "unreviewed_graph_resolution": null,
+    "tool_requests": [
+      {
+        "request_id": "solver-tool-65f6330203f34864ac9dfe121323b208",
+        "work_item_id": "wi-1",
+        "tool_name": "legal_graph_neighbors",
+        "arguments": {
+          "article_ids": [
+            "law-402M50000040038-article-2_5"
+          ],
+          "max_relations": 20,
+          "mode": "semantic_assertion",
+          "predicate": "USES_DEFINITION",
+          "direction": "from_subject"
+        },
+        "purpose": "第2条の5が別条文の定義規定を用いている用語と、その定義規定の候補を発見する。",
+        "hypothesis_ids": [
+          "h-1"
+        ]
+      }
+    ],
+    "answer": null
+  }
+}

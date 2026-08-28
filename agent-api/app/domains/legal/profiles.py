@@ -25,7 +25,7 @@ def legal_agent_profile() -> AgentProfile:
     timeout_sec = settings.agent_framework_model_timeout_sec
     return AgentProfile(
         name="legal-default",
-        version="393",
+        version="394",
         provider=settings.llm_provider,
         solver_research=_model_profile(
             model=settings.agent_framework_research_model,
@@ -104,12 +104,6 @@ def legal_agent_profile() -> AgentProfile:
             ),
             dependency_completion_check_prompt=_read_prompt(
                 "solver_dependency_assessment_check.md"
-            ),
-            final_answer_check_system_prompt=_read_prompt(
-                "solver_final_answer_check.md"
-            ),
-            final_answer_check_completion_prompt=_read_prompt(
-                "solver_final_answer_check_completion.md"
             ),
             context_projection="cycle_close",
             available_tool_names=(),
