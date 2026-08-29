@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any
 
 from app.adapters.models import StructuredJSONModelAdapter
@@ -225,42 +223,7 @@ def test_production_adapter_generates_hypotheses_one_work_item_at_a_time() -> No
     assert hypothesis.gaps == ("第二の論点を判定する条件",)
 
 
-def test_v269_observed_failures_are_preserved_as_prompt_regression() -> None:
-    fixture_path = (
-        Path(__file__).parent
-        / "fixtures/framework/legal_hypothesis_generation_v269_observed_v1.json"
-    )
-    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
-    assert fixture["source"]["model"] == "gpt-4o-mini"
-    observed = "\n".join(
-        item["statement"]
-        for case in fixture["cases"]
-        for item in case["observedHypotheses"]
-    )
-    assert "法令により異なる" in observed
-
-    profile = legal_agent_profile().solver_hypothesis_generation
-    assert profile is not None
-    prompt = profile.system_prompt
-    completion = profile.completion_check_prompt or ""
-    assert "WorkItemを確認します" in prompt
-    assert "`gaps`" in prompt
-    assert "WorkItemにない行為者" in prompt
-    assert "数値又は条文番号" in prompt
-    assert "暫定的な法的効果を示す1つの文" in completion
-
-
-def test_overview_hypothesis_overexpansion_fixture_is_covered() -> None:
-    fixture_path = (
-        Path(__file__).parent
-        / "fixtures/framework/tob_overview_hypothesis_overexpansion_v357.json"
-    )
-    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
-    failure = fixture["observedFailure"]
-    assert failure["profileVersion"] == "357"
-    assert len(failure["scopeHypotheses"]) == 3
-    assert len(failure["procedureHypotheses"]) == 4
-
+def test_hypothesis_prompt_does_not_invent_unknown_answer_parts() -> None:
     profile = legal_agent_profile().solver_hypothesis_generation
     assert profile is not None
     prompt = profile.system_prompt

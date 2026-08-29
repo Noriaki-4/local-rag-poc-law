@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-import json
-from pathlib import Path
 from typing import Any
 
 from app.domains.legal.research_stage_review_diagnostic import (
@@ -178,18 +176,3 @@ def test_review_does_not_repair_invalid_first_output() -> None:
     assert len(client.calls) == 1
     assert run.review is None
     assert run.validation_error == "invalid structured output"
-
-
-def test_cause_analysis_fixture_contains_both_review_inputs() -> None:
-    fixture_path = (
-        Path(__file__).parent
-        / "fixtures/framework/tob_exceptions_research_cause_analysis_v273.json"
-    )
-    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
-
-    assert fixture["source"]["model"] == "gpt-4o-mini"
-    assert len(fixture["baseline"]["workItems"]) == 2
-    assert len(fixture["baseline"]["hypotheses"]) == 2
-    assert fixture["recommendedDirection"]["reviewer"].startswith(
-        "Hypothesis生成には追加せず"
-    )

@@ -1147,6 +1147,9 @@ Graph Toolの入力schemaは、`semantic_assertion`では`from_subject / to_subj
   成果物が一致する。
 - 通常実行の成果物はGit管理外、代表fixtureの基準成果物だけをGit管理し、再生成差分をテストで検出する。
 - 既存fixtureを固有の回帰価値で監査し、古いPrompt文言または修正済み輸送形式だけを固定するものを削除する。
+- 2026-08-29の初回監査では、未参照fixtureと、過去のモデル出力を保存していることだけを検査する
+  fixtureを合わせて14件削除した。現在のコードを実行して契約、状態遷移、ID対応又は探索経路を検査する
+  fixtureは維持し、残す基準を`agent-api/tests/fixtures/framework/README.md`へ明記した。
 
 ### LR-013 Provider共通の小型Solver輸送契約
 
@@ -1237,7 +1240,7 @@ LR-010  必要性と費用を再評価して全件分類を再開
 | 2026-08-22 | OpenAI Provider | `gpt-4o-mini`への切替とStructured Outputs接続を実装。法令E2Eは未実施 | [RUNBOOK](../RUNBOOK.md) |
 | 2026-08-23 | LR-012 Prompt・契約成果物 | 固定指示、動的入力、Provider schema、正規化後schema、実送信内容を分離。3 Provider基準成果物と全887テストに合格 | [RUNBOOK](../RUNBOOK.md) |
 | 2026-08-24 | LR-013 / LR-014 共通小型契約・checkpoint再生 | Legal Profile v154。Provider共通schema、実行時IDの事後検証、承認済みcheckpoint再生コマンドを実装。代表Cycle Close schemaは14,494→7,014文字、全895テスト合格。実モデル再生は未実施 | [RUNBOOK](../RUNBOOK.md) |
-| 2026-08-25 | Profile v275・公開買付け3問・`gpt-4o-mini` | 公告は必要Article 2/2だが回答要点不足。例外は2/3取得後、総合は0/6取得後に、いずれもCycle 2の`finalize`とTool要求の矛盾で停止。総合では27条の22の2を誤選択 | `tob_announcement_final_answer_incomplete_v275.json`、`tob_exceptions_cycle2_finalize_tool_conflict_v275.json`、`tob_overview_issuer_actor_mismatch_v275.json`、`tob_overview_cycle2_finalize_tool_conflict_v275.json` |
+| 2026-08-25 | Profile v275・公開買付け3問・`gpt-4o-mini` | 公告は必要Article 2/2だが回答要点不足。例外は2/3取得後、総合は0/6取得後に、いずれもCycle 2の`finalize`とTool要求の矛盾で停止。総合では27条の22の2を誤選択 | 修正前出力だけを保存した3件は2026-08-29のfixture監査で削除した。現行Dependency Action回帰に使う`tob_exceptions_cycle2_finalize_tool_conflict_v275.json`だけを維持する |
 | 2026-08-25 | Profile v291・公開買付け3問・`gpt-4o-mini` | 公告だけ正常完了。3問合計で必要Article 2/11、回答要点4/12。例外と総合は`next=finalize`、`answer=null`、Tool要求ありの矛盾を修復できず`protocol_error`。候補内容評価と主体照合の対応ID不一致、および取得候補の誤選択を確認 | `eval-results/e2e-v291-gpt4omini/`、`eval-results/agent-framework-diagnostics/legal-beb78a10fd89425eb78de503e5829a93.jsonl`、`legal-07f80109b5074079851b241bccfb32ce.jsonl`、`legal-985c7b715e12438cbf2404d0257625a6.jsonl` |
 | 2026-08-27 | Profile v375・公開買付け総合・Haiku | 全`needs_action`同時Graph要求の矛盾と、open WorkItemの確認済み根拠を最終化から除外する不備を修正。全1059テスト合格。実モデルは2 Cycleで正常完了し、条件・対象・例外・基本手続を引用付きで回答した。府令2条の5・10条は本文未取得のため完全回答は未達 | `eval-results/e2e-v375-haiku-overview.json`、`eval-results/agent-framework-diagnostics/legal-4d596e7ddc0e4a039b96e4be77de48eb.jsonl` |
 | 2026-08-27 | Profile v379・公開買付け総合・Luna `high` | Search SelectionとWorkItem別Evidence Integrationを統合し、独立WorkItemを最大4件並列化した。Graph Reviewは現在batchだけを入出力し、理由を短文化した。3 Cycleを`protocol_error`なく完了し、必要Article 6/6を取得した。回答は確認済み範囲を引用したが、「必要な手続」を広く分解した未確認Hypothesisが残り完全回答は未達 | `eval-results/agent-framework-diagnostics/legal-4d8c773f37004c9caf86a46664a4a22e.jsonl` |

@@ -16,7 +16,6 @@ from app.agent_framework.context import build_solver_context
 from app.agent_framework.context import SolverContext
 from app.agent_framework.contracts import (
     ObservationIntegrationDecision,
-    SolverDecision,
 )
 from app.agent_framework.model_call_artifacts import (
     model_call_artifact_contents,
@@ -107,39 +106,6 @@ def test_question_decomposition_uses_only_question_and_small_contract() -> None:
         ["description"]
     )
     assert "graph_candidate_review" in rendered.normalized_schema["properties"]
-
-
-def test_real_model_v145_fixture_documents_duplicate_checklist() -> None:
-    fixture_path = (
-        Path(__file__).parent
-        / "fixtures"
-        / "framework"
-        / "tob_overview_initial_research_v145_observed_v1.json"
-    )
-    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
-    context = SolverContext.model_validate(fixture["solverContext"])
-    transport_input = fixture["observedTransportInput"]
-    transport_output = fixture["observedTransportOutput"]
-    payload = transport_output["payload"]
-    decision = SolverDecision.model_validate(fixture["observedSolverDecision"])
-
-    assert fixture["source"]["model"] == "gpt-4o-mini"
-    assert fixture["source"]["profileVersion"] == "145"
-    assert context.case_id == transport_input["inputPayload"]["case_id"]
-    assert "最初の探索行動" in transport_input["instructions"]
-    assert "remaining_fetch_capacity" in transport_input["instructions"]
-    assert transport_output["validationError"] is None
-    assert transport_output["providerRetryCount"] == 0
-    checklist = payload["question_requirement_checklist"]
-    questions = [item.question for item in decision.update.add_work_items]
-    assert checklist == questions
-    assert {
-        "公開買付けの手続が必要になる場合",
-        "対象となる株券等の範囲",
-        "主な例外",
-        "必要な手続",
-    } <= set(questions)
-    assert "根拠となる条文" in questions
 
 
 def test_provider_transport_is_explicit_in_artifacts(tmp_path) -> None:

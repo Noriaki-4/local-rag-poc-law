@@ -106,39 +106,3 @@ def test_run_calls_model_once_and_normalizes_assessment_map() -> None:
         item.article_id for item in run.decision.assessments
     ) == tuple(item.article_id for item in context.search_candidates)
     assert "actor_matches" not in run.decision.assessments[0].model_dump()
-
-
-def test_v309_real_model_search_assessment_fixtures_preserve_call_boundary() -> None:
-    fixture_names = (
-        "tob_announcement_search_assessment_v309_observed_v1.json",
-        "tob_exceptions_focused_search_assessment_v309_observed_v1.json",
-        "tob_overview_search_assessment_v309_observed_v1.json",
-    )
-
-    for fixture_name in fixture_names:
-        fixture = json.loads(
-            (FIXTURE.parent / fixture_name).read_text(encoding="utf-8")
-        )
-        source = fixture["source"]
-        transport_input = fixture["observedTransportInput"]
-        transport_output = fixture["observedTransportOutput"]
-        input_candidates = transport_input["inputPayload"]["search_candidates"]
-        candidate_ids = tuple(item["article_id"] for item in input_candidates)
-
-        assert fixture["checkpoint"]["approved"] is True
-        assert fixture["checkpoint"]["sourceProvider"] == "openai"
-        assert source["model"] == "gpt-4o-mini-2024-07-18"
-        assert source["profileVersion"] == "309"
-        assert source["transportStage"] == "search_assessment"
-        assert transport_output["validationError"] is None
-        assert set(transport_output["payload"]) == {"assessments"}
-        assert tuple(transport_output["payload"]["assessments"]) == candidate_ids
-
-    exception_fixture = json.loads(
-        (
-            FIXTURE.parent
-            / "tob_exceptions_focused_search_assessment_v309_observed_v1.json"
-        ).read_text(encoding="utf-8")
-    )
-    assert exception_fixture["expectations"]["workItemCount"] == 1
-    assert exception_fixture["expectations"]["hypothesisCount"] == 1
