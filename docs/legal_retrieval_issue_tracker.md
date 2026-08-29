@@ -1,6 +1,6 @@
 # 法令検索 課題管理
 
-> 更新日: 2026-08-27
+> 更新日: 2026-08-29
 >
 > 本書は、法令検索の現在地、未解決課題、優先順位、完了条件を管理する。
 > 設計仕様の正本ではない。Agent契約は
@@ -90,6 +90,8 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-028` | P0 | 完了 | 同じGraph Articleペアを異なる探索要求から取得してもEvidence IDが衝突しない | Graph navigation Evidence IDはArticleペアから決定する一方、Evidence本文には関係種別と向きが含まれていた。同じペアを別のGraph selectorで再取得すると、同じIDで内容が異なり、CaseStoreが`tool returned conflicting evidence ID`として拒否した。Profile v389ではArticleペアIDを共通接頭辞として保ち、関係内容のhashをEvidence IDへ加えた | 同じArticleペアをREFERENCESとRelationAssertionから取得する回帰とLuna `high`総合問題に合格した。実モデルはGraph衝突なくCycle 3の最終化まで到達した |
 | `LR-029` | P0 | 完了 | `supported`かつ`gaps`ありのHypothesisを後続探索と限定回答へ一貫して引き継ぐ | LR-024で`judgment`と`gaps`を独立させた後も、Search Planning・Search Selectionは`judgment=unresolved`だけを未確認対象としていた。このため、追加検索要求が参照するHypothesisを候補選択入力から落とし、空の対応IDを許すschemaと対応ID必須validatorが衝突した。最終化でも、`gaps`によりopenのWorkItemを未解決として表現できなかった。さらに本文評価がDependencyだけを更新した場合、`continue`契約が状態更新と認識せず`schema_validation`になった | Profile v392で探索対象、限定回答検証、Dependency単独更新の3境界を統一した。全1072テストとLuna `high`の社内方針設問に合格し、必要Article 4/4を取得して2 Cycleで正常完了した。意味上の候補選択、`gaps`解消、下位規範判断はLLMに残した |
 | `LR-030` | P0 | 実装済み（意味関係実モデル合格） | Hypothesisに合う意味関係をGraph探索へ使い、意味分類の未被覆時だけ明示参照へフォールバックする | Profile v392の追加Lv.3設問では、Graphに`IMPLEMENTS / EXCEPTION_TO / USES_DEFINITION / OVERRIDES`が登録済みでも、実行したGraph要求は全て`explicit_reference`だった。公告方法の設問ではGraph 4回のうち最初の府令9条発見後は取得済み条文へ戻り、データセットに存在しない準用先をOpenSearchで6回追加検索した。Graph処理自体は合計約0.05秒だが、26回のLLM呼出しに約322.5秒を要した | Profile v393で、下位規範Actionの`explicit_reference`固定schemaを廃止した。SolverはHypothesisに対応するpredicateを説明できる場合に`semantic_assertion`を先に選び、新候補がない場合だけ明示参照へ切り替える。Programは意味を選ばず、各Graph要求の返却Article ID、新規Article ID及び同一scope履歴を提示する。Luna `high`総合問題はGraph 4回を全て意味関係・正方向で行い11/11。意味分類coverageのscope別manifestは`LR-006`で扱う |
+| `LR-031` | P1 | 要設計 | 新Frameworkの`explains`をガイド`Document`から法令`Article`を発見できる契約へ整合させる | `EXPLAINS`はガイドの条文注釈・対応表が明示した`Document → Article`であり、法令本文間の`REFERENCES`とは別の索引である。一方、`legal_graph_neighbors`の共通入力は起点を`article_ids`とし、`GraphClient.article_relations_touching`も両端を`Article / Paragraph / Item`へ限定するため、正規の`Document → Article`を新Frameworkの`explains`モードから取得できない。旧Guidance Laneには`document_id`起点の探索がある | `explains`の利用範囲を決め、少なくともガイド`Document`から明示対応する法令`Article`を1ホップで取得し、選択したArticle本文をOpenSearchから取得するfixtureを通す。Articleからガイドへの逆引きを提供する場合は、Article本文取得とは別の候補型・取得経路を設計する。単なる言及を`EXPLAINS`へ昇格させない |
+| `LR-032` | P1 | 要整理 | `explicit_reference`が何を検索するmodeか、名称と契約だけで理解できるようにする | 現在の名称は、本文をその場で解析する検索、利用者が明示した参照、Neo4jの物理`REFERENCES`探索のいずれにも読める。実際にはseed済み`REFERENCES`を1ホップたどるmodeであり、`follow_reference_in_text / find_articles_referencing_this`が二方向を表す。また、意味関係未被覆時のfallbackという利用順序まで同じ説明へ混在している | 参照元規定・参照先規定、保存済みEdge、二つの探索目的、fallback条件を分けて定義する。mode名を`references`等へ変更するかは互換性を確認して決める。完成Promptとschema descriptionだけで、本文検索ではないこと及び各探索目的の向きを説明できるfixtureを通す |
 
 ### 3.1 LR-016 Tool観察とCycle Closeの単一責務化
 
@@ -890,6 +892,66 @@ Graph要求4回は全て`semantic_assertion / IMPLEMENTS / from_subject`で、`e
 金商法27条の3・27条の9から公開買付府令10条等を発見した。UIの採点では文書3/3、必須条文4/4、
 回答要点4/4の計11/11である。モデル呼出し18回・試行24回に324.4秒、Tool 14回に4.2秒を要しており、
 意味関係の選択は改善したが、処理時間は引き続きLLM呼出しと契約修復が支配している。
+
+### LR-031 ガイド`EXPLAINS`のFramework契約
+
+`explicit_reference`と`explains`は統合しない。前者は法令のArticle、Paragraph又はItemに明記された
+参照元から参照先Articleへ進む`REFERENCES`である。後者は、ガイドの条文注釈又は対応表で解説対象が
+明示された場合に限り、ガイド`Document`から法令`Article`へ進む非規範的な索引である。
+
+```text
+法令Content Unit ── REFERENCES ──→ 法令Article
+ガイドDocument   ── EXPLAINS   ──→ 法令Article
+```
+
+物理Graphとseedは後者を`Document → Article`として定義しているが、新Frameworkには次の不整合がある。
+
+- `legal_graph_neighbors`の共通起点項目が`article_ids`であり、ガイド`Document`を指定できない。
+- `GraphClient.article_relations_touching`がRelationの両端を`Article / Paragraph / Item`へ限定し、
+  `Document → Article`の`EXPLAINS`を除外する。
+- Graph Reviewと後続の`fetch_articles`はArticle候補を前提とするため、Articleからガイドを逆引きする場合の
+  ガイド本文取得契約がない。
+
+現状の`explains`モードはschema上選択できても、新Frameworkの本来の用途である
+「OpenSearchで発見したガイドDocumentから、明示的な解説対象Articleを特定する」を実行できない。
+旧Guidance Laneの`document_id`起点探索は存在するが、新Frameworkの解決とはみなさない。
+
+修正時は、まずガイド`Document → Article`の順方向だけをArticle発見経路として成立させる。
+Articleからガイドへの逆引きは、利用要件とガイド本文取得経路を確認してから追加する。Programは
+Document ID、Article ID、方向、件数及び既知参照を検証するだけとし、ガイドが質問を解説するかという
+意味判断はSolverへ残す。単なる言及、同じページに現れただけの条文又は前ページからの引継ぎを
+`EXPLAINS`として登録しない。
+
+### LR-032 `explicit_reference`の名称と契約
+
+`explicit_reference`は、起点Articleの本文を実行時に文字列検索する機能ではない。seed時に原文の明示参照から
+作成済みのNeo4j `REFERENCES`を、検索時に1ホップたどるmodeである。また、`explicit`は「利用者が質問で
+明示した」という意味でもない。
+
+```text
+[参照元規定] ── REFERENCES ──> [参照先規定]
+
+follow_reference_in_text
+  参照元規定から、本文に記載された参照先規定を探す
+
+find_articles_referencing_this
+  参照先規定から、それを参照している参照元規定を探す
+```
+
+現在の説明は、次の異なる事項を一か所へ混在させている。
+
+- Graphに保存された物理関係の種類: `REFERENCES`
+- Graph検索modeの名前: `explicit_reference`
+- 検索方向を表す目的: `follow_reference_in_text / find_articles_referencing_this`
+- `semantic_assertion`で候補が得られない場合に利用する、探索フロー上のfallback条件
+
+このため、Solver、実装者及び利用者が、意味関係との違い、検索方向、OpenSearchによる本文検索との違いを
+名称だけから把握しにくい。修正では、まずschema description、完成Prompt及び人間向けGraph説明で上の4点を
+分離する。`outgoing / incoming`はLLM-visible契約へ戻さず、参照元・参照先という法令上の役割で説明する。
+
+mode名を変更する場合は、`references`又は`reference_edge`のように保存済みEdgeの探索だと分かる候補を比較する。
+ただし、名称変更だけでfallback条件まで表そうとしない。fallbackは探索手順、modeは実行するGraph検索の種類として
+別々に保つ。既存fixture、保存済みToolRequest及び再開データとの互換性を確認するまでは改名しない。
 
 ### LR-019 統合契約と意味的行動選択の分離
 
