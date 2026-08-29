@@ -92,6 +92,7 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-030` | P0 | 実装済み（意味関係実モデル合格） | Hypothesisに合う意味関係をGraph探索へ使い、意味分類の未被覆時だけ明示参照へフォールバックする | Profile v392の追加Lv.3設問では、Graphに`IMPLEMENTS / EXCEPTION_TO / USES_DEFINITION / OVERRIDES`が登録済みでも、実行したGraph要求は全て`explicit_reference`だった。公告方法の設問ではGraph 4回のうち最初の府令9条発見後は取得済み条文へ戻り、データセットに存在しない準用先をOpenSearchで6回追加検索した。Graph処理自体は合計約0.05秒だが、26回のLLM呼出しに約322.5秒を要した | Profile v393で、下位規範Actionの`explicit_reference`固定schemaを廃止した。SolverはHypothesisに対応するpredicateを説明できる場合に`semantic_assertion`を先に選び、新候補がない場合だけ明示参照へ切り替える。Programは意味を選ばず、各Graph要求の返却Article ID、新規Article ID及び同一scope履歴を提示する。Luna `high`総合問題はGraph 4回を全て意味関係・正方向で行い11/11。意味分類coverageのscope別manifestは`LR-006`で扱う |
 | `LR-031` | P1 | 要設計 | 新Frameworkの`explains`をガイド`Document`から法令`Article`を発見できる契約へ整合させる | `EXPLAINS`はガイドの条文注釈・対応表が明示した`Document → Article`であり、法令本文間の`REFERENCES`とは別の索引である。一方、`legal_graph_neighbors`の共通入力は起点を`article_ids`とし、`GraphClient.article_relations_touching`も両端を`Article / Paragraph / Item`へ限定するため、正規の`Document → Article`を新Frameworkの`explains`モードから取得できない。旧Guidance Laneには`document_id`起点の探索がある | `explains`の利用範囲を決め、少なくともガイド`Document`から明示対応する法令`Article`を1ホップで取得し、選択したArticle本文をOpenSearchから取得するfixtureを通す。Articleからガイドへの逆引きを提供する場合は、Article本文取得とは別の候補型・取得経路を設計する。単なる言及を`EXPLAINS`へ昇格させない |
 | `LR-032` | P1 | 完了 | Graphの物理`REFERENCES`探索を名称と契約だけで理解できるようにする | 旧`explicit_reference`は、本文の実行時解析、利用者が明示した参照、物理`REFERENCES`探索のいずれにも読めた。Profile v395でGraph modeを`reference_edges`へ変更し、seed済み`REFERENCES`を1ホップたどる処理だとschema descriptionとPromptへ明記した。`follow_reference_in_text / find_articles_referencing_this`は二方向の探索目的として維持した。実装コミットは`e58e2ac` | 全1074テストに合格した。Luna `high`総合問題では`reference_edges`を2回実行して正常完了し、旧modeは完成schema、応答及びtraceに現れなかった。探索フロー上のfallback条件はmodeの意味へ混ぜず、別の手順として維持する。意味関係の方向選択は変更対象外であり、再発した誤方向は`LR-023`で継続する |
+| `LR-033` | P1 | 未着手 | 本文評価と次行動選択の重複LLM呼出しを統合し、回答時間を短縮する | Profile v395のLuna `high`総合問題は345.3秒、LLM 22回、Tool 16回だった。Tool処理は合計9.2秒に対し、`observation_integration`は6回・延べ121.2秒、後続`integration`は4回・延べ94.6秒で、両者がLLM時間の約63%を占めた。同じ本文と更新状態を近接した2処理で読み直すことが主な重複であり、OpenSearch・Neo4j・本文取得の速度は第一のボトルネックではない | WorkItem単位のObservation IntegrationにHypothesis更新、下位規範状態及び次行動最大1件をまとめ、同じ観察直後の通常Integrationをなくす。Luna `high`の隔離fixtureで全Tool種別・行動なし・Graph方向再評価を確認後、公告・例外・総合を同じ条件で比較し、必要根拠、11/11、契約違反なしを維持したまま呼出数・wall time・tokenを削減する |
 
 ### 3.1 LR-016 Tool観察とCycle Closeの単一責務化
 
@@ -960,6 +961,63 @@ Profile v395では全1074テストに合格した。Luna `high`の公開買付�
 施行令7条と金商法27条の3を起点に、後続の正しい`semantic_assertion / IMPLEMENTS / from_subject`で回収した。
 最初の`IMPLEMENTS`探索で意味方向を誤った問題は名称変更で解決しておらず、`LR-023`で継続する。
 
+### LR-033 本文評価と次行動選択の統合
+
+Profile v395のLuna `high`による公開買付け総合問題を性能baselineとする。
+
+| 処理 | LLM呼出し | 延べlatency | 入力token | 出力token |
+|---|---:|---:|---:|---:|
+| Observation Integration | 6 | 121.2秒 | 132,789 | 28,229 |
+| Integration | 4 | 94.6秒 | 78,725 | 12,594 |
+| Finalization | 1 | 39.5秒 | 27,825 | 6,270 |
+| Cycle Close | 2 | 29.0秒 | 12,299 | 3,833 |
+| 全LLM処理 | 22 | 342.1秒 | 293,489 | 57,430 |
+
+Tool処理16回の合計は9.2秒であり、最初にOpenSearch、Neo4j又は本文取得を高速化しても全体への効果は小さい。
+最優先の重複は、新しい本文をObservation Integrationで評価した直後に、通常Integrationが更新済み状態と本文を
+読み直して次のToolを選ぶことである。
+
+```text
+現行
+本文取得
+  -> Observation Integration: Hypothesis・下位規範状態を更新
+  -> Integration: 同じ観察を踏まえて次行動を選択
+
+変更案
+本文取得
+  -> Observation Integration
+       - Hypothesisを更新
+       - 下位規範状態を更新
+       - 次行動を最大1件選択
+```
+
+統合対象は、同じWorkItemについて取得本文を評価し、その結果から直ちに選べる次行動までとする。入力は当該WorkItem、
+対応Hypothesis、今回取得した本文、成功済み検索scope、利用可能Tool及び処理上限へ限定する。出力は状態差分と、
+`fetch_articles / legal_graph_neighbors / legal_search / load_evidence / 行動なし`のいずれか最大1件とする。
+他WorkItemの再評価、Cycle移行、Graph候補の一括評価及び最終回答は兼務させない。
+
+独立WorkItemはこれまでどおりLuna `high`で並列評価できる。各結果が返した有効なToolRequestは捨てずCaseStoreへ保存し、
+現在stepの上限内で実行し、残りは後続stepへ送る。Programは既知ID、Tool schema、件数、予算、成功済みscopeとの完全一致、
+待ち行列の保存だけを扱う。Hypothesis更新、次に必要な確認、Toolの選択、Graph predicate・方向はLLMが判断する。
+
+Graph候補0件の場合は、前回の起点、predicate、direction、候補数及び逆方向の試行有無を次の入力へ残す。
+LLMが方向誤りだと判断した場合だけ逆方向を選べるようにし、Programが自動的に両方向を検索しない。
+同一scopeの再実行は禁止し、意味方向の精度自体は`LR-023`で扱う。
+
+次に、Cycle CloseではCaseStoreに保存済みのEvidence IDや状態を再列挙させず、次Cycleの焦点、意味判断が必要な未決候補の
+扱い及び短い理由だけを返す方向で入力・出力を削減する。FinalizationはHypothesisに対応する取得本文を中心に投影し、
+棄却済みnavigation、処理済みledger及び重複本文を除く。reasoning設定の引下げは最初の変更へ混ぜず、同じfixtureで
+品質を比較できる段階になってから別に評価する。
+
+完了条件は次とする。
+
+- 本文評価直後に同じ観察を読み直す通常Integration呼出しがない。
+- Observation Integrationは1 WorkItemごとに状態差分と次行動最大1件だけを返す。
+- 複数WorkItemの有効な次行動が処理上限を超えても欠落せず、後続stepへ残る。
+- Programが法的関連性、Graph predicate・方向、根拠十分性又は次Toolの意味を決めない。
+- `fetch_articles`、5 predicate・2方向の`legal_graph_neighbors`、`reference_edges`、`legal_search`、`load_evidence`、行動なしをfixtureで検証する。
+- Luna `high`の公告・例外・総合で必要根拠と総合11/11を維持し、同じsnapshot・設定に対するLLM呼出数、wall time、入出力tokenをbaselineより削減する。
+
 ### LR-019 統合契約と意味的行動選択の分離
 
 - 構造契約は、JSON形状、既知ID、型、件数・予算、参照整合、同一成功済み要求の二重実行防止を検証する。
@@ -1123,6 +1181,8 @@ LR-024  支持済みHypothesisにも未確認事項を保持する
 LR-026  Graph本文取得後にEvidenceを逐次統合する
     ↓
 LR-023  Graph方向と候補のHypothesis再対応付けを修正
+    ↓
+LR-033  本文評価と次行動選択を統合し、重複LLM呼出しを削減
     ↓
 LR-003  OpenSearchだけでは解けない連続1ホップE2Eを確認
     ↓
