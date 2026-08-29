@@ -31,6 +31,7 @@ class ToolCallTrace(FrameworkModel):
 
 class RunTrace(FrameworkModel):
     reviewer_enabled: bool
+    elapsed_ms: int = Field(default=0, ge=0)
     model_calls: tuple[ModelCallTrace, ...] = ()
     tool_calls: tuple[ToolCallTrace, ...] = ()
     failure_code: str | None = None

@@ -2096,6 +2096,8 @@ EventJournalやDB監査ログは導入しない。運用ログとAPI traceを同
 - logical call数、transport attempt数
 - input/output token
 - latency
+- Run・Cycleの実経過時間
+- WorkItem・Hypothesis IDに対応する呼出し用途と回数
 - Tool名、件数、status、elapsed
 - 機械的な`error_code / stop_reason`
 - Reviewerが有効だったか
@@ -2110,6 +2112,10 @@ EventJournalやDB監査ログは導入しない。運用ログとAPI traceを同
 - 内部例外文字列をそのまま返したAPI error
 
 内容が必要なデバッグは明示的な開発設定に限定する。ログ出力失敗によって回答処理を失敗させない。
+
+性能変更は、同じ設問・model・reasoning・設定についてRun実経過時間、LLM呼出し総数、用途別latency・token、
+Tool時間を前後比較する。一処理の短縮やCycle数の減少だけで改善と判定しない。診断集計は同一Hypothesisへの
+統合反復等を構造的な確認事項として示すが、法的意味の誤りを判定せず、状態更新やTool実行にも介入しない。
 
 診断出力は`off / status / snapshot`の明示modeで切り替える。既定`off`ではmodel・Tool・停止理由等の
 小さい実行要約だけをAPI traceへ返し、診断ファイルを作らない。`status`はWorkItem、Hypothesis、

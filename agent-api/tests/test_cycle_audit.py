@@ -5,6 +5,8 @@ from app.agent_framework.contracts import SolverDecision
 from app.agent_framework.cycle_audit import (
     build_cycle_audit_report,
     build_cycle_checkpoint,
+    compare_cycle_audit_reports,
+    render_cycle_audit_comparison_markdown,
     render_cycle_audit_markdown,
 )
 from app.agent_framework.diagnostics import AgentDiagnostics, load_diagnostic_records
@@ -232,7 +234,11 @@ def test_snapshot_diagnostics_emits_cycle_checkpoint_and_report(tmp_path) -> Non
         contract_attempt=0,
         decision=decision,
     )
-    diagnostics.record_run_complete(state=state_after, failure_code=None)
+    diagnostics.record_run_complete(
+        state=state_after,
+        failure_code=None,
+        elapsed_ms=800,
+    )
 
     records = load_diagnostic_records(tmp_path, baseline.case_id)
     checkpoint = next(item for item in records if item["event"] == "cycle_checkpoint")
@@ -243,8 +249,20 @@ def test_snapshot_diagnostics_emits_cycle_checkpoint_and_report(tmp_path) -> Non
     report = build_cycle_audit_report(records)
     assert report["cycleCount"] == 1
     assert report["findingCount"] == 2
+    assert report["runMetrics"] == {
+        "elapsedMs": 800,
+        "modelCallCount": 1,
+        "modelLatencyMs": 125,
+        "inputTokens": 300,
+        "outputTokens": 75,
+        "toolCallCount": 1,
+        "toolElapsedMs": 12,
+    }
+    assert report["purposeMetrics"][0]["purpose"] == "cycle_close"
+    assert isinstance(report["cycles"][0]["elapsedMs"], int)
     markdown = render_cycle_audit_markdown(report)
     assert "## Cycle 1" in markdown
+    assert "## Run performance" in markdown
     assert "GRAPH_EMPTY_INVERSE_UNTRIED" in markdown
 
 
@@ -291,3 +309,177 @@ def test_status_diagnostics_keeps_cycle_summary_without_snapshot(tmp_path) -> No
         "GRAPH_EMPTY_INVERSE_UNTRIED",
         "CYCLE_NO_PROGRESS",
     ]
+
+
+def test_report_flags_repeated_integration_structure() -> None:
+    scope = {"workItemIds": ["w1"], "hypothesisIds": ["h1"]}
+    records = (
+        {
+            "sequence": 1,
+            "event": "solver_input",
+            "purpose": "observation_integration",
+            "contractAttempt": 1,
+            "cycleNo": 1,
+            "scope": scope,
+        },
+        {
+            "sequence": 2,
+            "event": "transport_input",
+            "instructionsHash": "instructions",
+            "inputHash": "input",
+            "schemaHash": "schema",
+            "transportStage": "solver",
+        },
+        {
+            "sequence": 3,
+            "event": "solver_output",
+            "purpose": "observation_integration",
+            "contractAttempt": 1,
+            "cycleNo": 1,
+            "scope": scope,
+            "latencyMs": 100,
+            "inputTokens": 20,
+            "outputTokens": 5,
+        },
+        {
+            "sequence": 4,
+            "event": "decision_applied",
+            "purpose": "observation_integration",
+            "scope": scope,
+            "stateAfterStatus": {"toolResultCount": 1},
+        },
+        {
+            "sequence": 5,
+            "event": "solver_input",
+            "purpose": "observation_integration",
+            "contractAttempt": 1,
+            "cycleNo": 1,
+            "scope": scope,
+        },
+        {
+            "sequence": 6,
+            "event": "transport_input",
+            "instructionsHash": "instructions",
+            "inputHash": "input",
+            "schemaHash": "schema",
+            "transportStage": "solver",
+        },
+        {
+            "sequence": 7,
+            "event": "solver_output",
+            "purpose": "observation_integration",
+            "contractAttempt": 1,
+            "cycleNo": 1,
+            "scope": scope,
+            "latencyMs": 120,
+            "inputTokens": 25,
+            "outputTokens": 6,
+        },
+        {
+            "sequence": 8,
+            "event": "decision_applied",
+            "purpose": "observation_integration",
+            "scope": scope,
+            "stateAfterStatus": {"toolResultCount": 1},
+        },
+        {
+            "sequence": 9,
+            "event": "decision_applied",
+            "purpose": "integration",
+            "scope": scope,
+            "stateBeforeStatus": {"toolResultCount": 1},
+        },
+        {
+            "sequence": 10,
+            "event": "tool_execution",
+            "cycleNo": 1,
+            "requestId": "tool-1",
+            "toolName": "legal_search",
+            "arguments": {"query": "条件"},
+            "hypothesisIds": ["h1"],
+            "elapsedMs": 10,
+        },
+        {
+            "sequence": 11,
+            "event": "tool_execution",
+            "cycleNo": 1,
+            "requestId": "tool-2",
+            "toolName": "legal_search",
+            "arguments": {"query": "条件"},
+            "hypothesisIds": ["h1"],
+            "elapsedMs": 12,
+        },
+        {
+            "sequence": 12,
+            "event": "run_complete",
+            "caseId": "case-1",
+            "elapsedMs": 500,
+            "stateStatus": {"runStatus": "completed"},
+        },
+    )
+
+    report = build_cycle_audit_report(records)
+
+    assert report["runMetrics"]["modelCallCount"] == 2
+    assert report["runMetrics"]["toolCallCount"] == 2
+    assert report["runMetrics"]["toolElapsedMs"] == 22
+    assert report["hypothesisActivity"][0]["callCount"] == 2
+    assert {item["code"] for item in report["executionFindings"]} == {
+        "REPEATED_OBSERVATION_INTEGRATION_SCOPE",
+        "ADJACENT_INTEGRATION_WITHOUT_NEW_TOOL_RESULT",
+        "REPEATED_MODEL_INPUT",
+        "REPEATED_TOOL_SCOPE",
+    }
+
+
+def test_cycle_audit_comparison_reports_run_and_purpose_deltas() -> None:
+    baseline = {
+        "caseId": "before",
+        "runMetrics": {
+            "elapsedMs": 1000,
+            "modelCallCount": 2,
+            "modelLatencyMs": 800,
+            "inputTokens": 100,
+            "outputTokens": 20,
+            "toolCallCount": 1,
+            "toolElapsedMs": 10,
+        },
+        "purposeMetrics": [
+            {
+                "purpose": "integration",
+                "callCount": 2,
+                "latencyMs": 800,
+                "inputTokens": 100,
+                "outputTokens": 20,
+            }
+        ],
+    }
+    current = {
+        "caseId": "after",
+        "runMetrics": {
+            "elapsedMs": 1200,
+            "modelCallCount": 3,
+            "modelLatencyMs": 900,
+            "inputTokens": 130,
+            "outputTokens": 25,
+            "toolCallCount": 1,
+            "toolElapsedMs": 8,
+        },
+        "purposeMetrics": [
+            {
+                "purpose": "integration",
+                "callCount": 3,
+                "latencyMs": 900,
+                "inputTokens": 130,
+                "outputTokens": 25,
+            }
+        ],
+    }
+
+    comparison = compare_cycle_audit_reports(baseline, current)
+
+    assert comparison["metrics"]["elapsedMs"]["delta"] == 200
+    assert comparison["purposes"][0]["callCount"]["delta"] == 1
+    markdown = render_cycle_audit_comparison_markdown(comparison)
+    assert "Agent Diagnostic Comparison" in markdown
+    assert "| elapsedMs | 1000 | 1200 | 200 |" in markdown

@@ -1193,7 +1193,7 @@ curl -s http://localhost:8000/answer/framework \
 ```
 
 既定の`AGENT_FRAMEWORK_DIAGNOSTICS_MODE=off`では、`trace.agentFramework`へ
-`reviewerEnabled`、`researchCycleCount`、`modelCalls`、`toolCalls`、`runStatus`等の小さい実行要約だけを返す。
+`reviewerEnabled`、`researchCycleCount`、`elapsedMs`、`modelCalls`、`toolCalls`、`runStatus`等の小さい実行要約だけを返す。
 `runStatus=completed`は実行完了だけを表し、
 回答の法的十分性を意味しない。
 `toolCalls`には本文を含めず、Solverが指定した検索・本文取得・1ホップGraph取得の`arguments`と
@@ -1230,6 +1230,19 @@ python3 scripts/summarize_agent_diagnostic.py \
 `cycle-audit.md`では最終実行状態と経路上の警告を分けて読む。Graphの逆方向未試行等は確認候補であり、
 Programによる法的な誤り判定や自動再検索ではない。警告の詳細を再現する場合は、表示された診断sequenceから
 最小fixtureを作る。
+
+同じ条件の変更前後を比較する場合は、比較元を追加する。
+
+```bash
+python3 scripts/summarize_agent_diagnostic.py \
+  --baseline eval-results/agent-framework-diagnostics/legal-before.jsonl \
+  --input eval-results/agent-framework-diagnostics/legal-after.jsonl \
+  --output-dir eval-results/cycle-audits/comparison
+```
+
+`cycle-audit-comparison.md`にはRun実経過時間、LLM呼出し数、用途別latency・token、Tool時間の差分が出る。
+新形式の診断JSONLは`recordedAt`とRun開始からの`runElapsedMs`を各recordに持つ。旧形式も要約できるが、
+保存されていない実経過時間は`null`になる。
 
 双方向の契約は次のrecordで追跡する。`transport_input`はプログラムからLLMへ送ったPrompt・schemaの
 `promptHash`、`schemaHash`、Profile名・versionと、外部Prompt assetのファイル名・使用section・hashを持つ。

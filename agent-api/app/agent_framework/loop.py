@@ -224,15 +224,18 @@ class AgentLoop:
             state = self._finish(state, "failed", stop_reason="provider_error")
             failure_code = "provider_error"
 
+        run_elapsed_ms = self._elapsed_ms(started_at)
         if self._diagnostics is not None:
             self._diagnostics.record_run_complete(
                 state=state,
                 failure_code=failure_code,
+                elapsed_ms=run_elapsed_ms,
             )
         return AgentRunResult(
             state=state,
             trace=RunTrace(
                 reviewer_enabled=self._profile.reviewer.enabled,
+                elapsed_ms=run_elapsed_ms,
                 model_calls=tuple(model_traces),
                 tool_calls=tuple(tool_traces),
                 failure_code=failure_code,
@@ -1302,6 +1305,11 @@ class AgentLoop:
         new_results: list[ToolResult] = []
         for request, execution in zip(requests, executions, strict=True):
             self._validate_tool_execution(request, execution, cycle_no)
+            if self._diagnostics is not None:
+                self._diagnostics.record_tool_execution(
+                    request=request,
+                    result=execution.result,
+                )
             new_results.append(execution.result)
             tool_traces.append(
                 ToolCallTrace(

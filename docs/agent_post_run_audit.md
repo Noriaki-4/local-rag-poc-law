@@ -28,6 +28,7 @@ Agent処理の終了後に、「なぜその判断をしたか」を保存済み
 - 適用前後の状態
 - 実行終了状態と最終回答
 - Cycle終了時のWorkItem・Hypothesis、Evidence、Tool試行、時間・tokenの差分
+- Run・Cycleの実経過時間、用途別LLM呼出し数、Hypothesisごとの呼出し履歴
 
 修復前の契約違反Decisionは`decision_applied`として扱わない。事後監査へ渡すときは
 `SolverContext`を正本とし、同じEvidenceを前後のCaseStateから重複して渡さない。
@@ -123,6 +124,19 @@ python3 scripts/summarize_agent_diagnostic.py \
 
 本文はEvidence正本を参照し、報告へ重複掲載しない。完全なCycle内容が必要な場合は`snapshot`、件数と警告だけでよい場合は
 `status`を使う。
+
+同じ設問・model・設定の変更前後は`--baseline`で比較できる。
+
+```bash
+python3 scripts/summarize_agent_diagnostic.py \
+  --baseline eval-results/agent-framework-diagnostics/legal-before.jsonl \
+  --input eval-results/agent-framework-diagnostics/legal-after.jsonl \
+  --output-dir eval-results/cycle-audits/comparison
+```
+
+比較報告は実経過時間、LLM呼出し数、用途別latency・token、Tool時間の差分を示す。また、同一Hypothesisへの
+Observation Integration反復、新しいTool結果なしの連続Integration、同一モデル入力の再送を警告する。
+いずれも法的判断ではなく実行構造の確認事項であり、自動的な状態更新や再検索には使わない。
 
 ## モデルと保存先
 

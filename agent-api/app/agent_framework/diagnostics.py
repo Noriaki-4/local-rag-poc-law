@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 from threading import RLock
+from time import monotonic
 from typing import Any, Literal
 
 from .context import SolverActionFeedback, SolverContext
@@ -16,7 +18,7 @@ from .cycle_audit import build_cycle_checkpoint, cycle_number
 from .model_call_artifacts import RenderedModelCall, write_model_call_artifacts
 from .ports.model import ReviewerView
 from .profiles import ModelCallProfile, ReviewerProfile
-from .state import CaseState, ReviewResult
+from .state import CaseState, ReviewResult, ToolRequest, ToolResult
 
 DiagnosticsMode = Literal["off", "status", "snapshot"]
 logger = logging.getLogger(__name__)
@@ -49,6 +51,7 @@ class AgentDiagnostics:
         self._cycle_start_sequences: dict[int, int] = {}
         self._cycle_model_metrics: dict[int, dict[str, int]] = {}
         self._recorded_cycle_checkpoints: set[int] = set()
+        self._started_at = monotonic()
 
     @property
     def output_path(self) -> Path | None:
@@ -81,6 +84,9 @@ class AgentDiagnostics:
             "timeoutSec": profile.timeout_sec,
             "profileName": self._profile_name,
             "profileVersion": self._profile_version,
+            "cycleNo": cycle_number(state),
+            "questionHash": _text_sha256(state.question),
+            "scope": _context_scope(context),
         }
         if self.mode == "snapshot":
             record.update(
@@ -120,6 +126,8 @@ class AgentDiagnostics:
             "latencyMs": latency_ms,
             "inputTokens": input_tokens,
             "outputTokens": output_tokens,
+            "cycleNo": cycle_number(state),
+            "scope": _decision_scope(decision),
         }
         if self.mode == "snapshot":
             record["solverDecision"] = decision.model_dump(mode="json")
@@ -215,6 +223,10 @@ class AgentDiagnostics:
             "solverDecisionHash": _json_sha256(decision.model_dump(mode="json")),
             "stateBeforeStatus": _state_status(state_before),
             "stateAfterStatus": _state_status(state_after),
+            "stateBeforeHash": _json_sha256(state_before.model_dump(mode="json")),
+            "stateAfterHash": _json_sha256(state_after.model_dump(mode="json")),
+            "cycleNo": cycle_number(state_before),
+            "scope": _decision_scope(decision),
         }
         if self.mode == "snapshot":
             record.update(
@@ -293,6 +305,7 @@ class AgentDiagnostics:
         *,
         state: CaseState,
         failure_code: str | None,
+        elapsed_ms: int | None = None,
     ) -> None:
         if self.mode == "off":
             return
@@ -302,10 +315,37 @@ class AgentDiagnostics:
             "stateStatus": _state_status(state),
             "failureCode": failure_code,
             "appliedDecisionSequences": list(self._applied_decision_sequences),
+            "elapsedMs": elapsed_ms,
         }
         if self.mode == "snapshot":
             record["caseState"] = state.model_dump(mode="json")
         self._write(record)
+
+    def record_tool_execution(
+        self,
+        *,
+        request: ToolRequest,
+        result: ToolResult,
+    ) -> None:
+        if self.mode == "off":
+            return
+        self._write(
+            {
+                "event": "tool_execution",
+                "caseId": self._path.stem,
+                "cycleNo": result.cycle_no,
+                "requestId": request.request_id,
+                "toolName": request.tool_name,
+                "workItemId": request.work_item_id,
+                "hypothesisIds": list(request.hypothesis_ids),
+                "purpose": request.purpose,
+                "arguments": request.arguments,
+                "status": result.status,
+                "errorCode": result.error_code,
+                "elapsedMs": result.elapsed_ms,
+                "evidenceIds": list(result.evidence_ids),
+            }
+        )
 
     def record_reviewer_input(
         self,
@@ -520,6 +560,8 @@ class AgentDiagnostics:
             ),
             "promptAssets": list(rendered.prompt_assets),
             "artifactPath": str(artifact_dir),
+            "cycleNo": max(1, context.research_cycle_count),
+            "scope": _context_scope(context),
         }
         if self.mode == "snapshot":
             record.update(
@@ -618,7 +660,15 @@ class AgentDiagnostics:
         try:
             with self._lock:
                 self._sequence += 1
-                record = {"sequence": self._sequence, **record}
+                record = {
+                    "sequence": self._sequence,
+                    "recordedAt": datetime.now(timezone.utc).isoformat(),
+                    "runElapsedMs": max(
+                        0,
+                        int((monotonic() - self._started_at) * 1000),
+                    ),
+                    **record,
+                }
                 self._path.parent.mkdir(parents=True, exist_ok=True)
                 with self._path.open("a", encoding="utf-8") as output:
                     output.write(
@@ -745,6 +795,39 @@ def _decision_status(decision: SolverDecision) -> dict[str, Any]:
         "hasGraphCandidateReview": decision.graph_candidate_review is not None,
         "hasSearchCandidateReview": decision.search_candidate_review is not None,
         "hasAnswer": decision.answer is not None,
+    }
+
+
+def _context_scope(context: SolverContext) -> dict[str, list[str]]:
+    return {
+        "workItemIds": list(
+            dict.fromkeys(item.work_item_id for item in context.work_tree)
+        ),
+        "hypothesisIds": list(
+            dict.fromkeys(item.hypothesis_id for item in context.hypotheses)
+        ),
+    }
+
+
+def _decision_scope(decision: SolverDecision) -> dict[str, list[str]]:
+    work_item_ids = [
+        *(item.work_item_id for item in decision.update.add_work_items),
+        *(item.work_item_id for item in decision.update.update_work_items),
+        *(item.work_item_id for item in decision.dependency_decisions),
+        *(item.work_item_id for item in decision.tool_requests),
+    ]
+    hypothesis_ids = [
+        *(item.hypothesis_id for item in decision.update.add_hypotheses),
+        *(item.hypothesis_id for item in decision.update.update_hypotheses),
+        *(
+            hypothesis_id
+            for request in decision.tool_requests
+            for hypothesis_id in request.hypothesis_ids
+        ),
+    ]
+    return {
+        "workItemIds": list(dict.fromkeys(work_item_ids)),
+        "hypothesisIds": list(dict.fromkeys(hypothesis_ids)),
     }
 
 

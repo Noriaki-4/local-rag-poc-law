@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any, Iterable
 
 from .contracts import SolverDecision
@@ -99,11 +100,18 @@ def build_cycle_audit_report(
     checkpoints = [
         item for item in record_list if item.get("event") == "cycle_checkpoint"
     ]
+    records_by_sequence = {
+        item.get("sequence"): item
+        for item in record_list
+        if isinstance(item.get("sequence"), int)
+    }
     cycles: list[dict[str, Any]] = []
     for record in checkpoints:
         snapshot = record.get("cycleSnapshot")
         if isinstance(snapshot, dict):
-            cycles.append(snapshot)
+            cycle = dict(snapshot)
+            cycle["elapsedMs"] = _cycle_elapsed_ms(record, records_by_sequence)
+            cycles.append(cycle)
             continue
         cycles.append(
             {
@@ -116,6 +124,7 @@ def build_cycle_audit_report(
                 "findings": record.get("findings", []),
                 "modelMetrics": record.get("modelMetrics", {}),
                 "toolMetrics": record.get("toolMetrics", {}),
+                "elapsedMs": _cycle_elapsed_ms(record, records_by_sequence),
             }
         )
     findings = [
@@ -127,6 +136,51 @@ def build_cycle_audit_report(
         (item for item in reversed(record_list) if item.get("event") == "run_complete"),
         None,
     )
+    model_calls = _model_call_records(record_list)
+    purpose_metrics = _purpose_metrics(model_calls)
+    hypothesis_activity = _hypothesis_activity(model_calls)
+    execution_findings = _execution_findings(record_list, model_calls)
+    tool_records = [
+        item for item in record_list if item.get("event") == "tool_execution"
+    ]
+    tool_metrics = (
+        {
+            "callCount": len(tool_records),
+            "elapsedMs": sum(
+                int(item.get("elapsedMs") or 0) for item in tool_records
+            ),
+        }
+        if tool_records
+        else {
+            "callCount": sum(
+                int((cycle.get("toolMetrics") or {}).get("callCount", 0))
+                for cycle in cycles
+            ),
+            "elapsedMs": sum(
+                int((cycle.get("toolMetrics") or {}).get("elapsedMs", 0))
+                for cycle in cycles
+            ),
+        }
+    )
+    run_metrics = {
+        "elapsedMs": (
+            run_complete.get("elapsedMs")
+            if isinstance(run_complete, dict)
+            else None
+        ),
+        "modelCallCount": len(model_calls),
+        "modelLatencyMs": sum(
+            int(item.get("latencyMs") or 0) for item in model_calls
+        ),
+        "inputTokens": sum(
+            int(item.get("inputTokens") or 0) for item in model_calls
+        ),
+        "outputTokens": sum(
+            int(item.get("outputTokens") or 0) for item in model_calls
+        ),
+        "toolCallCount": tool_metrics["callCount"],
+        "toolElapsedMs": tool_metrics["elapsedMs"],
+    }
     return {
         "caseId": (
             run_complete.get("caseId")
@@ -135,6 +189,7 @@ def build_cycle_audit_report(
         ),
         "cycleCount": len(cycles),
         "findingCount": len(findings),
+        "executionFindingCount": len(execution_findings),
         "finalRunStatus": (
             (run_complete.get("stateStatus") or {}).get("runStatus")
             if isinstance(run_complete, dict)
@@ -147,6 +202,69 @@ def build_cycle_audit_report(
         ),
         "cycles": cycles,
         "findings": findings,
+        "executionFindings": execution_findings,
+        "runMetrics": run_metrics,
+        "purposeMetrics": purpose_metrics,
+        "hypothesisActivity": hypothesis_activity,
+    }
+
+
+def compare_cycle_audit_reports(
+    baseline: dict[str, Any],
+    current: dict[str, Any],
+) -> dict[str, Any]:
+    """同じ評価条件の前後差を、意味評価せず実行指標だけで比較する。"""
+
+    metric_names = (
+        "elapsedMs",
+        "modelCallCount",
+        "modelLatencyMs",
+        "inputTokens",
+        "outputTokens",
+        "toolCallCount",
+        "toolElapsedMs",
+    )
+    baseline_metrics = baseline.get("runMetrics", {})
+    current_metrics = current.get("runMetrics", {})
+    metrics = {
+        name: _metric_comparison(
+            baseline_metrics.get(name),
+            current_metrics.get(name),
+        )
+        for name in metric_names
+    }
+    baseline_purposes = {
+        item.get("purpose"): item for item in baseline.get("purposeMetrics", [])
+    }
+    current_purposes = {
+        item.get("purpose"): item for item in current.get("purposeMetrics", [])
+    }
+    purposes = []
+    for purpose in sorted(set(baseline_purposes) | set(current_purposes)):
+        before = baseline_purposes.get(purpose, {})
+        after = current_purposes.get(purpose, {})
+        purposes.append(
+            {
+                "purpose": purpose,
+                "callCount": _metric_comparison(
+                    before.get("callCount", 0), after.get("callCount", 0)
+                ),
+                "latencyMs": _metric_comparison(
+                    before.get("latencyMs", 0), after.get("latencyMs", 0)
+                ),
+                "inputTokens": _metric_comparison(
+                    before.get("inputTokens", 0), after.get("inputTokens", 0)
+                ),
+                "outputTokens": _metric_comparison(
+                    before.get("outputTokens", 0), after.get("outputTokens", 0)
+                ),
+            }
+        )
+    return {
+        "baselineCaseId": baseline.get("caseId"),
+        "currentCaseId": current.get("caseId"),
+        "metrics": metrics,
+        "purposes": purposes,
     }
 
 
@@ -159,10 +277,93 @@ def render_cycle_audit_markdown(report: dict[str, Any]) -> str:
         f"- Case: `{_md(report.get('caseId'))}`",
         f"- Cycles: {report.get('cycleCount', 0)}",
         f"- Path findings: {report.get('findingCount', 0)}",
+        f"- Execution findings: {report.get('executionFindingCount', 0)}",
         f"- Final run status: `{_md(report.get('finalRunStatus'))}`",
         "",
-        "> 最終回答の合否と探索経路の警告は別です。警告は法的誤りの確定ではなく、確認対象です。",
+        (
+            "> 最終回答の合否と探索経路の警告は別です。"
+            "警告は法的誤りの確定ではなく、確認対象です。"
+        ),
     ]
+    run_metrics = report.get("runMetrics", {})
+    lines.extend(
+        [
+            "",
+            "## Run performance",
+            "",
+            (
+                "| Wall ms | Model calls | Model latency ms | Input tokens | "
+                "Output tokens | Tool calls | Tool ms |"
+            ),
+            "|---:|---:|---:|---:|---:|---:|---:|",
+            (
+                "| {elapsed} | {calls} | {latency} | {input_tokens} | "
+                "{output_tokens} | {tool_calls} | {tool_ms} |"
+            ).format(
+                elapsed=_md(run_metrics.get("elapsedMs")),
+                calls=run_metrics.get("modelCallCount", 0),
+                latency=run_metrics.get("modelLatencyMs", 0),
+                input_tokens=run_metrics.get("inputTokens", 0),
+                output_tokens=run_metrics.get("outputTokens", 0),
+                tool_calls=run_metrics.get("toolCallCount", 0),
+                tool_ms=run_metrics.get("toolElapsedMs", 0),
+            ),
+        ]
+    )
+    purpose_metrics = report.get("purposeMetrics", [])
+    if purpose_metrics:
+        lines.extend(
+            [
+                "",
+                "### Model calls by purpose",
+                "",
+                "| Purpose | Calls | Latency ms | Input tokens | Output tokens |",
+                "|---|---:|---:|---:|---:|",
+            ]
+        )
+        for item in purpose_metrics:
+            lines.append(
+                "| {purpose} | {calls} | {latency} | {input_tokens} | {output_tokens} |".format(
+                    purpose=_md(item.get("purpose")),
+                    calls=item.get("callCount", 0),
+                    latency=item.get("latencyMs", 0),
+                    input_tokens=item.get("inputTokens", 0),
+                    output_tokens=item.get("outputTokens", 0),
+                )
+            )
+    execution_findings = report.get("executionFindings", [])
+    lines.extend(["", "## Execution findings", ""])
+    if execution_findings:
+        for finding in execution_findings:
+            lines.append(
+                f"- `{_md(finding.get('code'))}`: {_md(finding.get('message'))}"
+            )
+    else:
+        lines.append("- なし")
+    hypothesis_activity = report.get("hypothesisActivity", [])
+    if hypothesis_activity:
+        lines.extend(
+            [
+                "",
+                "## Hypothesis activity",
+                "",
+                "| Cycle | Hypothesis | Calls | Purposes |",
+                "|---:|---|---:|---|",
+            ]
+        )
+        for item in hypothesis_activity:
+            purposes = ", ".join(
+                f"{name}={count}"
+                for name, count in item.get("purposes", {}).items()
+            )
+            lines.append(
+                "| {cycle} | {hypothesis} | {calls} | {purposes} |".format(
+                    cycle=item.get("cycleNo"),
+                    hypothesis=_md(item.get("hypothesisId")),
+                    calls=item.get("callCount", 0),
+                    purposes=_md(purposes),
+                )
+            )
     for cycle in report.get("cycles", []):
         transition = cycle.get("transition", {})
         lines.extend(
@@ -173,6 +374,7 @@ def render_cycle_audit_markdown(report: dict[str, Any]) -> str:
                 f"- Transition: `{_md(transition.get('next'))}` / "
                 f"start next: `{bool(transition.get('startNextCycle'))}`",
                 f"- Reason: {_md(cycle.get('decisionReason'))}",
+                f"- Wall time: `{_md(cycle.get('elapsedMs'))}` ms",
                 f"- Model: {_metrics(cycle.get('modelMetrics', {}))}",
                 f"- Tools: {_metrics(cycle.get('toolMetrics', {}))}",
             ]
@@ -231,6 +433,290 @@ def render_cycle_audit_markdown(report: dict[str, Any]) -> str:
                 )
     lines.append("")
     return "\n".join(lines)
+
+
+def render_cycle_audit_comparison_markdown(comparison: dict[str, Any]) -> str:
+    lines = [
+        "# Agent Diagnostic Comparison",
+        "",
+        f"- Baseline: `{_md(comparison.get('baselineCaseId'))}`",
+        f"- Current: `{_md(comparison.get('currentCaseId'))}`",
+        "",
+        "## Run metrics",
+        "",
+        "| Metric | Baseline | Current | Delta |",
+        "|---|---:|---:|---:|",
+    ]
+    for name, value in comparison.get("metrics", {}).items():
+        lines.append(
+            "| {name} | {before} | {after} | {delta} |".format(
+                name=_md(name),
+                before=_md(value.get("baseline")),
+                after=_md(value.get("current")),
+                delta=_md(value.get("delta")),
+            )
+        )
+    purposes = comparison.get("purposes", [])
+    if purposes:
+        lines.extend(
+            [
+                "",
+                "## Model calls by purpose",
+                "",
+                "| Purpose | Calls before | Calls after | Calls delta | Latency delta ms |",
+                "|---|---:|---:|---:|---:|",
+            ]
+        )
+        for item in purposes:
+            calls = item.get("callCount", {})
+            latency = item.get("latencyMs", {})
+            lines.append(
+                "| {purpose} | {before} | {after} | {call_delta} | {latency_delta} |".format(
+                    purpose=_md(item.get("purpose")),
+                    before=calls.get("baseline", 0),
+                    after=calls.get("current", 0),
+                    call_delta=calls.get("delta", 0),
+                    latency_delta=latency.get("delta", 0),
+                )
+            )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _model_call_records(
+    records: tuple[dict[str, Any], ...],
+) -> list[dict[str, Any]]:
+    pending: dict[tuple[Any, Any], list[dict[str, Any]]] = {}
+    calls: list[dict[str, Any]] = []
+    for record in records:
+        event = record.get("event")
+        key = (record.get("purpose"), record.get("contractAttempt"))
+        if event == "solver_input":
+            pending.setdefault(key, []).append(record)
+            continue
+        if event != "solver_output":
+            continue
+        inputs = pending.get(key, [])
+        input_record = inputs.pop(0) if inputs else {}
+        output_scope = record.get("scope") or {}
+        input_scope = input_record.get("scope") or {}
+        scope = {
+            "workItemIds": list(
+                output_scope.get("workItemIds")
+                or input_scope.get("workItemIds")
+                or []
+            ),
+            "hypothesisIds": list(
+                output_scope.get("hypothesisIds")
+                or input_scope.get("hypothesisIds")
+                or []
+            ),
+        }
+        calls.append(
+            {
+                "sequence": record.get("sequence"),
+                "inputSequence": input_record.get("sequence"),
+                "cycleNo": record.get("cycleNo") or input_record.get("cycleNo"),
+                "purpose": record.get("purpose"),
+                "latencyMs": record.get("latencyMs"),
+                "inputTokens": record.get("inputTokens"),
+                "outputTokens": record.get("outputTokens"),
+                "scope": scope,
+            }
+        )
+    return calls
+
+
+def _purpose_metrics(model_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    for call in model_calls:
+        purpose = str(call.get("purpose") or "unknown")
+        metrics = grouped.setdefault(
+            purpose,
+            {
+                "purpose": purpose,
+                "callCount": 0,
+                "latencyMs": 0,
+                "inputTokens": 0,
+                "outputTokens": 0,
+            },
+        )
+        metrics["callCount"] += 1
+        metrics["latencyMs"] += int(call.get("latencyMs") or 0)
+        metrics["inputTokens"] += int(call.get("inputTokens") or 0)
+        metrics["outputTokens"] += int(call.get("outputTokens") or 0)
+    return sorted(
+        grouped.values(),
+        key=lambda item: (-item["latencyMs"], item["purpose"]),
+    )
+
+
+def _hypothesis_activity(
+    model_calls: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    grouped: dict[tuple[int, str], dict[str, Any]] = {}
+    for call in model_calls:
+        cycle_no = int(call.get("cycleNo") or 1)
+        for hypothesis_id in (call.get("scope") or {}).get("hypothesisIds", []):
+            key = (cycle_no, hypothesis_id)
+            activity = grouped.setdefault(
+                key,
+                {
+                    "cycleNo": cycle_no,
+                    "hypothesisId": hypothesis_id,
+                    "callCount": 0,
+                    "purposes": {},
+                    "sequences": [],
+                },
+            )
+            purpose = str(call.get("purpose") or "unknown")
+            activity["callCount"] += 1
+            activity["purposes"][purpose] = (
+                activity["purposes"].get(purpose, 0) + 1
+            )
+            if isinstance(call.get("sequence"), int):
+                activity["sequences"].append(call["sequence"])
+    return [grouped[key] for key in sorted(grouped)]
+
+
+def _execution_findings(
+    records: tuple[dict[str, Any], ...],
+    model_calls: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    observation_by_scope: dict[tuple[int, str], list[int]] = {}
+    for call in model_calls:
+        if call.get("purpose") != "observation_integration":
+            continue
+        cycle_no = int(call.get("cycleNo") or 1)
+        for hypothesis_id in (call.get("scope") or {}).get("hypothesisIds", []):
+            observation_by_scope.setdefault((cycle_no, hypothesis_id), []).append(
+                int(call.get("sequence") or 0)
+            )
+    for (cycle_no, hypothesis_id), sequences in sorted(observation_by_scope.items()):
+        if len(sequences) < 2:
+            continue
+        findings.append(
+            _finding(
+                "REPEATED_OBSERVATION_INTEGRATION_SCOPE",
+                (
+                    "同じCycle・Hypothesisに対してObservation Integrationを"
+                    "複数回実行しています。取得結果をまとめられるか確認してください。"
+                ),
+                cycleNo=cycle_no,
+                hypothesisIds=[hypothesis_id],
+                callCount=len(sequences),
+                sequences=sequences,
+            )
+        )
+
+    applied = [item for item in records if item.get("event") == "decision_applied"]
+    for previous, current in zip(applied, applied[1:]):
+        if previous.get("purpose") != "observation_integration":
+            continue
+        if current.get("purpose") != "integration":
+            continue
+        previous_results = (previous.get("stateAfterStatus") or {}).get(
+            "toolResultCount"
+        )
+        current_results = (current.get("stateBeforeStatus") or {}).get(
+            "toolResultCount"
+        )
+        if (
+            not isinstance(previous_results, int)
+            or previous_results != current_results
+        ):
+            continue
+        findings.append(
+            _finding(
+                "ADJACENT_INTEGRATION_WITHOUT_NEW_TOOL_RESULT",
+                (
+                    "Observation Integrationの直後に、新しいTool結果を挟まず"
+                    "通常Integrationを実行しています。"
+                ),
+                previousSequence=previous.get("sequence"),
+                currentSequence=current.get("sequence"),
+                hypothesisIds=(previous.get("scope") or {}).get(
+                    "hypothesisIds", []
+                ),
+            )
+        )
+
+    repeated_inputs: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for record in records:
+        if record.get("event") != "transport_input":
+            continue
+        hashes = (
+            record.get("instructionsHash"),
+            record.get("inputHash"),
+            record.get("schemaHash"),
+        )
+        if not all(isinstance(value, str) for value in hashes):
+            continue
+        key = (str(hashes[0]), str(hashes[1]), str(hashes[2]))
+        repeated_inputs.setdefault(key, []).append(record)
+    for duplicates in repeated_inputs.values():
+        if len(duplicates) < 2:
+            continue
+        findings.append(
+            _finding(
+                "REPEATED_MODEL_INPUT",
+                "同一の指示・入力・出力schemaでモデルを複数回呼び出しています。",
+                sequences=[item.get("sequence") for item in duplicates],
+                callCount=len(duplicates),
+                transportStages=list(
+                    dict.fromkeys(
+                        str(item.get("transportStage")) for item in duplicates
+                    )
+                ),
+            )
+        )
+
+    repeated_tools: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+    for record in records:
+        if record.get("event") != "tool_execution":
+            continue
+        key = (
+            record.get("cycleNo"),
+            record.get("toolName"),
+            json.dumps(
+                record.get("arguments") or {},
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            tuple(record.get("hypothesisIds") or []),
+        )
+        repeated_tools.setdefault(key, []).append(record)
+    for duplicates in repeated_tools.values():
+        if len(duplicates) < 2:
+            continue
+        findings.append(
+            _finding(
+                "REPEATED_TOOL_SCOPE",
+                "同じCycleで同一のTool・引数・Hypothesisを複数回実行しています。",
+                requestIds=[item.get("requestId") for item in duplicates],
+                callCount=len(duplicates),
+            )
+        )
+    return findings
+
+
+def _cycle_elapsed_ms(
+    checkpoint: dict[str, Any],
+    records_by_sequence: dict[int, dict[str, Any]],
+) -> int | None:
+    start = records_by_sequence.get(checkpoint.get("startSequence"))
+    start_elapsed = start.get("runElapsedMs") if isinstance(start, dict) else None
+    end_elapsed = checkpoint.get("runElapsedMs")
+    if not isinstance(start_elapsed, int) or not isinstance(end_elapsed, int):
+        return None
+    return max(0, end_elapsed - start_elapsed)
+
+
+def _metric_comparison(before: Any, after: Any) -> dict[str, Any]:
+    delta = after - before if isinstance(before, int) and isinstance(after, int) else None
+    return {"baseline": before, "current": after, "delta": delta}
 
 
 def _new_evidence(baseline: CaseState, state_after: CaseState) -> tuple[Evidence, ...]:

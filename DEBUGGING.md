@@ -131,6 +131,31 @@ python3 scripts/summarize_agent_diagnostic.py \
 警告を見つけたら、該当Cycleの`startSequence`と`decisionSequence`を起点に最小fixtureへ固定します。
 警告を新しい状態値や法令固有の補正条件へ変換しません。
 
+### 性能回帰の切り分け
+
+Cycle数や一処理の短縮だけで性能改善と判断しません。監査報告の次を同じ設問・model・reasoning・設定で比較します。
+
+- Run全体の実経過時間
+- LLM呼出し数と用途別latency・token
+- Cycle別の実経過時間
+- Hypothesisごとの呼出し用途と回数
+- Tool回数と所要時間
+
+監査報告は、同じHypothesisへのObservation Integration反復、新しいTool結果を挟まない連続Integration、
+同一の指示・入力・schemaによるモデル再呼出しを構造上の確認事項として表示します。これらは誤りの断定ではなく、
+取得結果をまとめられるか、処理を別名で重複実行していないかを調べる起点です。
+
+変更前後を比較する場合は、現在の診断JSONLに`--baseline`で比較元を指定します。
+
+```bash
+python3 scripts/summarize_agent_diagnostic.py \
+  --baseline eval-results/agent-framework-diagnostics/legal-before.jsonl \
+  --input eval-results/agent-framework-diagnostics/legal-after.jsonl \
+  --output-dir eval-results/cycle-audits/comparison
+```
+
+実経過時間、品質、呼出し数のいずれかが悪化した場合は、局所的に一処理が短縮していても改善済みと扱いません。
+
 ### 確認済み動作
 
 2026-08-29に、固定状態を使って次を確認しました。

@@ -13,6 +13,8 @@ sys.path.insert(0, str(ROOT / "agent-api"))
 
 from app.agent_framework.cycle_audit import (  # noqa: E402
     build_cycle_audit_report,
+    compare_cycle_audit_reports,
+    render_cycle_audit_comparison_markdown,
     render_cycle_audit_markdown,
 )
 
@@ -22,6 +24,11 @@ def _parse_args() -> argparse.Namespace:
         description="Agent診断JSONLをCycle単位のJSON/Markdownへ要約します。",
     )
     parser.add_argument("--input", type=Path, required=True)
+    parser.add_argument(
+        "--baseline",
+        type=Path,
+        help="比較元の診断JSONL。指定時は前後比較も出力します。",
+    )
     parser.add_argument("--output-dir", type=Path, required=True)
     return parser.parse_args()
 
@@ -53,9 +60,28 @@ def main() -> int:
         render_cycle_audit_markdown(report),
         encoding="utf-8",
     )
+    comparison_message = ""
+    if args.baseline is not None:
+        baseline_report = build_cycle_audit_report(_load_records(args.baseline))
+        comparison = compare_cycle_audit_reports(baseline_report, report)
+        comparison_json_path = args.output_dir / "cycle-audit-comparison.json"
+        comparison_markdown_path = args.output_dir / "cycle-audit-comparison.md"
+        comparison_json_path.write_text(
+            json.dumps(comparison, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        comparison_markdown_path.write_text(
+            render_cycle_audit_comparison_markdown(comparison),
+            encoding="utf-8",
+        )
+        comparison_message = (
+            f" comparison_json={comparison_json_path}"
+            f" comparison_markdown={comparison_markdown_path}"
+        )
     print(
         f"cycles={report['cycleCount']} findings={report['findingCount']} "
-        f"json={json_path} markdown={markdown_path}"
+        f"execution_findings={report['executionFindingCount']} "
+        f"json={json_path} markdown={markdown_path}{comparison_message}"
     )
     return 0
 

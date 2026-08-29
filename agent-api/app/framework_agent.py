@@ -92,6 +92,7 @@ class LegalFrameworkAgentService:
             "researchCycleCount": result.state.research_cycle_count,
             "stopReason": result.state.stop_reason,
             "failureCode": result.trace.failure_code,
+            "elapsedMs": result.trace.elapsed_ms,
             "modelCalls": [
                 item.model_dump(mode="json") for item in result.trace.model_calls
             ],

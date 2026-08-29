@@ -626,6 +626,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
         contract_field_description(DependencyDecision, "dependency_kind")
     )
     assert framework_trace["dependencyDecisions"][0]["status"] == "not_required"
+    assert framework_trace["elapsedMs"] >= 0
     assert len(framework_trace["appliedDecisionSequences"]) == 6
     diagnostic_records = [
         json.loads(record_line)
@@ -639,6 +640,9 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
     assert diagnostic_records[0]["profileVersion"] == "395"
+    assert diagnostic_records[0]["runElapsedMs"] >= 0
+    assert diagnostic_records[0]["recordedAt"].endswith("+00:00")
+    assert len(diagnostic_records[0]["questionHash"]) == 64
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -665,6 +669,11 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert "search_actor_classification" not in transport_stages
     assert "search_assessment" not in transport_stages
     assert "search_reselection" not in transport_stages
+    tool_execution = next(
+        item for item in diagnostic_records if item["event"] == "tool_execution"
+    )
+    assert tool_execution["elapsedMs"] >= 0
+    assert tool_execution["hypothesisIds"]
     solver_output = next(
         item for item in diagnostic_records if item["event"] == "solver_output"
     )
