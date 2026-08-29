@@ -1018,6 +1018,33 @@ LLMが方向誤りだと判断した場合だけ逆方向を選べるように�
 - `fetch_articles`、5 predicate・2方向の`legal_graph_neighbors`、`reference_edges`、`legal_search`、`load_evidence`、行動なしをfixtureで検証する。
 - Luna `high`の公告・例外・総合で必要根拠と総合11/11を維持し、同じsnapshot・設定に対するLLM呼出数、wall time、入出力tokenをbaselineより削減する。
 
+### LR-034 Cycle単位の探索経路監査
+
+最終回答が合格しても、途中のGraph方向、Evidence対応付け、未確認事項の更新に問題が残る場合がある。
+最終結果だけでは、別Cycleの探索によって偶然回復した経路上の誤りを回帰対象にできない。
+
+診断`status / snapshot`に、Cycle終了時の`cycle_checkpoint`を追加する。これはCaseStoreへ保存する新しい状態ではなく、
+Cycle開始・終了時の正本から作る監査用投影である。WorkItem・Hypothesisの差分、未確認事項、Evidence ID、
+Tool引数・結果・所要時間、モデル所要時間・tokenをCycle単位で記録する。本文はEvidence正本に残し、投影へ複製しない。
+
+Programが検出するのは構造上の確認候補に限定する。たとえば、0件だった意味関係Graph検索で逆方向が未試行、
+取得本文が未統合、取得Evidenceが要求元Hypothesisへ未対応、新しいEvidenceなしで`gaps`を消去、進捗なしで次Cycleへ
+移行した場合である。これらを法的誤りと断定せず、Graph方向の自動反転や状態の自動修復も行わない。
+
+完了条件は次とする。
+
+- `snapshot`から各Cycle終了時の完全な状態・差分を再現できる。
+- `status`では本文を保存せず、Cycle要約と確認事項だけを確認できる。
+- 保存JSONLから追加のLLM呼出しなしでJSON・Markdown監査報告を生成できる。
+- 最終回答の実行結果と探索経路の確認事項を別項目として表示する。
+- 確認事項の診断sequenceから既存手順で最小fixtureを作れる。
+- Programは法的関連性、Graph方向の正誤、根拠十分性を確定しない。
+
+2026-08-29のLuna `high`・公開買付け総合問題では、3 Cycle・342.3秒で正常完了し、資料3/3、必要Article
+4/4、回答要点4/4の11/11だった。Cycle監査は、Cycle 3で候補0件だった意味関係Graph探索2件を
+`GRAPH_EMPTY_INVERSE_UNTRIED`として記録した。本文未統合・Evidence未対応付けの警告はなかった。
+最終回答の合格を変えず、途中経路だけを別の確認対象として残せることを実モデルで確認した。
+
 ### LR-019 統合契約と意味的行動選択の分離
 
 - 構造契約は、JSON形状、既知ID、型、件数・予算、参照整合、同一成功済み要求の二重実行防止を検証する。

@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 from .context import SolverActionFeedback, SolverContext
 from .contracts import SolverDecision
+from .cycle_audit import build_cycle_checkpoint, cycle_number
 from .model_call_artifacts import RenderedModelCall, write_model_call_artifacts
 from .ports.model import ReviewerView
 from .profiles import ModelCallProfile, ReviewerProfile
@@ -44,6 +45,10 @@ class AgentDiagnostics:
         self._lock = RLock()
         self._profile_name = profile_name
         self._profile_version = profile_version
+        self._cycle_baselines: dict[int, CaseState] = {}
+        self._cycle_start_sequences: dict[int, int] = {}
+        self._cycle_model_metrics: dict[int, dict[str, int]] = {}
+        self._recorded_cycle_checkpoints: set[int] = set()
 
     @property
     def output_path(self) -> Path | None:
@@ -85,7 +90,12 @@ class AgentDiagnostics:
                     "modelProfile": profile.model_dump(mode="json"),
                 }
             )
-        self._write(record)
+        sequence = self._write(record)
+        cycle_no = cycle_number(state)
+        if cycle_no not in self._cycle_baselines:
+            self._cycle_baselines[cycle_no] = state
+            if sequence is not None:
+                self._cycle_start_sequences[cycle_no] = sequence
 
     def record_solver_output(
         self,
@@ -94,6 +104,9 @@ class AgentDiagnostics:
         purpose: str,
         contract_attempt: int,
         decision: SolverDecision,
+        latency_ms: int | None = None,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
     ) -> None:
         if self.mode == "off":
             return
@@ -104,10 +117,21 @@ class AgentDiagnostics:
             "contractAttempt": contract_attempt + 1,
             "decisionStatus": _decision_status(decision),
             "solverDecisionHash": _json_sha256(decision.model_dump(mode="json")),
+            "latencyMs": latency_ms,
+            "inputTokens": input_tokens,
+            "outputTokens": output_tokens,
         }
         if self.mode == "snapshot":
             record["solverDecision"] = decision.model_dump(mode="json")
         self._write(record)
+        metrics = self._cycle_model_metrics.setdefault(
+            cycle_number(state),
+            {"callCount": 0, "latencyMs": 0, "inputTokens": 0, "outputTokens": 0},
+        )
+        metrics["callCount"] += 1
+        metrics["latencyMs"] += latency_ms or 0
+        metrics["inputTokens"] += input_tokens or 0
+        metrics["outputTokens"] += output_tokens or 0
 
     def record_contract_violation(
         self,
@@ -204,6 +228,65 @@ class AgentDiagnostics:
         sequence = self._write(record)
         if sequence is not None:
             self._applied_decision_sequences.append(sequence)
+            self._record_cycle_checkpoint_if_needed(
+                state_before=state_before,
+                state_after=state_after,
+                purpose=purpose,
+                decision=decision,
+                decision_sequence=sequence,
+            )
+
+    def _record_cycle_checkpoint_if_needed(
+        self,
+        *,
+        state_before: CaseState,
+        state_after: CaseState,
+        purpose: str,
+        decision: SolverDecision,
+        decision_sequence: int,
+    ) -> None:
+        if not (
+            purpose == "cycle_close"
+            or decision.start_next_cycle
+            or decision.next == "finalize"
+        ):
+            return
+        cycle_no = cycle_number(state_before)
+        if cycle_no in self._recorded_cycle_checkpoints:
+            return
+        baseline = self._cycle_baselines.get(cycle_no, state_before)
+        snapshot = build_cycle_checkpoint(
+            baseline=baseline,
+            state_after=state_after,
+            decision=decision,
+            purpose=purpose,
+            start_sequence=self._cycle_start_sequences.get(cycle_no),
+            decision_sequence=decision_sequence,
+            model_metrics=self._cycle_model_metrics.get(
+                cycle_no,
+                {"callCount": 0, "latencyMs": 0, "inputTokens": 0, "outputTokens": 0},
+            ),
+        )
+        record: dict[str, Any] = {
+            "event": "cycle_checkpoint",
+            "caseId": state_before.case_id,
+            "cycleNo": cycle_no,
+            "startSequence": snapshot["startSequence"],
+            "decisionSequence": decision_sequence,
+            "purpose": purpose,
+            "transition": snapshot["transition"],
+            "decisionReason": decision.decision_reason,
+            "findingCount": len(snapshot["findings"]),
+            "findingCodes": [item["code"] for item in snapshot["findings"]],
+            "findings": snapshot["findings"],
+            "modelMetrics": snapshot["modelMetrics"],
+            "toolMetrics": snapshot["toolMetrics"],
+            "cycleSnapshotHash": _json_sha256(snapshot),
+        }
+        if self.mode == "snapshot":
+            record["cycleSnapshot"] = snapshot
+        self._write(record)
+        self._recorded_cycle_checkpoints.add(cycle_no)
 
     def record_run_complete(
         self,

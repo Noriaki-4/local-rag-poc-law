@@ -104,6 +104,49 @@ CaseState
 | Graphを続けて探索しない | 次の起点へ再採用できるか、Cycle引継ぎ |
 | 同じ失敗を繰り返す | fixtureの境界が広すぎないか、複数原因を同時修正していないか |
 
+## Cycle単位の経路監査
+
+`snapshot`診断では、Cycleを閉じるたびに`cycle_checkpoint`を保存します。これは新しい業務状態ではなく、
+Cycle開始時と終了時の`CaseState`から作る監査用の投影です。
+
+- WorkItem・Hypothesisの終了時点の内容と差分
+- そのCycleで増えたEvidenceのID、Article、役割
+- Toolの引数、結果件数、所要時間
+- LLM呼出し回数、所要時間、入出力token
+- 未解決Hypothesisと`gaps`
+- 構造上の確認事項
+
+最終回答の合否と探索経路の確認事項を分けます。たとえば最終回答が正しくても、0件だった意味関係Graph検索で
+逆方向を試していなければ確認対象として残します。ただし、Programは方向が誤りだと断定せず、自動で逆方向を検索しません。
+本文未統合、Evidence未対応付け、新しいEvidenceなしの`gaps`消去も同様に警告するだけです。
+
+診断JSONLから、追加のLLM呼出しなしでJSONとMarkdownの報告を作れます。
+
+```bash
+python3 scripts/summarize_agent_diagnostic.py \
+  --input eval-results/agent-framework-diagnostics/legal-....jsonl \
+  --output-dir eval-results/cycle-audits/legal-...
+```
+
+警告を見つけたら、該当Cycleの`startSequence`と`decisionSequence`を起点に最小fixtureへ固定します。
+警告を新しい状態値や法令固有の補正条件へ変換しません。
+
+### 確認済み動作
+
+2026-08-29に、固定状態を使って次を確認しました。
+
+- Cycle終了時に`cycle_checkpoint`が1件生成される。
+- `snapshot`では終了時のHypothesis、`gaps`、Tool試行、時間・tokenを再現できる。
+- 意味関係Graph検索が0件で逆方向未試行の場合を、誤りと断定せず警告できる。
+- 取得本文の未統合とHypothesis未対応付けを区別して警告できる。
+- 診断JSONLから追加のLLM呼出しなしでJSON・Markdown報告を生成できる。
+- Agent Frameworkを含む全1079テストが合格する。
+
+同日のLuna `high`実モデル検証では、公開買付け総合問題を3 Cycle・342.3秒で正常完了し、UIの
+資料3/3・必要Article 4/4・回答要点4/4に合格しました。Cycle監査は、回答へ影響しなかった0件の
+意味関係Graph探索2件について逆方向未試行を警告し、本文未統合・Evidence未対応付けは検出しませんでした。
+これにより、最終回答の合格と途中経路の確認事項を分けて表示できることを実データでも確認しました。
+
 ## 中止条件
 
 同じ原因が特定できないまま修正が繰り返される場合は、実装を止めます。残っている事実、確認済みの境界、

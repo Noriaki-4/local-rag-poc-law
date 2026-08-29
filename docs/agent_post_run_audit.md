@@ -27,6 +27,7 @@ Agent処理の終了後に、「なぜその判断をしたか」を保存済み
 - 構造検証を通過した`SolverDecision`
 - 適用前後の状態
 - 実行終了状態と最終回答
+- Cycle終了時のWorkItem・Hypothesis、Evidence、Tool試行、時間・tokenの差分
 
 修復前の契約違反Decisionは`decision_applied`として扱わない。事後監査へ渡すときは
 `SolverContext`を正本とし、同じEvidenceを前後のCaseStateから重複して渡さない。
@@ -104,6 +105,24 @@ curl -s http://localhost:8000/answer/framework/audit \
 
 事後説明は元の内部推論の再現ではなく、もっともらしい後付け説明になる可能性がある。
 判断時の`recordedDecisionReason`とID・状態記録を優先し、`inferences`は監査補助として扱う。
+
+## Cycle監査報告
+
+`cycle_checkpoint`は各Cycle終了時の状態と経路差分を保存する。最終回答が生成されたか、または正答したかとは別に、
+途中の空振りGraph探索、本文の未統合、Evidenceの未対応付け等を確認できる。検出結果は法的判断ではなく、
+fixture化して人またはLLMが確認するための構造的な警告である。
+
+次のコマンドは保存済みJSONLだけを読み、追加のモデル呼出しなしで`cycle-audit.json`と
+`cycle-audit.md`を生成する。
+
+```bash
+python3 scripts/summarize_agent_diagnostic.py \
+  --input eval-results/agent-framework-diagnostics/legal-....jsonl \
+  --output-dir eval-results/cycle-audits/legal-...
+```
+
+本文はEvidence正本を参照し、報告へ重複掲載しない。完全なCycle内容が必要な場合は`snapshot`、件数と警告だけでよい場合は
+`status`を使う。
 
 ## モデルと保存先
 

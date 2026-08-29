@@ -1218,6 +1218,19 @@ curl -s http://localhost:8000/answer/framework \
 切り替え、SolverのPromptや`SolverContext`を増減しないため、`status`や`snapshot`を有効にしても
 LLMへの入力tokenは増えない。通常は`off`を維持し、再現対象の1実行だけ`status`または`snapshot`にする。
 
+Cycleごとの状態、差分、Graph試行、所要時間をまとめて確認する場合は、実行後に次を実行する。
+追加のLLM呼出しは行わず、出力先もGit管理外である。
+
+```bash
+python3 scripts/summarize_agent_diagnostic.py \
+  --input eval-results/agent-framework-diagnostics/legal-....jsonl \
+  --output-dir eval-results/cycle-audits/legal-...
+```
+
+`cycle-audit.md`では最終実行状態と経路上の警告を分けて読む。Graphの逆方向未試行等は確認候補であり、
+Programによる法的な誤り判定や自動再検索ではない。警告の詳細を再現する場合は、表示された診断sequenceから
+最小fixtureを作る。
+
 双方向の契約は次のrecordで追跡する。`transport_input`はプログラムからLLMへ送ったPrompt・schemaの
 `promptHash`、`schemaHash`、Profile名・versionと、外部Prompt assetのファイル名・使用section・hashを持つ。
 `snapshot`ではPromptとschema本文も保存する。`transport_output`はLLMから返った生payloadと

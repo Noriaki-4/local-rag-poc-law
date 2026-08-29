@@ -447,12 +447,16 @@ class AgentLoop:
                     solver_call = self._model.solve(context, call_profile)
                 except SolverCheckpointTimeout as exc:
                     partial_decision = exc.partial_decision
+                    call_latency_ms = self._elapsed_ms(call_started)
                     if self._diagnostics is not None:
                         self._diagnostics.record_solver_output(
                             state=state,
                             purpose=f"{purpose}_{exc.completed_stage}_checkpoint",
                             contract_attempt=decision_attempt,
                             decision=partial_decision,
+                            latency_ms=call_latency_ms,
+                            input_tokens=exc.input_tokens,
+                            output_tokens=exc.output_tokens,
                         )
                     try:
                         checkpoint_state = apply_solver_decision(
@@ -497,7 +501,7 @@ class AgentLoop:
                                 f"{purpose}_{exc.completed_stage}_checkpoint_timeout"
                             ),
                             model=call_profile.model,
-                            latency_ms=self._elapsed_ms(call_started),
+                            latency_ms=call_latency_ms,
                             input_tokens=exc.input_tokens,
                             output_tokens=exc.output_tokens,
                             attempt_count=1,
@@ -534,6 +538,7 @@ class AgentLoop:
                     self._store.save(state)
                     cycle_step_timed_out = True
                     break
+                call_latency_ms = self._elapsed_ms(call_started)
                 model_traces.append(
                     ModelCallTrace(
                         purpose=(
@@ -546,7 +551,7 @@ class AgentLoop:
                             )
                         ),
                         model=call_profile.model,
-                        latency_ms=self._elapsed_ms(call_started),
+                        latency_ms=call_latency_ms,
                         input_tokens=solver_call.input_tokens,
                         output_tokens=solver_call.output_tokens,
                         attempt_count=solver_call.attempt_count,
@@ -559,6 +564,9 @@ class AgentLoop:
                         purpose=purpose,
                         contract_attempt=decision_attempt,
                         decision=solver_call.decision,
+                        latency_ms=call_latency_ms,
+                        input_tokens=solver_call.input_tokens,
+                        output_tokens=solver_call.output_tokens,
                     )
                 try:
                     candidate = apply_solver_decision(
