@@ -14,7 +14,7 @@ from app.agent_framework.state import Evidence, ToolRequest, ToolResult
 from app.agent_framework.tool_contracts import model_input_schema
 from app.config import settings
 from app.domains.legal.graph_schema import (
-    ExplicitReferenceLookup,
+    ReferenceEdgeLookup,
     GraphDirection,
     GraphSearchMode,
     ProposedPredicate,
@@ -99,15 +99,15 @@ class _SemanticGraphNeighborsArguments(_GraphNeighborsArgumentsBase):
     )
 
 
-class _ExplicitReferenceGraphNeighborsArguments(_GraphNeighborsArgumentsBase):
-    mode: Literal[GraphSearchMode.EXPLICIT_REFERENCE] = Field(
-        description="本文に明示されたREFERENCESを探索する。",
+class _ReferenceEdgesGraphNeighborsArguments(_GraphNeighborsArgumentsBase):
+    mode: Literal[GraphSearchMode.REFERENCE_EDGES] = Field(
+        description="seed済みの物理REFERENCESを探索する。",
     )
     predicate: None = Field(
         default=None,
         description="物理参照の探索ではnull。",
     )
-    reference_lookup: ExplicitReferenceLookup = Field(
+    reference_lookup: ReferenceEdgeLookup = Field(
         description=(
             "follow_reference_in_textは起点本文に明記された参照先Articleを探す。"
             "find_articles_referencing_thisは起点Articleを明示参照するArticleを探す。"
@@ -131,7 +131,7 @@ class _ExplainsGraphNeighborsArguments(_GraphNeighborsArgumentsBase):
 class _GraphNeighborsArguments(
     RootModel[
         _SemanticGraphNeighborsArguments
-        | _ExplicitReferenceGraphNeighborsArguments
+        | _ReferenceEdgesGraphNeighborsArguments
         | _ExplainsGraphNeighborsArguments
     ]
 ):
@@ -149,10 +149,10 @@ class _GraphNeighborsArguments(
 
     @property
     def direction(self) -> str:
-        if isinstance(self.root, _ExplicitReferenceGraphNeighborsArguments):
+        if isinstance(self.root, _ReferenceEdgesGraphNeighborsArguments):
             return {
-                ExplicitReferenceLookup.FOLLOW_REFERENCE_IN_TEXT: "outgoing",
-                ExplicitReferenceLookup.FIND_ARTICLES_REFERENCING_THIS: "incoming",
+                ReferenceEdgeLookup.FOLLOW_REFERENCE_IN_TEXT: "outgoing",
+                ReferenceEdgeLookup.FIND_ARTICLES_REFERENCING_THIS: "incoming",
             }[self.root.reference_lookup]
         value = self.root.direction
         return value.value if isinstance(value, GraphDirection) else value
@@ -393,7 +393,7 @@ class LegalGraphNeighborsTool:
             elif callable(formal_lookup):
                 edge_type = (
                     "REFERENCES"
-                    if arguments.mode is GraphSearchMode.EXPLICIT_REFERENCE
+                    if arguments.mode is GraphSearchMode.REFERENCE_EDGES
                     else "EXPLAINS"
                 )
                 formal = formal_lookup(

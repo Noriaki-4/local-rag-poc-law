@@ -82,7 +82,7 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-020` | P1 | 要設計 | 検索又は結論を変える質問の欠落・曖昧さを一方的に補わず、利用者へ確認する | 現在は行為者が不明でも`action_actor=不明`として調査を続ける。これは一般論の質問には適切だが、確認対象となる行為や主体の欠落により複数の検索経路・法的結論が成立する場合を、検索前に止める契約がない。検索後に候補本文から異なる規律主体が判明する場合もある | まず検索前の独立した質問確認をStreamlitへ追加し、必要な場合だけ確認・質問文修正・利用者確認を行う。検索後の分岐で必要となるCaseの確認待ち・再開は次段階として設計する |
 | `LR-021` | P0 | 対応中 | 検索候補の内容評価と取得選択を整合させる | v376でSearch AssessmentとReselectionを一つのSearch Selectionへ統合した。LLMは全候補を比較するが、出力は選択した最大5件の内容評価・対応Hypothesis・選択理由だけとする。Programはこの単一出力を保存用評価と本文取得選択へ分け、非選択IDを入力候補との差集合として保留する。意味上の採否はLLM、既知ID・件数・構造変換はProgramが扱う | Luna `high`の総合問題で、対応Hypothesisと選択Articleが同じ判断内で整合し、必要候補が後段で脱落しないことを確認する |
 | `LR-022` | P0 | 未着手 | 後続Cycleで既存WorkItemへ代替Hypothesisを追加する | 設計ではHypothesisの`statement`を別の意味へ上書きせず、見立てを変える場合は新しいHypothesisを追加する。しかし現行の段階別経路は、Hypothesisが1件もないopen WorkItemだけを生成処理へ送り、本文評価は既存Hypothesisの更新だけを許す。そのため、初期仮説が反証された場合も、同じWorkItemへ新しい見立てを追加して次Cycleで仕切り直せない | H1が`contradicted`または新しい規律構造が判明したfixtureで、H1と根拠を履歴として保持し、Cycle 2で同じWorkItemへ新IDのH2を追加できることを確認する。検索方法だけを変える場合は不要なHypothesisを追加しない |
-| `LR-023` | P0 | 完了 | Hypothesisに合うGraph方向と候補の対応先を安定して選ぶ | Profile v381で`explicit_reference`のLLM-visible契約から物理方向`outgoing / incoming`を除き、`follow_reference_in_text / find_articles_referencing_this`という探索目的へ置換した。Tool Adapterだけが探索目的を物理方向へ機械変換する。旧誤方向checkpointのLuna `high`隔離再生では、金商法27条の2と施行令7条の双方で`find_articles_referencing_this`を初回選択した | 2探索目的から物理方向への対応を契約テストで固定する。Graph候補の全open Hypothesisへの再対応付けと`relevant_deferred`候補の後続再採用は方向選択と分けて回帰確認する |
+| `LR-023` | P0 | 対応中（意味方向が再発） | Hypothesisに合うGraph方向と候補の対応先を安定して選ぶ | Profile v381で物理`REFERENCES`のLLM-visible契約から`outgoing / incoming`を除き、`follow_reference_in_text / find_articles_referencing_this`という探索目的へ置換した。Tool Adapterだけが探索目的を物理方向へ機械変換する。一方、Profile v395のLuna `high`総合問題では、金商法27条の2から具体化規定を探す目的に対して`semantic_assertion / IMPLEMENTS / to_subject`を1回選んだ。本来は親規定をSUBJECT起点とする`from_subject`であり、物理参照の方向問題とは別に意味関係の端点理解が安定していない。誤方向要求と2回の`reference_edges`はいずれも候補0件だったが、施行令7条と金商法27条の3を初回OpenSearchで取得済みだったため、それぞれを起点とする後続の正しい`semantic_assertion / IMPLEMENTS / from_subject`で府令2条の5と府令10条を発見した | 物理`REFERENCES`の2探索目的から物理方向への変換は契約テストで維持する。別に、5 predicateのSUBJECT / OBJECT役割と探索目的を入力契約だけから対応できる隔離fixtureを作り、金商法27条の2から具体化規定を探す場合に`IMPLEMENTS / from_subject`を選べるか確認する。Graph候補の再対応付けは方向選択と分けて扱う |
 | `LR-024` | P0 | 完了 | Hypothesisが支持された内容と未確認事項を同時に保持する | Haiku・Profile v375では、H-3は府令2条の5、H-4は府令10条を未取得だった。それぞれ上位規定から一部内容を確認できたが、`judgment=supported`への更新と同時に`gaps=[]`となった。WorkItemは下位規範Dependencyにより`open`を維持したものの、Hypothesis単体では必要な具体的内容を確認済みのように見える不整合が残った | Profile v383で`judgment`をstatementの判定、`gaps`をWorkItemへの回答に必要な未確認事項として契約・Promptへ明記した。Evidence Integrationでは下位規範状態を先に判断し、`terminal_text_missing`と同時に更新したWorkItemの全Hypothesisで`gaps=[]`となる矛盾だけをProgramが拒否する。固定fixtureで誤出力の拒否と、`supported`のまま府令の具体的条件を`gaps`へ保持する更新を確認した |
 | `LR-025` | P0 | 完了 | 取得済みEvidenceとHypothesisの対応付けを後続処理へ引き継ぐ | Profile v382で`HypothesisUpdate.evidence_ids`を今回新たに対応付けたEvidenceの差分とし、CaseStore保存時とCycle Close向け投影時の両方で既存対応へ追記する共通処理へ変更した。意味的な対応付けはLLM、既存対応の保持・既知ID検証・重複除去はProgramが担当する | 前CycleのEvidenceをLLMが再出力せず、現在CycleのEvidenceだけを返すfixtureで、両方の対応が後続入力とCaseStoreに保持されることを確認済み |
 | `LR-026` | P0 | 完了 | Graphで選択したArticle本文を、残りのGraph候補より先に統合する | Profile v383の総合問題では、府令2条の5を本文取得した後も未処理Graph候補のレビューを続けたため、取得本文をHypothesisへ統合できないまま時間上限へ到達した。Profile v384では未統合の取得本文を機械的に検出し、Graph・検索候補をCaseStoreに保持したままEvidence Integrationを優先する。統合後は処理済みIDを除いた未処理候補を再投影する。候補順序は固定せず、未処理候補はCycle境界でも保持する | 回帰テストに加え、Luna `high`の総合問題で`graph_selection → observation_integration`を2回連続して確認した。府令2条の5・10条を含む必要Article 6/6を取得・統合した。最終回答のtimeoutはLR-004で扱う |
@@ -91,7 +91,7 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-029` | P0 | 完了 | `supported`かつ`gaps`ありのHypothesisを後続探索と限定回答へ一貫して引き継ぐ | LR-024で`judgment`と`gaps`を独立させた後も、Search Planning・Search Selectionは`judgment=unresolved`だけを未確認対象としていた。このため、追加検索要求が参照するHypothesisを候補選択入力から落とし、空の対応IDを許すschemaと対応ID必須validatorが衝突した。最終化でも、`gaps`によりopenのWorkItemを未解決として表現できなかった。さらに本文評価がDependencyだけを更新した場合、`continue`契約が状態更新と認識せず`schema_validation`になった | Profile v392で探索対象、限定回答検証、Dependency単独更新の3境界を統一した。全1072テストとLuna `high`の社内方針設問に合格し、必要Article 4/4を取得して2 Cycleで正常完了した。意味上の候補選択、`gaps`解消、下位規範判断はLLMに残した |
 | `LR-030` | P0 | 実装済み（意味関係実モデル合格） | Hypothesisに合う意味関係をGraph探索へ使い、意味分類の未被覆時だけ明示参照へフォールバックする | Profile v392の追加Lv.3設問では、Graphに`IMPLEMENTS / EXCEPTION_TO / USES_DEFINITION / OVERRIDES`が登録済みでも、実行したGraph要求は全て`explicit_reference`だった。公告方法の設問ではGraph 4回のうち最初の府令9条発見後は取得済み条文へ戻り、データセットに存在しない準用先をOpenSearchで6回追加検索した。Graph処理自体は合計約0.05秒だが、26回のLLM呼出しに約322.5秒を要した | Profile v393で、下位規範Actionの`explicit_reference`固定schemaを廃止した。SolverはHypothesisに対応するpredicateを説明できる場合に`semantic_assertion`を先に選び、新候補がない場合だけ明示参照へ切り替える。Programは意味を選ばず、各Graph要求の返却Article ID、新規Article ID及び同一scope履歴を提示する。Luna `high`総合問題はGraph 4回を全て意味関係・正方向で行い11/11。意味分類coverageのscope別manifestは`LR-006`で扱う |
 | `LR-031` | P1 | 要設計 | 新Frameworkの`explains`をガイド`Document`から法令`Article`を発見できる契約へ整合させる | `EXPLAINS`はガイドの条文注釈・対応表が明示した`Document → Article`であり、法令本文間の`REFERENCES`とは別の索引である。一方、`legal_graph_neighbors`の共通入力は起点を`article_ids`とし、`GraphClient.article_relations_touching`も両端を`Article / Paragraph / Item`へ限定するため、正規の`Document → Article`を新Frameworkの`explains`モードから取得できない。旧Guidance Laneには`document_id`起点の探索がある | `explains`の利用範囲を決め、少なくともガイド`Document`から明示対応する法令`Article`を1ホップで取得し、選択したArticle本文をOpenSearchから取得するfixtureを通す。Articleからガイドへの逆引きを提供する場合は、Article本文取得とは別の候補型・取得経路を設計する。単なる言及を`EXPLAINS`へ昇格させない |
-| `LR-032` | P1 | 要整理 | `explicit_reference`が何を検索するmodeか、名称と契約だけで理解できるようにする | 現在の名称は、本文をその場で解析する検索、利用者が明示した参照、Neo4jの物理`REFERENCES`探索のいずれにも読める。実際にはseed済み`REFERENCES`を1ホップたどるmodeであり、`follow_reference_in_text / find_articles_referencing_this`が二方向を表す。また、意味関係未被覆時のfallbackという利用順序まで同じ説明へ混在している | 参照元規定・参照先規定、保存済みEdge、二つの探索目的、fallback条件を分けて定義する。mode名を`references`等へ変更するかは互換性を確認して決める。完成Promptとschema descriptionだけで、本文検索ではないこと及び各探索目的の向きを説明できるfixtureを通す |
+| `LR-032` | P1 | 完了 | Graphの物理`REFERENCES`探索を名称と契約だけで理解できるようにする | 旧`explicit_reference`は、本文の実行時解析、利用者が明示した参照、物理`REFERENCES`探索のいずれにも読めた。Profile v395でGraph modeを`reference_edges`へ変更し、seed済み`REFERENCES`を1ホップたどる処理だとschema descriptionとPromptへ明記した。`follow_reference_in_text / find_articles_referencing_this`は二方向の探索目的として維持した | 全1074テストに合格した。Luna `high`総合問題では`reference_edges`を2回実行して正常完了し、旧modeは完成schema、応答及びtraceに現れなかった。探索フロー上のfallback条件はmodeの意味へ混ぜず、別の手順として維持する |
 
 ### 3.1 LR-016 Tool観察とCycle Closeの単一責務化
 
@@ -857,7 +857,7 @@ DependencyDecisionだけが変化する本文評価も有効な状態更新と�
 1. Solverは現在のHypothesis、起点Article及び探索目的から、意味predicateを説明できるか判断する。
 2. 説明でき、publish済み分類のcoverageがある場合は`semantic_assertion`を使う。
 3. 該当predicateが未分類、対象scopeのcoverageが不足、又は明示された参照先そのものを確認する場合は、
-   `explicit_reference`へフォールバックする。
+   `reference_edges`へフォールバックする。
 4. Programは意味predicateを選ばない。既知ID、件数上限、coverage、過去の探索scope及び新規Article ID数だけを
    検証・記録する。
 5. 新しいArticle IDが得られなかった場合、その事実をObservationとしてSolverへ返す。別の検索表現、別の関係、
@@ -869,7 +869,7 @@ DependencyDecisionだけが変化する本文評価も有効な状態更新と�
   施行令7条から`IMPLEMENTS / from_subject`で府令2条の5へ進める。
 - 公告方法Hypothesisでは、金商法27条の3から`IMPLEMENTS / from_subject`で施行令9条の3・府令10条へ進み、
   施行令9条の3から同じpredicateで府令9条へ進める。
-- 意味分類の未被覆fixtureでは`explicit_reference`へ移り、意味関係があるfixtureでは最初からraw参照全件を
+- 意味分類の未被覆fixtureでは`reference_edges`へ移り、意味関係があるfixtureでは最初からraw参照全件を
   列挙しない。
 - 同じHypothesisで意味関係と明示参照の双方から新規Articleを得られなかった場合、同じscopeの反復ではなく、
   Solverが探索方針の変更又は限定回答を選べる。
@@ -895,7 +895,7 @@ Graph要求4回は全て`semantic_assertion / IMPLEMENTS / from_subject`で、`e
 
 ### LR-031 ガイド`EXPLAINS`のFramework契約
 
-`explicit_reference`と`explains`は統合しない。前者は法令のArticle、Paragraph又はItemに明記された
+`reference_edges`と`explains`は統合しない。前者は法令のArticle、Paragraph又はItemに明記された
 参照元から参照先Articleへ進む`REFERENCES`である。後者は、ガイドの条文注釈又は対応表で解説対象が
 明示された場合に限り、ガイド`Document`から法令`Article`へ進む非規範的な索引である。
 
@@ -922,11 +922,11 @@ Document ID、Article ID、方向、件数及び既知参照を検証するだ�
 意味判断はSolverへ残す。単なる言及、同じページに現れただけの条文又は前ページからの引継ぎを
 `EXPLAINS`として登録しない。
 
-### LR-032 `explicit_reference`の名称と契約
+### LR-032 `reference_edges`の名称と契約
 
-`explicit_reference`は、起点Articleの本文を実行時に文字列検索する機能ではない。seed時に原文の明示参照から
-作成済みのNeo4j `REFERENCES`を、検索時に1ホップたどるmodeである。また、`explicit`は「利用者が質問で
-明示した」という意味でもない。
+旧`explicit_reference`は、起点Articleの本文を実行時に文字列検索する機能、又は利用者が質問で明示した参照と
+誤読できた。Profile v395で名称を`reference_edges`へ変更した。このmodeは、seed時に原文の明示参照から
+作成済みのNeo4j `REFERENCES`を、検索時に1ホップたどる。
 
 ```text
 [参照元規定] ── REFERENCES ──> [参照先規定]
@@ -941,7 +941,7 @@ find_articles_referencing_this
 現在の説明は、次の異なる事項を一か所へ混在させている。
 
 - Graphに保存された物理関係の種類: `REFERENCES`
-- Graph検索modeの名前: `explicit_reference`
+- Graph検索modeの名前: `reference_edges`
 - 検索方向を表す目的: `follow_reference_in_text / find_articles_referencing_this`
 - `semantic_assertion`で候補が得られない場合に利用する、探索フロー上のfallback条件
 
@@ -949,9 +949,13 @@ find_articles_referencing_this
 名称だけから把握しにくい。修正では、まずschema description、完成Prompt及び人間向けGraph説明で上の4点を
 分離する。`outgoing / incoming`はLLM-visible契約へ戻さず、参照元・参照先という法令上の役割で説明する。
 
-mode名を変更する場合は、`references`又は`reference_edge`のように保存済みEdgeの探索だと分かる候補を比較する。
-ただし、名称変更だけでfallback条件まで表そうとしない。fallbackは探索手順、modeは実行するGraph検索の種類として
-別々に保つ。既存fixture、保存済みToolRequest及び再開データとの互換性を確認するまでは改名しない。
+名称変更だけでfallback条件まで表さない。fallbackは探索手順、`reference_edges`は実行するGraph検索の種類として
+別々に保つ。旧名称を含む過去の診断fixtureは当時の実行記録として維持し、新しい契約検証には使わない。
+
+Profile v395では全1074テストに合格した。Luna `high`の公開買付け総合問題は3 Cycle、345.3秒で正常完了し、
+資料3/3、必要条文4/4、回答要点4/4の計11/11だった。Graph要求5回のうち2回が`reference_edges`であり、
+旧名称は完成schema、応答及びtraceに現れなかった。最初の`IMPLEMENTS`探索で意味方向を誤った問題は、名称変更と
+分けて`LR-023`で扱う。
 
 ### LR-019 統合契約と意味的行動選択の分離
 
@@ -1038,7 +1042,7 @@ OpenAI TPM上限の429で停止したため、最終回答品質はこの実行�
 ToolRequestのWorkItem IDから`action_request_id`を決定的に対応付け、共通`SolverDecision`へ正規化する。
 
 Graph Toolの入力schemaは、`semantic_assertion`では`from_subject / to_subject`とpredicateを、
-`explicit_reference`では2つの`reference_lookup`と`predicate=null`を、`explains`では
+`reference_edges`では2つの`reference_lookup`と`predicate=null`を、`explains`では
 `outgoing / incoming`と`predicate=null`を許す分岐契約にした。明示参照の物理方向はadapterが探索目的から変換し、
 無効なmode・探索目的の組合せをProvider出力時点で防ぐ。
 
@@ -1155,6 +1159,7 @@ LR-010  必要性と費用を再評価して全件分類を再開
 | 2026-08-27 | Profile v389・LR-028・公開買付け総合・Luna `high` | Graph navigation Evidence IDへ関係内容hashを加え、同一Articleペアを異なるselectorで取得した際の衝突を解消した。実モデルでは府令2条の5・2条の4・2条の6・10条・9条を取得し、Graph衝突なく最終化へ到達した。最終化は48,090文字・schema 5,142文字、残り70.6秒で`model_timeout`となった | `eval-results/agent-framework-diagnostics/legal-909d02f5df2b42128ac406775005bd2e.jsonl` |
 | 2026-08-27 | Profile v390・LR-004・公開買付け総合・Luna `high` | 法令アプリの最終化予約を35秒から90秒へ変更した。実モデルは2 Cycle・17モデル呼出しで正常完了し、必要Article 4/4と府令2条の4・2条の5・2条の6・10条を取得した。最終化は113.2秒を確保し、入力28,076 token、出力6,468 tokenの引用付き回答を生成した。全1069テスト合格 | `eval-results/agent-framework-diagnostics/legal-368d39950a6b4dd384498172941289dd.jsonl` |
 | 2026-08-27 | Profile v392・LR-029・社内方針設問・Luna `high` | `supported`かつ`gaps`ありを後続探索へ残し、限定回答のopen WorkItemを正しく検証した。DependencyDecisionだけを更新する`continue`も状態差分として認めた。全1072テスト合格。実モデルは2 Cycle・24モデル呼出しで正常完了し、必要Article 4/4を取得して引用付き回答を生成した | `eval-results/agent-framework-diagnostics/legal-15e72e6b1e1546d1afdbc9a11a96c657.jsonl` |
+| 2026-08-29 | Profile v395・LR-032・公開買付け総合・Luna `high` | Graph modeを`explicit_reference`から`reference_edges`へ変更。全1074テスト合格。実モデルは3 Cycle、345.3秒で正常完了し11/11。`reference_edges`を2回実行し、旧名称は完成schema・応答・traceに現れなかった。最初の`IMPLEMENTS`で`to_subject`を選んだ意味方向の再発はLR-023へ記録 | `eval-results/e2e-v395-luna-overview/response.json` |
 ### 2026-08-25: 質問分解と仮説立案の主体表現を分離
 
 - WorkItemの主体情報を`action_actor`、`target_actor`、`actor_relation`へ分離し、Hypothesisには重複保存しない。

@@ -638,7 +638,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "394"
+    assert diagnostic_records[0]["profileVersion"] == "395"
     transport_input = next(
         item for item in diagnostic_records if item["event"] == "transport_input"
     )
@@ -646,7 +646,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "394"
+    assert transport_input["profileVersion"] == "395"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -1182,7 +1182,7 @@ def test_graph_review_moves_to_another_hypothesis_after_integrated_fetch() -> No
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "394"
+    assert profile.version == "395"
     assert profile.solver_graph_review is not None
     assert profile.solver_graph_review.max_output_tokens == (
         profile.solver_integration.max_output_tokens
@@ -1457,7 +1457,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "394"
+    assert profile.version == "395"
     assert prompt.rindex("## 出力") > prompt.rindex(
         "</solver_context>"
     )
@@ -1508,7 +1508,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "394"
+    assert profile.version == "395"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -3168,7 +3168,7 @@ def test_dependency_action_projection_focuses_required_work_items() -> None:
     graph_modes = {
         item["properties"]["mode"]["const"] for item in graph_variants
     }
-    assert {"semantic_assertion", "explicit_reference"} <= graph_modes
+    assert {"semantic_assertion", "reference_edges"} <= graph_modes
     assert "他のopen" in rendered.instructions
     assert "## 下位規範を確認する次の行動" in rendered.instructions
     assert "## Tool結果の統合と次の行動" not in rendered.instructions
@@ -3217,7 +3217,7 @@ def test_dependency_action_allows_following_named_reference() -> None:
                     "arguments": {
                         "article_ids": [article_id],
                         "max_relations": 10,
-                        "mode": "explicit_reference",
+                        "mode": "reference_edges",
                         "predicate": None,
                         "reference_lookup": "follow_reference_in_text",
                     },
@@ -3392,7 +3392,7 @@ def test_dependency_action_may_advance_part_of_needs_action_scope() -> None:
                     "arguments": {
                         "article_ids": [article_id],
                         "max_relations": 10,
-                        "mode": "explicit_reference",
+                        "mode": "reference_edges",
                         "predicate": None,
                         "reference_lookup": "find_articles_referencing_this",
                     },
@@ -3458,7 +3458,7 @@ def test_dependency_action_prompt_distinguishes_unknown_lower_norm_lookup() -> N
         for item in graph_variants
     )
     assert any(
-        item["properties"]["mode"]["const"] == "explicit_reference"
+        item["properties"]["mode"]["const"] == "reference_edges"
         and "reference_lookup" in item["properties"]
         for item in graph_variants
     )

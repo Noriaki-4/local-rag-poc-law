@@ -358,10 +358,10 @@ Graph検索では、探したい関係に応じてmodeを一つ選ぶ。
 | mode | 何をたどるか |
 |---|---|
 | `semantic_assertion` | 非同期LLMが分類し、publish済みの意味関係候補 |
-| `explicit_reference` | seed時に法令本文の明示参照から作成済みの物理`REFERENCES` |
+| `reference_edges` | seed時に法令本文の明示参照から作成済みの物理`REFERENCES` |
 | `explains` | ガイドが解説対象Articleを明示した物理`EXPLAINS` |
 
-`explicit_reference`は、検索時にArticle本文を解析して参照表現を探す機能ではない。また、利用者が質問で
+`reference_edges`は、検索時にArticle本文を解析して参照表現を探す機能ではない。また、利用者が質問で
 明示した参照という意味でもない。本文中の参照記載からあらかじめ登録された`REFERENCES`を1ホップたどる。
 
 ```text
@@ -372,15 +372,15 @@ find_articles_referencing_this
   [結果: 参照元Article] ── REFERENCES ──> [起点: 参照先Article]
 ```
 
-| `explicit_reference`の探索目的 | 起点 | 探すもの |
+| `reference_edges`の探索目的 | 起点 | 探すもの |
 |---|---|---|
 | `follow_reference_in_text` | 参照元Article | その本文に明記された参照先Article |
 | `find_articles_referencing_this` | 参照先Article | そのArticleを明示参照している参照元Article |
 
 Programはこの探索目的をNeo4jの物理方向へ変換する。Solverは`outgoing / incoming`を指定しない。
-`explicit_reference`は意味関係を表さないため、取得した`REFERENCES`だけから委任、定義利用、例外等を
+`reference_edges`は意味関係を表さないため、取得した`REFERENCES`だけから委任、定義利用、例外等を
 確定しない。Hypothesisに合うpublish済み意味関係を選べる場合は`semantic_assertion`を使い、その候補が
-得られない場合や、原文に記載された参照先そのものを確認する場合に`explicit_reference`を使う。
+得られない場合や、原文に記載された参照先そのものを確認する場合に`reference_edges`を使う。
 
 `from_subject`は検索起点がSUBJECT側、`to_subject`は検索起点がOBJECT側である。同じpredicateでも、
 方向によって検索目的が変わる。

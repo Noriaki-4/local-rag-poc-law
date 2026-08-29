@@ -44,7 +44,7 @@ def test_graph_vocabularies_match_the_new_contract() -> None:
     }
     assert {item.value for item in GraphSearchMode} == {
         "semantic_assertion",
-        "explicit_reference",
+        "reference_edges",
         "explains",
     }
 

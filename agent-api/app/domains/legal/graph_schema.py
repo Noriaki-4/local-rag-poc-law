@@ -98,12 +98,12 @@ class GraphSearchMode(StrEnum):
     """LLMが選択できる固定Graph検索。自由Cypherは受け付けない。"""
 
     SEMANTIC_ASSERTION = "semantic_assertion"
-    EXPLICIT_REFERENCE = "explicit_reference"
+    REFERENCE_EDGES = "reference_edges"
     EXPLAINS = "explains"
 
 
-class ExplicitReferenceLookup(StrEnum):
-    """明示参照GraphでLLMが選ぶ探索目的。"""
+class ReferenceEdgeLookup(StrEnum):
+    """REFERENCES GraphでLLMが選ぶ探索目的。"""
 
     FOLLOW_REFERENCE_IN_TEXT = "follow_reference_in_text"
     FIND_ARTICLES_REFERENCING_THIS = "find_articles_referencing_this"

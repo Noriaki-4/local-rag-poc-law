@@ -33,8 +33,9 @@ Article IDまたは探索すべき関係がまだ分からない場合に、Open
 
 - Hypothesisに必要な意味関係を説明できる場合は、まず`semantic_assertion`を使います。
 - `semantic_assertion`では、Hypothesisに対応する1 predicateと、起点Articleから見た1 directionを指定します。
-- 明示された参照先そのものを確認する場合、または意味関係の探索で新規候補が得られず参照関係を確認する場合は、`explicit_reference`を使います。
-- `explicit_reference`では、本文に書かれた参照先をたどる場合は`follow_reference_in_text`、起点を参照するArticleを探す場合は`find_articles_referencing_this`を使います。
+- 明示された参照先そのものを確認する場合、または意味関係の探索で新規候補が得られず参照関係を確認する場合は、`reference_edges`を使います。
+- `reference_edges`は、seed済みの物理`REFERENCES`を1ホップたどります。検索時に本文から参照表現を抽出する処理ではありません。
+- `reference_edges`では、本文に書かれた参照先をたどる場合は`follow_reference_in_text`、起点を参照するArticleを探す場合は`find_articles_referencing_this`を使います。
 - `completed_graph_searches[].new_candidate_article_ids`が空でも、法的関係の不存在は確定しません。意味関係から明示参照へ切り替えるか、別検索または限定回答へ進みます。
 - 意味関係と明示参照の両方で新規候補がなければ、引数だけを変えたGraph探索を反復しません。
 - 1要求は1 mode、1探索目的です。`semantic_assertion`では1 predicateと1 directionを指定します。

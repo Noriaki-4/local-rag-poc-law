@@ -330,13 +330,13 @@ def test_fetch_articles_accepts_five_and_rejects_more_article_ids() -> None:
         )
 
 
-def test_explicit_reference_schema_exposes_lookup_intent_not_physical_direction() -> None:
-    explicit_reference = next(
+def test_reference_edges_schema_exposes_lookup_intent_not_physical_direction() -> None:
+    reference_edges = next(
         variant
         for variant in LegalGraphNeighborsTool.definition.input_schema["anyOf"]
-        if variant["properties"]["mode"].get("const") == "explicit_reference"
+        if variant["properties"]["mode"].get("const") == "reference_edges"
     )
-    properties = explicit_reference["properties"]
+    properties = reference_edges["properties"]
     description = properties["reference_lookup"]["description"]
 
     assert "follow_reference_in_text" in description
@@ -351,7 +351,7 @@ def test_explicit_reference_schema_exposes_lookup_intent_not_physical_direction(
         ("find_articles_referencing_this", "incoming"),
     ),
 )
-def test_explicit_reference_lookup_maps_mechanically_to_graph_direction(
+def test_reference_edges_lookup_maps_mechanically_to_graph_direction(
     reference_lookup: str,
     expected_direction: str,
 ) -> None:
@@ -365,7 +365,7 @@ def test_explicit_reference_lookup_maps_mechanically_to_graph_direction(
             "legal_graph_neighbors",
             {
                 "article_ids": ["law-act-article-27_2"],
-                "mode": "explicit_reference",
+                "mode": "reference_edges",
                 "reference_lookup": reference_lookup,
             },
         ),
@@ -425,7 +425,7 @@ def test_graph_tool_keeps_an_independent_relation_window_for_each_seed() -> None
                     "law-act-article-27_2",
                     "law-act-article-27_3",
                 ],
-                "mode": "explicit_reference",
+                "mode": "reference_edges",
                 "reference_lookup": "find_articles_referencing_this",
             },
         ),
@@ -452,7 +452,7 @@ def test_graph_tool_collapses_duplicate_relations_into_one_article_pair() -> Non
             "legal_graph_neighbors",
             {
                 "article_ids": ["law-act-article-27_2"],
-                "mode": "explicit_reference",
+                "mode": "reference_edges",
                 "reference_lookup": "find_articles_referencing_this",
             },
         ),
@@ -514,7 +514,7 @@ def test_graph_navigation_id_distinguishes_relation_content_for_same_pair() -> N
         },
         {
             "article_ids": ["law-act-article-27_2"],
-            "mode": "explicit_reference",
+            "mode": "reference_edges",
             "predicate": "IMPLEMENTS",
             "reference_lookup": "find_articles_referencing_this",
         },

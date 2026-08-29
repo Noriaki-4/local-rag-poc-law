@@ -42,7 +42,7 @@
   ただし全statusのowner・遷移・永続化versionを1つの正本から生成するPhase 1全体は未完了である。
 - Reviewerの既定値は無効で、新経路のFeature Flagも既定では無効である。
 - 現行Legal Profileは本文取得後の自動Graph連動を持たず、`automatic_tools=()`である。
-  Solverは`legal_graph_neighbors`へ、既知起点Article、`semantic_assertion / explicit_reference / explains`の
+  Solverは`legal_graph_neighbors`へ、既知起点Article、`semantic_assertion / reference_edges / explains`の
   いずれか1 modeを指定する。意味関係では5 predicateのうち1つと`from_subject / to_subject`を選ぶ。
   明示参照では、起点本文の参照先をたどる`follow_reference_in_text`又は起点を参照するArticleを探す
   `find_articles_referencing_this`を選び、Tool Adapterが`outgoing / incoming`へ機械変換する。
@@ -913,7 +913,7 @@ Legal ToolはLLM生成Cypherを受け付けず、次の固定modeをparameterize
 | mode | 必須scope | 用途 |
 |---|---|---|
 | `semantic_assertion` | 起点Article、`proposedPredicate` 1件、direction 1件、`classificationRunId` | 仮説に沿った意味候補検索。通常経路 |
-| `explicit_reference` | 起点Article、`reference_lookup` 1件 | 起点本文の参照先をたどるか、起点を参照するArticleを探す |
+| `reference_edges` | 起点Article、`reference_lookup` 1件 | seed済み`REFERENCES`を使い、起点本文の参照先をたどるか、起点を参照するArticleを探す |
 | `explains` | 起点DocumentまたはArticle、direction 1件 | ガイドの明示対応をたどる |
 
 `semantic_assertion`は必要な場合だけsame law family、target authority type、document ID等の構造filterを追加できる。
@@ -1963,7 +1963,7 @@ Legal Domain Packの共通Promptには次を追加する。
 - 質問に関係すると判断した1ホップ候補は、Graph Reviewごとに最大3件、かつCycleの
   残り本文取得枠内でselectする。関連するが枠に収まらない候補はdeferし、
   graph_review_ledgerと次Cycleの引継ぎ候補へ残す。Graph候補だけを根拠にせず、端点Article本文を確認する。
-- Graph mode `semantic_assertion`は非同期分類済みの未確認候補、`explicit_reference / explains`は
+- Graph mode `semantic_assertion`は非同期分類済みの未確認候補、`reference_edges / explains`は
   原文またはガイド上の明示関係である。
 - relation_assertionの`proposedPredicate`は候補となる意味関係であり、法的に確認済みの正式関係ではない。
   RelationAssertionとして存在すること自体が未確認を意味する。`SUBJECT / OBJECT`の両端Article本文を取得し、
