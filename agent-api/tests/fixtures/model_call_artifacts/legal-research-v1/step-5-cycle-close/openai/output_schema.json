@@ -1,10 +1,6 @@
 {
   "additionalProperties": false,
   "properties": {
-    "answer": {
-      "description": "required_transition=finalizeの場合だけ返す根拠付き回答。",
-      "type": "null"
-    },
     "decision_reason": {
       "description": "Programから指定されたCycle遷移について、未確認事項または完了根拠に結び付けた短い説明。",
       "maxLength": 1200,
@@ -31,8 +27,7 @@
   "required": [
     "decision_reason",
     "next_focus_work_item_ids",
-    "retain_evidence_ids",
-    "answer"
+    "retain_evidence_ids"
   ],
   "type": "object"
 }

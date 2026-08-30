@@ -75,7 +75,7 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-013` | P0 | 検証待ち | Provider共通の小さいSolver輸送契約へ統一する | v154で全Providerを同じ処理段階別schemaへ統一し、Anthropic専用sidecarを新規経路から外した。実行時IDはenumへ複製せず共通validatorで検証する。代表Cycle Close schemaは14,494文字から7,014文字へ減少し、全895テストに合格した | 同じcheckpointをHaikuで再生し、Integrationがgrammar complexityの400エラーにならないことを確認する |
 | `LR-014` | P1 | 検証待ち | Haikuで承認した中間状態から安価なモデルで後続処理を再生する | checkpointの明示承認をpromotion時に記録し、指定Provider・modelで1回のSolver処理を再生する`replay_agent_checkpoint.py`を実装した。APIを使わない単体テストは合格した | Haikuの正常中間状態を承認済みfixtureへ昇格し、`gpt-4o-mini`、同じcheckpointのHaikuの順に実モデル再生する |
 | `LR-015` | P0 | 検証待ち | 初回Researchを単一責務のStepへ分け、要求をWorkItemとそれ以外へ欠落なく分解する | Profile v156で同一Cycle内の要求分解、仮説立案、検索要求作成を実装した。各完成Promptは単独で読めるH1を持ち、処理順のStep番号を含めない。一時的な段階比較コードを整理した後の全900テストに合格した | 別分野fixtureと公開買付けE2Eを`gpt-4o-mini`で確認し、最終的にHaikuで品質確認する |
-| `LR-016` | P0 | 完了 | Tool観察の意味統合とCycle Closeの境界を保つ | v376でObservation IntegrationとDependency AssessmentをEvidence Integrationへ統合した。全open WorkItemの一括処理は総合問題の10 Hypothesis・47 Evidenceで16,384出力tokenを使い切ったため、意味的に独立したWorkItemごとの統合判断へ戻し、最大4件を並列実行する。WorkItem内の本文評価と下位規範判断は分けず、Programは差分結合とWorkItem完了を機械処理する。Cycle Closeは更新済み状態から遷移と回答だけを扱う | Profile v379・Luna `high`の総合問題で、WorkItem別の本文部分確認、下位規範状態、WorkItem機械導出、3 Cycleの遷移が契約違反なく完了した |
+| `LR-016` | P0 | 完了 | Tool観察の意味統合とCycle Closeの境界を保つ | v376でObservation IntegrationとDependency AssessmentをEvidence Integrationへ統合した。全open WorkItemの一括処理は総合問題の10 Hypothesis・47 Evidenceで16,384出力tokenを使い切ったため、意味的に独立したWorkItemごとの統合判断へ戻し、最大4件を並列実行する。WorkItem内の本文評価と下位規範判断は分けず、Programは差分結合とWorkItem完了を機械処理する。Cycle Closeは更新済み状態から次Cycleへの引継ぎだけを扱い、最終回答はFinalizationへ分離する | Profile v379・Luna `high`の総合問題で、WorkItem別の本文部分確認、下位規範状態、WorkItem機械導出、3 Cycleの遷移が契約違反なく完了した。最終回答の分離はLR-037で回帰確認する |
 | `LR-017` | P0 | 対応中 | 検索候補の規律主体と行為対象を安定して区別する | Profile v310の隔離診断で、検索抜粋と`action_actor=不明`から行為者を確定する結果が実行ごとに揺れた。Profile v311では本文取得前の専用主体照合を廃止し、内容面でHypothesisに対応する候補を本文取得可能にした。旧主体照合値は保存互換だけに残し、Solver入力と候補選択条件には使わない | 公開買付け3問で、主体未確定の必要Articleが本文取得前に除外されず、取得本文を評価するLLMが主体の一致・分岐を判断できることを確認する。利用者確認と条件付き回答はLR-020で扱う |
 | `LR-018` | P0 | 完了 | Graph探索が必要な未解決事項があってもSolverがGraph検索を要求しない | 次Cycle開始時の保留OpenSearch候補を自動Search Selectionへ戻さず、Integrationで既知候補・Graph・再検索を比較するよう修正した。Graph selectorのmode・predicate・directionを分岐schemaで拘束し、同一Graph要求と本文取得要求は選択内容を保ったまま輸送時に統合する | Cycle 2 fixtureで府令10条を含む既知候補の本文取得へ進むこと、および候補を除いたGraph必須状態で`27条の2 / IMPLEMENTS / from_subject`の1要求を返し共通契約を通過することを`gpt-4o-mini-2024-07-18`で確認済み |
 | `LR-019` | P0 | 検証待ち | 統合の意味的な行動選択を違反別契約からSolver loopへ戻す | v373で、Promptは処理上限内のWorkItem選択を許す一方、validatorが全`needs_action`への同時Graph要求を強制する不整合を再現した。v374で全件同時強制を削除し、LLMが今回選んだWorkItemだけを進め、残りを後続stepへ保持する契約へ統一した。Haiku総合問題でGraph要求と後続Graph Reviewが実行され、`protocol_error`は解消した | 公告・例外の回帰と、総合問題で複数の`needs_action`が次stepへ欠落せず残ることを確認する |
@@ -95,6 +95,7 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-033` | P1 | 構造修正・総合再検証中 | 本文評価と次行動選択の重複LLM呼出しを統合し、回答時間を短縮する | Profile v395のLuna `high`では、本文を`observation_integration`で評価した直後に`integration`が同じ観察を読み直していた。v409で最大3 WorkItemを一組として処理し、複数組を並列化したが、取得本文と直接関係しないWorkItemも同じ呼出しで評価するため、未取得事項の解消やEvidenceの誤対応付けを招く可能性が残った。Programは法的対応付けや優先順位を選ばず、既知ID、schema、件数、時間及び状態遷移だけを検証する | Profile v422でEvidence Integrationを1 WorkItemと1つのLLM呼出しに限定し、対象が複数ある場合は最大4呼出しを並列実行する。Profile v423では、新しいTool結果を受けた同一Hypothesisの再評価は保ち、同一WorkItemで処理済みの`load_evidence`本文だけを再提示の対象から外す。同一scopeの成功済み再要求は契約境界でも拒否し、監査は新しいTool結果がない反復だけを警告する。法的意味の判断は引き続きLLMが行い、ProgramはWorkItem、Hypothesis、Evidenceの既知IDと成功済みscopeのみを検証する。 |
 | `LR-035` | P1 | 完了（Profile v429） | LLMへ送る指示・入力・出力契約を、1つのレビュー用成果物で確認できるようにする | `snapshot`の各Model呼出しへ`complete_request.json`を生成する。実送信Prompt、Providerへ別送信した出力schema、正規化後schema、model、Provider及び各hashを一つに収録し、schemaをPrompt本文とは表示しない。診断JSONLの`completeRequestPath`から直接参照できる | 生成内容が既存`request.txt`、各schema、manifestのhashと一致する回帰テストを維持する。診断出力だけの変更であり、LLM入力とtoken数は変えない |
 | `LR-036` | P1 | 精度修正済み・速度改善継続（Profile v430） | 各WorkItemを専属セッションへ固定し、異なるWorkItemだけを並列処理する | `case_id + work_item_id`の論理session、turn継続、親の共通締切、完了差分の入力順merge、WorkItem別Evidence scopeを実装した。v428では本文取得・Graph・OpenSearchが同時完了した際、本文統合のため一時的に隠した探索結果まで処理済みにして、府令10条候補を失った。v430では本文統合へ実際に提示したTool結果だけを処理済みにし、同時完了した探索結果を次の専用Reviewへ残す | 最小fixtureと全1104テストに合格した。Luna `high`総合問題は府令10条をCycle 1で本文取得し11/11相当へ回復したが、2 Cycle・358.9秒でv428より123.6秒遅いため、速度改善は未完了とする |
+| `LR-037` | P1 | 構造・速度修正済み／検索精度継続 | Cycle CloseとFinalizationの最終回答生成を重複させない | Profile v430のLuna `high`総合問題では、Cycle 2の`required_transition=finalize`によりCycle Closeへ最終回答生成を要求した。約63,000文字の入力を30秒以内に処理できずtimeoutし、その後に専用Finalizationが同じ最終回答を生成した。Cycle Closeは次Cycleへの引継ぎだけを返し、調査終了時はCycle Closeを呼ばず、最終回答は常にFinalizationだけが生成するよう責務を分離する | Profile v431でCycle Closeの回答schema・本文入力を削除し、Finalizationへ探索中のDependency・Graph・OpenSearch処理要求を持ち込まないようにした。Luna `high`総合実測は2 Cycle・256.8秒、Cycle Close timeoutなし、Finalization 1回・修復0回で、v430より102.1秒短縮した。回答観点4/4だが府令2条の5を欠く10/11相当のため、11/11の検索精度確認はLR-036等で継続する |
 
 ### 3.1 LR-016 Tool観察とCycle Closeの単一責務化
 
@@ -102,15 +103,15 @@ Neo4jから指定条件の1ホップ候補を取得する
 で1つのWorkItemに属するHypothesisと下位規範確認を同時に更新する。対象WorkItemが複数ある場合は、WorkItem単位の呼出しを最大4件並列実行する。
 Adapterはその差分を入力順に結合する。AdapterはHypothesis、Evidence、Dependency状態から
 WorkItem完了差分を機械導出して更新後のread modelへ投影し、続けてCycle Closeを呼ぶ。
-Cycle Closeは本文評価やTool選択を兼務せず、
-通常完了または次Cycleへの引継ぎだけを判断する。2つの結果は1件の`SolverDecision`へ正規化し、共通validatorを
+Cycle Closeは本文評価やTool選択を兼務せず、次Cycleへの引継ぎだけを判断する。調査終了時は
+Cycle Closeを呼ばず、専用Finalizationへ直接移る。各結果は1件の`SolverDecision`へ正規化し、共通validatorを
 通過した後にCaseStoreへ一度だけ適用する。
 
 Cycle CloseのProvider入力から、`fetchable_article_ids`、検索・Graph候補、Tool定義、汎用`update`、
 本文評価用の分岐を除外する。入力には本文評価を反映済みのWorkItem・Hypothesis、引継ぎ候補となる
-既知Evidence IDを投影し、出力は通常完了または次Cycle開始の小さいdiscriminated contractにする。Programは既知ID、重複、
+既知Evidence IDを投影し、出力は次Cycleへの引継ぎだけを表す小さいcontractにする。Programは既知ID、重複、
 件数、分岐の排他性だけを検証する。Evidence採否とDependencyの意味はSolver、WorkItem進捗とCycle遷移は
-Programが担当し、次Cycleの引継ぎ説明と最終回答はSolverが作る。
+Programが担当する。次Cycleの引継ぎ説明はCycle Close、最終回答はFinalizationのSolverが作る。
 
 NoSQLはこの課題の解決条件にしない。永続化方式はCaseStore Adapterの責務であり、Providerがコンパイルする
 出力schemaの大きさとは独立している。まず専用View、専用Decision、Projectorによる入力投影で解決する。
@@ -1403,6 +1404,7 @@ LR-010  必要性と費用を再評価して全件分類を再開
 | 2026-08-30 | Profile v427・LR-036・公開買付け総合・Luna `high` | `case_id + work_item_id`の論理sessionを導入し、4 WorkItemが各6 turnで同じsession IDを維持した。親の共通締切、入力順merge、一部timeout時の完了差分checkpointを実装し、全1100テスト合格。実モデルは2 Cycle・351.9秒で、Evidence Integrationのtimeoutはなく、30秒のCycle Close timeout後も予約時間内に限定回答を生成した。一方、府令10条本文を取得できず10/11相当であり、11/11の完了条件は未達。府令10条は検索抜粋として既知だったが、専属sessionへ提示する保留候補のscopeが不十分な別課題を確認した | `eval-results/e2e-v427-luna-overview/response.json`、`eval-results/agent-framework-diagnostics/legal-5ddf81320ae249c0ad412325c590e5f8.jsonl`、`eval-results/cycle-audits/v427-vs-v426/cycle-audit-comparison.md` |
 | 2026-08-30 | Profile v428・LR-036・公開買付け総合・Luna `high` | 省略Evidenceを全sessionへ複製せず、発見Tool要求と既存Hypothesis対応の来歴でWorkItem別に投影した。全1101テスト合格。実モデルは4 Cycle・235.3秒、Evidence Integrationのtimeoutなしで完了し、v426比で123.6秒、入力105,036 token、Tool 7回を削減した。必要Articleは府令10条を欠く3/4で10/11相当のため、性能改善の確定及びLR-036完了とは扱わない。府令10条を発見・取得する探索品質は並列時間管理から分離して継続する | `eval-results/e2e-v428-luna-overview/response.json`、`eval-results/agent-framework-diagnostics/legal-87397ddfdea74e7aa60bec8a07b73c4f.jsonl`、`eval-results/cycle-audits/v428-vs-v426/cycle-audit-comparison.md` |
 | 2026-08-30 | Profile v430・LR-036・混在Tool結果引継ぎ・公開買付け総合・Luna `high` | 本文取得、Graph検索及びOpenSearch検索が同時完了した場合、本文統合へ提示したTool結果だけを処理済みにするよう修正した。隠した探索結果はGraph / Search Reviewへ残り、府令10条はCycle 1のSearch Reviewから本文取得され、最終回答にも引用された。全1104テスト合格。実モデルは2 Cycle・358.9秒、資料3/3・必要Article 4/4・回答観点4/4の11/11相当。v428比で123.6秒、モデル呼出し4回、Tool 11回増えたため速度改善は未完了 | `eval-results/e2e-v430-luna-overview/response.json`、`eval-results/agent-framework-diagnostics/legal-e889d4efa220422884f5dbc4cbda22ed.jsonl`、`eval-results/cycle-audits/v430-vs-v428/cycle-audit-comparison.md` |
+| 2026-08-30 | Profile v431・LR-037・公開買付け総合・Luna `high` | Cycle Closeを次Cycleの引継ぎ専用とし、調査終了時は直接Finalizationへ移るよう変更した。直接移行時に途中処理用Dependency判断と未処理OpenSearch候補ReviewをFinalizationへ要求する契約不整合も回帰で修正した。全1103テスト合格。最終実測は2 Cycle・17モデル呼出し・256.8秒で、Cycle CloseはCycle 1の1回7.7秒だけ、Finalizationは1回36.9秒、timeout・契約修復とも0回。v430より102.1秒短縮した。回答観点4/4だが府令2条の5を欠く必要Article 3/4、10/11相当 | `eval-results/agent-framework-diagnostics/legal-59cc933dca0d448cba74e1a759da923c.jsonl` |
 ### 2026-08-25: 質問分解と仮説立案の主体表現を分離
 
 - WorkItemの主体情報を`action_actor`、`target_actor`、`actor_relation`へ分離し、Hypothesisには重複保存しない。

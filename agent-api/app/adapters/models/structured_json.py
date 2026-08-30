@@ -640,10 +640,6 @@ class StructuredJSONModelAdapter:
             raise ModelProtocolError(
                 f"cycle close transport invalid: {transition_error}"
             )
-        answer_check_input_tokens = 0
-        answer_check_output_tokens = 0
-        answer_check_retry_count = 0
-        answer_check_attempted = False
         try:
             transition = CycleCloseDecision.model_validate(
                 transition_result.payload
@@ -658,109 +654,9 @@ class StructuredJSONModelAdapter:
             context,
             observation,
         )
-        if required_transition == "start_next_cycle":
-            if transition.answer is not None:
-                raise ModelProtocolError(
-                    "cycle close contract invalid: next cycle cannot contain an answer"
-                )
-        elif transition.answer is None:
+        if required_transition != "start_next_cycle":
             raise ModelProtocolError(
-                "cycle close contract invalid: finalize requires an answer"
-            )
-
-        if (
-            transition.answer is not None
-            and profile.final_answer_check_system_prompt is not None
-        ):
-            answer_check_call = render_final_answer_check_model_call(
-                context,
-                observation,
-                transition.answer,
-                profile,
-            )
-            remaining_timeout = profile.timeout_sec - (monotonic() - started_at)
-            if remaining_timeout <= 1:
-                raise _cycle_close_checkpoint_timeout(
-                    "final answer check time exhausted",
-                    observation=observation,
-                    completed_stage="cycle_close",
-                    input_tokens=transition_result.inputTokens,
-                    output_tokens=transition_result.outputTokens,
-                )
-            if self._diagnostics is not None:
-                self._diagnostics.record_transport_input(
-                    context=context,
-                    profile=profile,
-                    rendered=answer_check_call,
-                    repair_index=0,
-                    transport_stage="final_answer_check",
-                    provider=getattr(self._client, "provider", None),
-                )
-            try:
-                answer_check_result = self._client.generate_structured_json(
-                    prompt=answer_check_call.request,
-                    schema=answer_check_call.output_schema,
-                    model=profile.model,
-                    max_tokens=profile.max_output_tokens,
-                    timeout_sec=max(1, round(remaining_timeout)),
-                )
-            except requests.Timeout as exc:
-                if self._diagnostics is not None:
-                    self._diagnostics.record_transport_timeout(
-                        context=context,
-                        repair_index=0,
-                        reason="final answer check timed out",
-                        transport_stage="final_answer_check",
-                    )
-                raise _cycle_close_checkpoint_timeout(
-                    "final answer check timed out",
-                    observation=observation,
-                    completed_stage="cycle_close",
-                    input_tokens=transition_result.inputTokens,
-                    output_tokens=transition_result.outputTokens,
-                ) from exc
-            answer_check_error = answer_check_result.validationError
-            if answer_check_result.payload is None and answer_check_error is None:
-                answer_check_error = "empty"
-            if self._diagnostics is not None:
-                self._diagnostics.record_transport_output(
-                    context=context,
-                    repair_index=0,
-                    payload=answer_check_result.payload,
-                    validation_error=answer_check_error,
-                    input_tokens=answer_check_result.inputTokens,
-                    output_tokens=answer_check_result.outputTokens,
-                    provider_retry_count=answer_check_result.retryCount,
-                    latency_ms=answer_check_result.latencyMs,
-                    transport_stage="final_answer_check",
-                )
-            if answer_check_error is not None or answer_check_result.payload is None:
-                raise ModelProtocolError(
-                    "final answer check transport invalid: "
-                    f"{answer_check_error}"
-                )
-            checked_text = answer_check_result.payload.get("text")
-            if not isinstance(checked_text, str) or not checked_text.strip():
-                raise ModelProtocolError("final answer check requires answer text")
-            transition = transition.model_copy(
-                update={
-                    "answer": transition.answer.model_copy(
-                        update={
-                            "text": checked_text,
-                        }
-                    )
-                }
-            )
-            answer_check_input_tokens = answer_check_result.inputTokens
-            answer_check_output_tokens = answer_check_result.outputTokens
-            answer_check_retry_count = answer_check_result.retryCount
-            answer_check_attempted = True
-
-        if transition.answer is not None:
-            transition = _include_required_cycle_close_citations(
-                transition,
-                context,
-                observation,
+                "cycle close contract invalid: final answers require finalization"
             )
 
         decision = _normalize_cycle_close_decisions(
@@ -769,24 +665,11 @@ class StructuredJSONModelAdapter:
             transition,
         )
 
-        input_tokens = _sum_optional_tokens(
-            transition_result.inputTokens,
-            answer_check_input_tokens,
-        )
-        output_tokens = _sum_optional_tokens(
-            transition_result.outputTokens,
-            answer_check_output_tokens,
-        )
         return SolverCallResult(
             decision=decision,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            attempt_count=(
-                1
-                + transition_result.retryCount
-                + int(answer_check_attempted)
-                + answer_check_retry_count
-            ),
+            input_tokens=transition_result.inputTokens,
+            output_tokens=transition_result.outputTokens,
+            attempt_count=1 + transition_result.retryCount,
         )
 
     def _solve_observation_integrations(
@@ -2716,13 +2599,6 @@ def _cycle_close_context_payload(
         context,
         observation,
     )
-    required_answer_evidence_ids = _required_answer_evidence_ids(
-        context,
-        observation,
-    )
-    verified_answer_evidence_ids = set(
-        _verified_answer_evidence_ids(context, observation)
-    )
     dependency_decisions = _merged_dependency_decisions(
         context.dependency_decisions,
         observation.dependency_decisions,
@@ -2743,7 +2619,6 @@ def _cycle_close_context_payload(
             context,
             observation,
         ),
-        "non_work_item_requirements": list(context.non_work_item_requirements),
         "work_items_after_observation": [
             item.model_dump(mode="json") for item in work_items
         ],
@@ -2761,12 +2636,6 @@ def _cycle_close_context_payload(
             for item in context.evidence_manifest
             if item.evidence_id in retainable_evidence_ids
         ],
-        "grounding_evidence": [
-            item.model_dump(mode="json")
-            for item in context.material_evidence
-            if item.evidence_id in verified_answer_evidence_ids
-        ],
-        "required_answer_evidence_ids": list(required_answer_evidence_ids),
         "active_deferred_frontiers": active_deferred,
         "unreviewed_graph_candidate_count": (
             context.graph_review_batch.remaining_unreviewed_count
@@ -2853,34 +2722,6 @@ def _verified_answer_evidence_ids(
         evidence_id
         for evidence_id in context.grounding_evidence_ids
         if evidence_id in verified_ids
-    )
-
-
-def _include_required_cycle_close_citations(
-    transition: CycleCloseDecision,
-    context: SolverContext,
-    observation: ObservationIntegrationDecision,
-) -> CycleCloseDecision:
-    """モデルが選んだ確認済み引用を保ち、必須引用だけを追記する。"""
-
-    if transition.answer is None:
-        return transition
-    required_ids = _required_answer_evidence_ids(context, observation)
-    return transition.model_copy(
-        update={
-            "answer": transition.answer.model_copy(
-                update={
-                    "citation_ids": tuple(
-                        dict.fromkeys(
-                            [
-                                *transition.answer.citation_ids,
-                                *required_ids,
-                            ]
-                        )
-                    )
-                }
-            )
-        }
     )
 
 
@@ -3487,7 +3328,7 @@ def _cycle_close_transport_schema(
     context: SolverContext,
     observation: ObservationIntegrationDecision,
 ) -> dict[str, Any]:
-    projected_work_items, projected_hypotheses = (
+    projected_work_items, _ = (
         _project_observation_integration_state(context, observation)
     )
     open_work_item_ids = tuple(
@@ -3495,46 +3336,9 @@ def _cycle_close_transport_schema(
         for item in projected_work_items
         if item.state == "open"
     )
-    open_work_item_id_set = set(open_work_item_ids)
-    unresolved_hypothesis_ids = tuple(
-        item.hypothesis_id
-        for item in projected_hypotheses
-        if item.judgment == "unresolved"
-        and item.work_item_id in open_work_item_id_set
-    )
-    evidence_ids = _verified_answer_evidence_ids(context, observation)
     retainable_evidence_ids = _retainable_cycle_evidence_ids(
         context,
         observation,
-    )
-    answer = _strict_object(
-        {
-            "text": _described({"type": "string"}, FinalAnswer, "text"),
-            "citation_ids": _described(
-                _bounded_enum_array(evidence_ids),
-                FinalAnswer,
-                "citation_ids",
-            ),
-            "limitations": _described(
-                (
-                    _string_array_schema()
-                    if open_work_item_ids or unresolved_hypothesis_ids
-                    else _empty_array_schema()
-                ),
-                FinalAnswer,
-                "limitations",
-            ),
-            "unresolved_work_item_ids": _described(
-                _bounded_enum_array(open_work_item_ids),
-                FinalAnswer,
-                "unresolved_work_item_ids",
-            ),
-            "unresolved_hypothesis_ids": _described(
-                _bounded_enum_array(unresolved_hypothesis_ids),
-                FinalAnswer,
-                "unresolved_hypothesis_ids",
-            ),
-        }
     )
     required_transition = _required_cycle_close_transition(
         context,
@@ -3572,10 +3376,6 @@ def _cycle_close_transport_schema(
             "description": CycleCloseDecision.model_fields[
                 "retain_evidence_ids"
             ].description,
-        },
-        "answer": {
-            **({"type": "null"} if must_start_next_cycle else answer),
-            "description": CycleCloseDecision.model_fields["answer"].description,
         },
     }
     active_deferred = tuple(
@@ -3659,14 +3459,12 @@ def _normalize_cycle_close_decisions(
     observation: ObservationIntegrationDecision,
     transition: CycleCloseDecision,
 ) -> SolverDecision:
-    start_next_cycle = (
-        _required_cycle_close_transition(context, observation)
-        == "start_next_cycle"
-    )
+    if _required_cycle_close_transition(context, observation) != "start_next_cycle":
+        raise ValueError("final answers require the finalization profile")
     return SolverDecision(
-        next="continue" if start_next_cycle else "finalize",
+        next="continue",
         decision_reason=transition.decision_reason,
-        start_next_cycle=start_next_cycle,
+        start_next_cycle=True,
         update=CaseUpdate(
             update_work_items=observation.update_work_items,
             update_hypotheses=observation.update_hypotheses,
@@ -3678,7 +3476,6 @@ def _normalize_cycle_close_decisions(
             transition.deferred_frontier_resolutions
         ),
         unreviewed_graph_resolution=transition.unreviewed_graph_resolution,
-        answer=transition.answer,
     )
 
 

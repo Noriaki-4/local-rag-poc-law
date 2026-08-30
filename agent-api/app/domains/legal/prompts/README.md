@@ -97,8 +97,8 @@ Anthropicの「明確で直接的な指示、必要時だけ順序付き手順�
 | `solver_integration.md` | 観察結果の評価、状態更新、下位規範監査、次の行動。 |
 | `solver_evidence_integration.md` | 取得本文のHypothesis反映、下位規範確認及び同じWorkItemを直ちに進めるTool最大1件を扱う。Toolを選べるため、完成Promptには`solver_tools.md`も合成する。WorkItem完了、Cycle移行、回答は扱わない。 |
 | `solver_dependency_action.md` | `needs_action`の下位規範依存について、再利用・検索・Graph探索・本文取得の次の行動だけを決める。 |
-| `solver_cycle_close.md` | Cycle終了と次Cycleへの構造化引継ぎ。上限時は判定済みHypothesisの確認済み範囲を根拠付きで限定回答する。 |
-| `solver_finalization.md` | `finalize_only=true`時の限定最終化。 |
+| `solver_cycle_close.md` | 現Cycleを閉じ、未解決事項と保留候補を次Cycleへ構造化して引き継ぐ。最終回答は扱わない。 |
+| `solver_finalization.md` | 調査終了時に、確認済み範囲と未確認範囲を分けた最終回答を作る。 |
 | `solver_reviewer_revision.md` | Reviewer Findingの受領、反映、反論、再調査。 |
 | `solver_search_selection.md` | OpenSearch候補を全件比較し、選択候補の内容評価、Hypothesis対応、本文取得判断を一つの出力で返す。 |
 | `solver_search_review.md` / `solver_search_reselection.md` | 過去fixtureの単機能診断用。本番経路では使用しない。 |

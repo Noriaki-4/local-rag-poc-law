@@ -18,7 +18,11 @@ from app.agent_framework.contracts import (
     WorkItemImpactDecision,
     WorkItemUpdate,
 )
-from app.agent_framework.loop import AgentLoop, _grounding_observation_context
+from app.agent_framework.loop import (
+    AgentLoop,
+    _finalization_decision_context,
+    _grounding_observation_context,
+)
 from app.agent_framework.observability import RunTrace
 from app.agent_framework.ports.model import (
     ReviewCallResult,
@@ -1200,7 +1204,7 @@ def test_next_cycle_budget_does_not_force_current_cycle_finalization() -> None:
     )
 
 
-def test_cycle_close_call_is_bounded_by_its_own_reserve() -> None:
+def test_cycle_close_hands_final_answer_to_dedicated_finalization() -> None:
     class ManualClock:
         now = 0.0
 
@@ -1231,15 +1235,17 @@ def test_cycle_close_call_is_bounded_by_its_own_reserve() -> None:
             clock.now = 305.0
             return result
 
-    def close_cycle(
+    def finalize(
         context: SolverContext,
         profile: ModelCallProfile,
     ) -> SolverDecision:
         assert context.remaining_wall_time_sec == pytest.approx(115.0)
         assert context.cycle_close_required is True
-        assert context.finalize_only is False
-        assert profile.timeout_sec == pytest.approx(25.0)
-        assert profile.timeout_sec <= limits.cycle_close_reserve_sec
+        assert context.finalize_only is True
+        assert context.required_dependency_kind is None
+        assert context.required_dependency_work_item_ids == ()
+        assert profile.context_projection == "finalization"
+        assert profile.timeout_sec == pytest.approx(115.0)
         return SolverDecision(
             next="finalize",
             answer=FinalAnswer(
@@ -1253,17 +1259,24 @@ def test_cycle_close_call_is_bounded_by_its_own_reserve() -> None:
     model = FakeModel(
         [
             _first_research((_request("r1"),)),
-            close_cycle,
+            finalize,
         ]
     )
     profile = _profile().model_copy(
         update={
+            "required_dependency_kind": "lower_norm",
             "limits": limits,
             "solver_cycle_close": ModelCallProfile(
                 model="cycle-close-model",
                 system_prompt="cycle close",
                 timeout_sec=180,
                 context_projection="cycle_close",
+            ),
+            "solver_finalization": ModelCallProfile(
+                model="finalization-model",
+                system_prompt="finalization",
+                timeout_sec=180,
+                context_projection="finalization",
             ),
         }
     )
@@ -1279,6 +1292,31 @@ def test_cycle_close_call_is_bounded_by_its_own_reserve() -> None:
     ).run("case-1")
 
     assert result.state.run_status == "completed"
+
+
+def test_finalization_drops_pending_exploration_requirements() -> None:
+    context = build_solver_context(
+        CaseState(case_id="case-1", question="質問"),
+        AgentLimits(),
+        remaining_wall_time_sec=90,
+        finalize_only=True,
+        required_dependency_kind="lower_norm",
+        required_dependency_work_item_ids=("w1",),
+    ).model_copy(
+        update={
+            "required_graph_review_request_ids": ("graph-1",),
+            "required_search_review_request_ids": ("search-1",),
+            "fetchable_article_ids": ("article-1",),
+        }
+    )
+
+    projected = _finalization_decision_context(context)
+
+    assert projected.required_dependency_kind is None
+    assert projected.required_dependency_work_item_ids == ()
+    assert projected.required_graph_review_request_ids == ()
+    assert projected.required_search_review_request_ids == ()
+    assert projected.fetchable_article_ids == ()
 
 
 def test_completed_observation_checkpoint_survives_later_model_timeout() -> None:

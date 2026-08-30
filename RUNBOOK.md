@@ -1104,6 +1104,8 @@ Cycle Close、通常Integration、最終回答はこの専用設定の対象で�
 完了判断を行う処理へ`solver_completion.md`を追加する。実行手順は`research / integration /
 cycle_close / finalization / reviewer_revision / search_selection / graph_selection`別のPromptから一つだけ選ぶ。
 選択条件はContextの構造値だけで、法的意味やToolの必要性はSolverが判断する。
+Cycle Closeは次Cycleへの引継ぎだけを返す。調査終了時はCycle Closeを呼ばず、
+Finalizationが取得済み根拠から最終回答を一度だけ生成する。
 
 #### 実モデル検証前の設定確認
 
@@ -1316,8 +1318,8 @@ Step 3の`input.json.available_tools`には、本番の`ToolDefinition`から取
 
 Cycle境界の固定成果物は`step-4-evidence-integration`と`step-5-cycle-close`に分ける。
 前者は直前のToolで取得した本文を1つのopen WorkItemに属するHypothesisと照合し、同じ確認事項の下位規範状態と直後のToolを最大1件判断する。対象WorkItemが複数ある場合はWorkItem単位の呼出しを最大4件並列実行する。
-その`input.json`には本文取得候補と検索履歴が含まれ、利用可能Toolの契約は`output_schema.json`に一度だけ含まれる。後者は反映結果を前提に、完了または次Cycleへの
-引継ぎだけを判断し、これらの行動選択用情報を受け取らない。実行時IDの既知性は共通validatorが検証する。
+その`input.json`には本文取得候補と検索履歴が含まれ、利用可能Toolの契約は`output_schema.json`に一度だけ含まれる。後者は反映結果を前提に、次Cycleへの
+引継ぎだけを判断し、これらの行動選択用情報や回答用本文を受け取らない。調査終了時の回答は専用Finalizationが生成する。実行時IDの既知性は共通validatorが検証する。
 Evidence Integrationの既知Hypothesis、Evidence、取得可能Article IDは直近の取得結果へ限定されるので、
 未知IDによる再試行を避けるためProvider schemaのenumにも同じ一覧を残す。
 

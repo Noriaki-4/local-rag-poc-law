@@ -335,10 +335,6 @@ class CycleCloseDecision(FrameworkModel):
         default=None,
         description="未評価Graph候補が残る場合のCycle境界での扱い。",
     )
-    answer: FinalAnswer | None = Field(
-        default=None,
-        description="required_transition=finalizeの場合だけ返す根拠付き回答。",
-    )
 
 
 class SolverDecision(FrameworkModel):

@@ -82,58 +82,6 @@
       "title": "DeferredFrontierResolution",
       "type": "object"
     },
-    "FinalAnswer": {
-      "additionalProperties": false,
-      "properties": {
-        "citation_ids": {
-          "default": [],
-          "description": "回答で実際に使用したgrounding Evidence ID。",
-          "items": {
-            "type": "string"
-          },
-          "title": "Citation Ids",
-          "type": "array"
-        },
-        "limitations": {
-          "default": [],
-          "description": "上限等により確認できなかった事項と回答上の制約。",
-          "items": {
-            "type": "string"
-          },
-          "title": "Limitations",
-          "type": "array"
-        },
-        "text": {
-          "description": "質問へ返す根拠付き回答本文。",
-          "minLength": 1,
-          "title": "Text",
-          "type": "string"
-        },
-        "unresolved_hypothesis_ids": {
-          "default": [],
-          "description": "限定回答で未解決のまま残すHypothesis ID。",
-          "items": {
-            "type": "string"
-          },
-          "title": "Unresolved Hypothesis Ids",
-          "type": "array"
-        },
-        "unresolved_work_item_ids": {
-          "default": [],
-          "description": "限定回答で未解決のまま残すWorkItem ID。",
-          "items": {
-            "type": "string"
-          },
-          "title": "Unresolved Work Item Ids",
-          "type": "array"
-        }
-      },
-      "required": [
-        "text"
-      ],
-      "title": "FinalAnswer",
-      "type": "object"
-    },
     "UnreviewedGraphResolution": {
       "additionalProperties": false,
       "description": "SolverがCycle境界で未評価Graph候補群をどう扱うかを明示する。",
@@ -194,18 +142,6 @@
   },
   "additionalProperties": false,
   "properties": {
-    "answer": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/FinalAnswer"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "required_transition=finalizeの場合だけ返す根拠付き回答。"
-    },
     "decision_reason": {
       "description": "Programから指定されたCycle遷移について、未確認事項または完了根拠に結び付けた短い説明。",
       "maxLength": 1200,

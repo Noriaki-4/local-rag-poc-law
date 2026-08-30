@@ -349,6 +349,16 @@ class AgentLoop:
                     # Graph/Search pools remain in CaseState and are projected again on
                     # the next loop iteration.
                     context = _grounding_observation_context(context)
+                elif context.cycle_close_required and (
+                    not context.can_start_next_cycle
+                    or not any(item.state == "open" for item in context.work_tree)
+                ):
+                    # Cycle Closeは次Cycleへの引継ぎ専用とする。最終回答は
+                    # 専用Finalizationへ十分な時間を残して一度だけ生成させる。
+                    finalize_only = True
+                    dependency_audit_required = False
+                    model_budget = attempt_remaining
+                    context = context.model_copy(update={"finalize_only": True})
                 graph_review_call = bool(
                     context.required_graph_review_request_ids
                     and self._profile.solver_graph_review is not None
@@ -418,6 +428,8 @@ class AgentLoop:
                         pending_grounding_observation
                     ),
                 )
+                if purpose == "finalization":
+                    context = _finalization_decision_context(context)
                 if purpose == "cycle_close":
                     model_budget = min(
                         model_budget,
@@ -1765,6 +1777,22 @@ def _grounding_observation_context(context: SolverContext) -> SolverContext:
             "required_graph_review_request_ids": (),
             "search_candidates": (),
             "required_search_review_request_ids": (),
+            "fetchable_article_ids": (),
+        }
+    )
+
+
+def _finalization_decision_context(context: SolverContext) -> SolverContext:
+    """最終回答では、探索中だけ必要な未処理要求を再判定させない。"""
+
+    return context.model_copy(
+        update={
+            "required_dependency_kind": None,
+            "required_dependency_work_item_ids": (),
+            "required_graph_review_request_ids": (),
+            "required_search_review_request_ids": (),
+            "search_candidates": (),
+            "evidence_hypothesis_candidates": (),
             "fetchable_article_ids": (),
         }
     )

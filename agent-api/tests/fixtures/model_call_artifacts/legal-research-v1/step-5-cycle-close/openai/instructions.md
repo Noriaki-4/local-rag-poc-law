@@ -1,73 +1,48 @@
-# 法令調査Solver：Cycleの終了判断
+# 法令調査Solver：Cycleの引継ぎ
 
 ## 目的
 
-直前の取得本文評価とProgramが指定した`required_transition`を受け、次Cycleへの引継ぎまたは
-最終回答を作ります。本文の再評価、状態更新、Tool選択、遷移の変更は行いません。
-
-## 出力
-
-- `required_transition`に対応する次Cycleへの引継ぎまたは最終回答
-- 次Cycle開始時に引き継ぐWorkItem、Evidence、Graph候補の扱い
+現在のCycleを閉じ、未解決事項を次Cycleへ引き継ぎます。最終回答は別の処理が作ります。
 
 ## 完了条件
 
-- `required_transition`に従っている。
-- 次Cycle開始と最終回答を混在させていない。
-- 最終回答では、確認済み結論の必須Evidenceをすべて反映している。
+- 次Cycleで優先するopen WorkItemが選ばれている。
+- 未処理Graph候補の扱いが決まっている。
+- 取得本文の再評価、次の検索計画、最終回答を行っていない。
 
 ## 入力
 
-- `non_work_item_requirements`：最終回答を作る場合に守る、回答全体への明示要求です。
-- `required_transition`：更新後のWorkItem状態と実行可能なCycleからProgramが導出した遷移です。
-- `work_items_after_observation`、`hypotheses_after_observation`：直前の本文評価を反映済みの状態です。
+- `work_items_after_observation`：本文評価を反映済みのWorkItemです。
+- `hypotheses_after_observation`：本文評価を反映済みのHypothesisです。
 - `observation_summary`：直前の本文評価の短い要約です。
-- `dependency_decisions_after_observation`：本文評価後の下位規範確認状態です。
-- `max_retained_evidence`：`retain_evidence_ids`へ指定できる最大件数です。
-- `retainable_evidence`：状態から自動再提示されないEvidenceのうち、追加で次Cycleへ持ち越せる候補です。
-- `grounding_evidence`：判定済みHypothesis又は解決済み下位規範判断に対応し、最終回答で引用できる取得本文です。
-- `required_answer_evidence_ids`：解決済みWorkItemの回答に必ず含めるEvidence IDです。
-- `active_deferred_frontiers`、`unreviewed_graph_candidate_count`：Cycle境界で扱う未完了Graph探索です。
+- `dependency_decisions_after_observation`：下位規範確認の現在状態です。
+- `retainable_evidence`：次Cycleで再提示できるEvidenceの候補です。
+- `active_deferred_frontiers`：扱いを決める未処理Graph候補です。
+- `unreviewed_graph_candidate_count`：未評価Graph候補の件数です。
 
 ## 手順
 
-1. `required_transition`を確認します。
-2. `active_deferred_frontiers`の各候補について、次の扱いを1件ずつ`deferred_frontier_resolutions`へ書きます。
-3. `start_next_cycle`の場合だけ、優先するopen WorkItemと再提示が必要なEvidenceを選びます。
-4. `finalize`では、`grounding_evidence`から確認済み範囲を回答し、対応するEvidence IDを引用します。
-5. `required_answer_evidence_ids`をすべて含め、条件の結合関係と限定を保って統合します。
-6. 最終回答を作る場合は、`non_work_item_requirements`をすべて回答へ反映します。
+1. open WorkItemと、そのHypothesisの未確認事項を確認します。
+2. 次Cycleで優先するWorkItemを選びます。
+3. `active_deferred_frontiers`の各候補を、次Cycleで取得、保留又は終了のいずれかにします。
+4. 状態から自動再提示されないEvidenceだけ、必要に応じて引き継ぎます。
 
 ## ルール
 
-### 次Cycleへの引継ぎ
-
-- `retain_evidence_ids`には`retainable_evidence`にあるEvidence IDだけを、`max_retained_evidence`件以内で指定します。候補全件をコピーしません。
-- Hypothesisや下位規範確認にすでに紐づいたEvidenceは自動で再提示されるため、`retain_evidence_ids`へ重複指定しません。
-- Article ID、検索候補ID、Graph候補IDを`retain_evidence_ids`へ入れません。
-- `active_deferred_frontiers`があれば全件を処理します。次Cycleで本文を取得する候補は`fetch_next_cycle`、保留する候補は`carry_forward`、確認済み範囲には不要になった候補は`no_longer_needed`にします。上限で次Cycleへ進めない場合だけ`unresolved_at_limit`にします。
-- `fetch_next_cycle`と`carry_forward`は、対応するWorkItemがopenで`required_transition=start_next_cycle`の場合だけ使います。WorkItemが終了済みなら、残った候補を`no_longer_needed`にします。
-- `required_transition=start_next_cycle`では`answer=null`にします。
-- 次Cycleの検索計画は次Cycleで作るため、ここでは作りません。
-
-### 最終回答
-
-- `required_transition=finalize`では`answer`を返します。
-- 全WorkItemが終了済みなら、`limitations`、`unresolved_work_item_ids`、`unresolved_hypothesis_ids`はすべて空にします。
-- 実行上限で未解決のまま`finalize`する場合だけ、未確認内容を`limitations`に書き、対応する未解決IDを返します。
-- 未解決WorkItemでも、判定済みHypothesisに対応する`grounding_evidence`があれば、その確認済み範囲を根拠付きで回答します。未確認部分と混同しません。
-- `supported`でも`gaps`が残るHypothesisのWorkItemは未解決です。そのWorkItem IDと未確認内容を返し、Hypothesis IDは`unresolved_hypothesis_ids`へ読み替えません。
-- `finalize`では`required_answer_evidence_ids`を`answer.citation_ids`へ全件入れ、各Evidenceが示す規定内容を回答本文へ反映します。
-- `non_work_item_requirements`は法的結論の根拠にせず、根拠・出典の提示や表現・出力形式等の回答要件として適用します。
-- 複数のEvidenceが一つの要件を構成する場合は、「かつ」等の結合関係を保ち、一部の条件だけで結論を出しません。
-- 「ただし」「除く」「限る」等の限定を読み落とさず、除外された事項を該当例として挙げません。
+- `next_focus_work_item_ids`にはopen WorkItemのIDだけを指定します。
+- `retain_evidence_ids`には`retainable_evidence`のEvidence IDだけを、`max_retained_evidence`件以内で指定します。
+- Hypothesis等に紐づき自動再提示されるEvidenceは、重ねて指定しません。
+- Article ID、検索候補ID、Graph候補IDは`retain_evidence_ids`へ指定しません。
+- `active_deferred_frontiers`は全件を一度ずつ処理します。
+- 次Cycleで本文を取得する候補は`fetch_next_cycle`、保留する候補は`carry_forward`、不要な候補は`no_longer_needed`にします。
+- `unresolved_at_limit`は、次Cycleへ進めない場合だけ使います。
+- 次Cycleの検索計画やTool要求は作りません。
 
 {{runtime_input}}
 
 ## 出力前の確認
 
-1. `required_transition`に対応する出力だけを返したか確認します。
-2. `active_deferred_frontiers`の全IDを`deferred_frontier_resolutions`で1回ずつ扱い、引継ぎIDが許可された候補だけか確認します。
-3. 次Cycleへの引継ぎと最終回答を混在させていないか確認します。
-4. `finalize`では必須Evidenceを全件引用し、条件の結合、但書、除外、限定を回答へ正しく反映したか確認します。
-5. 通常完了では未解決IDと`limitations`が空で、上限時だけ対応する未確認事項を残したか確認します。
+1. `next_focus_work_item_ids`がopen WorkItemだけか確認します。
+2. `active_deferred_frontiers`の全IDを1回ずつ扱っているか確認します。
+3. 引継ぎEvidenceが許可された候補だけか確認します。
+4. 次の検索計画、Tool要求又は最終回答を含めていないか確認します。
