@@ -28,6 +28,9 @@ Prompt、入力情報、Tool、データのどこに不足があるかを切り�
 ### JSON契約の作法
 
 - LLMが取得・返却するJSON項目の形状と基本的な意味は、Pydantic型と`Field.description`を正本にします。
+- Solver、Cycle、Graph、検証で使う正規契約と状態遷移はProvider間で共通にします。
+- Provider APIの制約に合わせたwire schemaはadapter内だけで変換し、共通の正規契約へ復元してから検証します。
+- Provider固有の項目や分岐をAgent Loop、CaseStore、Domainの状態へ持ち込みません。
 - `Field.description`には、値の意味、IDの種類、配列の要素、`null`や空配列の意味を、その項目を理解できる範囲で書きます。
 - 用途別のLLM入力には、必要な項目だけを持つread modelを用意します。
 - 入力契約とProvider出力schemaは、Pydantic型と`Field.description`から決定的に生成します。

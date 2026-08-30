@@ -186,6 +186,7 @@ def _render(
             context,
             profile,
             work_item_session=first_work_item_session(context),
+            provider=provider,
         )
     elif stage == "dependency_assessment":
         observation_value = fixture.get("observationIntegration")
