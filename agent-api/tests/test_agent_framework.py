@@ -22,6 +22,7 @@ from app.agent_framework.loop import (
     AgentLoop,
     _finalization_decision_context,
     _grounding_observation_context,
+    _has_unintegrated_grounding_result,
 )
 from app.agent_framework.observability import RunTrace
 from app.agent_framework.ports.model import (
@@ -547,6 +548,110 @@ def test_grounding_observation_does_not_consume_concurrent_search_result() -> No
     assert tuple(
         candidate.article_id for candidate in next_context.search_candidates
     ) == ("law-test-article-2",)
+
+
+def test_load_evidence_grounding_result_is_integrated_before_other_results() -> None:
+    body = Evidence(
+        evidence_id="body-1",
+        source_ref="fixture:body-1",
+        content="第一条の本文",
+        created_cycle=1,
+        metadata={
+            "articleId": "law-test-article-1",
+            "citationEligible": True,
+        },
+    )
+    navigation = Evidence(
+        evidence_id="search-nav-2",
+        source_ref="fixture:search-nav-2",
+        content="第二条の検索抜粋",
+        created_cycle=1,
+        metadata={
+            "articleId": "law-test-article-2",
+            "citationEligible": False,
+        },
+    )
+    load_request = ToolRequest(
+        request_id="load-1",
+        work_item_id="w1",
+        tool_name="load_evidence",
+        arguments={"evidence_ids": [body.evidence_id]},
+        purpose="既知本文を再表示する",
+        hypothesis_ids=("h1",),
+    )
+    search_request = ToolRequest(
+        request_id="search-2",
+        work_item_id="w2",
+        tool_name="legal_search",
+        arguments={"query": "手続の具体的規定", "doc_types": ["law"]},
+        purpose="手続Articleを発見する",
+        hypothesis_ids=("h2",),
+    )
+    state = CaseState(
+        case_id="load-evidence-grounding-result",
+        question="二つの事項を確認する。",
+        research_cycle_count=1,
+        work_items=(
+            WorkItem(work_item_id="w1", question="第一の事項を確認する。"),
+            WorkItem(work_item_id="w2", question="手続を確認する。"),
+        ),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h1",
+                work_item_id="w1",
+                statement="第一の事項を定める。",
+            ),
+            Hypothesis(
+                hypothesis_id="h2",
+                work_item_id="w2",
+                statement="手続を定める規定がある。",
+            ),
+        ),
+        tool_requests=(load_request, search_request),
+        tool_results=(
+            ToolResult(
+                request_id=load_request.request_id,
+                status="succeeded",
+                evidence_ids=(body.evidence_id,),
+                cycle_no=1,
+            ),
+            ToolResult(
+                request_id=search_request.request_id,
+                status="succeeded",
+                evidence_ids=(navigation.evidence_id,),
+                cycle_no=1,
+            ),
+        ),
+        evidence=(body, navigation),
+    )
+
+    assert _has_unintegrated_grounding_result(
+        state,
+        tool_names=frozenset({"fetch_articles", "load_evidence"}),
+    ) is True
+
+    context = build_solver_context(
+        state,
+        AgentLimits(),
+        remaining_wall_time_sec=120,
+        finalize_only=False,
+    )
+    observation_context = _grounding_observation_context(context)
+
+    assert tuple(
+        request.request_id for request in observation_context.recent_tool_requests
+    ) == (load_request.request_id,)
+    assert tuple(
+        result.request_id for result in observation_context.recent_tool_results
+    ) == (load_request.request_id,)
+
+    integrated = state.model_copy(
+        update={"integrated_tool_result_request_ids": (load_request.request_id,)}
+    )
+    assert _has_unintegrated_grounding_result(
+        integrated,
+        tool_names=frozenset({"fetch_articles", "load_evidence"}),
+    ) is False
 
 
 def test_solver_can_explicitly_start_three_research_cycles() -> None:

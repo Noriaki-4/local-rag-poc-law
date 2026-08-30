@@ -86,3 +86,14 @@ def test_checkpoint_replay_uses_requested_provider_and_model(monkeypatch) -> Non
     }
     assert output["decision"]["answer"]["text"] == "診断結果"
     assert output["inputTokens"] == 10
+
+
+def test_checkpoint_replay_supports_observation_integration_stage() -> None:
+    fixture = _fixture()
+    fixture["checkpoint"]["resumeFrom"] = "observation_integration"
+
+    assert MODULE._resolve_stage(fixture, None) == "observation_integration"
+    profile = MODULE._resolve_profile("observation_integration", "test-model")
+
+    assert profile.context_projection == "observation_integration"
+    assert profile.model == "test-model"

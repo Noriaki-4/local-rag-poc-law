@@ -25,6 +25,7 @@ _PROFILE_ATTRIBUTES = {
     "hypothesis_generation": "solver_hypothesis_generation",
     "search_planning": "solver_search_planning",
     "integration": "solver_integration",
+    "observation_integration": "solver_observation_integration",
     "cycle_close": "solver_cycle_close",
     "finalization": "solver_finalization",
     "reviewer_revision": "solver_reviewer_revision",

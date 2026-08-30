@@ -497,6 +497,29 @@ def test_cycle_audit_allows_observation_iteration_after_scoped_tool_result() -> 
     }
 
 
+def test_cycle_audit_allows_integration_for_a_different_hypothesis() -> None:
+    records = (
+        {
+            "sequence": 1,
+            "event": "decision_applied",
+            "purpose": "observation_integration",
+            "scope": {"workItemIds": ["w1"], "hypothesisIds": ["h1"]},
+            "stateAfterStatus": {"toolResultCount": 1},
+        },
+        {
+            "sequence": 2,
+            "event": "decision_applied",
+            "purpose": "integration",
+            "scope": {"workItemIds": ["w2"], "hypothesisIds": ["h2"]},
+            "stateBeforeStatus": {"toolResultCount": 1},
+        },
+    )
+
+    report = build_cycle_audit_report(records)
+
+    assert report["executionFindings"] == []
+
+
 def test_cycle_audit_tracks_work_item_sessions_by_id_and_turn() -> None:
     records = (
         {

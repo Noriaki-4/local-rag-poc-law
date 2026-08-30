@@ -70,7 +70,7 @@
             "type": "string"
           },
           "status": {
-            "description": "not_requiredは下位規範確認不要、terminal_text_missingは末端下位規範本文が未確認、terminal_text_confirmedは委任元とそれを具体化する末端下位規範の本文を確認済み。",
+            "description": "not_requiredは下位規範確認不要、terminal_text_missingは末端下位規範本文が未確認、terminal_text_confirmedは委任元とそれを具体化する末端下位規範の本文を確認済み。同じWorkItemのHypothesisに下位規範で定める未確認内容をgapsとして残す場合はterminal_text_missingを使う。",
             "enum": [
               "not_required",
               "terminal_text_missing",

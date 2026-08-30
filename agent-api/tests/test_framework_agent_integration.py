@@ -204,29 +204,39 @@ def test_duplicate_load_evidence_ids_are_rejected_before_tool_execution() -> Non
         )
 
 
-def test_observation_transport_deduplicates_load_evidence_ids() -> None:
+@pytest.mark.parametrize(
+    ("tool_name", "argument_name", "values"),
+    (
+        ("load_evidence", "evidence_ids", ["e1", "e1", "e2"]),
+        ("fetch_articles", "article_ids", ["article-26", "article-26"]),
+    ),
+)
+def test_observation_transport_deduplicates_tool_list_arguments(
+    tool_name: str,
+    argument_name: str,
+    values: list[str],
+) -> None:
     normalized = _normalize_observation_integration_payload(
         {
-            "decision_reason": "本文を再表示する。",
+            "decision_reason": "本文を取得する。",
             "update_hypotheses": [],
             "dependency_decisions": [],
             "tool_requests": [
                 {
-                    "request_id": "load-1",
+                    "request_id": "request-1",
                     "work_item_id": "w1",
-                    "tool_name": "load_evidence",
-                    "arguments": {"evidence_ids": ["e1", "e1", "e2"]},
-                    "purpose": "本文を再表示する。",
+                    "tool_name": tool_name,
+                    "arguments": {argument_name: values},
+                    "purpose": "本文を取得する。",
                     "hypothesis_ids": ["h1"],
                 }
             ],
         }
     )
 
-    assert normalized["tool_requests"][0]["arguments"]["evidence_ids"] == [
-        "e1",
-        "e2",
-    ]
+    assert normalized["tool_requests"][0]["arguments"][argument_name] == list(
+        dict.fromkeys(values)
+    )
 
 
 def test_solver_contract_glossary_is_generated_from_field_descriptions() -> None:
@@ -737,7 +747,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "431"
+    assert diagnostic_records[0]["profileVersion"] == "434"
     assert diagnostic_records[0]["runElapsedMs"] >= 0
     assert diagnostic_records[0]["recordedAt"].endswith("+00:00")
     assert len(diagnostic_records[0]["questionHash"]) == 64
@@ -748,7 +758,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "431"
+    assert transport_input["profileVersion"] == "434"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -1294,7 +1304,7 @@ def test_graph_review_moves_to_another_hypothesis_after_integrated_fetch() -> No
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "431"
+    assert profile.version == "434"
     assert profile.solver_graph_review is not None
     assert profile.solver_graph_review.max_output_tokens == (
         profile.solver_integration.max_output_tokens
@@ -1571,7 +1581,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "431"
+    assert profile.version == "434"
     assert prompt.rindex("## 出力") > prompt.rindex(
         "</solver_context>"
     )
@@ -1622,7 +1632,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "431"
+    assert profile.version == "434"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -5648,6 +5658,44 @@ def test_observation_prompt_keeps_question_scoped_delegation_open() -> None:
         item.metadata.get("articleId") for item in projected.material_evidence
     }
     assert "law-340CO0000000321-article-7" in article_ids
+
+
+def test_observation_prompt_rejects_confirmed_dependency_with_lower_norm_gap(
+) -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_overview_dependency_gap_confirmed_v431.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    context = SolverContext.model_validate(fixture["solverContext"])
+    projected = next(
+        item
+        for item in _observation_work_item_contexts(context)
+        if item.work_tree[0].work_item_id == "wi-3"
+    )
+    prior_payload = fixture["observedTransportOutput"]["payload"]
+
+    assert prior_payload["update_hypotheses"][0]["gaps"]
+    assert prior_payload["dependency_decisions"][0]["status"] == (
+        "terminal_text_confirmed"
+    )
+
+    profile = legal_profiles.legal_agent_profile().solver_observation_integration
+    assert profile is not None
+    rendered = render_observation_integration_model_call(projected, profile)
+
+    assert "更新後の`gaps`と取得本文を使い" in rendered.instructions
+    assert "`terminal_text_confirmed`と併存させません" in (
+        rendered.instructions
+    )
+    assert rendered.instructions.index("未確認内容を`gaps`へ残します") < (
+        rendered.instructions.index("更新後の`gaps`と取得本文を使い")
+    )
+    assert "gapsとして残す場合" in rendered.output_schema["properties"][
+        "dependency_decisions"
+    ]["items"]["properties"]["status"]["description"]
 
 
 def test_overview_graph_direction_fixture_exposes_subject_mapping() -> None:

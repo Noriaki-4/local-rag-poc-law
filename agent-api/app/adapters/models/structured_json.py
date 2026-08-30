@@ -3044,17 +3044,20 @@ def _normalize_observation_integration_payload(
     normalized = deepcopy(payload)
     normalized.setdefault("dependency_decisions", [])
     for request in normalized.get("tool_requests") or []:
-        if (
-            not isinstance(request, dict)
-            or request.get("tool_name") != "load_evidence"
-        ):
+        if not isinstance(request, dict):
             continue
         arguments = request.get("arguments")
         if not isinstance(arguments, dict):
             continue
-        evidence_ids = arguments.get("evidence_ids")
-        if isinstance(evidence_ids, list):
-            arguments["evidence_ids"] = list(dict.fromkeys(evidence_ids))
+        list_argument = {
+            "load_evidence": "evidence_ids",
+            "fetch_articles": "article_ids",
+        }.get(request.get("tool_name"))
+        if list_argument is None:
+            continue
+        values = arguments.get(list_argument)
+        if isinstance(values, list):
+            arguments[list_argument] = list(dict.fromkeys(values))
     if context is not None:
         _normalize_grounding_evidence_aliases(normalized, context)
     for decision in normalized.get("dependency_decisions") or []:
@@ -3280,7 +3283,9 @@ def _dependency_assessment_transport_schema(
                     "not_requiredは下位規範確認不要、"
                     "terminal_text_missingは末端下位規範本文が未確認、"
                     "terminal_text_confirmedは委任元とそれを具体化する"
-                    "末端下位規範の本文を確認済み。"
+                    "末端下位規範の本文を確認済み。同じWorkItemの"
+                    "Hypothesisに下位規範で定める未確認内容をgapsとして"
+                    "残す場合はterminal_text_missingを使う。"
                 ),
             },
             "reason": _described(

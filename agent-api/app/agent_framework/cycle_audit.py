@@ -832,6 +832,17 @@ def _execution_findings(
             or previous_results != current_results
         ):
             continue
+        previous_hypothesis_ids = set(
+            (previous.get("scope") or {}).get("hypothesisIds", [])
+        )
+        current_hypothesis_ids = set(
+            (current.get("scope") or {}).get("hypothesisIds", [])
+        )
+        overlapping_hypothesis_ids = sorted(
+            previous_hypothesis_ids & current_hypothesis_ids
+        )
+        if not overlapping_hypothesis_ids:
+            continue
         findings.append(
             _finding(
                 "ADJACENT_INTEGRATION_WITHOUT_NEW_TOOL_RESULT",
@@ -841,9 +852,7 @@ def _execution_findings(
                 ),
                 previousSequence=previous.get("sequence"),
                 currentSequence=current.get("sequence"),
-                hypothesisIds=(previous.get("scope") or {}).get(
-                    "hypothesisIds", []
-                ),
+                hypothesisIds=overlapping_hypothesis_ids,
             )
         )
 

@@ -27,9 +27,9 @@
 ## 手順
 
 1. 取得本文を全ての提示Hypothesisと照合し、本文取得前の対応候補が不適切なら別のHypothesisへ反映します。
-2. 同じ確認事項について、起点規範から必要な末端規範まで本文が揃ったか判断します。
-3. Hypothesisが確認する規律と法的効果について、取得本文が`statement`を直接支持又は否定するか判断します。
-4. 2の判断を踏まえ、WorkItemへの回答に必要な未確認内容を`gaps`へ残します。
+2. Hypothesisが確認する規律と法的効果について、取得本文が`statement`を直接支持又は否定するか判断します。
+3. WorkItemへの回答に必要な未確認内容を`gaps`へ残します。
+4. 更新後の`gaps`と取得本文を使い、同じ確認事項の起点規範から必要な末端規範まで本文が揃ったか判断します。
 5. 未確認事項を直ちに進められる場合だけ、次のToolをWorkItemごとに最大1件選びます。
 
 ## Hypothesisの判定
@@ -67,6 +67,8 @@
 - 過去に評価済みの本文は再表示されません。現在の判定、確認済みEvidence ID及び未確認事項は
   `hypotheses[]`から引き継ぎます。
 - `terminal_text_confirmed`では、起点規範から末端規範までを上位順に示します。
+- 同じWorkItemの`gaps`に、関係する下位規範で定める未確認内容を残した場合は
+  `terminal_text_missing`です。`terminal_text_confirmed`と併存させません。
 - `not_required`又は`terminal_text_confirmed`では、判断に使った`basis_evidence_ids`を1件以上返します。
 - `terminal_text_missing`のWorkItemでは、対応するHypothesisの少なくとも1件に、
   未確認の下位規範の具体的内容を`gaps`として残します。

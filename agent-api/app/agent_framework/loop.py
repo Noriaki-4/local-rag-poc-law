@@ -287,9 +287,16 @@ class AgentLoop:
             pending_grounding_observation = bool(
                 integration_call
                 and not reviewer_findings
-                and _has_unintegrated_article_fetch_result(
+                and _has_unintegrated_grounding_result(
                     state,
-                    tool_name=self._profile.graph_review_fetch_tool_name,
+                    tool_names=frozenset(
+                        item
+                        for item in (
+                            self._profile.graph_review_fetch_tool_name,
+                            LOAD_EVIDENCE_TOOL,
+                        )
+                        if item is not None
+                    ),
                 )
             )
             dependency_audit_work_item_ids = _dependency_audit_scope(
@@ -1798,15 +1805,12 @@ def _finalization_decision_context(context: SolverContext) -> SolverContext:
     )
 
 
-def _has_unintegrated_article_fetch_result(
+def _has_unintegrated_grounding_result(
     state: CaseState,
     *,
-    tool_name: str | None,
+    tool_names: frozenset[str],
 ) -> bool:
-    """現在Cycleに、まだ意味統合していないArticle取得結果があるかを返す。"""
-
-    if tool_name is None:
-        return False
+    """現在Cycleに、まだ意味統合していない本文結果があるかを返す。"""
 
     requests_by_id = {item.request_id: item for item in state.tool_requests}
     grounding_evidence_ids = {
@@ -1818,7 +1822,7 @@ def _has_unintegrated_article_fetch_result(
         result.cycle_no == state.research_cycle_count
         and result.status == "succeeded"
         and (request := requests_by_id.get(result.request_id)) is not None
-        and request.tool_name == tool_name
+        and request.tool_name in tool_names
         and result.request_id not in state.integrated_tool_result_request_ids
         and not grounding_evidence_ids.isdisjoint(result.evidence_ids)
         for result in state.tool_results
