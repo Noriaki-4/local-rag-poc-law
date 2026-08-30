@@ -1760,7 +1760,7 @@ def _dependency_audit_work_item_ids(state: CaseState) -> tuple[str, ...]:
 
 
 def _grounding_observation_context(context: SolverContext) -> SolverContext:
-    """本文統合中は、同時に完了した探索結果を未処理のまま残す。"""
+    """本文統合中は、未Reviewの探索結果だけを未処理のまま残す。"""
 
     grounding_ids = set(context.grounding_evidence_ids)
     grounding_results = tuple(
@@ -1771,22 +1771,26 @@ def _grounding_observation_context(context: SolverContext) -> SolverContext:
     grounding_request_ids = {
         result.request_id for result in grounding_results
     }
-    return context.model_copy(
-        update={
-            "recent_tool_requests": tuple(
-                request
-                for request in context.recent_tool_requests
-                if request.request_id in grounding_request_ids
-            ),
-            "recent_tool_results": grounding_results,
-            "graph_review_batch": GraphReviewBatch(),
-            "graph_review_ledger": (),
-            "required_graph_review_request_ids": (),
-            "search_candidates": (),
-            "required_search_review_request_ids": (),
-            "fetchable_article_ids": (),
-        }
-    )
+    update: dict[str, object] = {
+        "recent_tool_requests": tuple(
+            request
+            for request in context.recent_tool_requests
+            if request.request_id in grounding_request_ids
+        ),
+        "recent_tool_results": grounding_results,
+        "graph_review_batch": GraphReviewBatch(),
+        "graph_review_ledger": (),
+        "required_graph_review_request_ids": (),
+        "required_search_review_request_ids": (),
+    }
+    if context.required_search_review_request_ids:
+        update.update(
+            {
+                "search_candidates": (),
+                "fetchable_article_ids": (),
+            }
+        )
+    return context.model_copy(update=update)
 
 
 def _finalization_decision_context(context: SolverContext) -> SolverContext:

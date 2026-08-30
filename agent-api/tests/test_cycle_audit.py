@@ -497,6 +497,71 @@ def test_cycle_audit_allows_observation_iteration_after_scoped_tool_result() -> 
     }
 
 
+def test_cycle_audit_does_not_report_contract_repair_as_repeated_integration(
+) -> None:
+    scope = {"workItemIds": ["w1"], "hypothesisIds": ["h1"]}
+    records = (
+        {
+            "sequence": 1,
+            "event": "solver_output",
+            "purpose": "observation_integration",
+            "contractAttempt": 1,
+            "cycleNo": 1,
+            "scope": scope,
+            "latencyMs": 10,
+        },
+        {
+            "sequence": 2,
+            "event": "contract_violation",
+            "purpose": "observation_integration",
+            "contractAttempt": 1,
+        },
+        {
+            "sequence": 3,
+            "event": "solver_output",
+            "purpose": "observation_integration",
+            "contractAttempt": 2,
+            "cycleNo": 1,
+            "scope": scope,
+            "latencyMs": 10,
+        },
+    )
+
+    report = build_cycle_audit_report(records)
+
+    assert "REPEATED_OBSERVATION_INTEGRATION_SCOPE" not in {
+        item["code"] for item in report["executionFindings"]
+    }
+
+
+def test_cycle_audit_allows_followup_integration_with_additional_scope() -> None:
+    records = (
+        {
+            "sequence": 1,
+            "event": "decision_applied",
+            "purpose": "observation_integration",
+            "scope": {"workItemIds": ["w1"], "hypothesisIds": ["h1"]},
+            "stateAfterStatus": {"toolResultCount": 1},
+        },
+        {
+            "sequence": 2,
+            "event": "decision_applied",
+            "purpose": "integration",
+            "scope": {
+                "workItemIds": ["w1", "w2"],
+                "hypothesisIds": ["h1", "h2"],
+            },
+            "stateBeforeStatus": {"toolResultCount": 1},
+        },
+    )
+
+    report = build_cycle_audit_report(records)
+
+    assert "ADJACENT_INTEGRATION_WITHOUT_NEW_TOOL_RESULT" not in {
+        item["code"] for item in report["executionFindings"]
+    }
+
+
 def test_cycle_audit_allows_integration_for_a_different_hypothesis() -> None:
     records = (
         {

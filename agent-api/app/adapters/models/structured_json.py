@@ -2258,7 +2258,13 @@ def _observation_integration_context_payload(
             item.model_dump(mode="json")
             for item in context.search_candidates
             if active_hypothesis_ids.intersection(
-                item.matched_hypothesis_ids
+                (
+                    *item.matched_hypothesis_ids,
+                    *item.discovery_hypothesis_ids,
+                )
+            )
+            or active_work_item_ids.intersection(
+                item.discovery_work_item_ids
             )
         ],
         "completed_legal_searches": [
@@ -2332,6 +2338,20 @@ def _observation_work_item_contexts(
             if item.work_item_id == work_item.work_item_id
         )
         hypothesis_ids = {item.hypothesis_id for item in hypotheses}
+        search_candidates = tuple(
+            item
+            for item in context.search_candidates
+            if hypothesis_ids.intersection(
+                (
+                    *item.matched_hypothesis_ids,
+                    *item.discovery_hypothesis_ids,
+                )
+            )
+            or work_item.work_item_id in item.discovery_work_item_ids
+        )
+        search_candidate_article_ids = {
+            item.article_id for item in search_candidates
+        }
         candidates = tuple(
             item.model_copy(
                 update={
@@ -2406,6 +2426,12 @@ def _observation_work_item_contexts(
                         work_item.work_item_id: omitted_evidence_ids
                     },
                     "evidence_hypothesis_candidates": candidates,
+                    "search_candidates": search_candidates,
+                    "fetchable_article_ids": tuple(
+                        article_id
+                        for article_id in context.fetchable_article_ids
+                        if article_id in search_candidate_article_ids
+                    ),
                     "required_dependency_work_item_ids": tuple(
                         item_id
                         for item_id in context.required_dependency_work_item_ids

@@ -561,6 +561,7 @@ def _model_call_records(
                 "inputSequence": input_record.get("sequence"),
                 "cycleNo": record.get("cycleNo") or input_record.get("cycleNo"),
                 "purpose": record.get("purpose"),
+                "contractAttempt": record.get("contractAttempt"),
                 "latencyMs": record.get("latencyMs"),
                 "inputTokens": record.get("inputTokens"),
                 "outputTokens": record.get("outputTokens"),
@@ -773,6 +774,9 @@ def _execution_findings(
 ) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     observation_by_scope: dict[tuple[int, str], list[int]] = {}
+    model_call_by_sequence = {
+        int(call.get("sequence") or 0): call for call in model_calls
+    }
     for call in model_calls:
         if call.get("purpose") != "observation_integration":
             continue
@@ -787,6 +791,9 @@ def _execution_findings(
     for (cycle_no, hypothesis_id), sequences in sorted(observation_by_scope.items()):
         repeated_without_result: list[int] = []
         for previous_sequence, current_sequence in zip(sequences, sequences[1:]):
+            current_call = model_call_by_sequence.get(current_sequence, {})
+            if int(current_call.get("contractAttempt") or 1) > 1:
+                continue
             has_new_scoped_result = any(
                 isinstance(item.get("sequence"), int)
                 and previous_sequence < item["sequence"] < current_sequence
@@ -841,7 +848,10 @@ def _execution_findings(
         overlapping_hypothesis_ids = sorted(
             previous_hypothesis_ids & current_hypothesis_ids
         )
-        if not overlapping_hypothesis_ids:
+        if (
+            not overlapping_hypothesis_ids
+            or not current_hypothesis_ids.issubset(previous_hypothesis_ids)
+        ):
             continue
         findings.append(
             _finding(

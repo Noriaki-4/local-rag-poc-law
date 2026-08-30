@@ -94,6 +94,7 @@ from app.agent_framework.loop import (
     AgentLoop,
     _dependency_audit_scope,
     _dependency_audit_work_item_ids,
+    _grounding_observation_context,
 )
 from app.agent_framework.ports.model import (
     ModelProtocolError,
@@ -747,7 +748,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "434"
+    assert diagnostic_records[0]["profileVersion"] == "438"
     assert diagnostic_records[0]["runElapsedMs"] >= 0
     assert diagnostic_records[0]["recordedAt"].endswith("+00:00")
     assert len(diagnostic_records[0]["questionHash"]) == 64
@@ -758,7 +759,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "434"
+    assert transport_input["profileVersion"] == "438"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -1304,7 +1305,7 @@ def test_graph_review_moves_to_another_hypothesis_after_integrated_fetch() -> No
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "434"
+    assert profile.version == "438"
     assert profile.solver_graph_review is not None
     assert profile.solver_graph_review.max_output_tokens == (
         profile.solver_integration.max_output_tokens
@@ -1346,6 +1347,7 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     ] == ["# 法令調査Solver"]
     assert "Programへ意味判断" in finalization_prompt
     assert "`citation_ids`には`grounding_evidence_ids`" in finalization_prompt
+    assert "`material_evidence[].title`をそのまま使います" in finalization_prompt
     assert "## Solver共通ルール" not in finalization_prompt
     assert "## 調査の完了ルール" not in finalization_prompt
 
@@ -1581,7 +1583,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "434"
+    assert profile.version == "438"
     assert prompt.rindex("## 出力") > prompt.rindex(
         "</solver_context>"
     )
@@ -1632,7 +1634,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "434"
+    assert profile.version == "438"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -5613,10 +5615,64 @@ def test_observation_prompt_limits_follow_up_to_work_item_scope() -> None:
     assert "親規定から具体化規定を探す場合は`from_subject`" in (
         rendered.instructions
     )
+    assert "Article番号や法令名だけから候補の内容を推測しません" in (
+        rendered.instructions
+    )
     assert len(projected.work_tree) == 1
     assert {
         item.work_item_id for item in projected.hypotheses
     } == {projected.work_tree[0].work_item_id}
+
+
+def test_observation_reconsiders_reviewed_candidate_in_discovery_scope() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_announcement_observation_scope_expansion_v409.json"
+    )
+    context = SolverContext.model_validate(
+        json.loads(fixture_path.read_text(encoding="utf-8"))["solverContext"]
+    )
+    candidate = SearchCandidateArticle(
+        article_id="law-test-article-9",
+        document_id="law-test",
+        title="公告府令",
+        headings=("第九条（公告の方法）",),
+        discovery_work_item_ids=("wi-3",),
+        discovery_hypothesis_ids=("h-3",),
+        search_request_ids=("search-1",),
+        navigation_evidence_ids=("search-nav-9",),
+    )
+    observation_context = _grounding_observation_context(
+        context.model_copy(
+            update={
+                "required_search_review_request_ids": (),
+                "search_candidates": (candidate,),
+                "fetchable_article_ids": (candidate.article_id,),
+            }
+        )
+    )
+
+    projected = next(
+        item
+        for item in _observation_work_item_contexts(observation_context)
+        if item.work_tree[0].work_item_id == "wi-3"
+    )
+    rendered = render_observation_integration_model_call(
+        projected.model_copy(update={"cycle_close_required": False}),
+        legal_profiles.legal_agent_profile().solver_observation_integration,
+    )
+
+    assert projected.fetchable_article_ids == (candidate.article_id,)
+    assert projected.search_candidates == (candidate,)
+    assert rendered.input_payload["fetchable_article_ids"] == [
+        candidate.article_id
+    ]
+    assert rendered.input_payload["search_candidates"][0]["article_id"] == (
+        candidate.article_id
+    )
+    assert "未取得候補を見落としていないか" in rendered.instructions
 
 
 def test_observation_prompt_keeps_question_scoped_delegation_open() -> None:
@@ -5749,6 +5805,11 @@ def test_overview_graph_direction_fixture_exposes_subject_mapping() -> None:
     assert "親規定から具体化規定を探す場合は`from_subject`" in (
         rendered.instructions
     )
+    assert (
+        "親規定を起点に`IMPLEMENTS`の具体化規定を探す場合は"
+        "`direction=from_subject`"
+    ) in rendered.instructions
+    assert "下位規範を探す目的なら`incoming`" not in rendered.instructions
     graph_tool = next(
         item
         for item in rendered.input_payload["available_tools"]

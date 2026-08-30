@@ -6,37 +6,12 @@
   "evidence_hypothesis_candidates": [],
   "fetchable_article_ids": [
     "law-340CO0000000321-article-12",
-    "law-323AC0000000025-article-27_6",
-    "law-340CO0000000321-article-7",
     "law-419M60000002059-article-17",
-    "law-340CO0000000321-article-14_3_7",
-    "law-323AC0000000025-article-27_13",
-    "law-340CO0000000321-suppl-36-article-2",
     "law-419M60000002059-article-23",
-    "law-402M50000040038-article-17",
-    "law-402M50000040038-article-30",
-    "law-323AC0000000025-suppl-42-article-55",
     "law-419M60000002059-article-19",
-    "law-323AC0000000025-article-27_3",
-    "law-340CO0000000321-article-14_3_2",
     "law-419M60000002059-article-30",
-    "law-340CO0000000321-article-31",
-    "law-419M60000002059-article-63",
-    "law-323AC0000000025-article-27_9",
-    "law-323AC0000000025-suppl-97-article-10",
     "law-419M60000002059-article-59",
-    "law-402M50000040038-article-10",
-    "law-402M50000040038-article-26",
-    "law-402M50000040038-article-19",
-    "law-323AC0000000025-suppl-84-article-145",
-    "law-402M50000040038-article-2_5",
-    "law-323AC0000000025-article-167",
-    "law-340CO0000000321-article-14_2_2",
-    "law-402M50000040038-article-9_5",
-    "law-340CO0000000321-article-19_3_8",
-    "law-323AC0000000025-article-172_5",
-    "law-323AC0000000025-article-27_11",
-    "law-323AC0000000025-suppl-22-article-12"
+    "law-402M50000040038-article-2_5"
   ],
   "graph_fetch_completed_hypothesis_ids_this_cycle": [],
   "grounding_evidence": [
@@ -387,7 +362,182 @@
   "omitted_evidence_ids": [],
   "remaining_fetch_capacity": 0,
   "required_dependency_kind": "lower_norm",
-  "search_candidates": [],
+  "search_candidates": [
+    {
+      "article_id": "law-419M60000002059-article-17",
+      "assessment_summary": null,
+      "discovery_hypothesis_ids": [
+        "h-1"
+      ],
+      "discovery_work_item_ids": [
+        "wi-1"
+      ],
+      "document_id": "law-419M60000002059",
+      "headings": [
+        "第十七条 （取引所金融商品市場における上場等株券等の買付け等の要件） 第1項第1号"
+      ],
+      "legal_function": null,
+      "matched_hypothesis_ids": [],
+      "matched_non_work_item_requirements": [],
+      "navigation_evidence_ids": [
+        "search-nav-law-419M60000002059-article-17-paragraph-1-item-1"
+      ],
+      "search_request_ids": [
+        "solver-tool-3bbec0ebc44f4c528dc15c99330f291e"
+      ],
+      "title": "有価証券の取引等の規制に関する内閣府令"
+    },
+    {
+      "article_id": "law-419M60000002059-article-23",
+      "assessment_summary": null,
+      "discovery_hypothesis_ids": [
+        "h-1"
+      ],
+      "discovery_work_item_ids": [
+        "wi-1"
+      ],
+      "document_id": "law-419M60000002059",
+      "headings": [
+        "第二十三条 （取引の公正の確保のため適当と認められる方法） 第1項第2号"
+      ],
+      "legal_function": null,
+      "matched_hypothesis_ids": [],
+      "matched_non_work_item_requirements": [],
+      "navigation_evidence_ids": [
+        "search-nav-law-419M60000002059-article-23-paragraph-1-item-2"
+      ],
+      "search_request_ids": [
+        "solver-tool-3bbec0ebc44f4c528dc15c99330f291e"
+      ],
+      "title": "有価証券の取引等の規制に関する内閣府令"
+    },
+    {
+      "article_id": "law-419M60000002059-article-19",
+      "assessment_summary": null,
+      "discovery_hypothesis_ids": [
+        "h-1"
+      ],
+      "discovery_work_item_ids": [
+        "wi-1"
+      ],
+      "document_id": "law-419M60000002059",
+      "headings": [
+        "第十九条 （店頭売買有価証券市場における上場等株券等の買付け等の要件） 第1項第1号"
+      ],
+      "legal_function": null,
+      "matched_hypothesis_ids": [],
+      "matched_non_work_item_requirements": [],
+      "navigation_evidence_ids": [
+        "search-nav-law-419M60000002059-article-19-paragraph-1-item-1"
+      ],
+      "search_request_ids": [
+        "solver-tool-3bbec0ebc44f4c528dc15c99330f291e"
+      ],
+      "title": "有価証券の取引等の規制に関する内閣府令"
+    },
+    {
+      "article_id": "law-419M60000002059-article-30",
+      "assessment_summary": null,
+      "discovery_hypothesis_ids": [
+        "h-1"
+      ],
+      "discovery_work_item_ids": [
+        "wi-1"
+      ],
+      "document_id": "law-419M60000002059",
+      "headings": [
+        "第三十条 （報告書の提出を要しない場合） 第1項第2号"
+      ],
+      "legal_function": null,
+      "matched_hypothesis_ids": [],
+      "matched_non_work_item_requirements": [],
+      "navigation_evidence_ids": [
+        "search-nav-law-419M60000002059-article-30-paragraph-1-item-2"
+      ],
+      "search_request_ids": [
+        "solver-tool-3bbec0ebc44f4c528dc15c99330f291e"
+      ],
+      "title": "有価証券の取引等の規制に関する内閣府令"
+    },
+    {
+      "article_id": "law-419M60000002059-article-59",
+      "assessment_summary": null,
+      "discovery_hypothesis_ids": [
+        "h-1"
+      ],
+      "discovery_work_item_ids": [
+        "wi-1"
+      ],
+      "document_id": "law-419M60000002059",
+      "headings": [
+        "第五十九条 （重要事実に係る規制の適用除外） 第1項第8号"
+      ],
+      "legal_function": null,
+      "matched_hypothesis_ids": [],
+      "matched_non_work_item_requirements": [],
+      "navigation_evidence_ids": [
+        "search-nav-law-419M60000002059-article-59-paragraph-1-item-8"
+      ],
+      "search_request_ids": [
+        "solver-tool-3bbec0ebc44f4c528dc15c99330f291e"
+      ],
+      "title": "有価証券の取引等の規制に関する内閣府令"
+    },
+    {
+      "article_id": "law-402M50000040038-article-2_5",
+      "assessment_summary": null,
+      "discovery_hypothesis_ids": [
+        "h-1"
+      ],
+      "discovery_work_item_ids": [
+        "wi-1"
+      ],
+      "document_id": "law-402M50000040038",
+      "headings": [
+        "第二条の五 （株券等の所有者が少数である場合） 第2項"
+      ],
+      "legal_function": null,
+      "matched_hypothesis_ids": [],
+      "matched_non_work_item_requirements": [],
+      "navigation_evidence_ids": [
+        "search-nav-law-402M50000040038-article-2_5-paragraph-2"
+      ],
+      "search_request_ids": [
+        "solver-tool-3bbec0ebc44f4c528dc15c99330f291e"
+      ],
+      "title": "発行者以外の者による株券等の公開買付けの開示に関する内閣府令"
+    },
+    {
+      "article_id": "law-340CO0000000321-article-12",
+      "assessment_summary": null,
+      "discovery_hypothesis_ids": [
+        "h-1",
+        "h-3",
+        "h-5"
+      ],
+      "discovery_work_item_ids": [
+        "wi-1",
+        "wi-3",
+        "wi-5"
+      ],
+      "document_id": "law-340CO0000000321",
+      "headings": [
+        "第十二条 （公開買付けによらないで買付け等ができる場合）"
+      ],
+      "legal_function": null,
+      "matched_hypothesis_ids": [],
+      "matched_non_work_item_requirements": [],
+      "navigation_evidence_ids": [
+        "search-nav-law-340CO0000000321-article-12"
+      ],
+      "search_request_ids": [
+        "solver-tool-3bbec0ebc44f4c528dc15c99330f291e",
+        "solver-tool-2bf3533cb7af4609925c2c34e2f1966d",
+        "solver-tool-1220b7063120496db957d72a3b2f6af4"
+      ],
+      "title": "金融商品取引法施行令"
+    }
+  ],
   "work_item_session": {
     "session_id": "work-item-session-4e79902f2f0d75775419c0aa",
     "turn": 1,

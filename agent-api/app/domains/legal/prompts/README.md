@@ -180,9 +180,10 @@ CaseStoreの正本です。`non_work_item_requirements`は重要度や全WorkIte
 生成します。Step 3では`available_tools`の一覧全体の意味と、各Toolが持つ用途・入力Schema・戻り値説明を
 完成Promptと`input.json`の組で確認できます。
 
-Cycle境界でも同じ方式を使います。取得本文の評価には既存WorkItem、Hypothesis、grounding Evidenceを投影し、
+Cycle境界でも同じ方式を使います。取得本文の評価には既存WorkItem、Hypothesis、grounding Evidenceと、
+そのWorkItem・Hypothesisから発見済みで本文未取得の検索候補を投影し、
 続く下位規範依存の評価には対象WorkItemとその根拠だけを投影します。Cycle終了判断には、その評価結果、構造上の残りCycle、
-引継ぎ可能なEvidenceを投影します。`fetchable_article_ids`、検索・Graph候補、Tool定義は両方へ渡さず、
+引継ぎ可能なEvidenceを投影します。未Reviewの検索候補とGraph候補は本文評価へ渡さず、
 Article IDを`retain_evidence_ids`へ混入させない専用契約にします。
 前段の意味差分はProgramが機械的に更新後のread modelへ投影します。2つのLLM出力は共通`SolverDecision`へ
 正規化し、共通validatorを通過した後にCaseStoreへ一度だけ適用します。

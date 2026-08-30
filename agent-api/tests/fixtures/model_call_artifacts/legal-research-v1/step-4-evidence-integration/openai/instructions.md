@@ -74,6 +74,9 @@
   未確認の下位規範の具体的内容を`gaps`として残します。
 - 既知候補の本文が必要なら`fetch_articles`、関係と起点を説明できるなら`legal_graph_neighbors`、
   Article又は関係が不明なら`legal_search`、省略済み本文が必要なら`load_evidence`を使います。
+- `gaps`を空にする前に、提示された未取得候補の見出し、要約又は抜粋を確認します。
+  未確認事項へ直接対応する候補があれば`gaps`を残し、`fetch_articles`で本文を確認します。
+  Article番号や法令名だけから候補の内容を推測しません。
 - 提示済み本文及び成功済みscopeを繰り返しません。
 - `cycle_close_required=true`では`tool_requests=[]`にします。
 - `tool_requests[]`は、提示された未確認事項を直接進める要求をWorkItemごとに最大1件返します。
@@ -154,4 +157,6 @@ Caseでは取得済みだが、今回のPromptから省略されたEvidence本�
    `terminal_text_missing`になっているか確認します。
 3. `terminal_text_missing`なのに、同じWorkItemの全Hypothesisで`gaps`を空にしていないか確認します。
 4. Evidence ID、WorkItem ID、Hypothesis IDが入力と一致するか確認します。
-5. `cycle_close_required=true`では`tool_requests=[]`、それ以外では未確認事項を直接進める最大1件か確認します。
+5. `gaps`を空にする前に、未確認事項へ直接対応する未取得候補を見落としていないか確認します。
+6. `cycle_close_required=true`では`tool_requests=[]`、それ以外では未確認事項を直接進める最大1件か確認します。
+   `fetch_articles`では、候補の見出し、要約又は抜粋が未確認事項へ直接対応しているか確認します。
