@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from copy import deepcopy
 from time import monotonic
 from typing import Any, Literal
@@ -82,6 +82,10 @@ from app.agent_framework.state import (
     merge_hypothesis_evidence_ids,
 )
 from app.agent_framework.tool_contracts import ToolDefinition
+from app.agent_framework.work_item_sessions import (
+    WorkItemSession,
+    WorkItemSessionCoordinator,
+)
 from app.llm import LLMClient
 
 
@@ -110,6 +114,7 @@ class StructuredJSONModelAdapter:
     ) -> None:
         self._client = client
         self._diagnostics = diagnostics
+        self._work_item_sessions = WorkItemSessionCoordinator()
 
     def solve(
         self,
@@ -798,12 +803,16 @@ class StructuredJSONModelAdapter:
                 decision_reason="評価対象のopen WorkItemはない。"
             ), 0, 0, 0
 
+        assignments = self._work_item_sessions.assign(projected_contexts)
+
         def solve_one(
-            projected_context: SolverContext,
+            assignment: tuple[WorkItemSession, SolverContext],
         ) -> tuple[ObservationIntegrationDecision, int | None, int | None, int]:
+            session, projected_context = assignment
             rendered = render_observation_integration_model_call(
                 projected_context,
                 profile,
+                work_item_session=session,
             )
             if self._diagnostics is not None:
                 self._diagnostics.record_transport_input(
@@ -813,6 +822,8 @@ class StructuredJSONModelAdapter:
                     repair_index=0,
                     transport_stage="observation_integration",
                     provider=getattr(self._client, "provider", None),
+                    work_item_session_id=session.session_id,
+                    work_item_session_turn=session.turn,
                 )
             remaining_timeout = profile.timeout_sec - (monotonic() - started_at)
             if remaining_timeout <= 1:
@@ -823,9 +834,18 @@ class StructuredJSONModelAdapter:
                     schema=rendered.output_schema,
                     model=profile.model,
                     max_tokens=profile.max_output_tokens,
-                    timeout_sec=max(1, round(remaining_timeout)),
+                    timeout_sec=max(1, int(remaining_timeout)),
                 )
             except requests.Timeout as exc:
+                if self._diagnostics is not None:
+                    self._diagnostics.record_transport_timeout(
+                        context=projected_context,
+                        repair_index=0,
+                        reason="observation integration timed out",
+                        transport_stage="observation_integration",
+                        work_item_session_id=session.session_id,
+                        work_item_session_turn=session.turn,
+                    )
                 raise TimeoutError("observation integration timed out") from exc
             error = result.validationError
             if result.payload is None and error is None:
@@ -840,6 +860,8 @@ class StructuredJSONModelAdapter:
                     output_tokens=result.outputTokens,
                     provider_retry_count=result.retryCount,
                     transport_stage="observation_integration",
+                    work_item_session_id=session.session_id,
+                    work_item_session_turn=session.turn,
                 )
             if error is not None or result.payload is None:
                 raise ModelProtocolError(
@@ -867,10 +889,55 @@ class StructuredJSONModelAdapter:
                 1 + result.retryCount,
             )
 
-        with ThreadPoolExecutor(
-            max_workers=min(4, len(projected_contexts))
-        ) as executor:
-            results = list(executor.map(solve_one, projected_contexts))
+        executor = ThreadPoolExecutor(max_workers=min(4, len(assignments)))
+        futures = {
+            executor.submit(solve_one, assignment): index
+            for index, assignment in enumerate(assignments)
+        }
+        remaining_timeout = max(
+            0.0,
+            profile.timeout_sec - (monotonic() - started_at),
+        )
+        completed, pending = wait(futures, timeout=remaining_timeout)
+        for future in pending:
+            future.cancel()
+        executor.shutdown(wait=not pending, cancel_futures=True)
+
+        indexed_results = []
+        timed_out = bool(pending)
+        protocol_errors: list[ModelProtocolError] = []
+        for future in completed:
+            try:
+                indexed_results.append((futures[future], future.result()))
+            except TimeoutError:
+                timed_out = True
+            except ModelProtocolError as exc:
+                protocol_errors.append(exc)
+
+        if protocol_errors:
+            raise protocol_errors[0]
+
+        results = [
+            result for _, result in sorted(indexed_results, key=lambda item: item[0])
+        ]
+        if timed_out:
+            if not results:
+                raise TimeoutError("observation integration batch timed out")
+            observation = _derive_observation_work_item_updates(
+                context,
+                _merge_observation_integrations([item[0] for item in results]),
+            )
+            raise _cycle_close_checkpoint_timeout(
+                "observation integration batch partially timed out",
+                observation=observation,
+                completed_stage="work_item_sessions_partial",
+                input_tokens=_sum_optional_tokens(
+                    *(item[1] for item in results)
+                ),
+                output_tokens=_sum_optional_tokens(
+                    *(item[2] for item in results)
+                ),
+            )
         return (
             _merge_observation_integrations([item[0] for item in results]),
             _sum_optional_tokens(*(item[1] for item in results)),
@@ -2076,8 +2143,13 @@ def _contract_repair_catalog(context: SolverContext) -> str:
 def render_observation_integration_model_call(
     context: SolverContext,
     profile: ModelCallProfile,
+    *,
+    work_item_session: WorkItemSession | None = None,
 ) -> RenderedModelCall:
-    input_payload = _observation_integration_context_payload(context)
+    input_payload = _observation_integration_context_payload(
+        context,
+        work_item_session=work_item_session,
+    )
     instructions = (
         f"{profile.system_prompt}\n\n"
         f"{RUNTIME_INPUT_MARKER}"
@@ -2228,6 +2300,8 @@ def render_dependency_assessment_model_call(
 
 def _observation_integration_context_payload(
     context: SolverContext,
+    *,
+    work_item_session: WorkItemSession | None = None,
 ) -> dict[str, Any]:
     grounding_ids = set(context.grounding_evidence_ids)
     active_work_items, active_hypotheses = _active_observation_items(context)
@@ -2315,6 +2389,8 @@ def _observation_integration_context_payload(
         ],
         "cycle_close_required": context.cycle_close_required,
     }
+    if work_item_session is not None:
+        payload["work_item_session"] = work_item_session.as_input()
     if context.contract_feedback is not None:
         previous = context.contract_feedback.previous_decision
         active_hypothesis_ids = {
@@ -2402,9 +2478,17 @@ def _observation_work_item_contexts(
                 (),
             )
         )
+        scoped_omitted_evidence_ids = (
+            context.omitted_evidence_ids_by_work_item.get(
+                work_item.work_item_id,
+                (),
+            )
+            if context.omitted_evidence_ids_by_work_item
+            else context.omitted_evidence_ids
+        )
         omitted_evidence_ids = tuple(
             evidence_id
-            for evidence_id in context.omitted_evidence_ids
+            for evidence_id in scoped_omitted_evidence_ids
             if evidence_id not in completed_load_ids
         )
         projected.append(
@@ -2426,6 +2510,9 @@ def _observation_work_item_contexts(
                     "omitted_evidence_ids": omitted_evidence_ids,
                     "completed_load_evidence_ids_by_work_item": {
                         work_item.work_item_id: tuple(sorted(completed_load_ids))
+                    },
+                    "omitted_evidence_ids_by_work_item": {
+                        work_item.work_item_id: omitted_evidence_ids
                     },
                     "evidence_hypothesis_candidates": candidates,
                     "required_dependency_work_item_ids": tuple(

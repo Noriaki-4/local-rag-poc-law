@@ -13,6 +13,7 @@
 
 ## 入力
 
+- `work_item_session`：このWorkItem専属の論理session IDと現在turn
 - `work_items[]`：今回確認する事項
 - `hypotheses[]`：現在の命題、判定、確認済みEvidenceと未確認事項
 - `evidence_hypothesis_candidates[]`：本文取得前の対応候補であり、判定結果ではなく対応先も制限しない
@@ -50,6 +51,7 @@
 
 ## ルール
 
+- このsessionでは`work_item_session.work_item_id`の確認だけを扱います。後続turnでも、現在提示されたHypothesis、Evidence及び検索履歴を正本とします。
 - 候補対応や同じ語句だけを理由に本文を根拠にしません。
 - 同じArticleの別の要件又は例外を、確認対象の根拠にしません。
 - 質問への回答に関係しない参照先の内容を、新しい`gaps`に追加しません。質問された

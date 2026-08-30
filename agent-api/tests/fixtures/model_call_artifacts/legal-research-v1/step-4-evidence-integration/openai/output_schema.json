@@ -81,8 +81,7 @@
           "work_item_id": {
             "description": "この依存判断が属する既知WorkItem ID。",
             "enum": [
-              "wi-1",
-              "wi-2"
+              "wi-1"
             ],
             "type": "string"
           }
@@ -97,8 +96,8 @@
         ],
         "type": "object"
       },
-      "maxItems": 2,
-      "minItems": 2,
+      "maxItems": 1,
+      "minItems": 1,
       "type": "array"
     },
     "tool_requests": {
@@ -167,11 +166,7 @@
           "hypothesis_id": {
             "description": "更新する既存Hypothesisの完全一致ID。",
             "enum": [
-              "h-1",
-              "h-2",
-              "h-3",
-              "h-4",
-              "h-5"
+              "h-1"
             ],
             "type": "string"
           },
@@ -193,7 +188,7 @@
         ],
         "type": "object"
       },
-      "maxItems": 5,
+      "maxItems": 1,
       "type": "array"
     }
   },

@@ -713,6 +713,14 @@ class SolverContext(FrameworkModel):
     omitted_evidence_ids: tuple[str, ...] = Field(
         description="Caseでは既知だが今回本文を省略したEvidence ID。必要ならload_evidenceで取得する。",
     )
+    omitted_evidence_ids_by_work_item: dict[str, tuple[str, ...]] = Field(
+        default_factory=dict,
+        exclude=True,
+        description=(
+            "省略Evidenceを発見又は対応付けたWorkItem別に保持する内部投影。"
+            "法的関連性を推測せず、Tool要求と既存Hypothesis対応の来歴だけを使う。"
+        ),
+    )
     required_dependency_kind: str | None = Field(
         default=None,
         description="対象WorkItemで確認する下位規範依存の種類。指定がなければnull。",
@@ -1230,6 +1238,13 @@ def build_solver_context(
         material,
     )
 
+    omitted_evidence_ids = tuple(
+        item.evidence_id
+        for item in state.evidence
+        if item.evidence_id not in included_ids
+        and item.evidence_id not in graph_navigation_ids
+    )
+
     return SolverContext(
         case_id=state.case_id,
         question=state.question,
@@ -1297,11 +1312,12 @@ def build_solver_context(
         required_graph_review_request_ids=required_graph_review_request_ids,
         required_search_review_request_ids=required_search_review_request_ids,
         material_evidence=material,
-        omitted_evidence_ids=tuple(
-            item.evidence_id
-            for item in state.evidence
-            if item.evidence_id not in included_ids
-            and item.evidence_id not in graph_navigation_ids
+        omitted_evidence_ids=omitted_evidence_ids,
+        omitted_evidence_ids_by_work_item=(
+            _omitted_evidence_ids_by_work_item(
+                state,
+                omitted_evidence_ids=omitted_evidence_ids,
+            )
         ),
         required_dependency_kind=required_dependency_kind,
         required_dependency_work_item_ids=required_dependency_work_item_ids,
@@ -1310,6 +1326,76 @@ def build_solver_context(
         contract_feedback=contract_feedback,
         action_feedback=action_feedback,
     )
+
+
+def _omitted_evidence_ids_by_work_item(
+    state: CaseState,
+    *,
+    omitted_evidence_ids: tuple[str, ...],
+) -> dict[str, tuple[str, ...]]:
+    """省略Evidenceを、既存の発見・対応来歴だけでWorkItemへ割り当てる。"""
+
+    hypothesis_work_item = {
+        item.hypothesis_id: item.work_item_id for item in state.hypotheses
+    }
+    owners_by_evidence: dict[str, set[str]] = {}
+
+    def add_owner(evidence_id: str, work_item_id: str | None) -> None:
+        if work_item_id is None:
+            return
+        owners_by_evidence.setdefault(evidence_id, set()).add(work_item_id)
+
+    for hypothesis in state.hypotheses:
+        for evidence_id in hypothesis.evidence_ids:
+            add_owner(evidence_id, hypothesis.work_item_id)
+
+    requests_by_id = {item.request_id: item for item in state.tool_requests}
+    for result in state.tool_results:
+        request = requests_by_id.get(result.request_id)
+        if request is None:
+            continue
+        for evidence_id in result.evidence_ids:
+            add_owner(evidence_id, request.work_item_id)
+
+    article_work_items: dict[str, set[str]] = {}
+    for review in state.search_candidate_reviews:
+        for assessment in review.assessments:
+            for hypothesis_id in assessment.matched_hypothesis_ids:
+                work_item_id = hypothesis_work_item.get(hypothesis_id)
+                if work_item_id is not None:
+                    article_work_items.setdefault(
+                        assessment.article_id,
+                        set(),
+                    ).add(work_item_id)
+    for review in state.graph_candidate_reviews:
+        for decision in review.frontier_decisions:
+            work_item_id = (
+                hypothesis_work_item.get(decision.hypothesis_id)
+                if decision.hypothesis_id is not None
+                else decision.work_item_id
+            )
+            if work_item_id is not None:
+                article_work_items.setdefault(decision.article_id, set()).add(
+                    work_item_id
+                )
+
+    evidence_by_id = {item.evidence_id: item for item in state.evidence}
+    for evidence_id in omitted_evidence_ids:
+        evidence = evidence_by_id.get(evidence_id)
+        if evidence is None:
+            continue
+        for article_id in _evidence_article_ids(evidence):
+            for work_item_id in article_work_items.get(article_id, ()):
+                add_owner(evidence_id, work_item_id)
+
+    return {
+        work_item.work_item_id: tuple(
+            evidence_id
+            for evidence_id in omitted_evidence_ids
+            if work_item.work_item_id in owners_by_evidence.get(evidence_id, ())
+        )
+        for work_item in state.work_items
+    }
 
 
 def _evidence_hypothesis_candidates(

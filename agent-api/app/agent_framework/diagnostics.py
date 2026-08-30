@@ -521,6 +521,8 @@ class AgentDiagnostics:
         repair_index: int,
         transport_stage: str = "solver",
         provider: str | None = None,
+        work_item_session_id: str | None = None,
+        work_item_session_turn: int | None = None,
     ) -> None:
         if self.mode == "off":
             return
@@ -563,6 +565,10 @@ class AgentDiagnostics:
             "cycleNo": max(1, context.research_cycle_count),
             "scope": _context_scope(context),
         }
+        if work_item_session_id is not None:
+            record["workItemSessionId"] = work_item_session_id
+        if work_item_session_turn is not None:
+            record["workItemSessionTurn"] = work_item_session_turn
         if self.mode == "snapshot":
             record.update(
                 {
@@ -617,6 +623,8 @@ class AgentDiagnostics:
         output_tokens: int | None,
         provider_retry_count: int,
         transport_stage: str = "solver",
+        work_item_session_id: str | None = None,
+        work_item_session_turn: int | None = None,
     ) -> None:
         if self.mode == "off":
             return
@@ -632,6 +640,10 @@ class AgentDiagnostics:
             "hasPayload": payload is not None,
             "payloadHash": _json_sha256(payload) if payload is not None else None,
         }
+        if work_item_session_id is not None:
+            record["workItemSessionId"] = work_item_session_id
+        if work_item_session_turn is not None:
+            record["workItemSessionTurn"] = work_item_session_turn
         if self.mode == "snapshot":
             record["payload"] = payload
         self._write(record)
@@ -643,18 +655,23 @@ class AgentDiagnostics:
         repair_index: int,
         reason: str,
         transport_stage: str = "solver",
+        work_item_session_id: str | None = None,
+        work_item_session_turn: int | None = None,
     ) -> None:
         if self.mode == "off":
             return
-        self._write(
-            {
-                "event": "transport_timeout",
-                "caseId": context.case_id,
-                "transportAttempt": repair_index + 1,
-                "transportStage": transport_stage,
-                "reason": reason,
-            }
-        )
+        record: dict[str, Any] = {
+            "event": "transport_timeout",
+            "caseId": context.case_id,
+            "transportAttempt": repair_index + 1,
+            "transportStage": transport_stage,
+            "reason": reason,
+        }
+        if work_item_session_id is not None:
+            record["workItemSessionId"] = work_item_session_id
+        if work_item_session_turn is not None:
+            record["workItemSessionTurn"] = work_item_session_turn
+        self._write(record)
 
     def _write(self, record: dict[str, Any]) -> int | None:
         try:

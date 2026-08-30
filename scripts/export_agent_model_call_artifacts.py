@@ -13,6 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "agent-api"))
 
 from app.adapters.models.structured_json import (  # noqa: E402
+    _observation_work_item_contexts,
     render_cycle_close_model_call,
     render_dependency_assessment_model_call,
     render_observation_integration_model_call,
@@ -36,6 +37,9 @@ from app.agent_framework.model_call_artifacts import (  # noqa: E402
 )
 from app.agent_framework.ports.model import ReviewerView  # noqa: E402
 from app.agent_framework.profiles import ModelCallProfile  # noqa: E402
+from app.agent_framework.work_item_sessions import (  # noqa: E402
+    first_work_item_session,
+)
 from app.domains.legal.profiles import legal_agent_profile  # noqa: E402
 
 _SOLVER_STAGES = {
@@ -174,7 +178,15 @@ def _render(
             profile,
         )
     elif stage == "observation_integration":
-        rendered = render_observation_integration_model_call(context, profile)
+        projected_contexts = _observation_work_item_contexts(context)
+        if not projected_contexts:
+            raise ValueError("observation fixture has no active WorkItem session")
+        context = projected_contexts[0]
+        rendered = render_observation_integration_model_call(
+            context,
+            profile,
+            work_item_session=first_work_item_session(context),
+        )
     elif stage == "dependency_assessment":
         observation_value = fixture.get("observationIntegration")
         if not isinstance(observation_value, dict):

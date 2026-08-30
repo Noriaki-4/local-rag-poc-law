@@ -324,6 +324,11 @@ Reviewer無効時のSolver呼び出しは次の範囲になる。
 Solverは専用のEvidence Integrationで、1つのopen WorkItemとそのHypothesisを直近取得本文と照合し、
 Hypothesisへの反映、同じ確認事項の下位規範確認、直後に必要なToolを最大1件、1回の判断で行う。
 対象WorkItemが複数ある場合は、WorkItem単位の呼出しを最大4件並列実行する。
+各呼出しには`case_id + work_item_id`から作る論理session IDを付ける。同じWorkItemは同じsessionを
+後続Step・Cycleでも使うが、会話履歴は正本にせず、毎回CaseStoreから投影した状態を入力する。
+親AgentLoopは並列batchに一つの共通締切を設定する。締切までに完了した差分は入力順で結合し、
+未完了呼出しのために破棄しない。未完了WorkItemはopenのまま残す。子sessionはCaseStoreを直接更新せず、
+Cycle Close、次Cycle開始及び最終回答を判断しない。
 取得前のArticleとHypothesisの対応は候補であり、対応候補があるWorkItemのLLMが本文と照合して判断する。
 Programは本文取得枠と既知IDを管理するが、対応先、取得するArticle又はその優先順位を決めない。
 Cycle境界では新しいTool要求を許可しない。
@@ -339,6 +344,8 @@ Evidence IDと残る`gaps`を保持する。
 続く専用のCycle Closeで、`finalize`または次Cycleへの未解決事項・frontierの引継ぎだけを返す。
 Evidence Integrationの出力が契約検証に合格した後で後続処理が時間切れになった場合、その意味更新を
 既存validatorで検証してCaseStoreへ保存する。後続処理の失敗を理由に、完了済みのObservationを破棄しない。
+並列batchの一部だけが時間切れになった場合も同じ扱いとし、完了したsessionの意味更新だけをcheckpointへ保存する。
+時間切れ時は親AgentLoopが予約済み時間で限定回答へ移り、子sessionの遅延によって最終回答予約を消費しない。
 依存確認対象がない場合はEvidence Integrationの依存判断を空配列にする。
 次Cycleを開始する場合は、その後の`start_cycle`呼出しでgoal・strategyを決める。
 予算によって短縮された中間LLM呼出しがtimeoutした場合は、実際のprovider障害と区別して

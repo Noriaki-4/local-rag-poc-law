@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from app.adapters.models.structured_json import (
+    _observation_work_item_contexts,
     render_cycle_close_model_call,
     render_dependency_assessment_model_call,
     render_observation_integration_model_call,
@@ -23,6 +24,7 @@ from app.agent_framework.model_call_artifacts import (
 )
 from app.agent_framework.profiles import AgentLimits, ModelCallProfile
 from app.agent_framework.state import CaseState
+from app.agent_framework.work_item_sessions import first_work_item_session
 from app.domains.legal.profiles import legal_agent_profile
 from app.llm import _to_anthropic_schema
 
@@ -243,11 +245,13 @@ def test_cycle_boundary_artifacts_are_current() -> None:
             "dependency_decisions": observed["dependency_decisions"],
         }
     )
+    observation_context = _observation_work_item_contexts(context)[0]
     rendered_calls = {
         "step-4-evidence-integration": (
             render_observation_integration_model_call(
-                context,
+                observation_context,
                 observation_profile,
+                work_item_session=first_work_item_session(observation_context),
             )
         ),
         "step-5-cycle-close": render_cycle_close_model_call(
