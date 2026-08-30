@@ -748,7 +748,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "438"
+    assert diagnostic_records[0]["profileVersion"] == "439"
     assert diagnostic_records[0]["runElapsedMs"] >= 0
     assert diagnostic_records[0]["recordedAt"].endswith("+00:00")
     assert len(diagnostic_records[0]["questionHash"]) == 64
@@ -759,7 +759,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "438"
+    assert transport_input["profileVersion"] == "439"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -1305,7 +1305,7 @@ def test_graph_review_moves_to_another_hypothesis_after_integrated_fetch() -> No
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "438"
+    assert profile.version == "439"
     assert profile.solver_graph_review is not None
     assert profile.solver_graph_review.max_output_tokens == (
         profile.solver_integration.max_output_tokens
@@ -1583,7 +1583,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "438"
+    assert profile.version == "439"
     assert prompt.rindex("## 出力") > prompt.rindex(
         "</solver_context>"
     )
@@ -1634,7 +1634,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "438"
+    assert profile.version == "439"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -5746,7 +5746,7 @@ def test_observation_prompt_rejects_confirmed_dependency_with_lower_norm_gap(
     assert "`terminal_text_confirmed`と併存させません" in (
         rendered.instructions
     )
-    assert rendered.instructions.index("未確認内容を`gaps`へ残します") < (
+    assert rendered.instructions.index("残る未確認内容だけを`gaps`へ残します") < (
         rendered.instructions.index("更新後の`gaps`と取得本文を使い")
     )
     assert "gapsとして残す場合" in rendered.output_schema["properties"][
@@ -11395,7 +11395,7 @@ def test_finalization_excludes_unverified_work_item_evidence() -> None:
     assert rendered.input_payload["material_evidence"] == []
     assert rendered.input_payload["grounding_evidence_ids"] == []
     assert "navigation_evidence_ids" not in rendered.input_payload
-    assert "`verified_hypothesis_ids=[]`なら" in (
+    assert "`grounding_evidence_ids=[]`なら" in (
         rendered.instructions
     )
     assert rendered.input_payload["resolved_work_item_ids"] == []
@@ -11456,7 +11456,7 @@ def test_finalization_rejects_citations_without_resolved_work_item_basis() -> No
 
     with pytest.raises(
         ContractViolation,
-        match="citations require verified Hypothesis or resolved dependency basis",
+        match="citations require Hypothesis evidence or resolved dependency basis",
     ):
         apply_solver_decision(
             state,
@@ -11467,6 +11467,80 @@ def test_finalization_rejects_citations_without_resolved_work_item_basis() -> No
             finalize_only=True,
             can_start_next_cycle=False,
         )
+
+
+def test_finalization_can_cite_confirmed_part_of_unresolved_hypothesis() -> None:
+    state = CaseState(
+        case_id="fixture-finalization-unresolved-confirmed-part",
+        question="手続の確認済み部分と未確認部分を説明する。",
+        research_cycle_count=4,
+        work_items=(WorkItem(work_item_id="wi-1", question="手続を確認する"),),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h-1",
+                work_item_id="wi-1",
+                statement="複数の手続が必要である。",
+                judgment="unresolved",
+                evidence_ids=("e-confirmed-part",),
+                gaps=("残る手続の具体的内容",),
+            ),
+        ),
+        evidence=(
+            Evidence(
+                evidence_id="e-confirmed-part",
+                source_ref="fixture:e-confirmed-part",
+                content="公告日に届出書を提出しなければならない。",
+                created_cycle=4,
+                metadata={
+                    "articleId": "law-article-1",
+                    "citationEligible": True,
+                },
+            ),
+        ),
+    )
+    context = build_solver_context(
+        state,
+        AgentLimits(max_research_cycles=4),
+        remaining_wall_time_sec=30,
+        finalize_only=True,
+    )
+    profile = legal_profiles.legal_agent_profile().solver_finalization
+    assert profile is not None
+    rendered = render_solver_model_call(
+        context,
+        profile,
+        provider="openai",
+        stage="finalization",
+    )
+
+    assert rendered.input_payload["verified_hypothesis_ids"] == []
+    assert rendered.input_payload["grounding_evidence_ids"] == [
+        "e-confirmed-part"
+    ]
+    assert [
+        item["evidence_id"] for item in rendered.input_payload["material_evidence"]
+    ] == ["e-confirmed-part"]
+
+    finalized = apply_solver_decision(
+        state,
+        SolverDecision(
+            next="finalize",
+            answer=FinalAnswer(
+                text="確認済み本文では、公告日に届出書を提出する。",
+                citation_ids=("e-confirmed-part",),
+                limitations=("残る手続の具体的内容は未確認。",),
+                unresolved_work_item_ids=("wi-1",),
+                unresolved_hypothesis_ids=("h-1",),
+            ),
+        ),
+        limits=AgentLimits(max_research_cycles=4),
+        known_tool_names=set(),
+        material_evidence_ids=("e-confirmed-part",),
+        finalize_only=True,
+        can_start_next_cycle=False,
+    )
+    assert finalized.final_answer is not None
+    assert finalized.final_answer.citation_ids == ("e-confirmed-part",)
 
 
 def test_overview_finalization_projects_verified_open_work_material() -> None:

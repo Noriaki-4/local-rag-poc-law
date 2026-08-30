@@ -1070,24 +1070,23 @@ def apply_solver_decision(
             raise ContractViolation(
                 f"answer cites navigation-only evidence: {sorted(navigation_citations)}"
             )
-        verified_basis_evidence_ids = {
+        citable_basis_evidence_ids = {
             evidence_id
             for hypothesis in hypotheses.values()
-            if hypothesis.judgment in {"supported", "contradicted"}
             for evidence_id in hypothesis.evidence_ids
         }
-        verified_basis_evidence_ids.update(
+        citable_basis_evidence_ids.update(
             evidence_id
             for dependency in dependency_by_key.values()
             if dependency.status == "resolved"
             for evidence_id in dependency.basis_evidence_ids
         )
         unsupported_citations = (
-            set(decision.answer.citation_ids) - verified_basis_evidence_ids
+            set(decision.answer.citation_ids) - citable_basis_evidence_ids
         )
         if unsupported_citations:
             raise ContractViolation(
-                "answer citations require verified Hypothesis or resolved "
+                "answer citations require Hypothesis evidence or resolved "
                 "dependency basis: "
                 f"{sorted(unsupported_citations)}"
             )

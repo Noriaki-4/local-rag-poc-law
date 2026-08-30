@@ -1257,13 +1257,12 @@ def _project_finalization_context(context: SolverContext) -> SolverContext:
     visible_hypothesis_ids = {
         item.hypothesis_id for item in context.hypotheses
     }
-    verified_basis_evidence_ids = {
+    citable_basis_evidence_ids = {
         evidence_id
         for hypothesis in context.hypotheses
-        if hypothesis.judgment in {"supported", "contradicted"}
         for evidence_id in hypothesis.evidence_ids
     }
-    verified_basis_evidence_ids.update(
+    citable_basis_evidence_ids.update(
         evidence_id
         for decision in context.dependency_decisions
         if decision.status == "resolved"
@@ -1272,7 +1271,7 @@ def _project_finalization_context(context: SolverContext) -> SolverContext:
     visible_grounding_ids = tuple(
         evidence_id
         for evidence_id in context.grounding_evidence_ids
-        if evidence_id in verified_basis_evidence_ids
+        if evidence_id in citable_basis_evidence_ids
         and any(
             item.evidence_id == evidence_id
             for item in context.material_evidence
@@ -2722,7 +2721,7 @@ def _verified_answer_evidence_ids(
     context: SolverContext,
     observation: ObservationIntegrationDecision,
 ) -> tuple[str, ...]:
-    """判定済みHypothesis・DependencyへLLMが結び付けた本文IDを返す。"""
+    """Hypothesisの確認済み部分・解決済みDependencyの本文IDを返す。"""
 
     _, hypotheses = _project_observation_integration_state(
         context,
@@ -2732,13 +2731,12 @@ def _verified_answer_evidence_ids(
         context.dependency_decisions,
         observation.dependency_decisions,
     )
-    verified_ids = {
+    citable_ids = {
         evidence_id
         for hypothesis in hypotheses
-        if hypothesis.judgment in {"supported", "contradicted"}
         for evidence_id in hypothesis.evidence_ids
     }
-    verified_ids.update(
+    citable_ids.update(
         evidence_id
         for decision in dependency_decisions
         if decision.status == "resolved"
@@ -2747,7 +2745,7 @@ def _verified_answer_evidence_ids(
     return tuple(
         evidence_id
         for evidence_id in context.grounding_evidence_ids
-        if evidence_id in verified_ids
+        if evidence_id in citable_ids
     )
 
 

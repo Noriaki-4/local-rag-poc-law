@@ -20,7 +20,7 @@
 - `work_tree[]`：各IDの確認事項と現在の状態です。
 - `hypotheses[]`：確認済み・未確認を含む現在のHypothesisです。
 - `verified_hypothesis_ids`：本文根拠により`supported`又は`contradicted`と判断済みのHypothesis IDです。
-- `grounding_evidence_ids`：確認済みHypothesis又は解決済み下位規範判断に使用できる引用IDです。
+- `grounding_evidence_ids`：Hypothesisの確認済み部分又は解決済み下位規範判断に使用できる引用IDです。
 - `required_answer_evidence_ids`：解決済みWorkItemの回答に必ず含める引用IDです。
 - `material_evidence[]`：`grounding_evidence_ids`に対応する確認済み本文です。
 - `non_work_item_requirements`：限定回答でも守る、回答全体への明示要求です。
@@ -34,8 +34,8 @@
 ### 手順
 
 1. `resolved_work_item_ids`と`open_work_item_ids`を確認します。
-2. `verified_hypothesis_ids`にある命題は、対応する本文が示す範囲だけを確認済みとして回答します。所属WorkItemがopenなら、そのWorkItem全体が解決したとは扱いません。
-3. `verified_hypothesis_ids=[]`なら、仮説の内容を回答へ転記せず、法的結論を確認できなかった旨だけを回答します。
+2. `verified_hypothesis_ids`にある命題と、未解決HypothesisでもEvidenceにより確認できた部分を、本文が示す範囲だけ回答します。所属WorkItemがopenなら、そのWorkItem全体が解決したとは扱いません。
+3. `grounding_evidence_ids=[]`なら、仮説の内容を回答へ転記せず、法的結論を確認できなかった旨だけを回答します。
 4. `open_work_item_ids`を回答の`unresolved_work_item_ids`へ、入力の`unresolved_hypothesis_ids`を回答の同名項目へ、そのまま列挙します。
 5. `graph_review_ledger`に未処理の`relevant_deferred`があれば、全件を`deferred_frontier_resolutions`へ書きます。
 6. 回答を作るときは、`non_work_item_requirements`をすべて反映します。
@@ -50,10 +50,10 @@
 - `supported`でも`gaps`が残るHypothesisのWorkItemは未解決です。WorkItem IDと`limitations`へ未確認内容を反映し、そのHypothesis IDを`unresolved_hypothesis_ids`へ読み替えません。
 - supported Hypothesisがあっても下位規範の`needs_action`が残るWorkItemは未解決です。そのWorkItem IDは含めますが、supported Hypothesisをunresolvedへ読み替えません。
 - open WorkItemがある場合は、対応する未確認内容をlimitationsへ書きます。
-- `verified_hypothesis_ids=[]`なら、`citation_ids=[]`にします。
+- `grounding_evidence_ids=[]`なら、`citation_ids=[]`にします。
 - `citation_ids`には`grounding_evidence_ids`のIDだけを使います。
 - `required_answer_evidence_ids`を`citation_ids`から落としません。
-- open WorkItemに属する確認済みHypothesisは限定的に回答できますが、未確認部分を確認済みとして補いません。
+- open WorkItem又は未解決Hypothesisでも、提示本文が直接示す部分は限定的に回答できます。未確認部分を確認済みとして補いません。
 - Tool失敗、timeout、候補不在を法的根拠の不存在として断定しません。
 - 回答は取得済み本文が示す範囲に限定します。
 - 法令名を回答へ書く場合は、対応する`material_evidence[].title`をそのまま使います。
