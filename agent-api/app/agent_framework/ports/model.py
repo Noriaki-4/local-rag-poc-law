@@ -31,7 +31,7 @@ class SolverCheckpointTimeout(TimeoutError):
         self,
         message: str,
         *,
-        partial_decision: SolverDecision,
+        partial_decision: SolverDecision | None,
         completed_stage: str,
         input_tokens: int | None = None,
         output_tokens: int | None = None,

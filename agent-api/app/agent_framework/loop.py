@@ -263,12 +263,12 @@ class AgentLoop:
             cycle_limit_reached = (
                 state.research_cycle_count >= self._profile.limits.max_research_cycles
             )
-            completion_reserve = (
-                self._profile.limits.finalization_reserve_sec
-                + self._profile.limits.cycle_close_reserve_sec
-                + self._profile.limits.min_next_cycle_budget_sec
+            # 現Cycleの探索停止と、次Cycleを開始できるかの判定は別物である。
+            # min_next_cycle_budget_secはbuild_solver_contextの
+            # can_start_next_cycleだけで使い、現在Cycleを早期終了させない。
+            time_reserve_reached = (
+                remaining <= self._profile.limits.finalization_reserve_sec
             )
-            time_reserve_reached = remaining <= completion_reserve
             finalize_only = (
                 cycle_limit_reached
                 or time_reserve_reached
@@ -286,7 +286,6 @@ class AgentLoop:
             integration_call = bool(state.research_cycle_count or reviewer_findings)
             pending_grounding_observation = bool(
                 integration_call
-                and not finalize_only
                 and not reviewer_findings
                 and _has_unintegrated_article_fetch_result(
                     state,
@@ -326,7 +325,9 @@ class AgentLoop:
                     state,
                     self._profile.limits,
                     remaining_wall_time_sec=attempt_remaining,
-                    finalize_only=finalize_only,
+                    finalize_only=(
+                        finalize_only and not pending_grounding_observation
+                    ),
                     reviewer_findings=reviewer_findings,
                     contract_feedback=contract_feedback,
                     action_feedback=action_feedback,
@@ -426,6 +427,11 @@ class AgentLoop:
                     ),
                 )
                 if purpose == "cycle_close":
+                    model_budget = min(
+                        model_budget,
+                        self._profile.limits.cycle_close_reserve_sec,
+                    )
+                if purpose == "cycle_close":
                     # 下位規範状態は逐次統合済みであり、Cycle Closeは遷移だけを判断する。
                     context = context.model_copy(
                         update={
@@ -451,7 +457,7 @@ class AgentLoop:
                 except SolverCheckpointTimeout as exc:
                     partial_decision = exc.partial_decision
                     call_latency_ms = self._elapsed_ms(call_started)
-                    if self._diagnostics is not None:
+                    if self._diagnostics is not None and partial_decision is not None:
                         self._diagnostics.record_solver_output(
                             state=state,
                             purpose=f"{purpose}_{exc.completed_stage}_checkpoint",
@@ -461,43 +467,44 @@ class AgentLoop:
                             input_tokens=exc.input_tokens,
                             output_tokens=exc.output_tokens,
                         )
-                    try:
-                        checkpoint_state = apply_solver_decision(
-                            state,
-                            partial_decision,
-                            limits=self._profile.limits,
-                            known_tool_names=self._read_only_tool_names,
-                            material_evidence_ids=context.material_evidence_ids,
-                            finalize_only=False,
-                        )
-                    except ContractViolation as checkpoint_error:
-                        logger.warning(
-                            "Solver checkpoint was not applied: %s",
-                            checkpoint_error,
-                        )
-                        if self._diagnostics is not None:
-                            self._diagnostics.record_contract_violation(
-                                state=state,
-                                purpose=(
-                                    f"{purpose}_{exc.completed_stage}_checkpoint"
-                                ),
-                                contract_attempt=decision_attempt,
-                                decision=partial_decision,
-                                violation=str(checkpoint_error),
+                    checkpoint_state = state
+                    if partial_decision is not None:
+                        try:
+                            checkpoint_state = apply_solver_decision(
+                                state,
+                                partial_decision,
+                                limits=self._profile.limits,
+                                known_tool_names=self._read_only_tool_names,
+                                material_evidence_ids=context.material_evidence_ids,
+                                finalize_only=False,
                             )
-                        checkpoint_state = state
-                    else:
-                        if self._diagnostics is not None:
-                            self._diagnostics.record_decision_applied(
-                                state_before=state,
-                                state_after=checkpoint_state,
-                                context=context,
-                                purpose=(
-                                    f"{purpose}_{exc.completed_stage}_checkpoint"
-                                ),
-                                contract_attempt=decision_attempt,
-                                decision=partial_decision,
+                        except ContractViolation as checkpoint_error:
+                            logger.warning(
+                                "Solver checkpoint was not applied: %s",
+                                checkpoint_error,
                             )
+                            if self._diagnostics is not None:
+                                self._diagnostics.record_contract_violation(
+                                    state=state,
+                                    purpose=(
+                                        f"{purpose}_{exc.completed_stage}_checkpoint"
+                                    ),
+                                    contract_attempt=decision_attempt,
+                                    decision=partial_decision,
+                                    violation=str(checkpoint_error),
+                                )
+                        else:
+                            if self._diagnostics is not None:
+                                self._diagnostics.record_decision_applied(
+                                    state_before=state,
+                                    state_after=checkpoint_state,
+                                    context=context,
+                                    purpose=(
+                                        f"{purpose}_{exc.completed_stage}_checkpoint"
+                                    ),
+                                    contract_attempt=decision_attempt,
+                                    decision=partial_decision,
+                                )
                     model_traces.append(
                         ModelCallTrace(
                             purpose=(
@@ -558,7 +565,7 @@ class AgentLoop:
                         input_tokens=solver_call.input_tokens,
                         output_tokens=solver_call.output_tokens,
                         attempt_count=solver_call.attempt_count,
-                        finalize_only=finalize_only,
+                        finalize_only=context.finalize_only,
                     )
                 )
                 if self._diagnostics is not None:
@@ -668,9 +675,12 @@ class AgentLoop:
                             context.graph_review_batch.remaining_unreviewed_count
                         ),
                         remaining_fetch_capacity=context.remaining_fetch_capacity,
-                        cycle_close_required=context.cycle_close_required,
+                        cycle_close_required=(
+                            context.cycle_close_required
+                            and purpose != "observation_integration"
+                        ),
                         can_start_next_cycle=context.can_start_next_cycle,
-                        finalize_only=finalize_only,
+                        finalize_only=context.finalize_only,
                         allow_dependency_action_without_tool=(
                             purpose == "observation_integration"
                             or bool(context.required_dependency_work_item_ids)
@@ -773,8 +783,20 @@ class AgentLoop:
                         in {"not_requested", "failed", "timeout"}
                     },
                 )
-                decision_requests = (
-                    (graph_fetch_request,) if graph_fetch_request is not None else ()
+                graph_load_request = self._graph_review_load_request(
+                    candidate,
+                    solver_call.decision.graph_candidate_review,
+                    fetchable_article_ids={
+                        item.article_id
+                        for item in context.graph_review_batch.candidates
+                        if item.content_status
+                        in {"not_requested", "failed", "timeout"}
+                    },
+                )
+                decision_requests = tuple(
+                    item
+                    for item in (graph_fetch_request, graph_load_request)
+                    if item is not None
                 )
                 candidate = self._replace_state(
                     candidate,
@@ -900,7 +922,8 @@ class AgentLoop:
             return self._profile.solver_reviewer_revision, "reviewer_revision"
         if observation_integration_call:
             observation_profile = (
-                self._profile.solver_cycle_close
+                self._profile.solver_observation_integration
+                or self._profile.solver_cycle_close
                 or self._profile.solver_integration
             )
             return (
@@ -919,10 +942,18 @@ class AgentLoop:
         if (
             integration_call
             and context.recent_tool_results
-            and self._profile.solver_cycle_close is not None
+            and (
+                self._profile.solver_observation_integration is not None
+                or self._profile.solver_cycle_close is not None
+            )
         ):
+            observation_profile = (
+                self._profile.solver_observation_integration
+                or self._profile.solver_cycle_close
+            )
+            assert observation_profile is not None
             return (
-                self._profile.solver_cycle_close.model_copy(
+                observation_profile.model_copy(
                     update={"context_projection": "observation_integration"}
                 ),
                 "observation_integration",
@@ -994,6 +1025,91 @@ class AgentLoop:
             tool_name=self._profile.graph_review_fetch_tool_name or "fetch_articles",
             arguments={"article_ids": list(selected_ids)},
             purpose="Solverが選んだGraph候補Article本文を取得する",
+            hypothesis_ids=hypothesis_ids,
+        )
+
+    def _graph_review_load_request(
+        self,
+        state: CaseState,
+        review: GraphCandidateReview,
+        *,
+        fetchable_article_ids: set[str],
+    ) -> ToolRequest | None:
+        """LLMが選び直した取得済みGraph候補の本文を再提示する。"""
+
+        selected_decisions = tuple(
+            item
+            for item in review.frontier_decisions
+            if item.action == "select"
+            and item.article_id not in fetchable_article_ids
+        )
+        if not selected_decisions:
+            return None
+        evidence_ids_by_article: dict[str, list[str]] = {}
+        for evidence in state.evidence:
+            article_id = evidence.metadata.get("articleId")
+            if (
+                not isinstance(article_id, str)
+                or evidence.metadata.get("citationEligible") is False
+            ):
+                continue
+            evidence_ids_by_article.setdefault(article_id, []).append(
+                evidence.evidence_id
+            )
+        hypotheses_by_id = {
+            item.hypothesis_id: item for item in state.hypotheses
+        }
+        evidence_ids: list[str] = []
+        applicable_decisions = []
+        for decision in selected_decisions:
+            article_evidence_ids = evidence_ids_by_article.get(
+                decision.article_id,
+                (),
+            )
+            if not article_evidence_ids:
+                continue
+            hypothesis = (
+                hypotheses_by_id.get(decision.hypothesis_id)
+                if decision.hypothesis_id is not None
+                else None
+            )
+            if hypothesis is not None and set(article_evidence_ids).issubset(
+                hypothesis.evidence_ids
+            ):
+                continue
+            applicable_decisions.append(decision)
+            evidence_ids.extend(
+                item for item in article_evidence_ids if item not in evidence_ids
+            )
+        if not applicable_decisions or not evidence_ids:
+            return None
+        hypothesis_ids = tuple(
+            dict.fromkeys(
+                item.hypothesis_id
+                for item in applicable_decisions
+                if item.hypothesis_id is not None
+            )
+        )
+        payload = json.dumps(
+            {
+                "graph_request_ids": review.graph_request_ids,
+                "selected_article_ids": [
+                    item.article_id for item in applicable_decisions
+                ],
+                "evidence_ids": evidence_ids,
+                "review_sequence": len(state.graph_candidate_reviews),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
+        return ToolRequest(
+            request_id=f"graph-review-load-{digest}",
+            work_item_id=applicable_decisions[0].work_item_id,
+            tool_name=LOAD_EVIDENCE_TOOL,
+            arguments={"evidence_ids": evidence_ids},
+            purpose="Solverが選んだ取得済みGraph候補本文を再表示する",
             hypothesis_ids=hypothesis_ids,
         )
 

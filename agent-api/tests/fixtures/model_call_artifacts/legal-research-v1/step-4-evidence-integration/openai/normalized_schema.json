@@ -19,7 +19,7 @@
         },
         "basis_evidence_ids": {
           "default": [],
-          "description": "この状態判断に使用した取得済みgrounding Evidence ID。",
+          "description": "今回の状態判断に新たに使用した取得済みgrounding Evidence ID。同じ依存判断の既存IDはProgramが保持して追記する。",
           "items": {
             "type": "string"
           },
@@ -113,6 +113,61 @@
       "title": "HypothesisUpdate",
       "type": "object"
     },
+    "ToolRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "arguments": {
+          "description": "選んだToolのinput_schemaに完全一致する引数object。",
+          "title": "Arguments",
+          "type": "object"
+        },
+        "hypothesis_ids": {
+          "default": [],
+          "description": "このTool結果で検証する既知Hypothesis ID。",
+          "items": {
+            "type": "string"
+          },
+          "title": "Hypothesis Ids",
+          "type": "array"
+        },
+        "purpose": {
+          "description": "何を確認するための要求かを示す短い説明。",
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Purpose",
+          "type": "string"
+        },
+        "request_id": {
+          "description": "同じSolverDecision内で一意な短い局所ID。",
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "tool_name": {
+          "description": "available_toolsにある正規Tool名。",
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Tool Name",
+          "type": "string"
+        },
+        "work_item_id": {
+          "description": "このTool結果を利用する主なopen WorkItem ID。",
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Work Item Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "work_item_id",
+        "tool_name",
+        "purpose"
+      ],
+      "title": "ToolRequest",
+      "type": "object"
+    },
     "WorkItemUpdate": {
       "additionalProperties": false,
       "properties": {
@@ -181,6 +236,15 @@
         "$ref": "#/$defs/DependencyDecision"
       },
       "title": "Dependency Decisions",
+      "type": "array"
+    },
+    "tool_requests": {
+      "default": [],
+      "description": "取得本文の評価から直ちに必要と判断した次のread-only Tool要求。WorkItemごとに最大1件。",
+      "items": {
+        "$ref": "#/$defs/ToolRequest"
+      },
+      "title": "Tool Requests",
       "type": "array"
     },
     "update_hypotheses": {

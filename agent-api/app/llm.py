@@ -829,12 +829,33 @@ class LLMClient:
         戻り値: (parse_fnの結果, latencyMs, inputTokens, outputTokens, stopReason, retryCount)"""
         started = perf_counter()
         retry_count = 0
-        raw_text, latency_ms, input_tokens, output_tokens, stop_reason = (
-            self._json_transport(prompt, schema, model, max_tokens, timeout)
-        )
+        try:
+            raw_text, latency_ms, input_tokens, output_tokens, stop_reason = (
+                self._json_transport(prompt, schema, model, max_tokens, timeout)
+            )
+        except requests.ConnectionError:
+            retry_timeout = _retry_timeout(timeout, started)
+            if retry_timeout is None:
+                raise
+            retry_count = 1
+            sleep(min(0.25, retry_timeout / 2))
+            raw_text, _, input_tokens, output_tokens, stop_reason = (
+                self._json_transport(
+                    prompt,
+                    schema,
+                    model,
+                    max_tokens,
+                    retry_timeout,
+                )
+            )
+            latency_ms = round((perf_counter() - started) * 1000)
         parsed = parse_fn(raw_text)
         validation_error = parsed[-1]
-        retry_timeout = _retry_timeout(timeout, started) if validation_error else None
+        retry_timeout = (
+            _retry_timeout(timeout, started)
+            if validation_error and retry_count == 0
+            else None
+        )
         if retry_timeout is not None:
             retry_count = 1
             first_input_tokens, first_output_tokens = input_tokens, output_tokens

@@ -130,6 +130,11 @@ class AgentLimits(FrameworkModel):
     )
     max_fetched_resources_per_cycle: int = Field(default=4, ge=1, le=32)
     max_selected_frontier_per_step: int = Field(default=3, ge=1, le=16)
+    max_graph_articles_per_hypothesis_per_cycle: int = Field(
+        default=3,
+        ge=1,
+        le=16,
+    )
     max_graph_candidates_per_review_batch: int = Field(default=20, ge=1, le=200)
     max_parallel_tools: int = Field(default=4, ge=1, le=16)
     max_retained_evidence: int = Field(default=12, ge=0, le=60)
@@ -184,6 +189,7 @@ class AgentProfile(FrameworkModel):
     solver_integration: ModelCallProfile = Field(
         validation_alias=AliasChoices("solver_integration", "solver_finalize")
     )
+    solver_observation_integration: ModelCallProfile | None = None
     solver_cycle_close: ModelCallProfile | None = None
     solver_finalization: ModelCallProfile | None = None
     solver_reviewer_revision: ModelCallProfile | None = None

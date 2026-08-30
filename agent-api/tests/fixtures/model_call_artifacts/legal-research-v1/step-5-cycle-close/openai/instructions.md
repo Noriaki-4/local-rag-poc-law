@@ -25,8 +25,8 @@
 - `dependency_decisions_after_observation`：本文評価後の下位規範確認状態です。
 - `max_retained_evidence`：`retain_evidence_ids`へ指定できる最大件数です。
 - `retainable_evidence`：状態から自動再提示されないEvidenceのうち、追加で次Cycleへ持ち越せる候補です。
-- `grounding_evidence`：最終回答を作る場合に引用できる取得本文です。
-- `required_answer_evidence_ids`：確認済みの結論と下位規範確認で使用したEvidence IDです。最終回答では全件を引用します。
+- `grounding_evidence`：判定済みHypothesis又は解決済み下位規範判断に対応し、最終回答で引用できる取得本文です。
+- `required_answer_evidence_ids`：解決済みWorkItemの回答に必ず含めるEvidence IDです。
 - `active_deferred_frontiers`、`unreviewed_graph_candidate_count`：Cycle境界で扱う未完了Graph探索です。
 
 ## 手順
@@ -34,8 +34,8 @@
 1. `required_transition`を確認します。
 2. `active_deferred_frontiers`の各候補について、次の扱いを1件ずつ`deferred_frontier_resolutions`へ書きます。
 3. `start_next_cycle`の場合だけ、優先するopen WorkItemと再提示が必要なEvidenceを選びます。
-4. `finalize`では、`required_answer_evidence_ids`の各Evidenceから回答に使う規定内容を一つずつ拾います。
-5. 拾った内容を、条件の結合関係と限定を保って統合し、確認済み範囲と未確認範囲を区別した回答を返します。
+4. `finalize`では、`grounding_evidence`から確認済み範囲を回答し、対応するEvidence IDを引用します。
+5. `required_answer_evidence_ids`をすべて含め、条件の結合関係と限定を保って統合します。
 6. 最終回答を作る場合は、`non_work_item_requirements`をすべて回答へ反映します。
 
 ## ルール
@@ -55,6 +55,7 @@
 - `required_transition=finalize`では`answer`を返します。
 - 全WorkItemが終了済みなら、`limitations`、`unresolved_work_item_ids`、`unresolved_hypothesis_ids`はすべて空にします。
 - 実行上限で未解決のまま`finalize`する場合だけ、未確認内容を`limitations`に書き、対応する未解決IDを返します。
+- 未解決WorkItemでも、判定済みHypothesisに対応する`grounding_evidence`があれば、その確認済み範囲を根拠付きで回答します。未確認部分と混同しません。
 - `supported`でも`gaps`が残るHypothesisのWorkItemは未解決です。そのWorkItem IDと未確認内容を返し、Hypothesis IDは`unresolved_hypothesis_ids`へ読み替えません。
 - `finalize`では`required_answer_evidence_ids`を`answer.citation_ids`へ全件入れ、各Evidenceが示す規定内容を回答本文へ反映します。
 - `non_work_item_requirements`は法的結論の根拠にせず、根拠・出典の提示や表現・出力形式等の回答要件として適用します。

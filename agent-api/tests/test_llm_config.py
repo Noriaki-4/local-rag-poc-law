@@ -18,6 +18,7 @@ def _load_models(**environment: str) -> dict[str, str]:
         "LLM_RESEARCH_INTEGRATION_MODEL",
         "AGENT_FRAMEWORK_RESEARCH_MODEL",
         "AGENT_FRAMEWORK_INTEGRATION_MODEL",
+        "AGENT_FRAMEWORK_EVIDENCE_INTEGRATION_MODEL",
         "AGENT_FRAMEWORK_REVIEWER_MODEL",
     ):
         env.pop(name, None)
@@ -32,6 +33,7 @@ print(json.dumps({
     "evaluator": Settings.evaluator_model,
     "research": Settings.agent_framework_research_model,
     "integration": Settings.agent_framework_integration_model,
+    "evidenceIntegration": Settings.agent_framework_evidence_integration_model,
     "frameworkReviewer": Settings.agent_framework_reviewer_model,
 }))
 """
@@ -61,3 +63,18 @@ def test_llm_model_overrides_stale_role_specific_settings() -> None:
     )
 
     assert set(models.values()) == {"gpt-4o-mini"}
+
+
+def test_evidence_integration_model_can_override_global_framework_model() -> None:
+    models = _load_models(
+        LLM_PROVIDER="openai",
+        LLM_MODEL="gpt-5.6-luna",
+        AGENT_FRAMEWORK_EVIDENCE_INTEGRATION_MODEL="gpt-5.6-terra",
+    )
+
+    assert models["evidenceIntegration"] == "gpt-5.6-terra"
+    assert {
+        model
+        for role, model in models.items()
+        if role != "evidenceIntegration"
+    } == {"gpt-5.6-luna"}

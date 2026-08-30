@@ -394,6 +394,12 @@ class SearchAssessmentInput(FrameworkModel):
 class SearchSelectionInput(SearchAssessmentInput):
     """検索候補の理解と本文取得対象の選択を一度に行うread model。"""
 
+    non_work_item_requirements: tuple[str, ...] = Field(
+        description=(
+            "質問の明示要求のうち、独立したWorkItemにしなかった回答全体の要件。"
+            "根拠の提示等、本文取得候補の選択に関係する場合に考慮する。"
+        )
+    )
     current_fetch_request_capacity: int = Field(
         ge=0,
         description="今回1回の本文取得要求で選べるArticle数の上限。",
@@ -568,11 +574,18 @@ class SolverContext(FrameworkModel):
     max_selected_frontier_per_step: int = Field(
         description="今回のGraph reviewでselectedにできる候補数上限。",
     )
+    max_graph_articles_per_hypothesis_per_cycle: int = Field(
+        default=3,
+        description=(
+            "同じHypothesisについて1 Cycleで本文取得できるGraph候補Article数上限。"
+        ),
+    )
 
     @property
     def graph_review_selection_limit(self) -> int:
         return min(
             self.max_selected_frontier_per_step,
+            self.max_graph_articles_per_hypothesis_per_cycle,
             self.remaining_fetch_capacity,
         )
 
@@ -660,6 +673,14 @@ class SolverContext(FrameworkModel):
         description=(
             "過去Cycleを含む成功済みlegal_graph_neighborsのWorkItem、Hypothesis、"
             "入力引数。候補0件も履歴に含み、同じ3要素をscopeとして再要求しない。"
+        ),
+    )
+    completed_load_evidence_ids_by_work_item: dict[str, tuple[str, ...]] = Field(
+        default_factory=dict,
+        exclude=True,
+        description=(
+            "現在CycleでLLMへの提示まで完了したload_evidenceのEvidence IDを、"
+            "WorkItem別に保持する内部投影。同じWorkItemへ同じ本文を再提示しないために使う。"
         ),
     )
     graph_fetch_completed_hypothesis_ids_this_cycle: tuple[str, ...] = Field(
@@ -976,6 +997,8 @@ def build_solver_context(
                     for item in graph_review_ledger
                     if (
                         item.review_status == "relevant_deferred"
+                        and (item.work_item_id, item.hypothesis_id)
+                        not in completed_graph_units
                         and item.content_status
                         in {"not_requested", "failed", "timeout"}
                         and item.deferred_resolution_action != "no_longer_needed"
@@ -1081,6 +1104,33 @@ def build_solver_context(
         if request.tool_name == "legal_search"
         and request.request_id in succeeded_request_ids
     )
+    completed_load_ids_by_work_item: dict[str, list[str]] = {}
+    integrated_request_ids = set(state.integrated_tool_result_request_ids)
+    current_cycle_succeeded_request_ids = {
+        item.request_id
+        for item in state.tool_results
+        if item.status == "succeeded"
+        and item.cycle_no == state.research_cycle_count
+        and item.request_id in integrated_request_ids
+    }
+    for request in state.tool_requests:
+        if (
+            request.tool_name != "load_evidence"
+            or request.request_id not in current_cycle_succeeded_request_ids
+        ):
+            continue
+        evidence_ids = request.arguments.get("evidence_ids")
+        if not isinstance(evidence_ids, list):
+            continue
+        known_ids = completed_load_ids_by_work_item.setdefault(
+            request.work_item_id,
+            [],
+        )
+        known_ids.extend(
+            evidence_id
+            for evidence_id in evidence_ids
+            if isinstance(evidence_id, str) and evidence_id not in known_ids
+        )
     requests_by_id = {item.request_id: item for item in state.tool_requests}
     evidence_by_id = {item.evidence_id: item for item in state.evidence}
     known_article_ids: set[str] = set()
@@ -1201,6 +1251,9 @@ def build_solver_context(
         fetched_resource_ids_this_cycle=fetched_resource_ids_this_cycle,
         remaining_fetch_capacity=remaining_fetch_capacity,
         max_selected_frontier_per_step=limits.max_selected_frontier_per_step,
+        max_graph_articles_per_hypothesis_per_cycle=(
+            limits.max_graph_articles_per_hypothesis_per_cycle
+        ),
         cycle_budget_reached=remaining_fetch_capacity == 0,
         cycle_close_required=(
             remaining_fetch_capacity == 0
@@ -1231,6 +1284,10 @@ def build_solver_context(
         recent_tool_results=solver_recent_results,
         completed_legal_searches=completed_legal_searches,
         completed_graph_searches=completed_graph_searches,
+        completed_load_evidence_ids_by_work_item={
+            work_item_id: tuple(evidence_ids)
+            for work_item_id, evidence_ids in completed_load_ids_by_work_item.items()
+        },
         graph_fetch_completed_hypothesis_ids_this_cycle=(
             graph_fetch_completed_hypothesis_ids
         ),
@@ -1874,7 +1931,7 @@ def _graph_review_projection(
 def _completed_graph_review_units_for_cycle(
     state: CaseState,
 ) -> frozenset[tuple[str, str | None]]:
-    """現在CycleでGraph由来本文を統合済みの探索単位を返す。"""
+    """現在CycleでGraph由来本文の取得に成功した探索単位を返す。"""
 
     requests_by_id = {item.request_id: item for item in state.tool_requests}
     completed: set[tuple[str, str | None]] = set()
@@ -1883,7 +1940,6 @@ def _completed_graph_review_units_for_cycle(
         if (
             result.cycle_no != state.research_cycle_count
             or result.status != "succeeded"
-            or result.request_id not in state.integrated_tool_result_request_ids
             or request is None
             or not request.request_id.startswith(GRAPH_REVIEW_FETCH_REQUEST_PREFIX)
         ):

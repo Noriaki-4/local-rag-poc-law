@@ -17,7 +17,8 @@
     "finalization": "model_timeout"
   },
   "expected": {
-    "finalize_only": true,
-    "ordinary_integration_started": false
+    "finalize_only": false,
+    "ordinary_integration_started": true,
+    "can_start_next_cycle": true
   }
 }

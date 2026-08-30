@@ -593,20 +593,37 @@ def _execution_findings(
             observation_by_scope.setdefault((cycle_no, hypothesis_id), []).append(
                 int(call.get("sequence") or 0)
             )
+    tool_executions = [
+        item for item in records if item.get("event") == "tool_execution"
+    ]
     for (cycle_no, hypothesis_id), sequences in sorted(observation_by_scope.items()):
-        if len(sequences) < 2:
+        repeated_without_result: list[int] = []
+        for previous_sequence, current_sequence in zip(sequences, sequences[1:]):
+            has_new_scoped_result = any(
+                isinstance(item.get("sequence"), int)
+                and previous_sequence < item["sequence"] < current_sequence
+                and item.get("cycleNo") == cycle_no
+                and hypothesis_id in (item.get("hypothesisIds") or [])
+                for item in tool_executions
+            )
+            if has_new_scoped_result:
+                continue
+            if not repeated_without_result:
+                repeated_without_result.append(previous_sequence)
+            repeated_without_result.append(current_sequence)
+        if not repeated_without_result:
             continue
         findings.append(
             _finding(
                 "REPEATED_OBSERVATION_INTEGRATION_SCOPE",
                 (
-                    "同じCycle・Hypothesisに対してObservation Integrationを"
-                    "複数回実行しています。取得結果をまとめられるか確認してください。"
+                    "同じCycle・Hypothesisに対して、新しいTool結果を挟まず"
+                    "Observation Integrationを再実行しています。"
                 ),
                 cycleNo=cycle_no,
                 hypothesisIds=[hypothesis_id],
-                callCount=len(sequences),
-                sequences=sequences,
+                callCount=len(repeated_without_result),
+                sequences=repeated_without_result,
             )
         )
 

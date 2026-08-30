@@ -8,6 +8,7 @@
 from dataclasses import replace
 
 import pytest
+import requests
 
 from app.llm import LLMClient, LLMResult, _build_contract_retry_prompt
 from app.models import AnswerRequest
@@ -82,6 +83,35 @@ def test_keeps_the_same_budget_for_other_validation_errors(client, monkeypatch):
     assert prompts[0] == "prompt"
     assert "schema_error" in prompts[1]
     assert "プログラムは法的判断や次動作を推測して補正しません" in prompts[1]
+
+
+def test_structured_json_retries_one_transient_connection_error(
+    client, monkeypatch
+):
+    calls: list[int] = []
+
+    def fake_transport(prompt, schema, model, max_tokens, timeout):
+        del prompt, schema, model, max_tokens
+        calls.append(timeout)
+        if len(calls) == 1:
+            raise requests.ConnectionError("remote closed connection")
+        return '{"value":"ok"}', 10, 12, 3, "stop"
+
+    monkeypatch.setattr(client, "_json_transport", fake_transport)
+    monkeypatch.setattr("app.llm.sleep", lambda _seconds: None)
+
+    result = client.generate_structured_json(
+        prompt="prompt",
+        schema={"type": "object"},
+        model="model",
+        max_tokens=100,
+        timeout_sec=30,
+    )
+
+    assert result.payload == {"value": "ok"}
+    assert result.retryCount == 1
+    assert len(calls) == 2
+    assert calls[1] <= calls[0]
 
 
 def test_falls_back_to_the_first_result_when_the_retry_fails(client, monkeypatch):

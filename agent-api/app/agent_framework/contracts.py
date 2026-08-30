@@ -253,6 +253,13 @@ class ObservationIntegrationDecision(FrameworkModel):
         default=(),
         description="取得本文から判断した、対象WorkItemごとの下位規範確認状態。",
     )
+    tool_requests: tuple[ToolRequest, ...] = Field(
+        default=(),
+        description=(
+            "取得本文の評価から直ちに必要と判断した次のread-only Tool要求。"
+            "WorkItemごとに最大1件。"
+        ),
+    )
 
 
 class EvidenceIntegrationDecision(FrameworkModel):

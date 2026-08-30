@@ -1,5 +1,44 @@
 {
+  "completed_graph_searches": [],
+  "completed_legal_searches": [],
+  "cycle_close_required": true,
+  "dependency_decisions": [],
   "evidence_hypothesis_candidates": [],
+  "fetchable_article_ids": [
+    "law-340CO0000000321-article-12",
+    "law-323AC0000000025-article-27_6",
+    "law-340CO0000000321-article-7",
+    "law-419M60000002059-article-17",
+    "law-340CO0000000321-article-14_3_7",
+    "law-323AC0000000025-article-27_13",
+    "law-340CO0000000321-suppl-36-article-2",
+    "law-419M60000002059-article-23",
+    "law-402M50000040038-article-17",
+    "law-402M50000040038-article-30",
+    "law-323AC0000000025-suppl-42-article-55",
+    "law-419M60000002059-article-19",
+    "law-323AC0000000025-article-27_3",
+    "law-340CO0000000321-article-14_3_2",
+    "law-419M60000002059-article-30",
+    "law-340CO0000000321-article-31",
+    "law-419M60000002059-article-63",
+    "law-323AC0000000025-article-27_9",
+    "law-323AC0000000025-suppl-97-article-10",
+    "law-419M60000002059-article-59",
+    "law-402M50000040038-article-10",
+    "law-402M50000040038-article-26",
+    "law-402M50000040038-article-19",
+    "law-323AC0000000025-suppl-84-article-145",
+    "law-402M50000040038-article-2_5",
+    "law-323AC0000000025-article-167",
+    "law-340CO0000000321-article-14_2_2",
+    "law-402M50000040038-article-9_5",
+    "law-340CO0000000321-article-19_3_8",
+    "law-323AC0000000025-article-172_5",
+    "law-323AC0000000025-article-27_11",
+    "law-323AC0000000025-suppl-22-article-12"
+  ],
+  "graph_fetch_completed_hypothesis_ids_this_cycle": [],
   "grounding_evidence": [
     {
       "content": "上場株券等の当該上場株券等の発行者による取引所金融商品市場外における買付け等（買付けその他の有償の譲受けをいう。以下この条及び次条において同じ。）のうち、次に掲げるものに該当するものについては、公開買付けによらなければならない。ただし、取引所金融商品市場における有価証券の売買等に準ずるものとして政令で定める取引による買付け等については、この限りでない。会社法第百五十六条第一項（同法第百六十五条第三項の規定により読み替えて適用する場合を含む。以下この号において同じ。）の規定又は他の法令の規定で同法第百五十六条第一項の規定に相当するものとして政令で定めるものによる買付け等（同法第百六十条第一項に規定する同法第百五十八条第一項の規定による通知を行う場合を除く。）上場株券等の発行者が外国会社である買付け等のうち、多数の者が当該買付け等に関する事項を知り得る状態に置かれる方法により行われる買付け等として政令で定めるもの",
@@ -389,7 +428,10 @@
       "work_item_id": "wi-5"
     }
   ],
+  "omitted_evidence_ids": [],
+  "remaining_fetch_capacity": 0,
   "required_dependency_kind": "lower_norm",
+  "search_candidates": [],
   "work_items": [
     {
       "question": "上場会社の株式を市場を通さずに多数の株主から買い集める場合、公開買付けの手続が必要になる条件は何か。",

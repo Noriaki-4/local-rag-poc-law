@@ -279,7 +279,10 @@ class DependencyDecision(FrameworkModel):
     )
     basis_evidence_ids: tuple[str, ...] = Field(
         default=(),
-        description="この状態判断に使用した取得済みgrounding Evidence ID。",
+        description=(
+            "今回の状態判断に新たに使用した取得済みgrounding Evidence ID。"
+            "同じ依存判断の既存IDはProgramが保持して追記する。"
+        ),
     )
     action_request_id: str | None = Field(
         default=None,

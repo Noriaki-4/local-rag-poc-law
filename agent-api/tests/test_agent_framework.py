@@ -55,7 +55,11 @@ from app.agent_framework.state import (
     UnreviewedGraphResolution,
     WorkItem,
 )
-from app.agent_framework.validation import ContractViolation, apply_solver_decision
+from app.agent_framework.validation import (
+    ActionRejected,
+    ContractViolation,
+    apply_solver_decision,
+)
 
 DecisionFactory = Callable[[SolverContext, ModelCallProfile], SolverDecision]
 
@@ -703,6 +707,104 @@ def test_contract_repair_budget_exhaustion_returns_to_reserved_finalization() ->
     assert result.trace.failure_code is None
 
 
+def test_unintegrated_article_text_is_observed_before_reserved_finalization() -> None:
+    class ManualClock:
+        now = 0.0
+
+        def __call__(self) -> float:
+            return self.now
+
+    clock = ManualClock()
+
+    class SlowFetchTool(FakeReadTool):
+        def execute(
+            self,
+            request: ToolRequest,
+            *,
+            cycle_no: int,
+            timeout_sec: float,
+        ) -> ToolExecution:
+            result = super().execute(
+                request,
+                cycle_no=cycle_no,
+                timeout_sec=timeout_sec,
+            )
+            clock.now = 95.0
+            return result
+
+    model = FakeModel(
+        [
+            _first_research(
+                (
+                    ToolRequest(
+                        request_id="r1",
+                        work_item_id="w1",
+                        tool_name="fetch_articles",
+                        purpose="本文を確認する",
+                        hypothesis_ids=("h1",),
+                    ),
+                )
+            ),
+            SolverDecision(
+                next="continue",
+                update=CaseUpdate(
+                    update_work_items=(
+                        WorkItemUpdate(
+                            work_item_id="w1",
+                            state="resolved",
+                            resolution="本文を確認した。",
+                            basis_hypothesis_ids=("h1",),
+                        ),
+                    ),
+                    update_hypotheses=(
+                        HypothesisUpdate(
+                            hypothesis_id="h1",
+                            judgment="supported",
+                            evidence_ids=("e_r1",),
+                        ),
+                    ),
+                ),
+            ),
+            SolverDecision(
+                next="finalize",
+                answer=FinalAnswer(
+                    text="取得本文を反映した回答",
+                    citation_ids=("e_r1",),
+                ),
+            ),
+        ]
+    )
+    store = InMemoryCaseStore()
+    store.create(CaseState(case_id="case-1", question="質問"))
+
+    result = AgentLoop(
+        store=store,
+        model=model,
+        tools=ToolRegistry((SlowFetchTool(name="fetch_articles"),)),
+        profile=_profile().model_copy(
+            update={"graph_review_fetch_tool_name": "fetch_articles"}
+        ),
+        clock=clock,
+    ).run("case-1")
+
+    assert [
+        (item.finalize_only, profile.context_projection)
+        for item, profile in zip(
+            model.solver_contexts,
+            model.solver_profiles,
+            strict=True,
+        )
+    ] == [
+        (False, "full"),
+        (False, "observation_integration"),
+        (True, "full"),
+    ]
+    assert result.state.run_status == "completed"
+    assert model.solver_profiles[1].context_projection == "observation_integration"
+    assert model.solver_contexts[1].grounding_evidence_ids == ("e_r1",)
+    assert model.solver_contexts[2].finalize_only is True
+
+
 def test_cycle_step_timeout_enters_finalization_above_time_reserve() -> None:
     fixture_path = (
         Path(__file__).parent
@@ -781,7 +883,7 @@ def test_cycle_step_timeout_enters_finalization_above_time_reserve() -> None:
     ]
 
 
-def test_completion_window_does_not_start_an_underbudget_integration() -> None:
+def test_next_cycle_admission_window_does_not_stop_current_integration() -> None:
     fixture_path = (
         Path(__file__).parent
         / "fixtures"
@@ -829,13 +931,33 @@ def test_completion_window_does_not_start_an_underbudget_integration() -> None:
     model = BoundaryModel(
         [
             _first_research((_request("r1"),)),
+            lambda context, _: SolverDecision(
+                next="continue",
+                next_focus_work_item_ids=("w1",),
+                tool_requests=(_request("r2"),),
+            ),
             SolverDecision(
                 next="finalize",
+                update=CaseUpdate(
+                    update_work_items=(
+                        WorkItemUpdate(
+                            work_item_id="w1",
+                            state="resolved",
+                            resolution="追加結果で確認した",
+                            basis_hypothesis_ids=("h1",),
+                        ),
+                    ),
+                    update_hypotheses=(
+                        HypothesisUpdate(
+                            hypothesis_id="h1",
+                            judgment="supported",
+                            evidence_ids=("e_r1", "e_r2"),
+                        ),
+                    ),
+                ),
                 answer=FinalAnswer(
-                    text="確認できた範囲の回答",
-                    limitations=("残る確認事項",),
-                    unresolved_work_item_ids=("w1",),
-                    unresolved_hypothesis_ids=("h1",),
+                    text="確認済みの回答",
+                    citation_ids=("e_r1", "e_r2"),
                 ),
             ),
         ]
@@ -852,9 +974,188 @@ def test_completion_window_does_not_start_an_underbudget_integration() -> None:
         clock=clock,
     ).run(fixture["source"]["caseId"])
 
+    assert result.state.run_status == "completed", result.trace.failure_code
+    assert len(model.solver_contexts) == 3
+    assert model.solver_contexts[1].finalize_only is False
+    assert model.solver_contexts[1].cycle_close_required is False
+    assert model.solver_contexts[1].can_start_next_cycle is True
+
+
+def test_next_cycle_budget_does_not_force_current_cycle_finalization() -> None:
+    """次Cycleを開始できなくても、現Cycleの探索時間は使い切れる。"""
+
+    class ManualClock:
+        now = 0.0
+
+        def __call__(self) -> float:
+            return self.now
+
+    clock = ManualClock()
+    limits = AgentLimits(
+        max_wall_time_sec=420,
+        finalization_reserve_sec=180,
+        cycle_close_reserve_sec=15,
+        min_next_cycle_budget_sec=120,
+    )
+
+    class AdvanceAfterFirstTool(FakeReadTool):
+        def execute(
+            self,
+            request: ToolRequest,
+            *,
+            cycle_no: int,
+            timeout_sec: float,
+        ) -> ToolExecution:
+            result = super().execute(
+                request,
+                cycle_no=cycle_no,
+                timeout_sec=timeout_sec,
+            )
+            if request.request_id == "r1":
+                clock.now = 130.0
+            return result
+
+    def continue_current_cycle(
+        context: SolverContext,
+        _: ModelCallProfile,
+    ) -> SolverDecision:
+        assert context.remaining_wall_time_sec == pytest.approx(290.0)
+        assert context.can_start_next_cycle is False
+        assert context.cycle_close_required is False
+        assert context.finalize_only is False
+        return SolverDecision(
+            next="continue",
+            next_focus_work_item_ids=("w1",),
+            tool_requests=(_request("r2"),),
+        )
+
+    model = FakeModel(
+        [
+            _first_research((_request("r1"),)),
+            continue_current_cycle,
+            SolverDecision(
+                next="finalize",
+                update=CaseUpdate(
+                    update_work_items=(
+                        WorkItemUpdate(
+                            work_item_id="w1",
+                            state="resolved",
+                            resolution="現Cycle内の追加結果で確認した",
+                            basis_hypothesis_ids=("h1",),
+                        ),
+                    ),
+                    update_hypotheses=(
+                        HypothesisUpdate(
+                            hypothesis_id="h1",
+                            judgment="supported",
+                            evidence_ids=("e_r1", "e_r2"),
+                        ),
+                    ),
+                ),
+                answer=FinalAnswer(
+                    text="現Cycle内の2件を統合した回答",
+                    citation_ids=("e_r1", "e_r2"),
+                ),
+            ),
+        ]
+    )
+    store = InMemoryCaseStore()
+    store.create(CaseState(case_id="case-1", question="質問"))
+
+    result = AgentLoop(
+        store=store,
+        model=model,
+        tools=ToolRegistry((AdvanceAfterFirstTool(),)),
+        profile=_profile().model_copy(update={"limits": limits}),
+        clock=clock,
+    ).run("case-1")
+
     assert result.state.run_status == "completed"
-    assert len(model.solver_contexts) == 2
-    assert model.solver_contexts[-1].finalize_only is True
+    assert tuple(item.request_id for item in result.state.tool_requests) == (
+        "r1",
+        "r2",
+    )
+
+
+def test_cycle_close_call_is_bounded_by_its_own_reserve() -> None:
+    class ManualClock:
+        now = 0.0
+
+        def __call__(self) -> float:
+            return self.now
+
+    clock = ManualClock()
+    limits = AgentLimits(
+        max_wall_time_sec=420,
+        finalization_reserve_sec=90,
+        cycle_close_reserve_sec=30,
+        min_next_cycle_budget_sec=120,
+    )
+
+    class AdvanceToCycleClose(FakeReadTool):
+        def execute(
+            self,
+            request: ToolRequest,
+            *,
+            cycle_no: int,
+            timeout_sec: float,
+        ) -> ToolExecution:
+            result = super().execute(
+                request,
+                cycle_no=cycle_no,
+                timeout_sec=timeout_sec,
+            )
+            clock.now = 305.0
+            return result
+
+    def close_cycle(
+        context: SolverContext,
+        profile: ModelCallProfile,
+    ) -> SolverDecision:
+        assert context.remaining_wall_time_sec == pytest.approx(115.0)
+        assert context.cycle_close_required is True
+        assert context.finalize_only is False
+        assert profile.timeout_sec == pytest.approx(25.0)
+        assert profile.timeout_sec <= limits.cycle_close_reserve_sec
+        return SolverDecision(
+            next="finalize",
+            answer=FinalAnswer(
+                text="確認できた範囲の回答",
+                limitations=("追加確認が必要",),
+                unresolved_work_item_ids=("w1",),
+                unresolved_hypothesis_ids=("h1",),
+            ),
+        )
+
+    model = FakeModel(
+        [
+            _first_research((_request("r1"),)),
+            close_cycle,
+        ]
+    )
+    profile = _profile().model_copy(
+        update={
+            "limits": limits,
+            "solver_cycle_close": ModelCallProfile(
+                model="cycle-close-model",
+                system_prompt="cycle close",
+                timeout_sec=180,
+                context_projection="cycle_close",
+            ),
+        }
+    )
+    store = InMemoryCaseStore()
+    store.create(CaseState(case_id="case-1", question="質問"))
+
+    result = AgentLoop(
+        store=store,
+        model=model,
+        tools=ToolRegistry((AdvanceToCycleClose(),)),
+        profile=profile,
+        clock=clock,
+    ).run("case-1")
+
+    assert result.state.run_status == "completed"
 
 
 def test_completed_observation_checkpoint_survives_later_model_timeout() -> None:
@@ -926,6 +1227,48 @@ def test_completed_observation_checkpoint_survives_later_model_timeout() -> None
     assert state.final_answer.citation_ids == ("e_r1",)
     assert model.solver_contexts[-1].cycle_step_timeout is True
     assert any("checkpoint_timeout" in item.purpose for item in trace.model_calls)
+
+
+def test_cycle_close_timeout_without_updates_enters_finalization() -> None:
+    class TimeoutWithoutCheckpointModel(FakeModel):
+        def solve(
+            self,
+            context: SolverContext,
+            profile: ModelCallProfile,
+        ) -> SolverCallResult:
+            self.solver_contexts.append(context)
+            self.solver_profiles.append(profile)
+            if len(self.solver_contexts) == 2:
+                raise SolverCheckpointTimeout(
+                    "cycle close transition timed out",
+                    partial_decision=None,
+                    completed_stage="cycle_state_ready",
+                )
+            item = self.decisions.pop(0)
+            decision = item(context, profile) if callable(item) else item
+            return SolverCallResult(decision=decision)
+
+    model = TimeoutWithoutCheckpointModel(
+        [
+            _first_research((_request("r1"),)),
+            SolverDecision(
+                next="finalize",
+                answer=FinalAnswer(
+                    text="確認できた範囲の回答",
+                    limitations=("追加確認が必要",),
+                    unresolved_work_item_ids=("w1",),
+                    unresolved_hypothesis_ids=("h1",),
+                ),
+            ),
+        ]
+    )
+
+    state, trace = _run(model, tools=(FakeReadTool(),))
+
+    assert state.run_status == "completed"
+    assert trace.failure_code is None
+    assert model.solver_contexts[-1].finalize_only is True
+    assert model.solver_contexts[-1].cycle_step_timeout is True
 
 
 def test_parallel_safe_read_requests_run_in_parallel() -> None:
@@ -1522,10 +1865,20 @@ def test_new_graph_candidates_use_dedicated_solver_profile() -> None:
     ]
     assert model.solver_profiles[3].system_prompt == "graph-selection"
     assert model.solver_profiles[6].system_prompt == "graph-selection"
+    assert (
+        model.solver_contexts[4].graph_fetch_completed_hypothesis_ids_this_cycle
+        == ("h1",)
+    )
+    assert "law-order-article-3" not in (
+        model.solver_contexts[4].fetchable_article_ids
+    )
     assert model.solver_contexts[5].cycle_close_required is False
     assert (
         model.solver_contexts[5].graph_fetch_completed_hypothesis_ids_this_cycle
         == ("h1",)
+    )
+    assert "law-order-article-3" not in (
+        model.solver_contexts[5].fetchable_article_ids
     )
     assert [
         tuple(item.article_id for item in context.graph_review_batch.candidates)
@@ -1804,6 +2157,126 @@ def test_repeated_successful_action_returns_normal_feedback() -> None:
         "integration",
         "integration_action_feedback",
     ]
+
+
+def test_repeated_successful_load_evidence_scope_is_rejected() -> None:
+    prior_request = ToolRequest(
+        request_id="load-1",
+        work_item_id="w1",
+        tool_name="load_evidence",
+        purpose="省略本文を確認する",
+        hypothesis_ids=("h1",),
+        arguments={"evidence_ids": ["e1"]},
+    )
+    state = CaseState(
+        case_id="case-repeated-load",
+        question="質問",
+        research_cycle_count=1,
+        work_items=(WorkItem(work_item_id="w1", question="確認事項"),),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h1",
+                work_item_id="w1",
+                statement="確認する",
+            ),
+        ),
+        tool_requests=(prior_request,),
+        tool_results=(
+            ToolResult(
+                request_id="load-1",
+                status="succeeded",
+                evidence_ids=("e1",),
+                cycle_no=1,
+            ),
+        ),
+        evidence=(
+            Evidence(
+                evidence_id="e1",
+                source_ref="test:e1",
+                content="本文",
+                created_cycle=1,
+            ),
+        ),
+    )
+    duplicate = prior_request.model_copy(update={"request_id": "load-2"})
+
+    with pytest.raises(ActionRejected, match="load_evidence scope"):
+        apply_solver_decision(
+            state,
+            SolverDecision(next="continue", tool_requests=(duplicate,)),
+            limits=AgentLimits(),
+            known_tool_names={"load_evidence"},
+            material_evidence_ids={"e1"},
+            finalize_only=False,
+        )
+
+
+def test_same_evidence_can_be_loaded_for_a_different_work_item() -> None:
+    prior_request = ToolRequest(
+        request_id="load-1",
+        work_item_id="w1",
+        tool_name="load_evidence",
+        purpose="第一の論点で本文を確認する",
+        hypothesis_ids=("h1",),
+        arguments={"evidence_ids": ["e1"]},
+    )
+    state = CaseState(
+        case_id="case-load-for-another-work-item",
+        question="質問",
+        research_cycle_count=1,
+        work_items=(
+            WorkItem(work_item_id="w1", question="第一の確認事項"),
+            WorkItem(work_item_id="w2", question="第二の確認事項"),
+        ),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h1",
+                work_item_id="w1",
+                statement="第一の確認をする",
+            ),
+            Hypothesis(
+                hypothesis_id="h2",
+                work_item_id="w2",
+                statement="第二の確認をする",
+            ),
+        ),
+        tool_requests=(prior_request,),
+        tool_results=(
+            ToolResult(
+                request_id="load-1",
+                status="succeeded",
+                evidence_ids=("e1",),
+                cycle_no=1,
+            ),
+        ),
+        evidence=(
+            Evidence(
+                evidence_id="e1",
+                source_ref="test:e1",
+                content="本文",
+                created_cycle=1,
+            ),
+        ),
+    )
+    second_request = prior_request.model_copy(
+        update={
+            "request_id": "load-2",
+            "work_item_id": "w2",
+            "hypothesis_ids": ("h2",),
+            "purpose": "第二の論点で本文を確認する",
+        }
+    )
+
+    updated = apply_solver_decision(
+        state,
+        SolverDecision(next="continue", tool_requests=(second_request,)),
+        limits=AgentLimits(),
+        known_tool_names={"load_evidence"},
+        material_evidence_ids={"e1"},
+        finalize_only=False,
+    )
+
+    assert updated.tool_requests[-1] == second_request
 
 
 def test_solver_can_use_second_contract_repair_without_program_rewriting() -> None:
@@ -3111,6 +3584,78 @@ def test_graph_review_may_select_fewer_relevant_articles_than_capacity() -> None
     assert updated.graph_candidate_reviews[-1].selected_article_ids == (
         "article-1",
     )
+
+
+def test_graph_review_limits_each_hypothesis_to_one_article_per_cycle() -> None:
+    state = CaseState(
+        case_id="case-graph-hypothesis-limit",
+        question="質問",
+        work_items=(WorkItem(work_item_id="w1", question="確認する"),),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h1",
+                work_item_id="w1",
+                statement="具体化規定を確認する",
+            ),
+        ),
+    )
+    review = GraphCandidateReview(
+        graph_request_ids=("graph-request",),
+        reviewed_link_ids=("link-1", "link-2"),
+        frontier_decisions=(
+            GraphFrontierDecision(
+                frontier_item_id="frontier-1",
+                article_id="article-1",
+                work_item_id="w1",
+                hypothesis_id="h1",
+                action="select",
+                reason="候補1を確認する",
+            ),
+            GraphFrontierDecision(
+                frontier_item_id="frontier-2",
+                article_id="article-2",
+                work_item_id="w1",
+                hypothesis_id="h1",
+                action="select",
+                reason="候補2を確認する",
+            ),
+        ),
+        reason="二つの候補を選択した",
+    )
+
+    with pytest.raises(
+        ContractViolation,
+        match="selected Article count exceeds the remaining limit of 1 items",
+    ):
+        apply_solver_decision(
+            state,
+            SolverDecision(
+                next="continue",
+                next_focus_work_item_ids=("w1",),
+                graph_candidate_review=review,
+            ),
+            limits=AgentLimits(
+                max_selected_frontier_per_step=3,
+                max_graph_articles_per_hypothesis_per_cycle=1,
+            ),
+            known_tool_names={"fetch_articles"},
+            material_evidence_ids=(),
+            fetchable_article_ids=("article-1", "article-2"),
+            required_graph_review_request_ids=("graph-request",),
+            graph_candidate_article_ids=("article-1", "article-2"),
+            graph_review_frontiers={
+                "frontier-1": ("article-1", "w1", "h1"),
+                "frontier-2": ("article-2", "w1", "h1"),
+            },
+            graph_review_link_ids=("link-1", "link-2"),
+            graph_selectable_frontiers={
+                "frontier-1": ("article-1", "w1", "h1"),
+                "frontier-2": ("article-2", "w1", "h1"),
+            },
+            graph_review_fetch_tool_name="fetch_articles",
+            remaining_fetch_capacity=3,
+            finalize_only=False,
+        )
 
 
 def test_cycle_cannot_restart_after_every_declared_task_is_resolved() -> None:

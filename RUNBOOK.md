@@ -1086,14 +1086,19 @@ Reviewerは`AGENT_FRAMEWORK_REVIEWER_ENABLED=true`を明示した場合だけ有
 `ReviewerView`を機械投影する。Reviewerは`accept`または構造化Findingを返し、差戻し後のSolverは
 全finding IDへ`addressed / disputed`を1回ずつ返す。Programは既知IDと全件性だけを検証し、
 回答修正か追加調査かを決めない。既定の差戻し上限は1回で、再確認も`revise`なら`review_failed`となる。
-検索時LLMの現在の基準検証はOpenAI API `gpt-5.6-luna`、reasoning effort `high`を
-researchとintegrationの両方へ設定して行う。共通fixtureと公開買付け3問が安定するまでは、
+検索時LLMの現在の基準検証はOpenAI API `gpt-5.6-luna`、reasoning effort `high`を基本とする。
+`evidence_integration`を含む全Solver処理にLunaを使う。
+`AGENT_FRAMEWORK_EVIDENCE_INTEGRATION_MODEL`は本文評価だけを別モデルで比較する場合の任意設定として残す。
+共通fixtureと公開買付け3問が安定するまでは、
 Haiku比較を同時に進めない。不具合時はモデル性能だけを原因とせず、
 実装、契約の`description`、Prompt、Provider輸送、入力、`trace.agentFramework`を先に調べる。
 Lunaで合格後、必要な場合だけ同じfixtureと合格条件のままHaikuへ変更し、Provider差だけを確認する。
 検索時のLuna利用は、非同期Relation分類とは別の運用である。
 初回の作業分解とTool選択には`AGENT_FRAMEWORK_RESEARCH_MODEL`、ToolResult取得後の意味評価・
 状態統合・追加調査または終了の判断には`AGENT_FRAMEWORK_INTEGRATION_MODEL`を使う。
+`AGENT_FRAMEWORK_EVIDENCE_INTEGRATION_MODEL`を指定した場合だけ、取得本文をHypothesisへ反映する
+`evidence_integration`にそのモデルを使う。未指定時は`AGENT_FRAMEWORK_INTEGRATION_MODEL`へ戻る。
+Cycle Close、通常Integration、最終回答はこの専用設定の対象ではない。
 旧`AGENT_FRAMEWORK_FINALIZE_MODEL`も互換設定として読めるが、新規設定ではintegration名を使う。
 全Solver呼出しへ短い`solver_common.md`を合成する。Toolを使える処理だけへ`solver_tools.md`、
 完了判断を行う処理へ`solver_completion.md`を追加する。実行手順は`research / integration /
@@ -1107,15 +1112,20 @@ cycle_close / finalization / reviewer_revision / search_selection / graph_select
 また、ローカルのSource、Prompt、契約またはProfileを変更した後は、起動中の`agent-api`をそのまま
 使わない。コンテナの作成時刻が新しく見えても、最後の変更前にbuildされたImageである可能性がある。
 実モデル検証前に、必ず最後の変更を含めて`--build --force-recreate`する。
-次は全SolverをLuna `high`にし、診断snapshotを保存する例である。
+次は全Solver処理をLuna `high`にし、診断snapshotを保存する例である。
 
 ```bash
+AGENT_FRAMEWORK_ACTIVE=true \
 LLM_PROVIDER=openai \
 LLM_MODEL=gpt-5.6-luna \
+AGENT_FRAMEWORK_EVIDENCE_INTEGRATION_MODEL=gpt-5.6-luna \
 OPENAI_REASONING_EFFORT=high \
 AGENT_FRAMEWORK_REVIEWER_ENABLED=false \
 AGENT_FRAMEWORK_DIAGNOSTICS_MODE=snapshot \
 AGENT_FRAMEWORK_MODEL_TIMEOUT_SEC=180 \
+AGENT_FRAMEWORK_CYCLE_CLOSE_RESERVE_SEC=30 \
+AGENT_FRAMEWORK_FINALIZATION_RESERVE_SEC=90 \
+AGENT_FRAMEWORK_MIN_NEXT_CYCLE_BUDGET_SEC=120 \
 AGENT_FRAMEWORK_MAX_WALL_TIME_SEC=420 \
 docker compose up --build -d --force-recreate agent-api
 ```
@@ -1165,6 +1175,7 @@ jq '.trace.agentFramework | {
   diagnosticsMode,
   models: ([.modelCalls[].model] | unique),
   runStatus,
+  answerCompleteness,
   stopReason
 }' response.json
 ```
@@ -1195,7 +1206,9 @@ curl -s http://localhost:8000/answer/framework \
 既定の`AGENT_FRAMEWORK_DIAGNOSTICS_MODE=off`では、`trace.agentFramework`へ
 `reviewerEnabled`、`researchCycleCount`、`elapsedMs`、`modelCalls`、`toolCalls`、`runStatus`等の小さい実行要約だけを返す。
 `runStatus=completed`は実行完了だけを表し、
-回答の法的十分性を意味しない。
+回答の法的十分性を意味しない。`answerCompleteness`は構造上の未解決IDから機械的に導出し、
+`complete`は未解決IDなし、`limited`は未解決WorkItemあり、`unavailable`は最終回答なしを表す。
+これは回答の法的正しさをProgramが判定した値ではない。
 `toolCalls`には本文を含めず、Solverが指定した検索・本文取得・1ホップGraph取得の`arguments`と
 `purpose`を残す。本文取得だけではGraphを自動実行しない。
 
@@ -1289,9 +1302,11 @@ Step 3の`input.json.available_tools`には、本番の`ToolDefinition`から取
 戻り値説明が含まれる。fixture内に古いTool定義が残っていても、成果物生成時は本番定義を正本とする。
 
 Cycle境界の固定成果物は`step-4-evidence-integration`と`step-5-cycle-close`に分ける。
-前者はWorkItemごとに取得本文を既存Hypothesisへ反映し、同じ確認事項の下位規範状態も判断する。後者はその反映結果を前提に完了または次Cycleへの引継ぎだけを
-判断する。両方の`input.json`と`output_schema.json`に、本文取得候補、検索候補、Tool定義が混入していないことを
-確認する。実行時IDの既知性はProvider schemaのenumではなく、共通validatorが検証する。
+前者は直前のToolで取得した本文を1つのopen WorkItemに属するHypothesisと照合し、同じ確認事項の下位規範状態と直後のToolを最大1件判断する。対象WorkItemが複数ある場合はWorkItem単位の呼出しを最大4件並列実行する。
+その`input.json`には本文取得候補と検索履歴が含まれ、利用可能Toolの契約は`output_schema.json`に一度だけ含まれる。後者は反映結果を前提に、完了または次Cycleへの
+引継ぎだけを判断し、これらの行動選択用情報を受け取らない。実行時IDの既知性は共通validatorが検証する。
+Evidence Integrationの既知Hypothesis、Evidence、取得可能Article IDは直近の取得結果へ限定されるので、
+未知IDによる再試行を避けるためProvider schemaのenumにも同じ一覧を残す。
 
 通常の整合レビューは`instructions.md`と`output_schema.json`を対にして行う。Provider輸送から
 共通契約への変換を疑う場合だけ`normalized_schema.json`、実際の直列化を疑う場合だけ`request.txt`を追加確認する。

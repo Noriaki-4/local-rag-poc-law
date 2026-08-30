@@ -383,6 +383,10 @@ class Settings:
         or os.getenv("AGENT_FRAMEWORK_FINALIZE_MODEL")
         or llm_research_integration_model
     )
+    agent_framework_evidence_integration_model = (
+        os.getenv("AGENT_FRAMEWORK_EVIDENCE_INTEGRATION_MODEL")
+        or agent_framework_integration_model
+    )
     # 旧設定名は既存環境との互換性のためだけに残す。
     agent_framework_finalize_model = agent_framework_integration_model
     agent_framework_reviewer_model = (
@@ -400,7 +404,7 @@ class Settings:
         min(
             int(
                 os.getenv("AGENT_FRAMEWORK_INTEGRATION_MAX_TOKENS")
-                or os.getenv("AGENT_FRAMEWORK_FINALIZE_MAX_TOKENS", "8192")
+                or os.getenv("AGENT_FRAMEWORK_FINALIZE_MAX_TOKENS", "12288")
             ),
             anthropic_max_tokens_ceiling,
         ),
@@ -509,14 +513,14 @@ class Settings:
     agent_framework_cycle_close_reserve_sec = max(
         5,
         min(
-            int(os.getenv("AGENT_FRAMEWORK_CYCLE_CLOSE_RESERVE_SEC", "15")),
+            int(os.getenv("AGENT_FRAMEWORK_CYCLE_CLOSE_RESERVE_SEC", "30")),
             179,
         ),
     )
     agent_framework_min_next_cycle_budget_sec = max(
         5,
         min(
-            int(os.getenv("AGENT_FRAMEWORK_MIN_NEXT_CYCLE_BUDGET_SEC", "25")),
+            int(os.getenv("AGENT_FRAMEWORK_MIN_NEXT_CYCLE_BUDGET_SEC", "120")),
             179,
         ),
     )
@@ -527,7 +531,7 @@ class Settings:
                 os.getenv("AGENT_FRAMEWORK_FINALIZATION_RESERVE_SEC")
                 or os.getenv("AGENT_FRAMEWORK_NEXT_SOLVER_RESERVE_SEC", "90")
             ),
-            179,
+            599,
         ),
     )
     agent_framework_next_solver_reserve_sec = (

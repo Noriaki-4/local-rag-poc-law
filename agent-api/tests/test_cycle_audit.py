@@ -432,6 +432,69 @@ def test_report_flags_repeated_integration_structure() -> None:
     }
 
 
+def test_cycle_audit_allows_observation_iteration_after_scoped_tool_result() -> None:
+    scope = {"workItemIds": ["w1"], "hypothesisIds": ["h1"]}
+    records = (
+        {
+            "sequence": 1,
+            "event": "solver_input",
+            "purpose": "observation_integration",
+            "contractAttempt": 0,
+            "cycleNo": 1,
+            "scope": scope,
+        },
+        {
+            "sequence": 2,
+            "event": "solver_output",
+            "purpose": "observation_integration",
+            "contractAttempt": 0,
+            "cycleNo": 1,
+            "scope": scope,
+            "latencyMs": 10,
+        },
+        {
+            "sequence": 3,
+            "event": "tool_execution",
+            "cycleNo": 1,
+            "requestId": "tool-1",
+            "toolName": "fetch_articles",
+            "arguments": {"article_ids": ["article-1"]},
+            "hypothesisIds": ["h1"],
+            "elapsedMs": 1,
+        },
+        {
+            "sequence": 4,
+            "event": "solver_input",
+            "purpose": "observation_integration",
+            "contractAttempt": 0,
+            "cycleNo": 1,
+            "scope": scope,
+        },
+        {
+            "sequence": 5,
+            "event": "solver_output",
+            "purpose": "observation_integration",
+            "contractAttempt": 0,
+            "cycleNo": 1,
+            "scope": scope,
+            "latencyMs": 10,
+        },
+        {
+            "sequence": 6,
+            "event": "run_complete",
+            "caseId": "case-1",
+            "elapsedMs": 25,
+            "stateStatus": {"runStatus": "completed"},
+        },
+    )
+
+    report = build_cycle_audit_report(records)
+
+    assert "REPEATED_OBSERVATION_INTEGRATION_SCOPE" not in {
+        item["code"] for item in report["executionFindings"]
+    }
+
+
 def test_cycle_audit_comparison_reports_run_and_purpose_deltas() -> None:
     baseline = {
         "caseId": "before",

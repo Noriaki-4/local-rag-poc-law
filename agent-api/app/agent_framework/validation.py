@@ -328,6 +328,17 @@ def apply_solver_decision(
             for result in state.tool_results
         )
     }
+    completed_load_scopes = {
+        _tool_request_scope(request)
+        for request in state.tool_requests
+        if request.tool_name == "load_evidence"
+        and any(
+            result.request_id == request.request_id
+            and result.status == "succeeded"
+            and result.cycle_no == state.research_cycle_count
+            for result in state.tool_results
+        )
+    }
     new_request_ids: set[str] = set()
     new_requests_by_id = {
         item.request_id: item for item in decision.tool_requests
@@ -381,6 +392,31 @@ def apply_solver_decision(
                 separators=(",", ":"),
             ),
             rejected_requests=tuple(duplicate_graph_scopes),
+        )
+    duplicate_load_scopes = [
+        request
+        for request in decision.tool_requests
+        if request.tool_name == "load_evidence"
+        and _tool_request_scope(request) in completed_load_scopes
+    ]
+    if duplicate_load_scopes:
+        duplicate_details = [
+            {
+                "work_item_id": request.work_item_id,
+                "hypothesis_ids": list(request.hypothesis_ids),
+                "arguments": request.arguments,
+            }
+            for request in duplicate_load_scopes
+        ]
+        raise ActionRejected(
+            "successful load_evidence scope was already completed in this cycle: "
+            + json.dumps(
+                duplicate_details,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            rejected_requests=tuple(duplicate_load_scopes),
         )
     execution_scopes = [
         (
@@ -706,6 +742,7 @@ def apply_solver_decision(
         )
         max_selected = min(
             limits.max_selected_frontier_per_step,
+            limits.max_graph_articles_per_hypothesis_per_cycle,
             effective_fetch_capacity
             if effective_fetch_capacity is not None
             else limits.max_selected_frontier_per_step,
@@ -855,13 +892,28 @@ def apply_solver_decision(
     if len(new_dependency_keys) != len(set(new_dependency_keys)):
         raise ContractViolation("dependency decision keys must be unique")
     for dependency in decision.dependency_decisions:
+        dependency_key = (dependency.dependency_kind, dependency.work_item_id)
+        previous_dependency = dependency_by_key.get(dependency_key)
+        previous_basis_ids = (
+            previous_dependency.basis_evidence_ids
+            if previous_dependency is not None
+            else ()
+        )
+        effective_dependency = dependency.model_copy(
+            update={
+                "basis_evidence_ids": merge_hypothesis_evidence_ids(
+                    previous_basis_ids,
+                    dependency.basis_evidence_ids,
+                )
+            }
+        )
         if dependency.work_item_id not in work_items:
             raise ContractViolation(
                 f"dependency decision references unknown work item: "
                 f"{dependency.work_item_id}"
             )
         if (
-            not dependency.basis_evidence_ids
+            not effective_dependency.basis_evidence_ids
             and dependency.status != "needs_action"
         ):
             raise ContractViolation("dependency decision requires basis evidence")
@@ -870,7 +922,9 @@ def apply_solver_decision(
         ):
             raise ContractViolation("dependency basis evidence IDs must be unique")
         unknown_dependency_evidence = (
-            set(dependency.basis_evidence_ids) - material_ids
+            set(dependency.basis_evidence_ids)
+            - material_ids
+            - set(previous_basis_ids)
         )
         if unknown_dependency_evidence:
             raise ContractViolation(
@@ -903,7 +957,7 @@ def apply_solver_decision(
         ):
             basis_article_ids = {
                 str(evidence_by_id[evidence_id].metadata.get("articleId") or "")
-                for evidence_id in dependency.basis_evidence_ids
+                for evidence_id in effective_dependency.basis_evidence_ids
             }
             basis_article_ids.discard("")
             if len(basis_article_ids) < 2:
@@ -913,9 +967,7 @@ def apply_solver_decision(
                     "at least two distinct Articles: the delegating source and the "
                     f"terminal target; actual Article IDs={sorted(basis_article_ids)}"
                 )
-        dependency_by_key[
-            (dependency.dependency_kind, dependency.work_item_id)
-        ] = dependency
+        dependency_by_key[dependency_key] = effective_dependency
 
     closed_dependency_work_items = sorted(
         {
@@ -1528,6 +1580,17 @@ def _raise_preflight_contract_violations(
         )
 
     for request in decision.tool_requests:
+        if request.tool_name == "load_evidence":
+            requested_evidence_ids = request.arguments.get("evidence_ids")
+            if (
+                not isinstance(requested_evidence_ids, list)
+                or not requested_evidence_ids
+                or len(requested_evidence_ids)
+                != len(set(requested_evidence_ids))
+            ):
+                violations.append(
+                    "load_evidence requires a non-empty unique evidence_ids list"
+                )
         requested_article_ids = {
             article_id
             for article_id in request.arguments.get("article_ids", ())

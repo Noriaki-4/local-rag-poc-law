@@ -27,8 +27,12 @@ Programが法的関連性、根拠の十分性、候補の採否、次のToolを
 
 Tool結果取得後
 
-通常時：solver_identity + integration + solver_common
-                              + solver_tools / solver_completion
+取得本文あり：evidence_integration
+              ├─ Hypothesis・下位規範状態を更新
+              └─ 同じWorkItemの直後のToolを最大1件選ぶ
+
+その他の状態：solver_identity + integration + solver_common
+                                  + solver_tools / solver_completion
 
 Cycle境界：取得本文と下位規範依存の統合 ──→ Cycleの終了判断
            各処理 = 専用Prompt + 専用入力 + 専用schema + 専用完了確認
@@ -47,8 +51,8 @@ Cycle境界：取得本文と下位規範依存の統合 ──→ Cycleの終�
 | `research` | question_decompositionのみ | 質問の明示要求を、独立した法的結論を要するWorkItemと、それ以外の明示要求へ分ける。 |
 | `hypothesis_generation` | hypothesis_generationのみ | HypothesisがないWorkItemを1件受け取り、検索前の暫定的な法的命題を作る。 |
 | `search_planning` | search_planningのみ | 入力済みHypothesisを検証する今回の`legal_search`要求を作る。 |
-| `integration` | 通常はidentity + integration + common + tools + completion。未解決の下位規範依存がある場合はidentity + dependency_action + tools | 通常はToolResultを評価して次の行動または完了を決める。未解決の下位規範依存がある場合は、その依存に対する次のToolRequestだけを専用契約で決める。 |
-| `evidence_integration` | evidence_integrationのみ | WorkItemごとにHypothesis反映と下位規範確認を一つの判断で行う。独立WorkItemは並列評価し、Programが差分を結合してWorkItem進捗を導出する。 |
+| `integration` | 通常はidentity + integration + common + tools + completion。新しい本文がなく既存の下位規範依存だけを進める場合はidentity + dependency_action + tools | 新しい取得本文がない通常Stepでは、状態から次の行動又は完了を決める。既存の未解決依存だけを進める場合は、その依存に対する次のToolRequestだけを専用契約で決める。 |
+| `evidence_integration` | evidence_integrationのみ | 1つのopen WorkItemとそのHypothesisを直近取得本文と照合し、状態差分、下位規範確認及び直後のToolを最大1件返す。対象WorkItemが複数ある場合はWorkItem単位の呼出しを最大4件並列実行する。Programは本文とIDを投影し、既知IDと構造だけを検証する。 |
 | `cycle_close` | cycle_closeのみ | 直前の本文評価を前提に、完了または次Cycleへの引継ぎだけを決める。 |
 | `finalization` | identity + finalization + common + completion | 実行上限時に追加Toolなしで、確認済み範囲と未確認範囲を分けた回答を作る。 |
 | `reviewer_revision` | identity + reviewer_revision + common + tools + completion | Reviewer Findingを全件処理し、回答修正または追加調査を決める。 |
@@ -91,9 +95,9 @@ Anthropicの「明確で直接的な指示、必要時だけ順序付き手順�
 | `solver_hypothesis_generation.md` | 初回Step 2。Hypothesisがない既知WorkItem 1件から、法的仮説と未確認の`gaps`を立案する。 |
 | `solver_search_planning.md` | 初回Step 3。既知Hypothesisに対する`legal_search`要求の作成。 |
 | `solver_integration.md` | 観察結果の評価、状態更新、下位規範監査、次の行動。 |
-| `solver_evidence_integration.md` | 取得本文のHypothesis反映と、同じ確認事項の下位規範確認を一つの判断で行う。WorkItem完了は出力しない。 |
+| `solver_evidence_integration.md` | 取得本文のHypothesis反映、下位規範確認及び同じWorkItemを直ちに進めるTool最大1件を扱う。Toolを選べるため、完成Promptには`solver_tools.md`も合成する。WorkItem完了、Cycle移行、回答は扱わない。 |
 | `solver_dependency_action.md` | `needs_action`の下位規範依存について、再利用・検索・Graph探索・本文取得の次の行動だけを決める。 |
-| `solver_cycle_close.md` | Cycle終了と次Cycleへの構造化引継ぎ。 |
+| `solver_cycle_close.md` | Cycle終了と次Cycleへの構造化引継ぎ。上限時は判定済みHypothesisの確認済み範囲を根拠付きで限定回答する。 |
 | `solver_finalization.md` | `finalize_only=true`時の限定最終化。 |
 | `solver_reviewer_revision.md` | Reviewer Findingの受領、反映、反論、再調査。 |
 | `solver_search_selection.md` | OpenSearch候補を全件比較し、選択候補の内容評価、Hypothesis対応、本文取得判断を一つの出力で返す。 |

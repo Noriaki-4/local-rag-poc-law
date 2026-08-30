@@ -69,8 +69,9 @@ W1の全HypothesisとDependency確認が完了
 open WorkItemのbasisが新たに`contradicted`になった場合、ProgramはそのWorkItemを自動変更せず、
 `WorkItemImpactDecision`の対象IDを決定的に要求する。維持・置換・破棄の意味判断はSolverが行う。
 
-Cycle Closeではopen WorkItemを未完了の正本とする。Observation IntegrationはHypothesisだけを更新し、
-Dependency Assessment後にProgramがWorkItem進捗を導出する。どの法的命題が必要か、本文が命題を
+Cycle Closeではopen WorkItemを未完了の正本とする。本番Loopでは、本文取得後のWorkItem単位の
+Observation IntegrationがHypothesis更新、下位規範判断及び直後のTool最大1件を同じDecisionで返し、
+ProgramがWorkItem進捗を導出する。どの法的命題が必要か、本文が命題を
 支持・否定するか、下位規範確認が必要かはSolverが判断し、Programはその意味判断を補わない。
 
 ## 変更時の確認順序

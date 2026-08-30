@@ -21,11 +21,14 @@ def legal_agent_profile() -> AgentProfile:
     tool_prompt = _read_prompt("solver_tools.md")
     completion_prompt = _read_prompt("solver_completion.md")
     integration_model = settings.agent_framework_integration_model
+    evidence_integration_model = (
+        settings.agent_framework_evidence_integration_model
+    )
     integration_max_tokens = settings.agent_framework_integration_max_tokens
     timeout_sec = settings.agent_framework_model_timeout_sec
     return AgentProfile(
         name="legal-default",
-        version="395",
+        version="426",
         provider=settings.llm_provider,
         solver_research=_model_profile(
             model=settings.agent_framework_research_model,
@@ -87,6 +90,26 @@ def legal_agent_profile() -> AgentProfile:
                 "solver_dependency_action_check.md"
             ),
         ),
+        solver_observation_integration=ModelCallProfile(
+            model=evidence_integration_model,
+            max_output_tokens=integration_max_tokens,
+            timeout_sec=timeout_sec,
+            system_prompt=_join_prompts(
+                _read_prompt("solver_evidence_integration.md"),
+                tool_prompt,
+            ),
+            completion_check_prompt=_read_prompt(
+                "solver_evidence_integration_check.md"
+            ),
+            dependency_system_prompt=_read_prompt(
+                "solver_dependency_assessment.md"
+            ),
+            dependency_completion_check_prompt=_read_prompt(
+                "solver_dependency_assessment_check.md"
+            ),
+            context_projection="observation_integration",
+            available_tool_names=None,
+        ),
         solver_cycle_close=ModelCallProfile(
             model=integration_model,
             max_output_tokens=integration_max_tokens,
@@ -106,7 +129,7 @@ def legal_agent_profile() -> AgentProfile:
                 "solver_dependency_assessment_check.md"
             ),
             context_projection="cycle_close",
-            available_tool_names=(),
+            available_tool_names=None,
         ),
         solver_finalization=_model_profile(
             model=integration_model,
@@ -194,6 +217,7 @@ def legal_agent_profile() -> AgentProfile:
             max_selected_frontier_per_step=(
                 settings.agent_framework_max_selected_frontier_per_step
             ),
+            max_graph_articles_per_hypothesis_per_cycle=1,
             max_graph_candidates_per_review_batch=(
                 settings.agent_framework_max_graph_candidates_per_review_batch
             ),

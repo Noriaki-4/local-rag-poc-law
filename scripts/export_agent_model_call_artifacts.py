@@ -43,7 +43,7 @@ _SOLVER_STAGES = {
     "hypothesis_generation": "solver_hypothesis_generation",
     "search_planning": "solver_search_planning",
     "integration": "solver_integration",
-    "observation_integration": "solver_cycle_close",
+    "observation_integration": "solver_observation_integration",
     "dependency_assessment": "solver_cycle_close",
     "cycle_close": "solver_cycle_close",
     "finalization": "solver_finalization",

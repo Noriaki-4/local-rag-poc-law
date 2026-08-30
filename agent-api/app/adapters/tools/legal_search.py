@@ -94,7 +94,9 @@ class _SemanticGraphNeighborsArguments(_GraphNeighborsArgumentsBase):
     )
     direction: GraphDirection = Field(
         description=(
-            "起点ArticleをSUBJECTまたはOBJECTのどちらとして探索するか。"
+            "起点ArticleをRelationAssertionのどちら側として探索するか。"
+            "from_subjectは起点をSUBJECTとしてOBJECT側を探し、"
+            "to_subjectは起点をOBJECTとしてSUBJECT側を探す。"
         ),
     )
 

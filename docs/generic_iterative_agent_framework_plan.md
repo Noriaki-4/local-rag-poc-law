@@ -314,12 +314,19 @@ Reviewer無効時のSolver呼び出しは次の範囲になる。
 | 1 Cycle内で4 action stepを実行 | 5回程度 |
 | 別Cycleへ再計画 | 前Cycleのstep数に次Cycleの呼び出しを加える |
 
-プログラムは各LLM・Tool実行前に、現Cycleを評価して閉じる時間、残りCycleの最小実行時間、
-最終回答時間を別々予約する。残り時間が現actionの実行予算と予約の合計を下回る場合、
+プログラムは、現在Cycleの終了、次Cycleの開始可否、最終回答の時間を別々に判定する。
+`min_next_cycle_budget_sec`はCycle境界で`can_start_next_cycle`を決めるためだけに使い、
+現在Cycleを途中終了させない。残り時間が最終回答予約とCycle終了予約の合計以下なら、
 新しいGraph ReviewやToolを開始せず、`cycle_close_required=true`をSolverへ渡す。
-Solverは専用のEvidence IntegrationでWorkItemごとに取得本文を評価し、Hypothesisへの反映と
-同じ確認事項の下位規範確認を一つの判断で行う。独立したWorkItemは最大4件を並列評価し、
-Programが入力順に差分を結合する。
+最終回答予約以下になった場合だけ`finalize_only=true`とする。LLM呼出しの`timeout_sec`は
+各呼出しの最大待機時間であり、最終回答予約として流用しない。Cycle Close呼出しは
+`cycle_close_reserve_sec`以内に制限し、timeoutしても最終回答予約を消費しない。
+Solverは専用のEvidence Integrationで、1つのopen WorkItemとそのHypothesisを直近取得本文と照合し、
+Hypothesisへの反映、同じ確認事項の下位規範確認、直後に必要なToolを最大1件、1回の判断で行う。
+対象WorkItemが複数ある場合は、WorkItem単位の呼出しを最大4件並列実行する。
+取得前のArticleとHypothesisの対応は候補であり、対応候補があるWorkItemのLLMが本文と照合して判断する。
+Programは本文取得枠と既知IDを管理するが、対応先、取得するArticle又はその優先順位を決めない。
+Cycle境界では新しいTool要求を許可しない。
 その後、ProgramはHypothesisの判定、
 `gaps`、Evidence参照及びDependency状態からWorkItemの完了差分を機械的に導出する。
 候補別・WorkItem別の理由は、判断を区別する直接の理由だけを短い一文で返し、入力本文、候補要約、
@@ -371,8 +378,10 @@ Solverは1回の`continue_cycle`で複数のToolRequestを返せる。
 Solverは現方針の結果と未解決命題を引継ぎに示して`start_next_cycle`を選べる。仮説・探索方針の仕切り直しに加え、
 Cycleの本文取得枠が尽きても必要と判断した未取得Evidenceが残る場合も対象とする。単なるTool終了や
 Graph 1ホップ完了だけを理由にせず、取得済みEvidenceの評価と引き継ぐfrontierを明示する。
-Cycle回数、総step、全体時間のいずれかで新しいToolを実行できない場合だけ
+Cycle回数又は総stepの上限へ到達した場合、もしくは残り時間が最終回答予約以下の場合だけ
 `finalize_only=true`とし、`start_cycle / continue_cycle / start_next_cycle`を禁止する。
+次Cycleの最低予算を下回っただけなら`can_start_next_cycle=false`とするが、現在Cycleの
+`continue_cycle`はCycle終了予約へ到達するまで許可する。
 
 ## 5. 状態と契約
 
@@ -1482,8 +1491,8 @@ Solverがfrontierから選んだArticle本文を同じCycleの次stepで取得�
 Solverは5つの`proposedPredicate`、原文`REFERENCES / EXPLAINS`、起点から見た
 `from_subject / to_subject`を共通Promptの定義どおりに解釈する。候補表示だけで法的結論を出さず、
 質問と現在のHypothesisに関係すると判断した既知frontier IDだけを、Profileの少数上限内で次の本文取得へ
-`select`する。Graph ReviewはWorkItem・Hypothesis単位で提示し、初期選択上限は3件とする。
-一つの単位で選択した本文取得バッチを統合した後は、同じCycleでは別Hypothesisへ進む。
+`select`する。Graph ReviewはWorkItem・Hypothesis単位で提示し、Legal Profileでは同じHypothesisから
+1 Cycleに選択できる本文未取得Articleを1件とする。その本文を統合した後は、同じCycleでは別Hypothesisへ進む。
 同じ単位の未処理候補や別枝は削除せず、次Cycleへ残す。関連するが今回の取得枠に入れない候補は
 `defer`として短いledgerへ残す。候補の関連性、取得順、
 `reject`はSolver、Node・Linkの重複排除、scope、取得済み判定、Tool実行はプログラムが担当する。
@@ -1630,42 +1639,45 @@ Reviewerは無効にする。ここで確認するのは、契約、Prompt、Too
 
 ```yaml
 name: legal-default
-provider: anthropic
+provider: openai
 
 solver:
   common_system_prompt: domains/legal/prompts/solver_common.md
   tool_prompt: domains/legal/prompts/solver_tools.md
   completion_prompt: domains/legal/prompts/solver_completion.md
   question_decomposition:
-    model: claude-haiku-4-5-20251001
+    model: gpt-5.6-luna
     max_output_tokens: 4096
     system_prompt: domains/legal/prompts/solver_question_decomposition.md
   hypothesis_generation:
-    model: claude-haiku-4-5-20251001
+    model: gpt-5.6-luna
     max_output_tokens: 4096
     system_prompt: domains/legal/prompts/solver_hypothesis_generation.md
   search_planning:
-    model: claude-haiku-4-5-20251001
+    model: gpt-5.6-luna
     max_output_tokens: 4096
     system_prompt: domains/legal/prompts/solver_search_planning.md
   integration:
-    model: claude-haiku-4-5-20251001
+    model: gpt-5.6-luna
     max_output_tokens: 4096
     system_prompt: domains/legal/prompts/solver_integration.md
+  observation_integration:
+    model: gpt-5.6-luna
+    max_output_tokens: 4096
+    system_prompt: domains/legal/prompts/solver_evidence_integration.md
   cycle_close:
-    model: claude-haiku-4-5-20251001
-    evidence_integration_prompt: domains/legal/prompts/solver_evidence_integration.md
+    model: gpt-5.6-luna
     transition_prompt: domains/legal/prompts/solver_cycle_close.md
   finalization:
-    model: claude-haiku-4-5-20251001
+    model: gpt-5.6-luna
     system_prompt: domains/legal/prompts/solver_finalization.md
   reviewer_revision:
-    model: claude-haiku-4-5-20251001
+    model: gpt-5.6-luna
     system_prompt: domains/legal/prompts/solver_reviewer_revision.md
 
 reviewer:
   enabled: false
-  model: claude-haiku-4-5-20251001
+  model: gpt-5.6-luna
   max_output_tokens: 4096
   system_prompt: domains/legal/prompts/reviewer.md
   max_revisions: 1
@@ -1678,15 +1690,16 @@ limits:
   max_tool_requests_per_step: 5
   max_parallel_tools: 4
   max_selected_frontier_per_step: 3
+  max_graph_articles_per_hypothesis_per_cycle: 1
   max_graph_candidates_per_scope_page: 20
   max_graph_candidates_per_review_batch: 10
   max_material_evidence_chars: 50000
   max_solver_input_chars: 240000
   max_retained_evidence: 12
-  cycle_close_reserve_sec: 15
-  min_next_cycle_budget_sec: 25
+  cycle_close_reserve_sec: 30
+  min_next_cycle_budget_sec: 120
   finalization_reserve_sec: 90
-  max_wall_time_sec: 240
+  max_wall_time_sec: 420
 ```
 
 回答Agentとは別に行う正本Relation分類は、次のオペレーター実行Profileを使う。
@@ -1743,7 +1756,8 @@ Luna Worker / Reviewerの出力はaudit履歴に残すが、Lunaの精度測定�
 Cycleの不変条件だけを持つ。初回3 StepとCycle境界の2 Stepは、それぞれ専用の入力・Prompt・schemaを使う。
 Toolを使えるモードだけへ`solver_tools.md`、完了判断を行うモードへ`solver_completion.md`を合成する。
 実行手順は`research / integration / observation_integration / cycle_close / finalization / reviewer_revision / graph_review`の
-用途別Promptへ分ける。Programは`reviewer_findings`の有無、`finalize_only`、`cycle_close_required`、
+用途別Promptへ分ける。本文取得後は`observation_integration`がWorkItem単位の本文評価、状態差分及び
+直後のTool最大1件を一つのDecisionで返す。Programは`reviewer_findings`の有無、`finalize_only`、`cycle_close_required`、
 未評価Graph候補の有無という構造的事実だけで用途を選び、法的意味や次のToolを決めない。
 
 モデルID、token上限、timeout、Reviewer有効・無効はProfileだけで変更する。
@@ -2013,7 +2027,7 @@ Graph Review差分処理やCycle境界処理を混入させず、IntegrationとG
 | `solver_hypothesis_generation.md` | 初回Step 2。Hypothesisがない既知WorkItemを1件ずつ処理し、検索対象を選べる未確認の法的命題を作って逐次保存する。初回`gaps`は空で初期化し、本文観察後に残る未確認事項だけを後続処理で記録する。 |
 | `solver_search_planning.md` | 初回Step 3。既知Hypothesisに対する今回の`legal_search`要求を作る。 |
 | `solver_integration.md` | 新しいToolResultを評価して状態を逐次更新し、未確認事項に対する次の行動を選ぶ。Graphの関係種別を説明できなければ全種別を要求せず、OpenSearchで根拠または起点を発見する。 |
-| `solver_evidence_integration.md` | 提示された取得本文を既存Hypothesisへ反映し、同じ確認事項の下位規範確認も判断する。WorkItem完了、Tool選択、Cycle移行、回答は扱わない。 |
+| `solver_evidence_integration.md` | 提示された取得本文を既存Hypothesisへ反映し、同じ確認事項の下位規範確認と直後のTool最大1件を判断する。WorkItem完了、Cycle移行、回答は扱わない。 |
 | `solver_cycle_close.md` | 直前の本文評価を前提に、active Frontierの引継ぎ、`finalize / start_next_cycle`及び最終回答を扱う。最終回答はこの呼出し内で根拠・限定・回答要件を確認し、別の回答書換えLLMは呼ばない。本文再評価や次Cycleの詳細なTool計画は行わない。 |
 | `solver_finalization.md` | `finalize_only=true`で追加Toolを要求せず、確認済み範囲と未確認範囲を分けた回答を作る。 |
 | `solver_reviewer_revision.md` | 全Findingを本文と照合し、`addressed / disputed`を全件返す。回答修正か追加調査かはSolverが判断する。 |

@@ -87,8 +87,12 @@ def test_question_decomposition_uses_only_question_and_small_contract() -> None:
     assert "Tool結果を受け取った後" not in rendered.instructions
     assert "共通ルール" not in rendered.instructions
     assert "Graph" not in rendered.instructions
-    assert "広い要求はその抽象度を保ち" in rendered.instructions
-    assert "質問にない内訳へ展開していないか" in rendered.instructions
+    assert "質問が上位概念だけを示す場合はその抽象度を保ち" in (
+        rendered.instructions
+    )
+    assert "質問にない構成要素、段階又は例へ展開していないか" in (
+        rendered.instructions
+    )
     assert "<input_contract>" in rendered.instructions
     assert "`question`: 利用者が回答を求めている元の質問。" in (
         rendered.instructions
@@ -216,9 +220,16 @@ def test_cycle_boundary_artifacts_are_current() -> None:
     fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
     context = SolverContext.model_validate(fixture["solverContext"])
     agent_profile = legal_agent_profile()
-    profile = agent_profile.solver_cycle_close
-    assert profile is not None
-    profile = profile.model_copy(update={"model": fixture["source"]["model"]})
+    observation_profile = agent_profile.solver_observation_integration
+    cycle_close_profile = agent_profile.solver_cycle_close
+    assert observation_profile is not None
+    assert cycle_close_profile is not None
+    observation_profile = observation_profile.model_copy(
+        update={"model": fixture["source"]["model"]}
+    )
+    cycle_close_profile = cycle_close_profile.model_copy(
+        update={"model": fixture["source"]["model"]}
+    )
     observed = fixture["observedSolverDecision"]
     update = observed["update"]
     observation = ObservationIntegrationDecision(
@@ -234,12 +245,15 @@ def test_cycle_boundary_artifacts_are_current() -> None:
     )
     rendered_calls = {
         "step-4-evidence-integration": (
-            render_observation_integration_model_call(context, profile)
+            render_observation_integration_model_call(
+                context,
+                observation_profile,
+            )
         ),
         "step-5-cycle-close": render_cycle_close_model_call(
             context,
             observation_with_dependency,
-            profile,
+            cycle_close_profile,
         ),
     }
 
@@ -249,7 +263,11 @@ def test_cycle_boundary_artifacts_are_current() -> None:
             provider="openai",
             profile_name=agent_profile.name,
             profile_version=agent_profile.version,
-            model=profile.model,
+            model=(
+                observation_profile.model
+                if artifact_stage == "step-4-evidence-integration"
+                else cycle_close_profile.model
+            ),
         )
         artifact_dir = (
             Path(__file__).parent

@@ -47,12 +47,13 @@ Article IDまたは探索すべき関係がまだ分からない場合に、Open
 - `formal_relation`は原文・構造から登録された関係、`relation_assertion`は非同期LLMが分類した関係候補です。
 - `REFERENCES`はfrom本文がtoを明示参照し、`EXPLAINS`はガイドがto Articleを解説します。
 - 明示参照の物理方向はToolが`reference_lookup`から変換します。LLMは`outgoing / incoming`を指定しません。
-- `relation_assertion`はSUBJECTからOBJECTへ向きます。`from_subject`は起点がSUBJECT、`to_subject`は起点がOBJECTです。
-- `IMPLEMENTS`：親規定から具体化規定へ向く。
-- `INCORPORATES`：準用・読替えする規定から、取り込まれる規定へ向く。
-- `USES_DEFINITION`：定義を使う規定から、定義を置く規定へ向く。
-- `EXCEPTION_TO`：例外規定から一般規定へ向く。
-- `OVERRIDES`：優先規定から、排除または修正される規定へ向く。
+- `relation_assertion`はSUBJECTからOBJECTへ向きます。
+- `from_subject`は起点をSUBJECTとしてOBJECT側を探し、`to_subject`は起点をOBJECTとしてSUBJECT側を探します。
+- `IMPLEMENTS`：SUBJECTは親規定、OBJECTは具体化規定。親規定から具体化規定を探す場合は`from_subject`です。
+- `INCORPORATES`：SUBJECTは準用・読替えする規定、OBJECTは取り込まれる規定。
+- `USES_DEFINITION`：SUBJECTは定義を使う規定、OBJECTは定義を置く規定。
+- `EXCEPTION_TO`：SUBJECTは例外規定、OBJECTは一般規定。
+- `OVERRIDES`：SUBJECTは優先規定、OBJECTは排除または修正される規定。
 
 `USES_DEFINITION`はラベルだけで選ばず、対象語とscopeがHypothesisに必要か確認します。`referenceKind`や`REFERENCES`だけから、委任、具体化、適用を確定しません。
 

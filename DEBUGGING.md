@@ -141,8 +141,9 @@ Cycle数や一処理の短縮だけで性能改善と判断しません。監査
 - Hypothesisごとの呼出し用途と回数
 - Tool回数と所要時間
 
-監査報告は、同じHypothesisへのObservation Integration反復、新しいTool結果を挟まない連続Integration、
-同一の指示・入力・schemaによるモデル再呼出しを構造上の確認事項として表示します。これらは誤りの断定ではなく、
+監査報告は、新しいTool結果を挟まない同一HypothesisのObservation Integration反復、
+同一Tool scopeの再要求、同一の指示・入力・schemaによるモデル再呼出しを構造上の確認事項として表示します。
+新しいTool結果を受けた同一Hypothesisの再評価は、通常のaction-observation反復であり警告対象にしません。これらは誤りの断定ではなく、
 取得結果をまとめられるか、処理を別名で重複実行していないかを調べる起点です。
 
 変更前後を比較する場合は、現在の診断JSONLに`--baseline`で比較元を指定します。

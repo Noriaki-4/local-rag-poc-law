@@ -89,6 +89,15 @@ class LegalFrameworkAgentService:
             "reviewerEnabled": profile.reviewer.enabled,
             "diagnosticsMode": diagnostics.mode,
             "runStatus": result.state.run_status,
+            "answerCompleteness": (
+                "unavailable"
+                if final_answer is None
+                else (
+                    "limited"
+                    if final_answer.unresolved_work_item_ids
+                    else "complete"
+                )
+            ),
             "researchCycleCount": result.state.research_cycle_count,
             "stopReason": result.state.stop_reason,
             "failureCode": result.trace.failure_code,
