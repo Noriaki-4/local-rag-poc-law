@@ -1690,7 +1690,7 @@ reviewer:
   max_revisions: 1
 
 limits:
-  max_research_cycles: 4
+  max_research_cycles: 5
   max_fetched_resources_per_cycle: 5
   max_steps_per_cycle: 4
   max_total_steps: 8
@@ -1844,6 +1844,8 @@ Prompt builder、使用した外部Prompt asset・section・各hashを記録す�
 decision_applied`へ正規化済みDecisionと同一hashを記録する。`snapshot`では実データ本文も保持し、
 `status`では本文を持たずhashと状態だけを保持する。これにより、双方向の契約内容、正規化、拒否、適用を
 別の境界として追跡し、Promptファイル変更後も実行時に使われたsectionを特定できるようにする。
+`snapshot`の呼出し別成果物には、実送信Promptと別送信のProvider schemaを明確に区別して一つに収録した
+`complete_request.json`も生成する。これは診断出力だけであり、LLM入力やtoken数を増やさない。
 
 Skillsは初期ループの必須要素にしない。必要になった場合だけ、明示的に選択されたSkillの指示を
 Solver promptへ追加する。SkillによってTool権限や意味判断の責務を拡大しない。
@@ -2145,6 +2147,8 @@ Graph review等の状態一覧と本文を含まない件数・契約違反を�
 `eval-results/`配下へ保存する。Providerへ渡した固定指示、動的入力、Prompt、schema、正規化後schemaは
 呼出し別の成果物にも分けて保存する。Provider内の輸送修復も同じRunへ記録し、
 Framework契約修復と区別する。modeは観測出力だけを変更し、LLMへ渡すstatus契約や本文量を変えない。
+WorkItem専属sessionを使う呼出しはsession IDとturnで対応付け、並列完了順に依存せずCycle別のlatency、token、
+timeout及びWorkItem scopeを集計する。
 
 SolverDecisionは各Stepの`continue / finalize`選択について、内部思考ではない短い
 `decision_reason`を持つ。構造契約を通過してCaseStateへ適用されたDecisionだけを`decision_applied`として
@@ -2338,7 +2342,7 @@ Integration等は完全な`SolverContext`を使う。用途別投影は項目の
 - 全WorkTree案内、現Cycleのgoal・strategy、直前Step、frontier、Solver指定focus、直前の新規Evidence、保持Evidenceを組み立てる。
 - Cycleの`planned → running → completed`と、各Stepの`planned → observed → completed`を保存し、
   Cycleの`completed`時だけcycle数を増やす。
-- `max_research_cycles=4`、Cycle累計の`max_fetched_resources_per_cycle=5`、
+- `max_research_cycles=5`、Cycle累計の`max_fetched_resources_per_cycle=5`、
   `max_tool_requests_per_step`を別の制約として実装する。自動Toolをstep・Cycle traceへ計上するが、
   本文取得数とは混同しない。
 - Cycleの本文取得・step・時間境界前に新しいactionを止め、予約したSolver呼出しで

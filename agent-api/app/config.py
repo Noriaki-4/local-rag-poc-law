@@ -433,7 +433,7 @@ class Settings:
     )
     agent_framework_max_research_cycles = max(
         1,
-        min(int(os.getenv("AGENT_FRAMEWORK_MAX_RESEARCH_CYCLES", "4")), 4),
+        min(int(os.getenv("AGENT_FRAMEWORK_MAX_RESEARCH_CYCLES", "5")), 5),
     )
     agent_framework_max_tool_requests_per_step = max(
         1,

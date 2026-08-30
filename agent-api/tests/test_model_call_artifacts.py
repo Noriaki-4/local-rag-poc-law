@@ -150,6 +150,7 @@ def test_provider_transport_is_explicit_in_artifacts(tmp_path) -> None:
         "output_schema.json",
         "normalized_schema.json",
         "request.txt",
+        "complete_request.json",
         "manifest.json",
     }
     manifest = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
@@ -159,6 +160,14 @@ def test_provider_transport_is_explicit_in_artifacts(tmp_path) -> None:
     assert manifest["outputSchemaHash"] == openai.output_schema_hash
     assert manifest["normalizedSchemaHash"] == openai.normalized_schema_hash
     assert manifest["requestHash"] == openai.request_hash
+    complete = json.loads(
+        (tmp_path / "complete_request.json").read_text(encoding="utf-8")
+    )
+    assert complete["prompt"] == openai.request
+    assert complete["outputSchema"] == openai.output_schema
+    assert complete["normalizedSchema"] == openai.normalized_schema
+    assert complete["hashes"]["prompt"] == openai.request_hash
+    assert "別項目" in complete["transportNote"]
 
 
 def test_dependency_assessment_uses_small_provider_common_schema() -> None:

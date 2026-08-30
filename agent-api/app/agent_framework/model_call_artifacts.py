@@ -150,6 +150,30 @@ def model_call_artifact_contents(
         "output_schema.json": _pretty_json(rendered.output_schema),
         "normalized_schema.json": _pretty_json(rendered.normalized_schema),
         "request.txt": rendered.request,
+        "complete_request.json": _pretty_json(
+            {
+                "stage": rendered.stage,
+                "provider": provider,
+                "profileName": profile_name,
+                "profileVersion": profile_version,
+                "model": model,
+                "prompt": rendered.request,
+                "outputSchema": rendered.output_schema,
+                "normalizedSchema": rendered.normalized_schema,
+                "hashes": {
+                    "instructions": rendered.instructions_hash,
+                    "input": rendered.input_hash,
+                    "outputSchema": rendered.output_schema_hash,
+                    "normalizedSchema": rendered.normalized_schema_hash,
+                    "prompt": rendered.request_hash,
+                },
+                "promptAssets": list(rendered.prompt_assets),
+                "transportNote": (
+                    "promptは実際に送信した結合後テキスト。outputSchemaは"
+                    "Providerへ別項目として送信した構造化出力契約。"
+                ),
+            }
+        ),
         "manifest.json": _pretty_json(
             {
                 "stage": rendered.stage,

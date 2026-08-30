@@ -1227,6 +1227,8 @@ curl -s http://localhost:8000/answer/framework \
 `EVAL_RESULTS_DIR/agent-model-calls/<case_id>/<stage>-<attempt>-<hash>/`へ保存する。
 `instructions.md`は固定指示、`input.json`は動的入力、`output_schema.json`はProvider出力契約、
 `normalized_schema.json`は正規化後のPydantic契約、`request.txt`は実送信内容である。
+`complete_request.json`は、実送信Prompt、Providerへ別送信した出力schema、正規化後schema、model、
+Provider及び各hashを一つにまとめたレビュー用ログである。schemaをPrompt本文の一部とは表示しない。
 `eval-results/`はGit管理外である。診断出力に失敗しても回答処理は失敗させない。modeは出力・保存だけを
 切り替え、SolverのPromptや`SolverContext`を増減しないため、`status`や`snapshot`を有効にしても
 LLMへの入力tokenは増えない。通常は`off`を維持し、再現対象の1実行だけ`status`または`snapshot`にする。
@@ -1243,6 +1245,16 @@ python3 scripts/summarize_agent_diagnostic.py \
 `cycle-audit.md`では最終実行状態と経路上の警告を分けて読む。Graphの逆方向未試行等は確認候補であり、
 Programによる法的な誤り判定や自動再検索ではない。警告の詳細を再現する場合は、表示された診断sequenceから
 最小fixtureを作る。
+WorkItem専属sessionが使われた実行では、同報告の`WorkItem sessions`にsession ID、WorkItem、Cycle、turn数、
+latency、token、timeoutが表示される。同じWorkItemのsession ID変更や、一つのsessionへの複数WorkItem混入も
+構造上の確認事項として表示する。
+
+各呼出しの結合済み成果物だけを探す場合は、次を使う。
+
+```bash
+jq -r 'select(.event == "transport_input") | [.sequence, .transportStage, .workItemSessionId, .completeRequestPath] | @tsv' \
+  eval-results/agent-framework-diagnostics/legal-....jsonl
+```
 
 同じ条件の変更前後を比較する場合は、比較元を追加する。
 
@@ -1297,7 +1309,8 @@ agent-api/.venv/bin/python scripts/export_agent_model_call_artifacts.py \
 
 初回Researchの固定成果物は`step-1-question-decomposition`、
 `step-2-hypothesis-generation`、`step-3-search-planning`の3段階を別々に生成する。
-各段階の`instructions.md`、`input.json`、`output_schema.json`、`request.txt`を一組として確認する。
+各段階の`complete_request.json`で実送信Promptと出力契約を一度に確認できる。個別差分が必要な場合は、
+`instructions.md`、`input.json`、`output_schema.json`、`request.txt`を確認する。
 Step 3の`input.json.available_tools`には、本番の`ToolDefinition`から取得した正規名、用途、入力Schema、
 戻り値説明が含まれる。fixture内に古いTool定義が残っていても、成果物生成時は本番定義を正本とする。
 

@@ -58,6 +58,10 @@ CaseState
 - Prompt、入力、出力schema、完了確認に矛盾や古い指示がないか
 - 質問にない固定例や件数へ誘導していないか
 
+`snapshot`診断の`complete_request.json`を正本として、実送信PromptとProvider出力schemaを同時に確認します。
+分割Promptや生成前schemaだけを見て、実行時の入力を推測しません。WorkItem専属処理ではCycle監査の
+`WorkItem sessions`も確認し、同じWorkItemが同じsession IDで継続しているか、timeoutしたturnがないかを確認します。
+
 理解不足が疑われる場合は、LLMに現在の作業、入力の意味、判断基準、次の処理を短く説明させ、期待する理解と照合します。
 実モデル呼出しの前に、説明された項目と実入力が一致し、本文、完了確認、schemaに矛盾や古い指示がないことを確認します。
 

@@ -389,6 +389,9 @@ class AgentDiagnostics:
         if self.mode == "snapshot":
             record.update(
                 {
+                    "completeRequestPath": str(
+                        artifact_dir / "complete_request.json"
+                    ),
                     "reviewerView": view.model_dump(mode="json"),
                     "instructions": rendered.instructions,
                     "inputPayload": rendered.input_payload,
@@ -572,6 +575,9 @@ class AgentDiagnostics:
         if self.mode == "snapshot":
             record.update(
                 {
+                    "completeRequestPath": str(
+                        artifact_dir / "complete_request.json"
+                    ),
                     "instructions": rendered.instructions,
                     "inputPayload": rendered.input_payload,
                     "prompt": rendered.request,
@@ -622,6 +628,7 @@ class AgentDiagnostics:
         input_tokens: int | None,
         output_tokens: int | None,
         provider_retry_count: int,
+        latency_ms: int | None = None,
         transport_stage: str = "solver",
         work_item_session_id: str | None = None,
         work_item_session_turn: int | None = None,
@@ -636,9 +643,12 @@ class AgentDiagnostics:
             "validationError": validation_error,
             "inputTokens": input_tokens,
             "outputTokens": output_tokens,
+            "latencyMs": latency_ms,
             "providerRetryCount": provider_retry_count,
             "hasPayload": payload is not None,
             "payloadHash": _json_sha256(payload) if payload is not None else None,
+            "cycleNo": max(1, context.research_cycle_count),
+            "scope": _context_scope(context),
         }
         if work_item_session_id is not None:
             record["workItemSessionId"] = work_item_session_id
@@ -666,6 +676,8 @@ class AgentDiagnostics:
             "transportAttempt": repair_index + 1,
             "transportStage": transport_stage,
             "reason": reason,
+            "cycleNo": max(1, context.research_cycle_count),
+            "scope": _context_scope(context),
         }
         if work_item_session_id is not None:
             record["workItemSessionId"] = work_item_session_id

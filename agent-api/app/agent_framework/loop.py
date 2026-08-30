@@ -348,15 +348,7 @@ class AgentLoop:
                     # its text before reviewing more discovery candidates. The complete
                     # Graph/Search pools remain in CaseState and are projected again on
                     # the next loop iteration.
-                    context = context.model_copy(
-                        update={
-                            "graph_review_batch": GraphReviewBatch(),
-                            "graph_review_ledger": (),
-                            "required_graph_review_request_ids": (),
-                            "search_candidates": (),
-                            "required_search_review_request_ids": (),
-                        }
-                    )
+                    context = _grounding_observation_context(context)
                 graph_review_call = bool(
                     context.required_graph_review_request_ids
                     and self._profile.solver_graph_review is not None
@@ -686,15 +678,25 @@ class AgentLoop:
                             or bool(context.required_dependency_work_item_ids)
                         ),
                     )
+                    consumed_result_request_ids: tuple[str, ...] = ()
                     if purpose in {"observation_integration", "cycle_close"}:
+                        consumed_result_request_ids = tuple(
+                            item.request_id for item in context.recent_tool_results
+                        )
+                    elif purpose == "graph_selection":
+                        consumed_result_request_ids = (
+                            context.required_graph_review_request_ids
+                        )
+                    elif purpose == "search_selection":
+                        consumed_result_request_ids = (
+                            context.required_search_review_request_ids
+                        )
+                    if consumed_result_request_ids:
                         integrated_request_ids = tuple(
                             dict.fromkeys(
                                 [
                                     *candidate.integrated_tool_result_request_ids,
-                                    *(
-                                        item.request_id
-                                        for item in context.recent_tool_results
-                                    ),
+                                    *consumed_result_request_ids,
                                 ]
                             )
                         )
@@ -1736,6 +1738,36 @@ def _dependency_audit_work_item_ids(state: CaseState) -> tuple[str, ...]:
             ):
                 projected.append(work_item_id)
     return tuple(projected)
+
+
+def _grounding_observation_context(context: SolverContext) -> SolverContext:
+    """本文統合中は、同時に完了した探索結果を未処理のまま残す。"""
+
+    grounding_ids = set(context.grounding_evidence_ids)
+    grounding_results = tuple(
+        result
+        for result in context.recent_tool_results
+        if not grounding_ids.isdisjoint(result.evidence_ids)
+    )
+    grounding_request_ids = {
+        result.request_id for result in grounding_results
+    }
+    return context.model_copy(
+        update={
+            "recent_tool_requests": tuple(
+                request
+                for request in context.recent_tool_requests
+                if request.request_id in grounding_request_ids
+            ),
+            "recent_tool_results": grounding_results,
+            "graph_review_batch": GraphReviewBatch(),
+            "graph_review_ledger": (),
+            "required_graph_review_request_ids": (),
+            "search_candidates": (),
+            "required_search_review_request_ids": (),
+            "fetchable_article_ids": (),
+        }
+    )
 
 
 def _has_unintegrated_article_fetch_result(

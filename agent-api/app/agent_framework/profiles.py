@@ -118,7 +118,7 @@ class ToolListArgumentLimit(FrameworkModel):
 
 
 class AgentLimits(FrameworkModel):
-    max_research_cycles: int = Field(default=4, ge=1, le=4)
+    max_research_cycles: int = Field(default=5, ge=1, le=5)
     max_tool_requests_per_step: int = Field(
         default=4,
         ge=1,

@@ -255,9 +255,11 @@ def test_snapshot_diagnostics_emits_cycle_checkpoint_and_report(tmp_path) -> Non
         "modelLatencyMs": 125,
         "inputTokens": 300,
         "outputTokens": 75,
-        "toolCallCount": 1,
-        "toolElapsedMs": 12,
-    }
+            "toolCallCount": 1,
+            "toolElapsedMs": 12,
+            "workItemSessionCount": 0,
+            "workItemSessionTimeoutCount": 0,
+        }
     assert report["purposeMetrics"][0]["purpose"] == "cycle_close"
     assert isinstance(report["cycles"][0]["elapsedMs"], int)
     markdown = render_cycle_audit_markdown(report)
@@ -493,6 +495,86 @@ def test_cycle_audit_allows_observation_iteration_after_scoped_tool_result() -> 
     assert "REPEATED_OBSERVATION_INTEGRATION_SCOPE" not in {
         item["code"] for item in report["executionFindings"]
     }
+
+
+def test_cycle_audit_tracks_work_item_sessions_by_id_and_turn() -> None:
+    records = (
+        {
+            "sequence": 1,
+            "event": "transport_input",
+            "transportStage": "observation_integration",
+            "transportAttempt": 1,
+            "cycleNo": 5,
+            "scope": {"workItemIds": ["w1"], "hypothesisIds": ["h1"]},
+            "workItemSessionId": "wi-session-1",
+            "workItemSessionTurn": 1,
+            "promptChars": 100,
+            "schemaChars": 20,
+            "completeRequestPath": "/tmp/turn-1/complete_request.json",
+        },
+        {
+            "sequence": 2,
+            "event": "transport_input",
+            "transportStage": "observation_integration",
+            "transportAttempt": 1,
+            "cycleNo": 5,
+            "scope": {"workItemIds": ["w1"], "hypothesisIds": ["h1"]},
+            "workItemSessionId": "wi-session-1",
+            "workItemSessionTurn": 2,
+            "promptChars": 110,
+            "schemaChars": 20,
+            "completeRequestPath": "/tmp/turn-2/complete_request.json",
+        },
+        {
+            "sequence": 3,
+            "event": "transport_output",
+            "transportStage": "observation_integration",
+            "transportAttempt": 1,
+            "cycleNo": 5,
+            "scope": {"workItemIds": ["w1"], "hypothesisIds": ["h1"]},
+            "workItemSessionId": "wi-session-1",
+            "workItemSessionTurn": 2,
+            "latencyMs": 20,
+            "inputTokens": 12,
+            "outputTokens": 4,
+        },
+        {
+            "sequence": 4,
+            "event": "transport_output",
+            "transportStage": "observation_integration",
+            "transportAttempt": 1,
+            "cycleNo": 5,
+            "scope": {"workItemIds": ["w1"], "hypothesisIds": ["h1"]},
+            "workItemSessionId": "wi-session-1",
+            "workItemSessionTurn": 1,
+            "latencyMs": 10,
+            "inputTokens": 8,
+            "outputTokens": 2,
+        },
+        {
+            "sequence": 5,
+            "event": "run_complete",
+            "caseId": "case-session-audit",
+            "elapsedMs": 40,
+            "stateStatus": {"runStatus": "completed"},
+        },
+    )
+
+    report = build_cycle_audit_report(records)
+
+    assert report["runMetrics"]["workItemSessionCount"] == 1
+    assert report["runMetrics"]["workItemSessionTimeoutCount"] == 0
+    session = report["workItemSessionActivity"][0]
+    assert session["sessionId"] == "wi-session-1"
+    assert session["workItemIds"] == ["w1"]
+    assert session["cycleNos"] == [5]
+    assert [item["turn"] for item in session["turns"]] == [1, 2]
+    assert session["latencyMs"] == 30
+    assert session["inputTokens"] == 20
+    assert session["outputTokens"] == 6
+    markdown = render_cycle_audit_markdown(report)
+    assert "## WorkItem sessions" in markdown
+    assert "wi-session-1" in markdown
 
 
 def test_cycle_audit_comparison_reports_run_and_purpose_deltas() -> None:

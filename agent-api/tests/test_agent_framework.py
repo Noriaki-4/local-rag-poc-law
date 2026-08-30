@@ -18,7 +18,7 @@ from app.agent_framework.contracts import (
     WorkItemImpactDecision,
     WorkItemUpdate,
 )
-from app.agent_framework.loop import AgentLoop
+from app.agent_framework.loop import AgentLoop, _grounding_observation_context
 from app.agent_framework.observability import RunTrace
 from app.agent_framework.ports.model import (
     ReviewCallResult,
@@ -430,6 +430,121 @@ def test_cycle_close_marks_its_integrated_tool_results_as_consumed() -> None:
     assert request_id in state.integrated_tool_result_request_ids
 
 
+def test_grounding_observation_does_not_consume_concurrent_search_result() -> None:
+    fetch_request = ToolRequest(
+        request_id="fetch-1",
+        work_item_id="w1",
+        tool_name="fetch_articles",
+        arguments={"article_ids": ["law-test-article-1"]},
+        purpose="既知Article本文を取得する",
+        hypothesis_ids=("h1",),
+    )
+    search_request = ToolRequest(
+        request_id="search-2",
+        work_item_id="w2",
+        tool_name="legal_search",
+        arguments={"query": "手続の具体的規定", "doc_types": ["law"]},
+        purpose="手続Articleを発見する",
+        hypothesis_ids=("h2",),
+    )
+    body = Evidence(
+        evidence_id="body-1",
+        source_ref="fixture:body-1",
+        content="第一条の本文",
+        created_cycle=1,
+        metadata={
+            "articleId": "law-test-article-1",
+            "citationEligible": True,
+        },
+    )
+    navigation = Evidence(
+        evidence_id="search-nav-2",
+        source_ref="fixture:search-nav-2",
+        content="第二条の検索抜粋",
+        created_cycle=1,
+        metadata={
+            "articleId": "law-test-article-2",
+            "documentId": "law-test",
+            "heading": "第二条",
+            "citationEligible": False,
+        },
+    )
+    state = CaseState(
+        case_id="mixed-tool-results",
+        question="二つの事項を確認する。",
+        research_cycle_count=1,
+        work_items=(
+            WorkItem(work_item_id="w1", question="第一の事項を確認する。"),
+            WorkItem(work_item_id="w2", question="手続を確認する。"),
+        ),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h1",
+                work_item_id="w1",
+                statement="第一の事項を定める。",
+            ),
+            Hypothesis(
+                hypothesis_id="h2",
+                work_item_id="w2",
+                statement="手続を定める規定がある。",
+            ),
+        ),
+        tool_requests=(fetch_request, search_request),
+        tool_results=(
+            ToolResult(
+                request_id=fetch_request.request_id,
+                status="succeeded",
+                evidence_ids=(body.evidence_id,),
+                cycle_no=1,
+            ),
+            ToolResult(
+                request_id=search_request.request_id,
+                status="succeeded",
+                evidence_ids=(navigation.evidence_id,),
+                cycle_no=1,
+            ),
+        ),
+        evidence=(body, navigation),
+    )
+    limits = AgentLimits(max_fetched_resources_per_cycle=1)
+    context = build_solver_context(
+        state,
+        limits,
+        remaining_wall_time_sec=120,
+        finalize_only=False,
+    )
+
+    observation_context = _grounding_observation_context(context)
+
+    assert tuple(
+        result.request_id for result in observation_context.recent_tool_results
+    ) == (fetch_request.request_id,)
+    assert tuple(
+        request.request_id for request in observation_context.recent_tool_requests
+    ) == (fetch_request.request_id,)
+    assert observation_context.fetchable_article_ids == ()
+    assert observation_context.required_search_review_request_ids == ()
+
+    after_observation = state.model_copy(
+        update={
+            "integrated_tool_result_request_ids": (fetch_request.request_id,),
+        }
+    )
+    next_context = build_solver_context(
+        after_observation,
+        limits,
+        remaining_wall_time_sec=120,
+        finalize_only=False,
+    )
+
+    assert next_context.required_search_review_request_ids == (
+        search_request.request_id,
+    )
+    assert tuple(
+        candidate.article_id for candidate in next_context.search_candidates
+    ) == ("law-test-article-2",)
+
+
 def test_solver_can_explicitly_start_three_research_cycles() -> None:
     def after_first(context: SolverContext, _: ModelCallProfile) -> SolverDecision:
         return SolverDecision(
@@ -511,7 +626,7 @@ def test_solver_can_explicitly_start_three_research_cycles() -> None:
     assert state.research_cycle_count == 3
     assert len(model.solver_contexts) == 4
     assert model.solver_contexts[-1].finalize_only is False
-    assert model.solver_contexts[-1].remaining_research_cycles == 1
+    assert model.solver_contexts[-1].remaining_research_cycles == 2
     assert model.solver_contexts[-1].material_evidence_ids == {
         "e_r1",
         "e_r2",
@@ -523,6 +638,14 @@ def test_solver_can_explicitly_start_three_research_cycles() -> None:
         "integration-model",
         "integration-model",
     ]
+
+
+def test_research_cycle_limit_defaults_to_five_and_rejects_six() -> None:
+    assert AgentLimits().max_research_cycles == 5
+    assert AgentLimits(max_research_cycles=5).max_research_cycles == 5
+
+    with pytest.raises(ValueError):
+        AgentLimits(max_research_cycles=6)
 
 
 def test_solver_can_start_second_cycle_without_forcing_a_third() -> None:

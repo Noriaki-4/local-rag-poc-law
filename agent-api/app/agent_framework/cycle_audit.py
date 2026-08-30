@@ -139,7 +139,11 @@ def build_cycle_audit_report(
     model_calls = _model_call_records(record_list)
     purpose_metrics = _purpose_metrics(model_calls)
     hypothesis_activity = _hypothesis_activity(model_calls)
-    execution_findings = _execution_findings(record_list, model_calls)
+    work_item_session_activity = _work_item_session_activity(record_list)
+    execution_findings = [
+        *_execution_findings(record_list, model_calls),
+        *_work_item_session_findings(work_item_session_activity),
+    ]
     tool_records = [
         item for item in record_list if item.get("event") == "tool_execution"
     ]
@@ -180,6 +184,10 @@ def build_cycle_audit_report(
         ),
         "toolCallCount": tool_metrics["callCount"],
         "toolElapsedMs": tool_metrics["elapsedMs"],
+        "workItemSessionCount": len(work_item_session_activity),
+        "workItemSessionTimeoutCount": sum(
+            int(item["timeoutCount"]) for item in work_item_session_activity
+        ),
     }
     return {
         "caseId": (
@@ -206,6 +214,7 @@ def build_cycle_audit_report(
         "runMetrics": run_metrics,
         "purposeMetrics": purpose_metrics,
         "hypothesisActivity": hypothesis_activity,
+        "workItemSessionActivity": work_item_session_activity,
     }
 
 
@@ -223,6 +232,8 @@ def compare_cycle_audit_reports(
         "outputTokens",
         "toolCallCount",
         "toolElapsedMs",
+        "workItemSessionCount",
+        "workItemSessionTimeoutCount",
     )
     baseline_metrics = baseline.get("runMetrics", {})
     current_metrics = current.get("runMetrics", {})
@@ -340,6 +351,38 @@ def render_cycle_audit_markdown(report: dict[str, Any]) -> str:
             )
     else:
         lines.append("- なし")
+    session_activity = report.get("workItemSessionActivity", [])
+    if session_activity:
+        lines.extend(
+            [
+                "",
+                "## WorkItem sessions",
+                "",
+                (
+                    "| Session | WorkItem | Cycles | Turns | Calls | Timeouts | "
+                    "Latency ms | Input tokens | Output tokens |"
+                ),
+                "|---|---|---|---:|---:|---:|---:|---:|---:|",
+            ]
+        )
+        for item in session_activity:
+            lines.append(
+                (
+                    "| `{session}` | {work_items} | {cycles} | {turns} | "
+                    "{calls} | {timeouts} | {latency} | {input_tokens} | "
+                    "{output_tokens} |"
+                ).format(
+                    session=_md(item.get("sessionId")),
+                    work_items=_md(", ".join(item.get("workItemIds", []))),
+                    cycles=_md(", ".join(str(v) for v in item.get("cycleNos", []))),
+                    turns=len(item.get("turns", [])),
+                    calls=item.get("callCount", 0),
+                    timeouts=item.get("timeoutCount", 0),
+                    latency=item.get("latencyMs", 0),
+                    input_tokens=item.get("inputTokens", 0),
+                    output_tokens=item.get("outputTokens", 0),
+                )
+            )
     hypothesis_activity = report.get("hypothesisActivity", [])
     if hypothesis_activity:
         lines.extend(
@@ -577,6 +620,151 @@ def _hypothesis_activity(
             if isinstance(call.get("sequence"), int):
                 activity["sequences"].append(call["sequence"])
     return [grouped[key] for key in sorted(grouped)]
+
+
+def _work_item_session_activity(
+    records: tuple[dict[str, Any], ...],
+) -> list[dict[str, Any]]:
+    """並列完了順に依存せず、論理session IDとturnで輸送記録を対応付ける。"""
+
+    calls: dict[tuple[str, int, str, int], dict[str, Any]] = {}
+    for record in records:
+        session_id = record.get("workItemSessionId")
+        turn = record.get("workItemSessionTurn")
+        if not isinstance(session_id, str) or not isinstance(turn, int):
+            continue
+        stage = str(record.get("transportStage") or "unknown")
+        attempt = int(record.get("transportAttempt") or 1)
+        key = (session_id, turn, stage, attempt)
+        call = calls.setdefault(
+            key,
+            {
+                "sessionId": session_id,
+                "turn": turn,
+                "transportStage": stage,
+                "transportAttempt": attempt,
+                "cycleNo": record.get("cycleNo"),
+                "workItemIds": [],
+                "hypothesisIds": [],
+                "inputSequence": None,
+                "outputSequence": None,
+                "timeoutSequence": None,
+                "promptChars": 0,
+                "schemaChars": 0,
+                "latencyMs": 0,
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "validationError": None,
+                "timedOut": False,
+                "completeRequestPath": None,
+            },
+        )
+        scope = record.get("scope") or {}
+        call["workItemIds"] = list(
+            dict.fromkeys([*call["workItemIds"], *(scope.get("workItemIds") or [])])
+        )
+        call["hypothesisIds"] = list(
+            dict.fromkeys(
+                [*call["hypothesisIds"], *(scope.get("hypothesisIds") or [])]
+            )
+        )
+        if record.get("event") == "transport_input":
+            call["inputSequence"] = record.get("sequence")
+            call["promptChars"] = int(record.get("promptChars") or 0)
+            call["schemaChars"] = int(record.get("schemaChars") or 0)
+            call["completeRequestPath"] = record.get("completeRequestPath")
+        elif record.get("event") == "transport_output":
+            call["outputSequence"] = record.get("sequence")
+            call["latencyMs"] = int(record.get("latencyMs") or 0)
+            call["inputTokens"] = int(record.get("inputTokens") or 0)
+            call["outputTokens"] = int(record.get("outputTokens") or 0)
+            call["validationError"] = record.get("validationError")
+        elif record.get("event") == "transport_timeout":
+            call["timeoutSequence"] = record.get("sequence")
+            call["timedOut"] = True
+
+    sessions: dict[str, dict[str, Any]] = {}
+    for call in sorted(
+        calls.values(),
+        key=lambda item: (
+            int(item.get("inputSequence") or item.get("outputSequence") or 0),
+            item["sessionId"],
+            item["turn"],
+        ),
+    ):
+        session = sessions.setdefault(
+            call["sessionId"],
+            {
+                "sessionId": call["sessionId"],
+                "workItemIds": [],
+                "cycleNos": [],
+                "callCount": 0,
+                "timeoutCount": 0,
+                "latencyMs": 0,
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "turns": [],
+            },
+        )
+        session["workItemIds"] = list(
+            dict.fromkeys([*session["workItemIds"], *call["workItemIds"]])
+        )
+        if isinstance(call.get("cycleNo"), int):
+            session["cycleNos"] = list(
+                dict.fromkeys([*session["cycleNos"], call["cycleNo"]])
+            )
+        session["callCount"] += 1
+        session["timeoutCount"] += int(call["timedOut"])
+        session["latencyMs"] += call["latencyMs"]
+        session["inputTokens"] += call["inputTokens"]
+        session["outputTokens"] += call["outputTokens"]
+        session["turns"].append(call)
+    return list(sessions.values())
+
+
+def _work_item_session_findings(
+    sessions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    sessions_by_work_item: dict[str, list[str]] = {}
+    for session in sessions:
+        work_item_ids = session.get("workItemIds", [])
+        if len(work_item_ids) > 1:
+            findings.append(
+                _finding(
+                    "WORK_ITEM_SESSION_SCOPE_CONFLICT",
+                    "一つの専属sessionが複数のWorkItemを処理しています。",
+                    sessionId=session.get("sessionId"),
+                    workItemIds=work_item_ids,
+                )
+            )
+        for work_item_id in work_item_ids:
+            sessions_by_work_item.setdefault(work_item_id, []).append(
+                session["sessionId"]
+            )
+        if session.get("timeoutCount", 0):
+            findings.append(
+                _finding(
+                    "WORK_ITEM_SESSION_TIMEOUT",
+                    "WorkItem専属sessionで時間切れが発生しています。",
+                    sessionId=session.get("sessionId"),
+                    workItemIds=work_item_ids,
+                    timeoutCount=session.get("timeoutCount"),
+                )
+            )
+    for work_item_id, session_ids in sorted(sessions_by_work_item.items()):
+        unique_session_ids = list(dict.fromkeys(session_ids))
+        if len(unique_session_ids) <= 1:
+            continue
+        findings.append(
+            _finding(
+                "WORK_ITEM_SESSION_ID_CHANGED",
+                "同じWorkItemが複数の専属session IDで処理されています。",
+                workItemId=work_item_id,
+                sessionIds=unique_session_ids,
+            )
+        )
+    return findings
 
 
 def _execution_findings(

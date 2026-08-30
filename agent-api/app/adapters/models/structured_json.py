@@ -249,6 +249,7 @@ class StructuredJSONModelAdapter:
                             input_tokens=result.inputTokens,
                             output_tokens=result.outputTokens,
                             provider_retry_count=result.retryCount,
+                            latency_ms=result.latencyMs,
                             transport_stage="solver",
                         )
                     return SolverCallResult(
@@ -269,6 +270,7 @@ class StructuredJSONModelAdapter:
                     input_tokens=result.inputTokens,
                     output_tokens=result.outputTokens,
                     provider_retry_count=result.retryCount,
+                    latency_ms=result.latencyMs,
                     transport_stage="solver",
                 )
 
@@ -364,6 +366,7 @@ class StructuredJSONModelAdapter:
                 input_tokens=result.inputTokens,
                 output_tokens=result.outputTokens,
                 provider_retry_count=result.retryCount,
+                latency_ms=result.latencyMs,
                 transport_stage="graph_review",
             )
         if validation_error is not None or review is None:
@@ -510,6 +513,7 @@ class StructuredJSONModelAdapter:
                     input_tokens=dependency_result.inputTokens,
                     output_tokens=dependency_result.outputTokens,
                     provider_retry_count=dependency_result.retryCount,
+                    latency_ms=dependency_result.latencyMs,
                     transport_stage="dependency_assessment",
                 )
             if dependency_error is not None or dependency_result.payload is None:
@@ -629,6 +633,7 @@ class StructuredJSONModelAdapter:
                 input_tokens=transition_result.inputTokens,
                 output_tokens=transition_result.outputTokens,
                 provider_retry_count=transition_result.retryCount,
+                latency_ms=transition_result.latencyMs,
                 transport_stage="cycle_close",
             )
         if transition_error is not None or transition_result.payload is None:
@@ -726,6 +731,7 @@ class StructuredJSONModelAdapter:
                     input_tokens=answer_check_result.inputTokens,
                     output_tokens=answer_check_result.outputTokens,
                     provider_retry_count=answer_check_result.retryCount,
+                    latency_ms=answer_check_result.latencyMs,
                     transport_stage="final_answer_check",
                 )
             if answer_check_error is not None or answer_check_result.payload is None:
@@ -859,6 +865,7 @@ class StructuredJSONModelAdapter:
                     input_tokens=result.inputTokens,
                     output_tokens=result.outputTokens,
                     provider_retry_count=result.retryCount,
+                    latency_ms=result.latencyMs,
                     transport_stage="observation_integration",
                     work_item_session_id=session.session_id,
                     work_item_session_turn=session.turn,
@@ -992,6 +999,7 @@ class StructuredJSONModelAdapter:
                 input_tokens=selection_result.inputTokens,
                 output_tokens=selection_result.outputTokens,
                 provider_retry_count=selection_result.retryCount,
+                latency_ms=selection_result.latencyMs,
                 transport_stage="search_selection",
             )
         if selection_error is not None or selection_result.payload is None:

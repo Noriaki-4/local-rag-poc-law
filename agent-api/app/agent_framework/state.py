@@ -794,7 +794,10 @@ class CaseState(FrameworkModel):
     tool_results: tuple[ToolResult, ...] = ()
     integrated_tool_result_request_ids: tuple[str, ...] = Field(
         default=(),
-        description="取得本文をWorkItem・Hypothesisへ反映済みのToolRequest ID。",
+        description=(
+            "取得本文をWorkItem・Hypothesisへ統合済み、又は探索候補を専用Reviewへ"
+            "反映済みのToolRequest ID。"
+        ),
     )
     focus_work_item_ids: tuple[str, ...] = ()
     retained_evidence_ids: tuple[str, ...] = ()
