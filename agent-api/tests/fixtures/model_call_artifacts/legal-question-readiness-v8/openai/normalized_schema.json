@@ -38,7 +38,7 @@
   "additionalProperties": false,
   "properties": {
     "choices": {
-      "description": "確認質問に対する2件から4件の相互に区別できる解釈候補。readyでは空配列。自由入力欄はUIが別に提供する。",
+      "description": "原文から作れる、確認質問に対する相互に区別できる解釈候補。readyでは空配列。clarification_requiredでも、安全な候補を推測なしで作れない場合は空配列とし、候補を返す場合は2件から4件とする。利用者は元の質問入力欄を直接修正できる。",
       "items": {
         "$ref": "#/$defs/QuestionClarificationChoice"
       },
@@ -60,7 +60,7 @@
       "title": "Clarification Question"
     },
     "decision": {
-      "description": "readyは一つの主たる主体・行為ペアを原文から特定して調査開始可能、clarification_requiredはペアが不明・曖昧又は複数あるため利用者確認が必要であることを示す。",
+      "description": "readyは一つの主たる主体と、検索対象を特定できる行為を原文から読み取って調査を開始できることを示す。clarification_requiredは、主体、行為若しくは行為対象の欠落・曖昧さ、又は独立した検索単位の混在により利用者確認が必要であることを示す。",
       "enum": [
         "ready",
         "clarification_required"
@@ -69,7 +69,7 @@
       "type": "string"
     },
     "reason": {
-      "description": "判断理由。clarification_requiredでは主体・行為ペアの欠落、曖昧さ又は複数性が検索をどう分けるかを、法的結論を断定せず説明する。",
+      "description": "判断理由。clarification_requiredでは、何が不足又は混在し、検索対象をどう変え得るかを法的結論を断定せず説明する。通常UIには表示せず、診断又はtraceで確認する。",
       "maxLength": 1000,
       "minLength": 1,
       "title": "Reason",

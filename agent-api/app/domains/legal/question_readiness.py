@@ -19,7 +19,7 @@ from app.llm import StructuredJSONResult
 from app.models import QuestionReadiness, QuestionReadinessRequest
 
 QUESTION_READINESS_PROFILE_NAME = "legal-question-readiness"
-QUESTION_READINESS_PROFILE_VERSION = "7"
+QUESTION_READINESS_PROFILE_VERSION = "8"
 _PROMPT_PATH = Path(__file__).with_name("prompts") / "solver_question_readiness.md"
 
 

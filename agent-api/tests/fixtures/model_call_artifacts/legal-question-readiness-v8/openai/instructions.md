@@ -46,3 +46,12 @@
 - `reason`は確認が回答へ与える影響を説明し、どの選択肢が法的に有利かを評価しません。
 - `ready`では`clarification_question=null`、`choices=[]`とします。
 - `clarification_required`では`clarification_question`を設定します。`choices`は0件又は2件から4件とし、1件だけ返しません。
+
+<input_contract>
+以下は今回の入力項目と意味です。
+- `question`: 利用者が入力した確認前の質問。質問に書かれていない事実を補わず、この本文だけから調査開始可能性を判断する。
+</input_contract>
+
+## 入力
+
+{{runtime_input}}

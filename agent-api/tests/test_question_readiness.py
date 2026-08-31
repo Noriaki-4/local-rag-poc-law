@@ -53,7 +53,7 @@ def test_render_question_readiness_uses_only_question_and_typed_contract() -> No
     )
 
     assert QUESTION_READINESS_PROFILE_NAME == "legal-question-readiness"
-    assert QUESTION_READINESS_PROFILE_VERSION == "7"
+    assert QUESTION_READINESS_PROFILE_VERSION == "8"
     assert question_readiness_profile().name == QUESTION_READINESS_PROFILE_NAME
     assert question_readiness_profile().version == QUESTION_READINESS_PROFILE_VERSION
     assert rendered.stage == "question_readiness"
@@ -61,11 +61,10 @@ def test_render_question_readiness_uses_only_question_and_typed_contract() -> No
         "question": "会社が株式を買う場合の手続は何ですか。"
     }
     assert "# 法令調査Solver：検索単位の確認" in rendered.instructions
-    assert "主体と、その主体自身の行為" in rendered.instructions
+    assert "適用される規律を検索できる程度に対象を含めて特定" in rendered.instructions
     assert "相手方、対象又は条件" in rendered.instructions
-    assert "利用者、質問者又は「その行為をする者」" in rendered.instructions
-    assert "質問中の各ペアに同じ順序で一つずつ" in rendered.instructions
-    assert "他の不明点は補いません" in rendered.instructions
+    assert "回答として求めている未知事項" in rendered.instructions
+    assert "安全に候補を作れる場合だけ" in rendered.instructions
     assert "`A / X`と`B / Y`" in rendered.instructions
     assert "`question`" in rendered.instructions
     assert "<question_readiness_input>" in rendered.request
@@ -81,7 +80,7 @@ def test_render_question_readiness_uses_only_question_and_typed_contract() -> No
         "clarification_question",
         "choices",
     }
-    assert "一つの主たる主体・行為ペア" in rendered.output_schema["properties"][
+    assert "検索対象を特定できる行為" in rendered.output_schema["properties"][
         "decision"
     ]["description"]
 
@@ -101,7 +100,7 @@ def test_question_readiness_model_call_artifacts_are_current() -> None:
     )
     artifact_dir = (
         Path(__file__).parent
-        / "fixtures/model_call_artifacts/legal-question-readiness-v7/openai"
+        / "fixtures/model_call_artifacts/legal-question-readiness-v8/openai"
     )
 
     assert {path.name for path in artifact_dir.iterdir()} == set(expected)
@@ -126,7 +125,9 @@ def test_service_returns_ready_without_changing_the_original_question(
     )
 
     result = QuestionReadinessService(client).check(
-        QuestionReadinessRequest(question="許可が必要となる条件は何ですか。")
+        QuestionReadinessRequest(
+            question="会社が有価証券報告書を提出する期限はいつですか。"
+        )
     )
 
     assert result.decision == "ready"
@@ -134,7 +135,9 @@ def test_service_returns_ready_without_changing_the_original_question(
     assert result.choices == []
     assert len(client.calls) == 1
     assert client.calls[0]["model"] == "test-model"
-    assert "許可が必要となる条件は何ですか。" in client.calls[0]["prompt"]
+    assert "会社が有価証券報告書を提出する期限はいつですか。" in client.calls[0][
+        "prompt"
+    ]
 
 
 def test_service_returns_distinct_refined_questions_for_clarification() -> None:
@@ -229,6 +232,38 @@ def test_question_readiness_contract_rejects_duplicate_choice_ids() -> None:
                         "label": "個人",
                         "refined_question": "個人が行う場合はどうか。",
                     },
+                ],
+            }
+        )
+
+
+def test_question_readiness_contract_accepts_clarification_without_choices() -> None:
+    result = QuestionReadiness.model_validate(
+        {
+            "decision": "clarification_required",
+            "reason": "提出対象がなく検索対象を特定できないため。",
+            "clarification_question": "何を提出する場合について調べますか。",
+            "choices": [],
+        }
+    )
+
+    assert result.decision == "clarification_required"
+    assert result.choices == []
+
+
+def test_question_readiness_contract_rejects_single_choice() -> None:
+    with pytest.raises(ValidationError, match="must be empty or include at least 2"):
+        QuestionReadiness.model_validate(
+            {
+                "decision": "clarification_required",
+                "reason": "確認が必要",
+                "clarification_question": "確認してください。",
+                "choices": [
+                    {
+                        "choice_id": "only",
+                        "label": "唯一の候補",
+                        "refined_question": "唯一の候補を調べる。",
+                    }
                 ],
             }
         )

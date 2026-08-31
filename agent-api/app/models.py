@@ -136,17 +136,19 @@ class QuestionReadiness(BaseModel):
 
     decision: Literal["ready", "clarification_required"] = Field(
         description=(
-            "readyは一つの主たる主体・行為ペアを原文から特定して調査開始可能、"
-            "clarification_requiredはペアが不明・曖昧又は複数あるため利用者確認が"
-            "必要であることを示す。"
+            "readyは一つの主たる主体と、検索対象を特定できる行為を原文から"
+            "読み取って調査を開始できることを示す。clarification_requiredは、"
+            "主体、行為若しくは行為対象の欠落・曖昧さ、又は独立した検索単位の"
+            "混在により利用者確認が必要であることを示す。"
         )
     )
     reason: str = Field(
         min_length=1,
         max_length=1000,
         description=(
-            "判断理由。clarification_requiredでは主体・行為ペアの欠落、曖昧さ"
-            "又は複数性が検索をどう分けるかを、法的結論を断定せず説明する。"
+            "判断理由。clarification_requiredでは、何が不足又は混在し、検索対象を"
+            "どう変え得るかを法的結論を断定せず説明する。通常UIには表示せず、"
+            "診断又はtraceで確認する。"
         ),
     )
     clarification_question: str | None = Field(
@@ -158,8 +160,10 @@ class QuestionReadiness(BaseModel):
     choices: list[QuestionClarificationChoice] = Field(
         max_length=4,
         description=(
-            "確認質問に対する2件から4件の相互に区別できる解釈候補。"
-            "readyでは空配列。自由入力欄はUIが別に提供する。"
+            "原文から作れる、確認質問に対する相互に区別できる解釈候補。"
+            "readyでは空配列。clarification_requiredでも、安全な候補を推測なしで"
+            "作れない場合は空配列とし、候補を返す場合は2件から4件とする。"
+            "利用者は元の質問入力欄を直接修正できる。"
         ),
     )
 
@@ -176,8 +180,10 @@ class QuestionReadiness(BaseModel):
             raise ValueError(
                 "clarification_required must include clarification_question"
             )
-        if len(self.choices) < 2:
-            raise ValueError("clarification_required must include at least 2 choices")
+        if len(self.choices) == 1:
+            raise ValueError(
+                "clarification_required choices must be empty or include at least 2 choices"
+            )
         choice_ids = [choice.choice_id for choice in self.choices]
         labels = [choice.label for choice in self.choices]
         refined_questions = [choice.refined_question for choice in self.choices]

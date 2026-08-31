@@ -22,20 +22,15 @@ DEFAULT_PATTERN = "pattern_4_deepsearch"
 QUESTION_READINESS_TIMEOUT_SEC = 200
 
 
-def _apply_confirmed_question(question: str, reason: str) -> None:
-    """選択済みの修正版を既存入力欄へ戻し、調査前の最終確認状態にする。"""
+def _apply_confirmed_question(question: str) -> None:
+    """選択済みの修正版を既存入力欄へ戻す。"""
 
     normalized = question.strip()
     if not normalized:
         return
     st.session_state.question_text = normalized
-    st.session_state.question_readiness_source = normalized
-    st.session_state.question_readiness = {
-        "decision": "ready",
-        "reason": reason,
-        "clarification_question": None,
-        "choices": [],
-    }
+    st.session_state.question_readiness_source = None
+    st.session_state.question_readiness = None
 
 st.set_page_config(page_title="法令RAG 質問デモ", layout="wide")
 st.title("法令RAG 質問デモ")
@@ -179,40 +174,35 @@ else:
         if st.session_state.question_readiness_source == question
         else None
     )
-    if readiness is None:
-        organize_column, direct_column = st.columns(2)
-        with organize_column:
-            organize_requested = st.button("質問を整理する", type="primary")
-        with direct_column:
-            answer_requested = st.button("このまま調べる")
+    organize_column, direct_column = st.columns(2)
+    with organize_column:
+        organize_requested = st.button("質問を整理する", type="primary")
+    with direct_column:
+        answer_requested = st.button("このまま調べる")
 
-        if organize_requested:
-            if not (question or "").strip():
-                st.warning("質問を入力してください。")
-            else:
-                try:
-                    with st.spinner("質問の前提と曖昧さを確認しています"):
-                        response = requests.post(
-                            f"{API_URL}/question/readiness",
-                            json={"question": question},
-                            timeout=QUESTION_READINESS_TIMEOUT_SEC,
-                        )
-                        response.raise_for_status()
-                    readiness = response.json()
-                    st.session_state.question_readiness = readiness
-                    st.session_state.question_readiness_source = question
-                except requests.RequestException as exc:
-                    st.error(f"質問確認に失敗しました: {exc}")
+    if organize_requested:
+        if not (question or "").strip():
+            st.warning("質問を入力してください。")
+        else:
+            try:
+                with st.spinner("質問の前提と曖昧さを確認しています"):
+                    response = requests.post(
+                        f"{API_URL}/question/readiness",
+                        json={"question": question},
+                        timeout=QUESTION_READINESS_TIMEOUT_SEC,
+                    )
+                    response.raise_for_status()
+                st.session_state.question_readiness = response.json()
+                st.session_state.question_readiness_source = question
+                st.rerun()
+            except requests.RequestException as exc:
+                st.error(f"質問確認に失敗しました: {exc}")
 
     if readiness and readiness.get("decision") == "ready":
-        st.success("この質問は、そのまま法令調査を開始できます。")
-        st.caption(readiness.get("reason") or "質問の確認が完了しました。")
-        answer_requested = st.button("この内容で調べる", type="primary")
+        st.success("質問の整理が完了しました。「このまま調べる」で検索を開始できます。")
     elif readiness and readiness.get("decision") == "clarification_required":
-        st.info(readiness.get("reason") or "回答の前提となる情報を確認してください。")
-        st.caption(
-            "複数の主体・行為を調べたい場合は、一つずつ選び、"
-            "残りは調査完了後に別の質問として実行してください。"
+        clarification_question = (
+            readiness.get("clarification_question") or "質問を確認してください。"
         )
         readiness_choices = readiness.get("choices") or []
         choice_by_id = {
@@ -226,7 +216,7 @@ else:
             if current_choice not in choice_by_id:
                 st.session_state.clarification_choice_id = choice_ids[0]
             selected_id = st.radio(
-                readiness.get("clarification_question") or "確認してください",
+                clarification_question,
                 options=choice_ids,
                 format_func=lambda choice_id: choice_by_id[choice_id].get(
                     "label", choice_id
@@ -239,31 +229,18 @@ else:
             st.button(
                 "この質問案を入力欄へ反映",
                 on_click=_apply_confirmed_question,
-                args=(
-                    selected["refined_question"],
-                    "利用者が確認候補を選択し、修正後の質問を確認しました。",
-                ),
+                args=(selected["refined_question"],),
             )
-
-        st.markdown("**選択肢に当てはまらない場合**")
-        custom_question = st.text_area(
-            "質問を直接修正してください",
-            key="custom_refined_question",
-            height=100,
-            help=(
-                "一回の検索で主に調べる主体とその行為を一組にし、"
-                "必要な相手方、対象や条件を補った質問全文を入力してください。"
-            ),
-        )
-        st.button(
-            "直接修正した質問を入力欄へ反映",
-            disabled=not custom_question.strip(),
-            on_click=_apply_confirmed_question,
-            args=(
-                custom_question,
-                "利用者が質問を直接修正し、その内容を確認しました。",
-            ),
-        )
+            st.caption(
+                "選択肢に当てはまらない場合は、上の質問入力欄を直接修正し、"
+                "もう一度「質問を整理する」を押してください。"
+            )
+        else:
+            st.info(clarification_question)
+            st.caption(
+                "不足している内容を上の質問入力欄へ追加し、"
+                "もう一度「質問を整理する」を押してください。"
+            )
 
 if answer_requested:
     if not (question or "").strip():
