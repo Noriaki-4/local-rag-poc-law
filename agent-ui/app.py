@@ -179,23 +179,30 @@ else:
         if st.session_state.question_readiness_source == question
         else None
     )
-    if readiness is None and st.button("質問を確認する", type="primary"):
-        if not (question or "").strip():
-            st.warning("質問を入力してください。")
-        else:
-            try:
-                with st.spinner("質問の前提と曖昧さを確認しています"):
-                    response = requests.post(
-                        f"{API_URL}/question/readiness",
-                        json={"question": question},
-                        timeout=QUESTION_READINESS_TIMEOUT_SEC,
-                    )
-                    response.raise_for_status()
-                readiness = response.json()
-                st.session_state.question_readiness = readiness
-                st.session_state.question_readiness_source = question
-            except requests.RequestException as exc:
-                st.error(f"質問確認に失敗しました: {exc}")
+    if readiness is None:
+        organize_column, direct_column = st.columns(2)
+        with organize_column:
+            organize_requested = st.button("質問を整理する", type="primary")
+        with direct_column:
+            answer_requested = st.button("このまま調べる")
+
+        if organize_requested:
+            if not (question or "").strip():
+                st.warning("質問を入力してください。")
+            else:
+                try:
+                    with st.spinner("質問の前提と曖昧さを確認しています"):
+                        response = requests.post(
+                            f"{API_URL}/question/readiness",
+                            json={"question": question},
+                            timeout=QUESTION_READINESS_TIMEOUT_SEC,
+                        )
+                        response.raise_for_status()
+                    readiness = response.json()
+                    st.session_state.question_readiness = readiness
+                    st.session_state.question_readiness_source = question
+                except requests.RequestException as exc:
+                    st.error(f"質問確認に失敗しました: {exc}")
 
     if readiness and readiness.get("decision") == "ready":
         st.success("この質問は、そのまま法令調査を開始できます。")
