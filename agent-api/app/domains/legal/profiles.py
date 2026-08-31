@@ -28,7 +28,7 @@ def legal_agent_profile() -> AgentProfile:
     timeout_sec = settings.agent_framework_model_timeout_sec
     return AgentProfile(
         name="legal-default",
-        version="450",
+        version="454",
         provider=settings.llm_provider,
         solver_research=_model_profile(
             model=settings.agent_framework_research_model,
@@ -92,6 +92,7 @@ def legal_agent_profile() -> AgentProfile:
                 completion_prompt,
             ),
             completion_check_prompt=_read_prompt("solver_integration_check.md"),
+            context_projection="integration",
             dependency_action_system_prompt=_join_prompts(
                 solver_identity_prompt,
                 _read_prompt("solver_dependency_action.md"),
@@ -236,7 +237,7 @@ def legal_agent_profile() -> AgentProfile:
             max_selected_frontier_per_step=(
                 settings.agent_framework_max_selected_frontier_per_step
             ),
-            max_graph_articles_per_hypothesis_per_cycle=1,
+            max_graph_articles_per_hypothesis_per_cycle=2,
             max_graph_candidates_per_review_batch=(
                 settings.agent_framework_max_graph_candidates_per_review_batch
             ),
@@ -282,6 +283,7 @@ def _model_profile(
     completion_check_prompt: str,
     context_projection: Literal[
         "full",
+        "integration",
         "initial_research",
         "research_decomposition",
         "research_hypothesis",

@@ -29,6 +29,7 @@ from app.agent_framework.context import (
     SearchSelectionInput,
     SolverContext,
     WorkTreeItem,
+    pending_candidate_review_work_item_ids,
 )
 from app.agent_framework.contract_rendering import (
     contract_field_description,
@@ -132,6 +133,8 @@ class StructuredJSONModelAdapter:
             context = _project_next_hypothesis_work_item(context)
         if profile.context_projection == "hypothesis_revision":
             return self._solve_hypothesis_revision(context, profile)
+        if profile.context_projection == "observation_integration":
+            return self._solve_observation_only(context, profile)
         if (
             context.required_search_review_request_ids
             and not context.graph_review_batch.candidates
@@ -144,8 +147,6 @@ class StructuredJSONModelAdapter:
             and not context.finalize_only
         ):
             return self._solve_graph_review(context, profile)
-        if profile.context_projection == "observation_integration":
-            return self._solve_observation_only(context, profile)
         if profile.context_projection == "cycle_close":
             return self._solve_cycle_close(context, profile)
         dependency_action_call = _is_dependency_action_call(context, profile)
@@ -1334,7 +1335,7 @@ def _is_dependency_action_call(
 ) -> bool:
     return bool(
         context.required_dependency_work_item_ids
-        and profile.context_projection == "full"
+        and profile.context_projection in {"full", "integration"}
         and profile.dependency_action_system_prompt is not None
     )
 
@@ -1742,7 +1743,7 @@ def _solver_context_payload(
         payload["graph_review_selection_limit"] = (
             context.graph_review_selection_limit
         )
-    if projection == "full" and context.required_dependency_work_item_ids:
+    if projection in {"full", "integration"} and context.required_dependency_work_item_ids:
         # A prior LLM decision already established which WorkItems need a
         # lower-norm action. Keep this planning step focused; other open work
         # remains in CaseStore and is projected again after these actions.
@@ -1894,6 +1895,31 @@ def _solver_context_payload(
         ]
         return {name: payload[name] for name in dependency_action_fields}
     if projection == "finalization":
+        verified_evidence_ids = set(
+            _verified_answer_evidence_ids(
+                context,
+                ObservationIntegrationDecision(
+                    decision_reason="逐次統合済み状態から引用可能な根拠を投影する。"
+                ),
+            )
+        )
+        payload["material_evidence"] = [
+            {
+                "evidence_id": item["evidence_id"],
+                "content": item["content"],
+                "title": item["title"],
+            }
+            for item in payload["material_evidence"]
+            if item["evidence_id"] in verified_evidence_ids
+        ]
+        material_evidence_ids = {
+            item["evidence_id"] for item in payload["material_evidence"]
+        }
+        payload["grounding_evidence_ids"] = [
+            evidence_id
+            for evidence_id in payload["grounding_evidence_ids"]
+            if evidence_id in material_evidence_ids
+        ]
         payload["graph_review_ledger"] = [
             item
             for item in payload["graph_review_ledger"]
@@ -1951,6 +1977,100 @@ def _solver_context_payload(
         if context.answer_options:
             finalization_payload["answer_options"] = payload["answer_options"]
         return finalization_payload
+    if projection == "integration":
+        payload["remaining_fetch_capacity_by_work_item"] = dict(
+            context.remaining_fetch_capacity_by_work_item
+        )
+        follow_up_hypothesis_ids = {
+            item.hypothesis_id
+            for item in context.hypotheses
+            if item.requires_follow_up
+        }
+        follow_up_work_item_ids = {
+            item.work_item_id
+            for item in context.hypotheses
+            if item.hypothesis_id in follow_up_hypothesis_ids
+        }
+        active_candidates = [
+            item
+            for item in payload["search_candidates"]
+            if (
+                follow_up_hypothesis_ids.intersection(
+                    item["matched_hypothesis_ids"]
+                )
+                or follow_up_hypothesis_ids.intersection(
+                    item["discovery_hypothesis_ids"]
+                )
+                or follow_up_work_item_ids.intersection(
+                    item["discovery_work_item_ids"]
+                )
+            )
+        ]
+        active_candidate_ids = {
+            item["article_id"] for item in active_candidates
+        }
+        # Observation Integrationで本文の意味は状態へ反映済みである。次行動・完了判断には
+        # 本文を残す一方、同じ出典情報を重複するmanifestと、解決済み論点の候補を送らない。
+        grounding_evidence_ids = set(payload["grounding_evidence_ids"])
+        payload["material_evidence"] = [
+            {
+                "evidence_id": item["evidence_id"],
+                "content": item["content"],
+                "title": item["title"],
+            }
+            for item in payload["material_evidence"]
+            if item["evidence_id"] in grounding_evidence_ids
+        ]
+        material_evidence_ids = {
+            item["evidence_id"] for item in payload["material_evidence"]
+        }
+        payload["grounding_evidence_ids"] = [
+            evidence_id
+            for evidence_id in payload["grounding_evidence_ids"]
+            if evidence_id in material_evidence_ids
+        ]
+        payload["search_candidates"] = active_candidates
+        payload["fetchable_article_ids"] = [
+            article_id
+            for article_id in payload["fetchable_article_ids"]
+            if article_id in active_candidate_ids
+        ]
+        integration_fields = (
+            "question",
+            "answer_options",
+            "non_work_item_requirements",
+            "research_cycle_count",
+            "remaining_research_cycles",
+            "remaining_wall_time_sec",
+            "min_next_cycle_budget_sec",
+            "can_start_next_cycle",
+            "max_tool_requests_per_step",
+            "remaining_fetch_capacity",
+            "remaining_fetch_capacity_by_work_item",
+            "cycle_budget_reached",
+            "cycle_close_required",
+            "finalize_only",
+            "available_tools",
+            "grounding_evidence_ids",
+            "material_evidence",
+            "omitted_evidence_ids",
+            "fetchable_article_ids",
+            "search_candidates",
+            "work_tree",
+            "hypotheses",
+            "focus_work_items",
+            "completed_legal_searches",
+            "completed_graph_searches",
+            "graph_fetch_completed_hypothesis_ids_this_cycle",
+            "graph_review_ledger",
+            "dependency_decisions",
+            "required_dependency_kind",
+            "required_dependency_work_item_ids",
+            "reviewer_findings",
+            "contract_feedback",
+            "action_feedback",
+        )
+        return {name: payload[name] for name in integration_fields}
     if projection == "full":
         return payload
     if projection == "graph_review":
@@ -2755,6 +2875,9 @@ def _observation_work_item_contexts(
         if item.evidence_id in observation_grounding_ids
         and isinstance(article_id := item.metadata.get("articleId"), str)
     }
+    pending_review_work_item_ids = pending_candidate_review_work_item_ids(
+        context
+    )
     has_candidate_mappings = bool(context.evidence_hypothesis_candidates)
     projected: list[SolverContext] = []
     for work_item in active_work_items:
@@ -2778,6 +2901,9 @@ def _observation_work_item_contexts(
         search_candidate_article_ids = {
             item.article_id for item in search_candidates
         }
+        candidate_review_pending = (
+            work_item.work_item_id in pending_review_work_item_ids
+        )
         candidates = tuple(
             item.model_copy(
                 update={
@@ -2853,11 +2979,20 @@ def _observation_work_item_contexts(
                         work_item.work_item_id: omitted_evidence_ids
                     },
                     "evidence_hypothesis_candidates": candidates,
-                    "search_candidates": search_candidates,
+                    "search_candidates": (
+                        () if candidate_review_pending else search_candidates
+                    ),
                     "fetchable_article_ids": tuple(
                         article_id
                         for article_id in context.fetchable_article_ids
                         if article_id in search_candidate_article_ids
+                    )
+                    if not candidate_review_pending
+                    else (),
+                    "available_tools": (
+                        ()
+                        if candidate_review_pending
+                        else context.available_tools
                     ),
                     "required_dependency_work_item_ids": tuple(
                         item_id
@@ -2960,6 +3095,9 @@ def _pending_dependency_action_contexts(
         for item in context.work_tree
         if item.state == "open"
     }
+    pending_review_work_item_ids = pending_candidate_review_work_item_ids(
+        context
+    )
     pending_ids = tuple(
         dict.fromkeys(
             item.work_item_id
@@ -2968,6 +3106,7 @@ def _pending_dependency_action_contexts(
             and item.work_item_id in context.required_dependency_work_item_ids
             and item.work_item_id in open_work_item_ids
             and item.work_item_id not in observed_work_item_ids
+            and item.work_item_id not in pending_review_work_item_ids
         )
     )
     projected = []
@@ -6663,6 +6802,14 @@ def _evidence_load_alias_map(context: SolverContext) -> dict[str, str]:
 
 
 def _tool_requests_transport_schema(context: SolverContext) -> dict[str, Any]:
+    if not context.available_tools:
+        return {
+            **_empty_array_schema(),
+            "description": contract_field_description(
+                SolverDecision,
+                "tool_requests",
+            ),
+        }
     projected_open_work_item_ids = _repair_open_work_item_ids(context)
     if (
         not projected_open_work_item_ids
@@ -8407,13 +8554,29 @@ def _normalize_absent_context_branches(
         if isinstance(request, dict)
         and request.get("tool_name") == "fetch_articles"
     ]
-    current_limit = context.remaining_fetch_capacity
-    if fetch_requests and current_limit > 0:
-        primary_request = fetch_requests[0]
+    fetch_groups: dict[str, list[dict[str, Any]]] = {}
+    if context.remaining_fetch_capacity_by_work_item:
+        for request in fetch_requests:
+            work_item_id = request.get("work_item_id")
+            if isinstance(work_item_id, str):
+                fetch_groups.setdefault(work_item_id, []).append(request)
+    elif fetch_requests:
+        # Older replay fixtures predate WorkItem-scoped capacity. Preserve their
+        # single shared fetch group so historical diagnostics remain replayable.
+        fetch_groups[""] = fetch_requests
+
+    for work_item_id, requests in fetch_groups.items():
+        current_limit = context.remaining_fetch_capacity_by_work_item.get(
+            work_item_id,
+            context.remaining_fetch_capacity,
+        )
+        if current_limit <= 0:
+            continue
+        primary_request = requests[0]
         requested_article_ids = list(
             dict.fromkeys(
                 article_id
-                for request in fetch_requests
+                for request in requests
                 for article_id in request.get("arguments", {}).get(
                     "article_ids",
                     (),
@@ -8427,7 +8590,7 @@ def _normalize_absent_context_branches(
         primary_request["hypothesis_ids"] = list(
             dict.fromkeys(
                 hypothesis_id
-                for request in fetch_requests
+                for request in requests
                 for hypothesis_id in request.get("hypothesis_ids", ())
                 if isinstance(hypothesis_id, str)
             )
@@ -8435,7 +8598,7 @@ def _normalize_absent_context_branches(
         primary_request_id = primary_request.get("request_id")
         merged_request_ids = {
             request.get("request_id")
-            for request in fetch_requests[1:]
+            for request in requests[1:]
             if isinstance(request.get("request_id"), str)
         }
         for dependency in normalized.get("dependency_decisions") or []:
@@ -8447,39 +8610,42 @@ def _normalize_absent_context_branches(
         normalized["tool_requests"] = [
             request
             for request in normalized.get("tool_requests") or []
-            if request is primary_request
-            or not (
-                isinstance(request, dict)
-                and request.get("tool_name") == "fetch_articles"
-            )
+            if request is primary_request or request not in requests[1:]
         ]
 
     if not context.cycle_close_required:
-        requested_article_ids: set[str] = set()
+        validation_groups: dict[str, list[dict[str, Any]]] = {}
         for request in normalized.get("tool_requests") or []:
-            if (
-                not isinstance(request, dict)
-                or request.get("tool_name") != "fetch_articles"
-            ):
+            if not isinstance(request, dict) or request.get("tool_name") != "fetch_articles":
                 continue
-            arguments = request.get("arguments")
-            article_ids = (
-                arguments.get("article_ids")
-                if isinstance(arguments, dict)
-                else None
+            work_item_id = (
+                request.get("work_item_id")
+                if context.remaining_fetch_capacity_by_work_item
+                and isinstance(request.get("work_item_id"), str)
+                else ""
             )
-            if isinstance(article_ids, list):
-                requested_article_ids.update(
-                    article_id
-                    for article_id in article_ids
-                    if isinstance(article_id, str)
+            validation_groups.setdefault(work_item_id, []).append(request)
+        for work_item_id, requests in validation_groups.items():
+            requested_article_ids = {
+                article_id
+                for request in requests
+                for article_id in request.get("arguments", {}).get(
+                    "article_ids",
+                    (),
                 )
-        if len(requested_article_ids) > current_limit:
-            raise ModelProtocolError(
-                "all fetch_articles requests combined must contain at most "
-                f"{current_limit} unique Article IDs; the LLM must choose the "
-                "current verification set"
+                if isinstance(article_id, str)
+            }
+            current_limit = context.remaining_fetch_capacity_by_work_item.get(
+                work_item_id,
+                context.remaining_fetch_capacity,
             )
+            if len(requested_article_ids) > current_limit:
+                scope = f" for WorkItem {work_item_id}" if work_item_id else ""
+                raise ModelProtocolError(
+                    "fetch_articles requests"
+                    f"{scope} must contain at most {current_limit} unique "
+                    "Article IDs; the LLM must choose the current verification set"
+                )
 
     if (
         context.cycle_close_required

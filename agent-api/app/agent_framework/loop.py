@@ -20,6 +20,7 @@ from .context import (
     SolverContext,
     SolverContractFeedback,
     build_solver_context,
+    pending_candidate_review_work_item_ids,
 )
 from .contracts import SolverDecision
 from .diagnostics import AgentDiagnostics
@@ -300,6 +301,7 @@ class AgentLoop:
             )
             pending_grounding_observation = bool(
                 integration_call
+                and not state.cycle_step_timeout
                 and not reviewer_findings
                 and _has_unintegrated_grounding_result(
                     state,
@@ -364,6 +366,9 @@ class AgentLoop:
                     ),
                     available_tools=self._solver_tool_definitions,
                 )
+                pending_candidate_work_item_ids = (
+                    pending_candidate_review_work_item_ids(context)
+                )
                 if pending_grounding_observation:
                     # A selected Article has already consumed fetch capacity. Integrate
                     # its text before reviewing more discovery candidates. The complete
@@ -387,6 +392,7 @@ class AgentLoop:
                 graph_review_call = bool(
                     context.required_graph_review_request_ids
                     and self._profile.solver_graph_review is not None
+                    and not pending_grounding_observation
                     and not finalize_only
                     and not reviewer_findings
                 )
@@ -394,6 +400,7 @@ class AgentLoop:
                     context.required_search_review_request_ids
                     and self._profile.solver_search_review is not None
                     and not graph_review_call
+                    and not pending_grounding_observation
                     and not finalize_only
                     and not reviewer_findings
                 )
@@ -621,6 +628,13 @@ class AgentLoop:
                     )
                 try:
                     applied_decision = solver_call.decision
+                    if purpose == "observation_integration":
+                        applied_decision = (
+                            _defer_actions_until_candidate_review(
+                                applied_decision,
+                                work_item_ids=pending_candidate_work_item_ids,
+                            )
+                        )
                     if purpose == "hypothesis_revision":
                         revision = solver_call.hypothesis_revision
                         if revision is None:
@@ -678,9 +692,13 @@ class AgentLoop:
                             },
                             required_graph_review_request_ids=(
                                 context.required_graph_review_request_ids
+                                if purpose == "graph_selection"
+                                else ()
                             ),
                             required_search_review_request_ids=(
                                 context.required_search_review_request_ids
+                                if purpose == "search_selection"
+                                else ()
                             ),
                             search_candidate_article_ids=tuple(
                                 item.article_id for item in context.search_candidates
@@ -867,15 +885,15 @@ class AgentLoop:
                 self._store.save(candidate)
                 return candidate
 
-            decision_requests = solver_call.decision.tool_requests
+            decision_requests = applied_decision.tool_requests
             if (
                 graph_review_call
-                and solver_call.decision.graph_candidate_review is not None
-                and solver_call.decision.graph_candidate_review.selected_article_ids
+                and applied_decision.graph_candidate_review is not None
+                and applied_decision.graph_candidate_review.selected_article_ids
             ):
                 graph_fetch_request = self._graph_review_fetch_request(
                     candidate,
-                    solver_call.decision.graph_candidate_review,
+                    applied_decision.graph_candidate_review,
                     fetchable_article_ids={
                         item.article_id
                         for item in context.graph_review_batch.candidates
@@ -885,7 +903,7 @@ class AgentLoop:
                 )
                 graph_load_request = self._graph_review_load_request(
                     candidate,
-                    solver_call.decision.graph_candidate_review,
+                    applied_decision.graph_candidate_review,
                     fetchable_article_ids={
                         item.article_id
                         for item in context.graph_review_batch.candidates
@@ -904,12 +922,12 @@ class AgentLoop:
                 )
             elif (
                 search_review_call
-                and solver_call.decision.search_candidate_review is not None
-                and solver_call.decision.search_candidate_review.selected_article_ids
+                and applied_decision.search_candidate_review is not None
+                and applied_decision.search_candidate_review.selected_article_ids
             ):
                 decision_requests = self._search_review_fetch_requests(
                     candidate,
-                    solver_call.decision.search_candidate_review,
+                    applied_decision.search_candidate_review,
                     context.search_candidates,
                 )
                 candidate = self._replace_state(
@@ -919,7 +937,7 @@ class AgentLoop:
 
             deferred_fetch_resolutions = tuple(
                 item
-                for item in solver_call.decision.deferred_frontier_resolutions
+                for item in applied_decision.deferred_frontier_resolutions
                 if item.action == "fetch_next_cycle"
             )
             has_deferred_article_fetch = any(
@@ -1883,19 +1901,40 @@ def _grounding_observation_context(context: SolverContext) -> SolverContext:
             if request.request_id in grounding_request_ids
         ),
         "recent_tool_results": grounding_results,
-        "graph_review_batch": GraphReviewBatch(),
-        "graph_review_ledger": (),
-        "required_graph_review_request_ids": (),
-        "required_search_review_request_ids": (),
     }
-    if context.required_search_review_request_ids:
-        update.update(
-            {
-                "search_candidates": (),
-                "fetchable_article_ids": (),
-            }
-        )
     return context.model_copy(update=update)
+
+
+def _defer_actions_until_candidate_review(
+    decision: SolverDecision,
+    *,
+    work_item_ids: frozenset[str],
+) -> SolverDecision:
+    """未評価候補のReview境界を越える新規Tool要求を保留する。"""
+
+    if not work_item_ids:
+        return decision
+    deferred_request_ids = {
+        request.request_id
+        for request in decision.tool_requests
+    }
+    if not deferred_request_ids:
+        return decision
+    return decision.model_copy(
+        update={
+            "tool_requests": tuple(
+                request
+                for request in decision.tool_requests
+                if request.request_id not in deferred_request_ids
+            ),
+            "dependency_decisions": tuple(
+                item.model_copy(update={"action_request_id": None})
+                if item.action_request_id in deferred_request_ids
+                else item
+                for item in decision.dependency_decisions
+            ),
+        }
+    )
 
 
 def _finalization_decision_context(context: SolverContext) -> SolverContext:

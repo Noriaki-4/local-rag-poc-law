@@ -288,6 +288,33 @@ def test_legal_search_uses_article_aggregation_and_document_scope() -> None:
     assert execution.evidence[1].metadata["articleId"] is None
 
 
+def test_legal_search_resolves_explicit_article_before_ranked_search() -> None:
+    class ExplicitArticleSearch(FakeArticleSearch):
+        def explicit_article_ids(self, query: str) -> tuple[str, ...]:
+            assert query == "金融商品取引法施行令 第二条の十二 譲渡制限付株式"
+            return ("law-order-article-2_12",)
+
+    client = ExplicitArticleSearch()
+    LegalSearchTool(
+        client,  # type: ignore[arg-type]
+        user_clearance_level=2,
+        top_k=8,
+    ).execute(
+        _request(
+            "legal_search",
+            {
+                "query": "金融商品取引法施行令 第二条の十二 譲渡制限付株式",
+                "doc_types": ["law"],
+                "document_ids": [],
+            },
+        ),
+        cycle_no=1,
+        timeout_sec=12.5,
+    )
+
+    assert client.specs[0].article_ids == ("law-order-article-2_12",)
+
+
 def test_fetch_articles_returns_citation_eligible_text_with_source_id() -> None:
     execution = LegalFetchArticlesTool(
         FakeArticleSearch(),  # type: ignore[arg-type]

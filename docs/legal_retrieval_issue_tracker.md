@@ -61,7 +61,7 @@ Neo4jから指定条件の1ホップ候補を取得する
 | ID | 優先度 | status | 課題 | 現在地 | 次の確認 |
 |---|---|---|---|---|---|
 | `LR-001` | P0 | 対応中 | 質問から必要な検索仮説を漏れなく作る | Profile v289でHypothesisがないWorkItemを1件ずつ処理する方式へ変更した際、元質問、`action_actor`及び`gaps`をHypothesis生成契約から落としたため、主体の推測と抽象的な命題が再発した。v300で`statement`をWorkItemへの回答を構成する回答項目として定義し、追加の未確認事項がない`gaps=[]`を許可した。v301でWorkItem最大24件、Hypothesis最大4件／WorkItemという意味上の上限をProvider schemaから削除した。v302で分割単位を「法令本文の一つの規定内容で個別に支持又は否定できる命題」と明確化した。v303では1 WorkItemずつ処理するHypothesis生成入力から元質問全体を外し、WorkItemを唯一の作業範囲とした。`gpt-4o-mini`の隔離実行では総合の成立条件へ他WorkItemの論点が混入する問題は解消した。Profile v379のLuna総合問題では、質問の「必要な手続」を質問にない7内訳へ展開して未確認範囲を広げたため、v380で広い要求の抽象度を保つよう質問分解Promptを補った。v380のLuna `high`隔離実行は4 WorkItemを維持し、「必要な手続」を内訳へ展開せず合格した。`action_actor`はWorkItemだけを正本とし、Hypothesisには複製しない | 公開買付けの公告・例外・総合WorkItemを隔離実行し、WorkItem外の論点や質問にない内訳を追加せず、検索対象を選べるHypothesisが生成されることを確認する |
-| `LR-002` | P0 | 対応中 | 法令検索表現を作り、同一Cycle内でOpenSearchを適切に再検索する | 検索要求作成だけの隔離診断を追加した。Profile v290で`purpose`を確認内容、`query`を短い法令用語の組合せとして分離した。例外問題では直接例外と委任を1検索にまとめて法令表現を生成できたが、総合問題の検索語はまだ抽象的である | 個別語をPromptへ追加せず、LR-001のHypothesis具体性と実際のOpenSearch候補を合わせて評価する |
+| `LR-002` | P0 | 対応中 | 法令検索表現を作り、同一Cycle内でOpenSearchを適切に再検索する | 検索要求作成だけの隔離診断を追加した。Profile v290で`purpose`を確認内容、`query`を短い法令用語の組合せとして分離した。Profile v453では、下位規範をGraphで発見できなかった場合、委任元の条・項・号を下位規範側の引用表現へ直してOpenSearchへ渡す。個別の府令名や正解ArticleはPromptへ固定しない | 委任元の引用表現を含む再検索が、正式名称を事前に知らない下位規範Articleの発見率を改善するか、複数法令系列で継続評価する |
 | `LR-003` | P0 | 完了 | Graph由来Articleを起点に連続1ホップ探索する | `gpt-4o-mini`の実モデルtrace v7で、金商法27条の2→施行令7条、施行令7条→府令2条の5を別々の1ホップGraph要求として実行し、府令本文取得後にCycle 1で正常完了した | `lr_003_second_hop_integration_v1.json`、`lr_003_second_hop_graph_review_v1.json`、`lr_003_cycle_close_deferred_frontiers_v1.json`を回帰fixtureとして維持する |
 | `LR-004` | P0 | 完了 | 複合問題の統合Decisionを成立させ、次の探索または完了へ進む | Profile v388で、逐次統合済みEvidenceをCycle Closeで再統合せず、Cycle遷移だけを判断するよう修正した。最終化はProvider共通の小型schemaを使い、処理済みGraph ledgerを除外する。Luna `high`総合問題ではCycle 2境界が約95秒から約22秒へ短縮した。v389では最終化へ70.6秒を与えてもtimeoutしたため、v390で法令アプリの最終化予約を35秒から90秒へ増やした | v390の実モデル総合問題は2 Cycle・17モデル呼出しで正常完了した。必要Article 4/4と関連する府令本文を取得し、入力28,076 token、出力6,468 tokenの最終回答を引用付きで生成した |
 | `LR-005` | P1 | 検証待ち | Haikuと`gpt-4o-mini`の役割を分けて評価する | `gpt-4o-mini`は単一責務の隔離Promptでは質問分解・具体的Hypothesis生成ができたが、実際の長い入力と複数処理ではHypothesisの抽象化、論点の結合、主体・候補対応の揺れが残った。過去の`protocol_error`、重複行動、ID不整合の多くはPrompt・契約・実装の不備であり、GPT固有の失敗とは扱わない。現在はHaikuを法令検索の主評価モデル、`gpt-4o-mini`を承認済みfixture以降の安価な構造デバッグ用とする | 同じ承認済みcheckpointを両モデルで各1回再生し、意味判断差とProvider・契約不備を分離して記録する。OpenAIの429は回答品質と別に扱う |
@@ -103,8 +103,8 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-042` | P0 | 検証待ち | OpenSearchとNeo4jのシナリオ範囲不一致で明示参照先を取得できない | 少人数私募ではOpenSearchが開示府令14条の15を取得し、Solverも金商法23条の13第4項への`reference_edges / follow_reference_in_text`を要求したが、Neo4jの公開買付け用subsetに両Articleがなく空結果となった。固定datasetを4法令15 Articleへ更新し、両Articleと`14条の15 REFERENCES 23条の13`を再生成可能にした。現在のNeo4jにも同じ生成物を非破壊upsertし、実Tool経路で1ホップ取得を確認した | 少人数私募E2Eを再実行し、金商法23条の13本文を取得して12/12になることを確認する |
 | `LR-043` | P0 | 実装済み・実モデル6/6確認 | WorkItem並列処理と単一Solver時代の共有上限を整合させる | 本文取得枠を`WorkItem × Cycle`ごとに5件とし、検索・Graph要求を別WorkItem間で統合しない。別WorkItemが取得済みのArticleも通常の本文取得対象にでき、Evidence IDはCaseStoreで重複排除する。Evidence提示順はWorkItem間でround-robinにする | APIを使わない全1135テストに合格。公開買付け総合問題で固定した必要Article 6/6を実モデルで取得する |
 | `LR-044` | P0 | 対応中 | IDの種類と所有scopeの誤認を構造的に減らす | Article ID、Paragraph・Item由来のEvidence ID、WorkItem ID、Hypothesis ID及びToolRequest IDは文字列として似ており、Prompt・Provider輸送・並列結果の結合境界で誤用が増えている。Profile v449実測ではParagraph Evidence IDをGraphのArticle起点へ指定したほか、修正前adapterが別WorkItemの本文取得要求を統合してHypothesis IDの所有関係を壊した | IDごとの正本、利用可能な処理、所有WorkItemを入力契約で区別する。Programは種類・既知性・所有scopeだけを検証し、法的対応先は判断しない。監査でID違反の種類と発生箇所を集計し、Article/Evidence混同、WorkItem/Hypothesis交差、Request参照切れの回帰を用意する |
-| `LR-045` | P0 | 未着手 | 未評価候補を残したまま新しい探索へ進み、必要Articleを取りこぼす | Profile v449の公開買付け総合問題では、公開買付府令2条の5をOpenSearchで2回発見したが、同時に返った本文の統合後、候補評価より新しい検索・Graph探索が先行した。Cycle Close開始まで本文取得対象に選ばれず、必要Articleは5/6となった | 同一WorkItemでは、選択済み本文の取得・統合を完了した後、未評価の検索・Graph候補をLLMに評価させてから新しい探索を許す。別WorkItemの取得・統合と候補評価は並列に進めてよい。Programは処理順、既知ID及び状態だけを管理し、候補の関連性やArticleの優先度は判断しない |
-| `LR-046` | P1 | 未着手 | 最終回答の引用を使用根拠へ絞り、条数と根拠箇所数を区別して表示する | 有価証券報告書の例題は採点8/8だったが、最終回答は3法令・11 Articleから32 Evidence IDを引用した。LawQA 2問目（case `legal-1528b4c40c9549ba89fbb9a29e34d0c0`）も正答Bに到達した一方、回答に直接使わない承認手続・準用規定を含む18 Evidence IDを引用した。UIはParagraph・Item単位のEvidenceを全て「引用件数」と表示し、探索中にHypothesisへ蓄積した根拠が回答本文で未使用でも引用集合へ残る | Finalizationでは回答中の主張に実際に使う確認済みEvidenceをLLMが選ぶ。Programは既知性・引用可能性・Hypothesis又は解決済み依存との対応だけを検証し、全Evidenceの引用を強制しない。UIは「法令数」「Article数」「根拠箇所数」を区別し、項・号の内訳は展開表示にする |
+| `LR-045` | P0 | 完了（Profile v452） | 未評価候補を残したまま新しい探索へ進み、必要Articleを取りこぼす | WorkItemごとに、選択済み本文の取得・統合、未評価候補の評価、新しい探索の順を強制した。候補評価待ちのWorkItemから出た新規Tool要求は保留し、別WorkItemの本文統合は並列に継続する。Programは未処理結果、WorkItem、既知ID及び処理順だけを扱い、候補の法的関連性は判断しない | Luna `high`の公開買付け総合問題で公開買付府令2条の5を本文取得し、必要資料・Article・回答要点11/11に合格した。後続のProfile v453全件実行でも先頭3問は満点だったが、4問目以降はOpenAI APIクレジット枯渇による429で中断したため、モデル品質の不合格とは扱わない |
+| `LR-046` | P1 | 引用投影修正済み・UI継続 | 最終回答の引用を使用根拠へ絞り、条数と根拠箇所数を区別して表示する | 最終化Promptへ、取得済みArticleの全Paragraphを提示していた一方、引用契約はHypothesis又は解決済み依存へ対応付けたEvidenceだけを許していた。Profile v453の適用除外問題では、回答が提示済みの金商法27条の2第7・8項を補足に使い、3回とも引用契約違反になった | Profile v454では、最終化へ提示する本文もHypothesis又は解決済み依存へ対応付けたgrounding Evidenceへ限定し、Promptと引用契約を一致させた。Luna `high`の適用除外問題は契約修復なしで10/10に合格した。UIの「法令数」「Article数」「根拠箇所数」の区別は継続課題とする |
 | `LR-047` | P0 | 未着手 | 回答に十分な根拠を得た後、付随する例外・下位規範を新しい未確認事項として過剰追跡する | LawQA 2問目は施行令3条の4で外国会社の提出期限を判断できた後も、ただし書の承認手続を`gaps`へ追加し、開示府令15条の2の2・17条の4・7条3項等を追跡した。2 Cycle・24モデル呼出し・364.3秒・入力349,706 tokenに対し、Tool時間は1.3秒だった。最終統合には検索候補用`search_navigation`も`material_evidence`として入り、1回の入力が83,638 tokenまで増えた | WorkItemの結論が付随手続の詳細に依存する場合だけ下位規範を`gaps`へ追加する。回答範囲との関係はLLMが判断し、Programは構造整合だけを検証する。最終回答用Projectorからnavigation Evidenceを除き、通常統合ではなく小さいFinalization投影を使う。同じHypothesisを新しいTool結果なしで再統合しない。委任・準用・ただし書を含む複数設問で、正答・必要条文を維持しながら呼出し数、入力token、引用数が減ることを確認する |
 
 ### 3.1 LR-016 Tool観察とCycle Closeの単一責務化
@@ -1413,6 +1413,11 @@ Programは未処理結果の有無、WorkItem、既知ID及び処理順だけを
 - 別WorkItemの選択済み本文取得・統合を、不必要に待機させない。
 - 候補のArticle ID、順位又は法的内容をProgramが評価せず、LLMの選択結果だけを検証する。
 - 公開買付け総合問題で公開買付府令2条の5を本文取得し、固定した必要Article 6/6に到達する。
+
+Profile v452でこの順序を実装した。取得直後の本文が未統合なら本文統合を優先し、その後も同じWorkItemに
+未評価候補が残る間は新しいTool要求を実行しない。候補評価待ちの検出とToolの保留はProgramが行うが、
+候補の採否と次の探索内容はLLMへ残す。Luna `high`の公開買付け総合問題では、公開買付府令2条の5を含む
+必要資料・Article・回答要点11/11に合格した。
 
 ### LR-046 最終引用の過剰選択と件数表示
 

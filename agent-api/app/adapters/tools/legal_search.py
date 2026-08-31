@@ -235,11 +235,17 @@ class LegalSearchTool:
                 )
             return results
 
+        explicit_article_ids: tuple[str, ...] = ()
+        explicit_resolver = getattr(self._client, "explicit_article_ids", None)
+        if callable(explicit_resolver):
+            explicit_article_ids = tuple(explicit_resolver(arguments.query))
+
         specs = [
             RequirementSearchSpec(
                 requirement_id=f"framework-search-{index}",
                 query=arguments.query,
                 document_ids=arguments.document_ids,
+                article_ids=(explicit_article_ids if doc_type == "law" else ()),
                 top_k=(self._top_k if doc_type == "law" else min(2, self._top_k)),
                 doc_type=doc_type,
             )

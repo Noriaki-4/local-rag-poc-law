@@ -25,6 +25,7 @@ class ModelCallProfile(FrameworkModel):
     final_answer_check_completion_prompt: str | None = None
     context_projection: Literal[
         "full",
+        "integration",
         "initial_research",
         "research_decomposition",
         "research_hypothesis",

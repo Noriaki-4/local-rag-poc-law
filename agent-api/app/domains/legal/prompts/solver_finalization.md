@@ -41,6 +41,8 @@
 5. `graph_review_ledger`に未処理の`relevant_deferred`があれば、全件を`deferred_frontier_resolutions`へ書きます。
 6. 回答を作るときは、`non_work_item_requirements`をすべて反映します。
 7. `answer_options[]`がある場合は、確認済み本文に最も合う候補の`option_id`を`selected_option_id`へ設定します。候補がなければnullにします。
+8. 同じ内容の言い換えや条文の長い転記を避け、質問への結論、条件、例外及び必要な手続を簡潔にまとめます。
+9. WorkItemが条件又は範囲を尋ねる場合は、確認済み本文が示す独立した主要条件を、一つの例だけで済ませず回答します。
 
 ### ルール
 
@@ -55,6 +57,7 @@
 - `grounding_evidence_ids=[]`なら、`citation_ids=[]`にします。
 - `citation_ids`には`grounding_evidence_ids`のIDだけを使います。
 - `required_answer_evidence_ids`を`citation_ids`から落としません。
+- `required_answer_evidence_ids`以外は、回答で実際に使う最小限のEvidenceだけを`citation_ids`へ入れます。
 - open WorkItem又は未解決Hypothesisでも、提示本文が直接示す部分は限定的に回答できます。未確認部分を確認済みとして補いません。
 - Tool失敗、timeout、候補不在を法的根拠の不存在として断定しません。
 - 回答は取得済み本文が示す範囲に限定します。

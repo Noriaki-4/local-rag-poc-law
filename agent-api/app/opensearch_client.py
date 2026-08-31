@@ -30,6 +30,24 @@ LEGAL_REFERENCE_PHRASE_PATTERN = re.compile(
     rf"第{_LEGAL_NUMBER}条(?:の{_LEGAL_NUMBER})*"
     rf"(?:第{_LEGAL_NUMBER}項)?(?:第{_LEGAL_NUMBER}号)?"
 )
+_ARTICLE_REFERENCE_PATTERN = re.compile(
+    rf"第({_LEGAL_NUMBER})条((?:の{_LEGAL_NUMBER})*)"
+)
+_JAPANESE_DIGITS = {
+    "〇": 0,
+    "零": 0,
+    "一": 1,
+    "二": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+}
+_JAPANESE_UNITS = {"十": 10, "百": 100, "千": 1000}
+_FULLWIDTH_DIGITS = str.maketrans("０１２３４５６７８９", "0123456789")
 
 
 @dataclass(frozen=True)
@@ -252,6 +270,14 @@ class OpenSearchClient:
                 titles[bucket["key"]] = str(hits[0]["_source"].get("title") or "")
         self._law_titles_cache = titles
         return dict(titles)
+
+    def explicit_article_ids(self, query: str) -> tuple[str, ...]:
+        """検索語に明示された「法令名＋条番号」をArticle IDへ解決する。
+
+        条番号は意味検索の順位に委ねない。法令名から次の法令名までに書かれた
+        条番号だけをその法令へ対応付けるため、異なる法令の同じ条番号を混同しない。
+        """
+        return _explicit_article_ids(query, self.law_titles())
 
     def search_by_document_id(
         self,
@@ -779,3 +805,61 @@ def _legal_reference_should_clauses(query: str) -> list[dict[str, Any]]:
         }
         for phrase in _legal_reference_phrases(query)
     ]
+
+
+def _explicit_article_ids(query: str, titles: dict[str, str]) -> tuple[str, ...]:
+    normalized = (query or "").translate(_FULLWIDTH_DIGITS)
+    mentions: list[tuple[int, int, str]] = []
+    for document_id, title in titles.items():
+        if not title:
+            continue
+        start = 0
+        while (index := normalized.find(title, start)) >= 0:
+            mentions.append((index, index + len(title), document_id))
+            start = index + 1
+
+    # 正式名称が別の正式名称の部分文字列なら、同じ位置では長い名称だけを採用する。
+    selected: list[tuple[int, int, str]] = []
+    for mention in sorted(mentions, key=lambda item: (item[0], -(item[1] - item[0]))):
+        start, end, _ = mention
+        if any(
+            start < other_end and other_start < end
+            for other_start, other_end, _ in selected
+        ):
+            continue
+        selected.append(mention)
+    selected.sort(key=lambda item: item[0])
+
+    article_ids: list[str] = []
+    for index, (_, end, document_id) in enumerate(selected):
+        segment_end = selected[index + 1][0] if index + 1 < len(selected) else len(normalized)
+        for match in _ARTICLE_REFERENCE_PATTERN.finditer(normalized[end:segment_end]):
+            parts = [match.group(1), *match.group(2).removeprefix("の").split("の")]
+            numbers = [_japanese_number_to_int(part) for part in parts if part]
+            if not numbers or any(number is None for number in numbers):
+                continue
+            suffix = "_".join(str(number) for number in numbers)
+            article_id = f"{document_id}-article-{suffix}"
+            if article_id not in article_ids:
+                article_ids.append(article_id)
+    return tuple(article_ids)
+
+
+def _japanese_number_to_int(value: str) -> int | None:
+    normalized = value.translate(_FULLWIDTH_DIGITS)
+    if normalized.isdigit():
+        return int(normalized)
+    if not normalized or any(
+        char not in _JAPANESE_DIGITS and char not in _JAPANESE_UNITS
+        for char in normalized
+    ):
+        return None
+    total = 0
+    current = 0
+    for char in normalized:
+        if char in _JAPANESE_DIGITS:
+            current = _JAPANESE_DIGITS[char]
+        else:
+            total += (current or 1) * _JAPANESE_UNITS[char]
+            current = 0
+    return total + current

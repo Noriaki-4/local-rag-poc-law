@@ -9,8 +9,13 @@ from threading import Barrier
 
 import pytest
 
+from app.adapters.models.structured_json import _observation_work_item_contexts
 from app.adapters.persistence.simple_in_memory import InMemoryCaseStore
-from app.agent_framework.context import SolverContext, build_solver_context
+from app.agent_framework.context import (
+    SolverContext,
+    build_solver_context,
+    pending_candidate_review_work_item_ids,
+)
 from app.agent_framework.contracts import (
     CaseUpdate,
     HypothesisUpdate,
@@ -20,6 +25,7 @@ from app.agent_framework.contracts import (
 )
 from app.agent_framework.loop import (
     AgentLoop,
+    _defer_actions_until_candidate_review,
     _finalization_decision_context,
     _grounding_observation_context,
     _has_unintegrated_grounding_result,
@@ -517,6 +523,19 @@ def test_grounding_observation_does_not_consume_concurrent_search_result() -> No
         limits,
         remaining_wall_time_sec=120,
         finalize_only=False,
+        available_tools=tuple(
+            ToolDefinition(
+                name=name,
+                description=f"{name}を実行する。",
+                input_schema={"type": "object"},
+                result_description=f"{name}の結果。",
+            )
+            for name in (
+                "legal_search",
+                "fetch_articles",
+                "legal_graph_neighbors",
+            )
+        ),
     )
 
     observation_context = _grounding_observation_context(context)
@@ -527,8 +546,22 @@ def test_grounding_observation_does_not_consume_concurrent_search_result() -> No
     assert tuple(
         request.request_id for request in observation_context.recent_tool_requests
     ) == (fetch_request.request_id,)
-    assert observation_context.fetchable_article_ids == ()
-    assert observation_context.required_search_review_request_ids == ()
+    assert observation_context.fetchable_article_ids == (
+        "law-test-article-2",
+    )
+    assert observation_context.required_search_review_request_ids == (
+        search_request.request_id,
+    )
+    assert pending_candidate_review_work_item_ids(observation_context) == {
+        "w2"
+    }
+    projected = _observation_work_item_contexts(observation_context)
+    assert [item.work_tree[0].work_item_id for item in projected] == ["w1"]
+    assert {item.name for item in projected[0].available_tools} == {
+        "legal_search",
+        "fetch_articles",
+        "legal_graph_neighbors",
+    }
 
     after_observation = state.model_copy(
         update={
@@ -548,6 +581,91 @@ def test_grounding_observation_does_not_consume_concurrent_search_result() -> No
     assert tuple(
         candidate.article_id for candidate in next_context.search_candidates
     ) == ("law-test-article-2",)
+
+    same_work_item_state = state.model_copy(
+        update={
+            "tool_requests": (
+                fetch_request,
+                search_request.model_copy(
+                    update={
+                        "work_item_id": "w1",
+                        "hypothesis_ids": ("h1",),
+                    }
+                ),
+            )
+        }
+    )
+    same_work_item_context = _grounding_observation_context(
+        build_solver_context(
+            same_work_item_state,
+            limits,
+            remaining_wall_time_sec=120,
+            finalize_only=False,
+            available_tools=context.available_tools,
+        )
+    )
+    assert pending_candidate_review_work_item_ids(
+        same_work_item_context
+    ) == {"w1"}
+    same_work_item_projection = _observation_work_item_contexts(
+        same_work_item_context
+    )[0]
+    assert same_work_item_projection.available_tools == ()
+    assert same_work_item_projection.search_candidates == ()
+    assert same_work_item_projection.fetchable_article_ids == ()
+
+
+def test_observation_defers_new_actions_until_pending_candidates_are_reviewed(
+) -> None:
+    decision = SolverDecision(
+        next="continue",
+        decision_reason="本文を評価し、次の探索を選んだ。",
+        dependency_decisions=(
+            DependencyDecision(
+                dependency_kind="lower_norm",
+                work_item_id="w1",
+                status="needs_action",
+                reason="w1の確認が必要。",
+                action_request_id="next-w1",
+            ),
+            DependencyDecision(
+                dependency_kind="lower_norm",
+                work_item_id="w2",
+                status="needs_action",
+                reason="w2の確認が必要。",
+                action_request_id="next-w2",
+            ),
+        ),
+        tool_requests=(
+            ToolRequest(
+                request_id="next-w1",
+                work_item_id="w1",
+                tool_name="legal_search",
+                arguments={"query": "w1", "doc_types": ["law"]},
+                purpose="w1の次の規定を探す",
+                hypothesis_ids=("h1",),
+            ),
+            ToolRequest(
+                request_id="next-w2",
+                work_item_id="w2",
+                tool_name="legal_search",
+                arguments={"query": "w2", "doc_types": ["law"]},
+                purpose="w2の次の規定を探す",
+                hypothesis_ids=("h2",),
+            ),
+        ),
+    )
+
+    deferred = _defer_actions_until_candidate_review(
+        decision,
+        work_item_ids=frozenset({"w1"}),
+    )
+
+    assert deferred.tool_requests == ()
+    assert {
+        item.work_item_id: item.action_request_id
+        for item in deferred.dependency_decisions
+    } == {"w1": None, "w2": None}
 
 
 def test_load_evidence_grounding_result_is_integrated_before_other_results() -> None:

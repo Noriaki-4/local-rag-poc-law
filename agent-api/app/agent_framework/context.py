@@ -1476,6 +1476,45 @@ def build_solver_context(
     )
 
 
+def pending_candidate_review_work_item_ids(
+    context: SolverContext,
+) -> frozenset[str]:
+    """未評価の検索・Graph候補を持つWorkItem IDを機械的に返す。"""
+
+    pending_search_request_ids = set(
+        context.required_search_review_request_ids
+    )
+    hypothesis_work_item_ids = {
+        item.hypothesis_id: item.work_item_id for item in context.hypotheses
+    }
+    work_item_ids: set[str] = set()
+    for candidate in context.search_candidates:
+        if pending_search_request_ids.isdisjoint(candidate.search_request_ids):
+            continue
+        work_item_ids.update(candidate.discovery_work_item_ids)
+        work_item_ids.update(
+            work_item_id
+            for hypothesis_id in candidate.discovery_hypothesis_ids
+            if (
+                work_item_id := hypothesis_work_item_ids.get(hypothesis_id)
+            )
+            is not None
+        )
+
+    pending_graph_request_ids = set(
+        context.required_graph_review_request_ids
+    )
+    work_item_ids.update(
+        candidate.work_item_id
+        for candidate in context.graph_review_batch.candidates
+        if any(
+            not pending_graph_request_ids.isdisjoint(link.graph_request_ids)
+            for link in candidate.links
+        )
+    )
+    return frozenset(work_item_ids)
+
+
 def _omitted_evidence_ids_by_work_item(
     state: CaseState,
     *,

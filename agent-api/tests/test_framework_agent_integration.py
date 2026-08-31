@@ -42,6 +42,7 @@ from app.adapters.models.structured_json import (
     _solver_anthropic_transport_schema,
     _solver_anthropic_json_transport_schema,
     _solver_common_transport_schema,
+    _solver_context_payload,
     _solver_compact_transport_schema,
     _solver_prompt,
     _solver_transport_schema,
@@ -105,7 +106,7 @@ from app.agent_framework.ports.model import (
     ReviewerView,
     SolverCheckpointTimeout,
 )
-from app.agent_framework.ports.tool import ToolRegistry
+from app.agent_framework.ports.tool import ToolDefinition, ToolRegistry
 from app.agent_framework.profiles import (
     AgentLimits,
     ModelCallProfile,
@@ -405,6 +406,35 @@ def test_provider_contract_schema_explains_every_visible_property(
 
     collect(schema_factory(context), "")
     assert missing == set()
+
+
+def test_integration_projection_omits_duplicate_evidence_metadata() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_overview_cycle2_repeated_search_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    context = SolverContext.model_validate(fixture["solverContext"]).model_copy(
+        update={
+            "required_dependency_kind": None,
+            "required_dependency_work_item_ids": (),
+        }
+    )
+
+    payload = _solver_context_payload(context, projection="integration")
+
+    assert "evidence_manifest" not in payload
+    assert "navigation_evidence_ids" not in payload
+    assert payload["material_evidence"]
+    assert all(
+        set(item) == {"evidence_id", "content", "title"}
+        for item in payload["material_evidence"]
+    )
+    assert set(payload["grounding_evidence_ids"]) == {
+        item["evidence_id"] for item in payload["material_evidence"]
+    }
 
 
 def test_legal_tool_contracts_describe_input_and_result_semantics() -> None:
@@ -799,7 +829,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "450"
+    assert diagnostic_records[0]["profileVersion"] == "454"
     assert diagnostic_records[0]["runElapsedMs"] >= 0
     assert diagnostic_records[0]["recordedAt"].endswith("+00:00")
     assert len(diagnostic_records[0]["questionHash"]) == 64
@@ -810,7 +840,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "450"
+    assert transport_input["profileVersion"] == "454"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -1489,6 +1519,38 @@ def test_observation_step_advances_other_pending_work_item_in_parallel() -> None
     assert result.attempt_count == 2
 
 
+def test_observation_profile_precedes_pending_search_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = build_solver_context(
+        CaseState(case_id="case-1", question="質問"),
+        AgentLimits(),
+        remaining_wall_time_sec=120,
+        finalize_only=False,
+    ).model_copy(
+        update={"required_search_review_request_ids": ("search-1",)}
+    )
+    adapter = StructuredJSONModelAdapter(object())  # type: ignore[arg-type]
+    expected = object()
+
+    monkeypatch.setattr(
+        adapter,
+        "_solve_observation_only",
+        lambda _context, _profile: expected,
+    )
+    monkeypatch.setattr(
+        adapter,
+        "_solve_search_review",
+        lambda _context, _profile: pytest.fail(
+            "observation must run before pending candidate review"
+        ),
+    )
+    profile = legal_profiles.legal_agent_profile().solver_observation_integration
+    assert profile is not None
+
+    assert adapter.solve(context, profile) is expected
+
+
 def test_graph_review_paging_preserves_discovery_order_instead_of_hash_order() -> None:
     state = CaseState(
         case_id="case-1",
@@ -1652,7 +1714,7 @@ def test_graph_review_moves_to_another_hypothesis_after_integrated_fetch() -> No
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "450"
+    assert profile.version == "454"
     assert profile.solver_graph_review is not None
     assert profile.solver_hypothesis_revision is not None
     assert profile.solver_graph_review.max_output_tokens == (
@@ -1716,7 +1778,7 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     assert profile.solver_hypothesis_revision.context_projection == (
         "hypothesis_revision"
     )
-    assert profile.solver_integration.context_projection == "full"
+    assert profile.solver_integration.context_projection == "integration"
     assert profile.solver_cycle_close.context_projection == "cycle_close"
     assert "# 法令調査Solver：質問の要求分解" in research_prompt
     assert "non_work_item_requirements" in research_prompt
@@ -1743,7 +1805,7 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     assert "WorkItemにない判定軸" in search_prompt
     assert "Hypothesisまたは`gaps`を検証" not in search_prompt
     assert (
-        profile.limits.max_graph_articles_per_hypothesis_per_cycle == 1
+        profile.limits.max_graph_articles_per_hypothesis_per_cycle == 2
     )
     for prompt in (research_prompt, hypothesis_prompt, search_prompt):
         assert "## 共通ルール" not in prompt
@@ -1943,7 +2005,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "450"
+    assert profile.version == "454"
     assert prompt.rindex("## 出力") > prompt.rindex(
         "</solver_context>"
     )
@@ -1994,7 +2056,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "450"
+    assert profile.version == "454"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -4937,6 +4999,18 @@ def test_compact_transport_structures_update_and_tool_arguments() -> None:
         AgentLimits(),
         remaining_wall_time_sec=60,
         finalize_only=False,
+        available_tools=(
+            ToolDefinition(
+                name="legal_search",
+                description="法令候補を検索する。",
+                input_schema={
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                },
+                result_description="検索候補。",
+            ),
+        ),
     )
 
     schema = _solver_compact_transport_schema(context)
@@ -5073,6 +5147,14 @@ def test_contract_repair_limits_identical_graph_requests_to_one() -> None:
                 "identical legal_graph_neighbors arguments must be consolidated"
             ),
             previous_decision=previous,
+        ),
+        available_tools=(
+            ToolDefinition(
+                name="legal_graph_neighbors",
+                description="Graph候補を検索する。",
+                input_schema={"type": "object"},
+                result_description="Graph候補。",
+            ),
         ),
     )
 
@@ -7716,6 +7798,54 @@ def test_tob_announcement_repair_schema_limits_the_aggregate_fetch_request() -> 
     assert normalized["dependency_decisions"][0]["action_request_id"] == "fetch-1"
 
 
+def test_fetch_normalization_preserves_independent_work_item_capacity() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_announcement_integration_one_slot_v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    context = SolverContext.model_validate(fixture["solverContext"]).model_copy(
+        update={
+            "remaining_fetch_capacity": 0,
+            "remaining_fetch_capacity_by_work_item": {
+                "wi-1": 1,
+                "wi-2": 2,
+            },
+        }
+    )
+    normalized = {
+        "next": "continue",
+        "dependency_decisions": [
+            {"work_item_id": "wi-2", "action_request_id": "fetch-2"}
+        ],
+        "tool_requests": [
+            {
+                "request_id": "fetch-1",
+                "work_item_id": "wi-1",
+                "tool_name": "fetch_articles",
+                "arguments": {"article_ids": ["article-1"]},
+                "hypothesis_ids": ["h-1"],
+            },
+            {
+                "request_id": "fetch-2",
+                "work_item_id": "wi-2",
+                "tool_name": "fetch_articles",
+                "arguments": {"article_ids": ["article-2", "article-3"]},
+                "hypothesis_ids": ["h-2"],
+            },
+        ],
+    }
+
+    _normalize_absent_context_branches(normalized, context)
+
+    assert [
+        request["request_id"] for request in normalized["tool_requests"]
+    ] == ["fetch-1", "fetch-2"]
+    assert normalized["dependency_decisions"][0]["action_request_id"] == "fetch-2"
+
+
 def test_tob_announcement_cycle_close_must_continue_for_projected_open_work(
 ) -> None:
     fixture_path = (
@@ -9977,6 +10107,21 @@ def test_overview_repeated_graph_fixture_preserves_every_tool_choice() -> None:
     assert "fetch_articles" in tool_names
 
 
+def test_tool_request_schema_is_empty_when_no_tool_is_available() -> None:
+    context = build_solver_context(
+        CaseState(case_id="case-1", question="質問"),
+        AgentLimits(),
+        remaining_wall_time_sec=120,
+        finalize_only=False,
+        available_tools=(),
+    )
+
+    schema = _tool_requests_transport_schema(context)
+
+    assert schema["type"] == "array"
+    assert schema["maxItems"] == 0
+
+
 def test_load_evidence_article_alias_expands_to_grounding_ids() -> None:
     fixture_path = (
         Path(__file__).parent
@@ -10084,6 +10229,24 @@ def test_openai_solver_uses_structured_tool_request_transport() -> None:
         AgentLimits(),
         remaining_wall_time_sec=60,
         finalize_only=False,
+        available_tools=(
+            ToolDefinition(
+                name="legal_search",
+                description="法令候補を検索する。",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "doc_types": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                    },
+                    "required": ["query", "doc_types"],
+                },
+                result_description="検索候補。",
+            ),
+        ),
     )
     llm = OpenAIStructuredLLM()
 
@@ -12752,6 +12915,27 @@ def test_overview_finalization_projects_verified_open_work_material() -> None:
     )
     fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
     state = CaseState.model_validate(fixture["caseState"])
+    state = state.model_copy(
+        update={
+            "evidence": (
+                *state.evidence,
+                Evidence(
+                    evidence_id="e-fetched-but-unlinked",
+                    source_ref="fixture:e-fetched-but-unlinked",
+                    content="取得したArticle内の別の規定内容。",
+                    created_cycle=2,
+                    metadata={
+                        "articleId": "article-unlinked",
+                        "citationEligible": True,
+                    },
+                ),
+            ),
+            "retained_evidence_ids": (
+                *state.retained_evidence_ids,
+                "e-fetched-but-unlinked",
+            ),
+        }
+    )
     observed = SolverDecision.model_validate(fixture["observedDecision"])
 
     finalized = apply_solver_decision(
@@ -12800,6 +12984,14 @@ def test_overview_finalization_projects_verified_open_work_material() -> None:
     assert rendered.input_payload["required_answer_evidence_ids"] == [
         "e-resolved"
     ]
+    assert all(
+        set(item) == {"evidence_id", "content", "title"}
+        for item in rendered.input_payload["material_evidence"]
+    )
+    assert set(rendered.input_payload["grounding_evidence_ids"]) == {
+        item["evidence_id"]
+        for item in rendered.input_payload["material_evidence"]
+    }
     assert rendered.input_payload["grounding_evidence_ids"] == [
         "e-resolved",
         "e-open",
