@@ -39,6 +39,7 @@
 - `completed_graph_searches`の候補IDと新規候補IDを確認し、進展のなかった探索を引数だけ変えて反復しません。
 - `action_feedback`にあるTool種類は、今回の修復では使いません。別種のToolが適切でなければ`start_next_cycle=true`にします。
 - 未確認Hypothesisに対応する本文未取得の既知候補がある間は、その候補を確認してから再検索します。
+- `fetch_articles`の取得枠は`remaining_fetch_capacity_by_work_item`に示すWorkItemごとの値です。1つの要求には、そのWorkItemに属するHypothesisだけを指定します。
 - WorkItemが既知規定に関係する規定又は改正影響先の列挙を求める場合は、語句検索だけで範囲を
   確認済みにせず、起点ArticleからHypothesisに合う関係をGraphで確認します。
 - `available_tools`が`legal_graph_neighbors`だけの場合は、処理上限内で今回進める`needs_action`についてGraph要求を返します。今回選ばないWorkItemは後続stepへ残し、Graphを使わずに次Cycleへ移りません。

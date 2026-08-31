@@ -79,5 +79,9 @@ def test_scenario_seed_graph_has_expected_three_layer_references(monkeypatch):
         "law-402M50000040038-article-10",
         "law-323AC0000000025-article-27_3",
     ) in reference_pairs
+    assert (
+        "law-348M50000040005-article-14_15",
+        "law-323AC0000000025-article-23_13",
+    ) in reference_pairs
     assert {node["sourceSnapshotId"] for node in nodes} == {source_snapshot_id}
     assert {edge["sourceSnapshotId"] for edge in edges} == {source_snapshot_id}

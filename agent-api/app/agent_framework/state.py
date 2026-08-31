@@ -225,6 +225,27 @@ class Hypothesis(FrameworkModel):
         return self
 
 
+class HypothesisHistoryRecord(FrameworkModel):
+    """Hypothesisの現在版を更新する前の監査用snapshot。"""
+
+    hypothesis: Hypothesis = Field(
+        description="更新前のHypothesis全体。通常のAgentViewには投影しない。",
+    )
+    version: int = Field(
+        ge=1,
+        description="同じHypothesis IDについて保存した旧版の連番。",
+    )
+    revised_cycle: int = Field(
+        ge=1,
+        description="この旧版が現在版へ置き換えられたResearch Cycle番号。",
+    )
+    reason: str = Field(
+        min_length=1,
+        max_length=1200,
+        description="LLMが現在版を更新した短い理由。",
+    )
+
+
 class Evidence(FrameworkModel):
     evidence_id: str = Field(
         min_length=1,
@@ -787,6 +808,13 @@ class CaseState(FrameworkModel):
     )
     work_items: tuple[WorkItem, ...] = ()
     hypotheses: tuple[Hypothesis, ...] = ()
+    hypothesis_history: tuple[HypothesisHistoryRecord, ...] = Field(
+        default=(),
+        description=(
+            "更新前のHypothesis snapshot。永続化と監査にだけ使い、"
+            "通常のSolverContextには投影しない。"
+        ),
+    )
     tool_requests: tuple[ToolRequest, ...] = ()
     evidence: tuple[Evidence, ...] = ()
     dependency_decisions: tuple[DependencyDecision, ...] = ()
@@ -828,4 +856,68 @@ class CaseState(FrameworkModel):
             raise ValueError(
                 "hypothesis revision cycle cannot exceed research cycle count"
             )
+        history_keys = [
+            (item.hypothesis.hypothesis_id, item.version)
+            for item in self.hypothesis_history
+        ]
+        if len(history_keys) != len(set(history_keys)):
+            raise ValueError("hypothesis history versions must be unique")
+        current_by_id = {
+            item.hypothesis_id: item for item in self.hypotheses
+        }
+        for item in self.hypothesis_history:
+            current = current_by_id.get(item.hypothesis.hypothesis_id)
+            if current is None:
+                raise ValueError("hypothesis history requires a current version")
+            if current.work_item_id != item.hypothesis.work_item_id:
+                raise ValueError("hypothesis history cannot change WorkItem")
+            if item.revised_cycle > self.research_cycle_count:
+                raise ValueError("hypothesis history cycle cannot exceed current cycle")
         return self
+
+
+def fetched_article_ids_by_work_item(
+    state: CaseState,
+    *,
+    cycle_no: int | None,
+) -> dict[str, tuple[str, ...]]:
+    """成功済み本文取得をWorkItemごとに、意味判断なしで集計する。"""
+
+    requests_by_id = {item.request_id: item for item in state.tool_requests}
+    hypothesis_work_items = {
+        item.hypothesis_id: item.work_item_id for item in state.hypotheses
+    }
+    article_ids_by_work_item: dict[str, list[str]] = {}
+    for result in state.tool_results:
+        if (
+            result.status != "succeeded"
+            or (cycle_no is not None and result.cycle_no != cycle_no)
+        ):
+            continue
+        request = requests_by_id.get(result.request_id)
+        if request is None or request.tool_name != "fetch_articles":
+            continue
+        raw_article_ids = request.arguments.get("article_ids")
+        if not isinstance(raw_article_ids, (list, tuple)):
+            continue
+        owner_ids = tuple(
+            dict.fromkeys(
+                (
+                    request.work_item_id,
+                    *(
+                        hypothesis_work_items[hypothesis_id]
+                        for hypothesis_id in request.hypothesis_ids
+                        if hypothesis_id in hypothesis_work_items
+                    ),
+                )
+            )
+        )
+        for work_item_id in owner_ids:
+            owned = article_ids_by_work_item.setdefault(work_item_id, [])
+            for article_id in raw_article_ids:
+                if isinstance(article_id, str) and article_id and article_id not in owned:
+                    owned.append(article_id)
+    return {
+        work_item_id: tuple(article_ids)
+        for work_item_id, article_ids in article_ids_by_work_item.items()
+    }

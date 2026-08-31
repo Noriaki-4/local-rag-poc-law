@@ -453,12 +453,21 @@ class Settings:
     agent_framework_max_tool_requests_per_cycle = (
         agent_framework_max_tool_requests_per_step
     )
-    agent_framework_max_fetched_resources_per_cycle = max(
+    agent_framework_max_fetched_resources_per_work_item_per_cycle = max(
         1,
         min(
-            int(os.getenv("AGENT_FRAMEWORK_MAX_FETCHED_RESOURCES_PER_CYCLE", "5")),
+            int(
+                os.getenv(
+                    "AGENT_FRAMEWORK_MAX_FETCHED_RESOURCES_PER_WORK_ITEM_PER_CYCLE"
+                )
+                or os.getenv("AGENT_FRAMEWORK_MAX_FETCHED_RESOURCES_PER_CYCLE", "5")
+            ),
             32,
         ),
+    )
+    # 旧名は既存環境・参照との互換用。意味はWorkItemごとのCycle上限。
+    agent_framework_max_fetched_resources_per_cycle = (
+        agent_framework_max_fetched_resources_per_work_item_per_cycle
     )
     agent_framework_max_selected_frontier_per_step = max(
         1,
@@ -482,6 +491,13 @@ class Settings:
     agent_framework_max_parallel_tools = max(
         1,
         min(int(os.getenv("AGENT_FRAMEWORK_MAX_PARALLEL_TOOLS", "4")), 16),
+    )
+    agent_framework_max_parallel_work_items = max(
+        1,
+        min(
+            int(os.getenv("AGENT_FRAMEWORK_MAX_PARALLEL_WORK_ITEMS", "4")),
+            16,
+        ),
     )
     agent_framework_max_retained_evidence = max(
         0,

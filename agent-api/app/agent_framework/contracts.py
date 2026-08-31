@@ -367,13 +367,46 @@ class HypothesisRevisionProposal(FrameworkModel):
     )
 
 
+class HypothesisRevisionUpdate(FrameworkModel):
+    """既存Hypothesisの現在版を同じIDでブラッシュアップする差分。"""
+
+    hypothesis_id: str = Field(
+        min_length=1,
+        max_length=160,
+        description="現在版を更新する既存Hypothesis ID。",
+    )
+    statement: str = Field(
+        min_length=1,
+        max_length=1200,
+        description="取得本文を踏まえて修正した、次Cycleで検証する法的命題。",
+    )
+    judgment: HypothesisJudgment = Field(
+        description="更新後の命題について、提示本文から判断した現在の判定。",
+    )
+    evidence_ids: tuple[str, ...] = Field(
+        default=(),
+        max_length=12,
+        description="見立てを更新する必要性を示した取得済みEvidence ID。",
+    )
+    gaps: tuple[str, ...] = Field(
+        default=(),
+        max_length=12,
+        description="更新後の命題について本文で未確認の事項。",
+    )
+
+
 class HypothesisRevisionDecision(FrameworkModel):
-    """取得本文に独立した未解決命題があった場合だけ返す追加差分。"""
+    """既存命題の現在版更新と、独立した未解決命題の追加差分。"""
 
     decision_reason: str = Field(
         min_length=1,
         max_length=1200,
-        description="Hypothesisを追加した又は追加しなかった理由。",
+        description="Hypothesisを更新、追加又は維持した理由。",
+    )
+    revise_hypotheses: tuple[HypothesisRevisionUpdate, ...] = Field(
+        default=(),
+        max_length=8,
+        description="同じIDの現在版をブラッシュアップする既存Hypothesis。",
     )
     add_hypotheses: tuple[HypothesisRevisionProposal, ...] = Field(
         default=(),

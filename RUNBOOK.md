@@ -247,8 +247,9 @@ OpenSearch index と Neo4j graph を作り直す。レスポンスの`sourceSnap
 
 ### 公開買付け3階層ミニデータセット
 
-第二期Step 1では、全件を再投入せず、保存済みe-Gov XMLから選んだ3法令13 Articleだけで
-OpenSearchとNeo4jの接続を検証する。まず、ネットワークやDBを使わず固定snapshotを監査する。
+第二期Step 1では、全件を再投入せず、保存済みe-Gov XMLから選んだ4法令15 Articleだけで
+OpenSearchとNeo4jの接続を検証する。公開買付け3階層に加え、開示府令14条の15から
+金商法23条の13への明示参照を含む。まず、ネットワークやDBを使わず固定snapshotを監査する。
 
 ```bash
 python3 scripts/validate_public_tender_offer_mini_dataset.py
@@ -269,8 +270,9 @@ curl -s -X POST http://localhost:8000/admin/seed | jq .
 元に戻す場合は対象の環境変数を戻してAgent APIを再起動し、全件seedを改めて実行する。
 ミニデータセットseedでは、MinIOの別snapshot由来vector文書を削除しない。
 
-2026-08-21の確認値は、OpenSearch 69文書、Neo4j 82 node
-（Document 3、Article 13、Paragraph 46、Item 20）、構造Relation 100件である。
+現行snapshotの生成時期待値は、OpenSearch 76文書、Neo4j 92 node
+（Document 4、Article 15、Paragraph 53、Item 20）、構造Relation 110件である。
+2026-08-21の旧snapshotはOpenSearch 69文書、Neo4j 82 nodeだった。
 意味分類はseedと分離し、監査済みRunだけをpublishする。同日の検証Run
 `classification-run-public-tender-mini-v1-v23`は17候補すべて承認、24 RelationAssertionである。
 回答経路でこのRunを固定する場合は、Agent API起動時に次も設定する。
@@ -1477,8 +1479,12 @@ CaseStore、最終回答、検索結果を更新しない。返るのは内部�
 Legal ProfileのGraph要求は1回1ホップである。SolverがHypothesisに対応するpredicate・方向・起点を
 明示して`legal_graph_neighbors`を要求する。Graph候補Articleの本文取得後、その先が必要なら、Solverは
 そのArticleを新しい起点にして次の1ホップを要求できる。Programは累積depthや発見元を理由に除外しない。
-`fetch_articles`1回のArticle IDは物理上限5個、1 Cycleの本文取得成功数は
-`AGENT_FRAMEWORK_MAX_FETCHED_RESOURCES_PER_CYCLE`（現行既定5件）で制限する。
+`fetch_articles`1回のArticle IDは物理上限5個とする。1 Cycleの本文取得成功数は
+`AGENT_FRAMEWORK_MAX_FETCHED_RESOURCES_PER_WORK_ITEM_PER_CYCLE`
+（現行既定5件）で、WorkItemごと・Cycleごとに制限する。互換用の旧変数
+`AGENT_FRAMEWORK_MAX_FETCHED_RESOURCES_PER_CYCLE`も読み込めるが、新規設定では使わない。
+WorkItem専属のLLM処理の同時実行数は
+`AGENT_FRAMEWORK_MAX_PARALLEL_WORK_ITEMS`（現行既定4）で指定する。
 Legal Profileの1 Solver Decisionは検索系Toolを最大4要求、`fetch_articles`を最大1要求とし、
 合計上限は5要求である。本文取得量の5 Article上限とは別の制約である。
 Graph Reviewから1 stepで選ぶ候補は最大3件とし、残りの関連候補はdeferして後続stepまたは次Cycleへ残す。
@@ -1498,14 +1504,14 @@ Article IDを`fetchable_article_ids`として別々に渡す。LLMは前者をHy
 `fetch_articles`へ使う。`fetchable_article_ids`は本文取得済みという意味ではなく、検索等で発見済みの
 本文取得可能な候補を表す。質問に関係する候補の本文が未取得なら、同じ検索の反復より本文取得を優先する。
 `search_candidates`は各候補を発見した検索要求、発見元WorkItem・Hypothesis、検索抜粋Evidenceの既知参照を
-Article単位にまとめる。発見元は来歴であり意味上の採用先を限定しない。Programは参照を対応付けるだけで、
-候補の関連性と本文取得対象はSolverが判断する。Search Reviewは採用先を確定せず、選択Articleの発見元参照を
-Programが本文取得要求の輸送用に転記する。全文取得後のIntegrationが意味上の採用先を判断する。
+Article単位にまとめる。発見元は来歴であり、候補の意味上の対応先を限定しない。どのWorkItemのHypothesisに
+対応するかはSolverが判断する。同じArticleを複数WorkItemへ対応付けた場合は、WorkItemごとに本文取得要求を作る。
+全文取得後のIntegrationが各WorkItem内でHypothesisとの意味上の対応を判断する。
 新しい検索候補が投影された直後は、同じSolverを`search_selection`用途で2段階に呼ぶ。第1段階は候補ごとに
 検索抜粋をまとめた専用Viewから、全候補の条件・効果を自分の言葉で短く評価する。この一時評価はCaseStateへ
 保存せず、診断snapshotと第2段階の入力だけに使う。第2段階は検索抜粋を再掲せず、短い評価一覧から本文取得候補を
-選ぶ。Programは評価対象の全件性、既知ID、選択件数だけを検証し、選択外候補を機械的に保留して、選択IDを
-1件の本文取得要求へ転記する。
+選ぶ。Programは評価対象の全件性、既知ID、WorkItem所属、選択件数だけを検証し、選択外候補を機械的に保留して、
+選択IDをWorkItem別の本文取得要求へ転記する。
 `non_work_item_requirements`は検索候補へ対応付けない。これは「簡潔に」「根拠条文とともに」等の
 回答全体への要求であり、WorkItem・Hypothesis・Evidenceが確定した後の回答生成と最終回答チェックで全件適用する。
 検索と本文評価はWorkItem・Hypothesisを基準にし、回答形式の要求を法的根拠や本文取得理由として扱わない。

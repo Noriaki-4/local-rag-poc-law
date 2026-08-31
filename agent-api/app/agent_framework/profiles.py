@@ -129,7 +129,12 @@ class AgentLimits(FrameworkModel):
             "max_tool_requests_per_cycle",
         ),
     )
-    max_fetched_resources_per_cycle: int = Field(default=4, ge=1, le=32)
+    max_fetched_resources_per_cycle: int = Field(
+        default=4,
+        ge=1,
+        le=32,
+        description="1 WorkItemが1 Cycleで本文取得できるArticle数上限。",
+    )
     max_selected_frontier_per_step: int = Field(default=3, ge=1, le=16)
     max_graph_articles_per_hypothesis_per_cycle: int = Field(
         default=3,
@@ -138,6 +143,7 @@ class AgentLimits(FrameworkModel):
     )
     max_graph_candidates_per_review_batch: int = Field(default=20, ge=1, le=200)
     max_parallel_tools: int = Field(default=4, ge=1, le=16)
+    max_parallel_work_items: int = Field(default=4, ge=1, le=16)
     max_retained_evidence: int = Field(default=12, ge=0, le=60)
     max_material_evidence_chars: int = Field(default=50000, ge=1000, le=200000)
     max_solver_input_chars: int = Field(default=240000, ge=2000, le=1000000)

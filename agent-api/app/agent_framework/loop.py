@@ -21,7 +21,7 @@ from .context import (
     SolverContractFeedback,
     build_solver_context,
 )
-from .contracts import CaseUpdate, SolverDecision
+from .contracts import SolverDecision
 from .diagnostics import AgentDiagnostics
 from .observability import (
     AgentRunResult,
@@ -42,7 +42,6 @@ from .state import (
     DeferredFrontierResolution,
     Evidence,
     GraphCandidateReview,
-    Hypothesis,
     ReviewFinding,
     ReviewResult,
     RunStatus,
@@ -52,7 +51,12 @@ from .state import (
     utc_now,
 )
 from .store import CaseStore
-from .validation import ActionRejected, ContractViolation, apply_solver_decision
+from .validation import (
+    ActionRejected,
+    ContractViolation,
+    apply_hypothesis_revision,
+    apply_solver_decision,
+)
 
 LOAD_EVIDENCE_TOOL = "load_evidence"
 LOAD_EVIDENCE_DEFINITION = ToolDefinition(
@@ -291,7 +295,7 @@ class AgentLoop:
                 and state.research_cycle_count
                 not in state.hypothesis_revision_cycles
                 and self._profile.solver_hypothesis_revision is not None
-                and any(item.state != "dropped" for item in state.work_items)
+                and _has_current_cycle_contradicted_hypothesis(state)
                 and not reviewer_findings
             )
             pending_grounding_observation = bool(
@@ -623,44 +627,31 @@ class AgentLoop:
                             raise ContractViolation(
                                 "hypothesis revision result is missing"
                             )
-                        if revision.add_hypotheses:
-                            applied_decision = SolverDecision(
-                                next="continue",
-                                decision_reason=revision.decision_reason,
-                                update=CaseUpdate(
-                                    add_hypotheses=tuple(
-                                        Hypothesis(
-                                            hypothesis_id=item.hypothesis_id,
-                                            work_item_id=item.work_item_id,
-                                            statement=item.statement,
-                                            evidence_ids=item.evidence_ids,
-                                            gaps=item.gaps,
-                                        )
-                                        for item in revision.add_hypotheses
-                                    )
-                                ),
-                            )
-                            candidate = apply_solver_decision(
-                                state,
-                                applied_decision,
-                                limits=self._profile.limits,
-                                known_tool_names=self._read_only_tool_names,
-                                material_evidence_ids=(
-                                    context.material_evidence_ids
-                                    | frozenset(
-                                        item.evidence_id
-                                        for item in context.hypothesis_revision_evidence
-                                    )
-                                ),
-                                finalize_only=False,
-                                hypothesis_revision_work_item_ids={
-                                    item.work_item_id
-                                    for item in context.work_tree
-                                    if item.state != "dropped"
-                                },
-                            )
-                        else:
-                            candidate = state
+                        candidate = apply_hypothesis_revision(
+                            state,
+                            revision,
+                            material_evidence_ids=(
+                                context.material_evidence_ids
+                                | frozenset(
+                                    item.evidence_id
+                                    for item in context.hypothesis_revision_evidence
+                                )
+                            ),
+                            eligible_work_item_ids={
+                                item.work_item_id
+                                for item in context.work_tree
+                                if item.state != "dropped"
+                            },
+                            eligible_hypothesis_ids={
+                                item.hypothesis_id
+                                for item in context.hypotheses
+                                if item.judgment == "contradicted"
+                                and any(
+                                    evidence.evidence_id in item.evidence_ids
+                                    for evidence in context.hypothesis_revision_evidence
+                                )
+                            },
+                        )
                     else:
                         candidate = apply_solver_decision(
                             state,
@@ -768,6 +759,9 @@ class AgentLoop:
                             allow_dependency_action_without_tool=(
                                 purpose == "observation_integration"
                                 or bool(context.required_dependency_work_item_ids)
+                            ),
+                            allow_parallel_work_item_actions=(
+                                purpose == "observation_integration"
                             ),
                         )
                     consumed_result_request_ids: tuple[str, ...] = ()
@@ -913,12 +907,10 @@ class AgentLoop:
                 and solver_call.decision.search_candidate_review is not None
                 and solver_call.decision.search_candidate_review.selected_article_ids
             ):
-                decision_requests = (
-                    self._search_review_fetch_request(
-                        candidate,
-                        solver_call.decision.search_candidate_review,
-                        context.search_candidates,
-                    ),
+                decision_requests = self._search_review_fetch_requests(
+                    candidate,
+                    solver_call.decision.search_candidate_review,
+                    context.search_candidates,
                 )
                 candidate = self._replace_state(
                     candidate,
@@ -1226,59 +1218,79 @@ class AgentLoop:
             hypothesis_ids=hypothesis_ids,
         )
 
-    def _search_review_fetch_request(
+    def _search_review_fetch_requests(
         self,
         state: CaseState,
         review: SearchCandidateReview,
         candidates: tuple[SearchCandidateArticle, ...],
-    ) -> ToolRequest:
+    ) -> tuple[ToolRequest, ...]:
         if not review.selections:
             raise ContractViolation("Search review fetch requires a selected Article")
         candidates_by_id = {item.article_id: item for item in candidates}
-        selected_candidates = tuple(
-            candidates_by_id[item.article_id] for item in review.selections
-        )
-        primary = selected_candidates[0]
-        if not primary.discovery_work_item_ids:
-            raise ContractViolation(
-                "Search review fetch requires discovery provenance"
+        hypothesis_work_items = {
+            item.hypothesis_id: item.work_item_id for item in state.hypotheses
+        }
+        grouped: dict[str, dict[str, list[str]]] = {}
+        for selection in review.selections:
+            candidate = candidates_by_id[selection.article_id]
+            matched_by_work_item: dict[str, list[str]] = {}
+            for hypothesis_id in selection.matched_hypothesis_ids:
+                work_item_id = hypothesis_work_items.get(hypothesis_id)
+                if work_item_id is not None:
+                    matched_by_work_item.setdefault(work_item_id, []).append(
+                        hypothesis_id
+                    )
+            if not matched_by_work_item:
+                for hypothesis_id in candidate.discovery_hypothesis_ids:
+                    work_item_id = hypothesis_work_items.get(hypothesis_id)
+                    if work_item_id is not None:
+                        matched_by_work_item.setdefault(work_item_id, []).append(
+                            hypothesis_id
+                        )
+            if not matched_by_work_item:
+                for work_item_id in candidate.discovery_work_item_ids:
+                    matched_by_work_item.setdefault(work_item_id, [])
+            if not matched_by_work_item:
+                raise ContractViolation(
+                    "Search review fetch requires discovery provenance"
+                )
+            for work_item_id, hypothesis_ids in matched_by_work_item.items():
+                item = grouped.setdefault(
+                    work_item_id,
+                    {"article_ids": [], "hypothesis_ids": []},
+                )
+                if selection.article_id not in item["article_ids"]:
+                    item["article_ids"].append(selection.article_id)
+                for hypothesis_id in hypothesis_ids:
+                    if hypothesis_id not in item["hypothesis_ids"]:
+                        item["hypothesis_ids"].append(hypothesis_id)
+
+        requests: list[ToolRequest] = []
+        for work_item_id, item in grouped.items():
+            payload = json.dumps(
+                {
+                    "search_request_ids": review.search_request_ids,
+                    "selected_article_ids": item["article_ids"],
+                    "work_item_id": work_item_id,
+                    "review_sequence": len(state.search_candidate_reviews),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
             )
-        selected_ids = tuple(item.article_id for item in review.selections)
-        hypothesis_ids = tuple(
-            dict.fromkeys(
-                hypothesis_id
-                for item in review.selections
-                for hypothesis_id in item.matched_hypothesis_ids
-            )
-        )
-        if not hypothesis_ids:
-            hypothesis_ids = tuple(
-                dict.fromkeys(
-                    hypothesis_id
-                    for item in selected_candidates
-                    for hypothesis_id in item.discovery_hypothesis_ids
+            digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
+            requests.append(
+                ToolRequest(
+                    request_id=f"search-review-fetch-{digest}",
+                    work_item_id=work_item_id,
+                    tool_name=self._profile.graph_review_fetch_tool_name
+                    or "fetch_articles",
+                    arguments={"article_ids": item["article_ids"]},
+                    purpose="Solverが選んだ検索候補Article本文を取得する",
+                    hypothesis_ids=tuple(item["hypothesis_ids"]),
                 )
             )
-        payload = json.dumps(
-            {
-                "search_request_ids": review.search_request_ids,
-                "selected_article_ids": selected_ids,
-                "review_sequence": len(state.search_candidate_reviews),
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
-        return ToolRequest(
-            request_id=f"search-review-fetch-{digest}",
-            work_item_id=primary.discovery_work_item_ids[0],
-            tool_name=self._profile.graph_review_fetch_tool_name
-            or "fetch_articles",
-            arguments={"article_ids": list(selected_ids)},
-            purpose="Solverが選んだ検索候補Article本文を取得する",
-            hypothesis_ids=hypothesis_ids,
-        )
+        return tuple(requests)
 
     def _deferred_frontier_fetch_request(
         self,
@@ -1925,6 +1937,26 @@ def _has_unintegrated_grounding_result(
     )
 
 
+def _has_current_cycle_contradicted_hypothesis(state: CaseState) -> bool:
+    """当Cycleの取得本文で反証された、見直し対象Hypothesisがあるかを返す。"""
+
+    active_work_item_ids = {
+        item.work_item_id for item in state.work_items if item.state != "dropped"
+    }
+    current_cycle_evidence_ids = {
+        item.evidence_id
+        for item in state.evidence
+        if item.created_cycle == state.research_cycle_count
+        and item.metadata.get("citationEligible") is not False
+    }
+    return any(
+        item.work_item_id in active_work_item_ids
+        and item.judgment == "contradicted"
+        and not current_cycle_evidence_ids.isdisjoint(item.evidence_ids)
+        for item in state.hypotheses
+    )
+
+
 def _dependency_audit_scope(
     state: CaseState,
     *,
@@ -1940,18 +1972,19 @@ def _dependency_audit_scope(
         or required_dependency_kind is None
     ):
         return ()
-    fresh_scope = _dependency_audit_work_item_ids(state)
-    if fresh_scope:
-        return fresh_scope
-
     open_work_item_ids = {
         item.work_item_id for item in state.work_items if item.state == "open"
     }
     return tuple(
         dict.fromkeys(
-            item.work_item_id
-            for item in state.dependency_decisions
-            if item.status == "needs_action"
-            and item.work_item_id in open_work_item_ids
+            (
+                *_dependency_audit_work_item_ids(state),
+                *(
+                    item.work_item_id
+                    for item in state.dependency_decisions
+                    if item.status == "needs_action"
+                    and item.work_item_id in open_work_item_ids
+                ),
+            )
         )
     )

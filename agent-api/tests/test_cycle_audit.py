@@ -532,6 +532,77 @@ def test_cycle_audit_does_not_report_contract_repair_as_repeated_integration(
     assert "REPEATED_OBSERVATION_INTEGRATION_SCOPE" not in {
         item["code"] for item in report["executionFindings"]
     }
+    assert "CONTRACT_VIOLATION" in {
+        item["code"] for item in report["executionFindings"]
+    }
+
+
+def test_cycle_audit_reports_tools_per_work_item_without_cross_scope_duplicates(
+) -> None:
+    records = (
+        {
+            "sequence": 1,
+            "event": "tool_execution",
+            "cycleNo": 1,
+            "requestId": "fetch-w1",
+            "workItemId": "w1",
+            "toolName": "fetch_articles",
+            "arguments": {"article_ids": ["article-1", "article-2"]},
+            "hypothesisIds": ["h1"],
+            "elapsedMs": 10,
+        },
+        {
+            "sequence": 2,
+            "event": "tool_execution",
+            "cycleNo": 1,
+            "requestId": "fetch-w2",
+            "workItemId": "w2",
+            "toolName": "fetch_articles",
+            "arguments": {"article_ids": ["article-1", "article-2"]},
+            "hypothesisIds": ["h1"],
+            "elapsedMs": 12,
+        },
+        {
+            "sequence": 3,
+            "event": "tool_execution",
+            "cycleNo": 1,
+            "requestId": "graph-w2",
+            "workItemId": "w2",
+            "toolName": "legal_graph_neighbors",
+            "arguments": {"article_ids": ["article-2"]},
+            "hypothesisIds": ["h1"],
+            "elapsedMs": 5,
+        },
+    )
+
+    report = build_cycle_audit_report(records)
+
+    assert "REPEATED_TOOL_SCOPE" not in {
+        item["code"] for item in report["executionFindings"]
+    }
+    assert report["workItemToolActivity"] == [
+        {
+            "workItemId": "w1",
+            "callCount": 1,
+            "searchCallCount": 0,
+            "graphCallCount": 0,
+            "fetchCallCount": 1,
+            "fetchedArticleIds": ["article-1", "article-2"],
+            "elapsedMs": 10,
+        },
+        {
+            "workItemId": "w2",
+            "callCount": 2,
+            "searchCallCount": 0,
+            "graphCallCount": 1,
+            "fetchCallCount": 1,
+            "fetchedArticleIds": ["article-1", "article-2"],
+            "elapsedMs": 17,
+        },
+    ]
+    markdown = render_cycle_audit_markdown(report)
+    assert "## Tools by WorkItem" in markdown
+    assert "| `w1` | 1 | 0 | 0 | 1 | 2 | 10 |" in markdown
 
 
 def test_cycle_audit_allows_followup_integration_with_additional_scope() -> None:

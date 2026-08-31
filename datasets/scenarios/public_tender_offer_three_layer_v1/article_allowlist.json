@@ -22,6 +22,12 @@
       "articleNum": "27_4"
     },
     {
+      "articleId": "law-323AC0000000025-article-23_13",
+      "lawId": "323AC0000000025",
+      "provisionType": "main",
+      "articleNum": "23_13"
+    },
+    {
       "articleId": "law-340CO0000000321-article-6",
       "lawId": "340CO0000000321",
       "provisionType": "main",
@@ -80,6 +86,12 @@
       "lawId": "402M50000040038",
       "provisionType": "main",
       "articleNum": "11"
+    },
+    {
+      "articleId": "law-348M50000040005-article-14_15",
+      "lawId": "348M50000040005",
+      "provisionType": "main",
+      "articleNum": "14_15"
     }
   ]
 }

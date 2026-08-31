@@ -140,6 +140,7 @@ def build_cycle_audit_report(
     purpose_metrics = _purpose_metrics(model_calls)
     hypothesis_activity = _hypothesis_activity(model_calls)
     work_item_session_activity = _work_item_session_activity(record_list)
+    work_item_tool_activity = _work_item_tool_activity(record_list)
     execution_findings = [
         *_execution_findings(record_list, model_calls),
         *_work_item_session_findings(work_item_session_activity),
@@ -215,6 +216,7 @@ def build_cycle_audit_report(
         "purposeMetrics": purpose_metrics,
         "hypothesisActivity": hypothesis_activity,
         "workItemSessionActivity": work_item_session_activity,
+        "workItemToolActivity": work_item_tool_activity,
     }
 
 
@@ -383,6 +385,35 @@ def render_cycle_audit_markdown(report: dict[str, Any]) -> str:
                     output_tokens=item.get("outputTokens", 0),
                 )
             )
+    tool_activity = report.get("workItemToolActivity", [])
+    if tool_activity:
+        lines.extend(
+            [
+                "",
+                "## Tools by WorkItem",
+                "",
+                (
+                    "| WorkItem | Calls | Search | Graph | Fetch | "
+                    "Fetched Articles | Tool ms |"
+                ),
+                "|---|---:|---:|---:|---:|---:|---:|",
+            ]
+        )
+        for item in tool_activity:
+            lines.append(
+                (
+                    "| `{work_item}` | {calls} | {searches} | {graphs} | "
+                    "{fetches} | {articles} | {elapsed} |"
+                ).format(
+                    work_item=_md(item.get("workItemId")),
+                    calls=item.get("callCount", 0),
+                    searches=item.get("searchCallCount", 0),
+                    graphs=item.get("graphCallCount", 0),
+                    fetches=item.get("fetchCallCount", 0),
+                    articles=len(item.get("fetchedArticleIds", [])),
+                    elapsed=item.get("elapsedMs", 0),
+                )
+            )
     hypothesis_activity = report.get("hypothesisActivity", [])
     if hypothesis_activity:
         lines.extend(
@@ -452,6 +483,27 @@ def render_cycle_audit_markdown(report: dict[str, Any]) -> str:
                         evidence=len(item.get("evidenceIds", [])),
                     )
                 )
+        dependencies = cycle.get("dependencyDecisions", [])
+        if dependencies:
+            lines.extend(
+                [
+                    "",
+                    "### Dependency status at close",
+                    "",
+                    "| WorkItem | Kind | Status | Action request | Reason |",
+                    "|---|---|---|---|---|",
+                ]
+            )
+            for item in dependencies:
+                lines.append(
+                    "| {work_item} | {kind} | {status} | {action} | {reason} |".format(
+                        work_item=_md(item.get("work_item_id")),
+                        kind=_md(item.get("dependency_kind")),
+                        status=_md(item.get("status")),
+                        action=_md(item.get("action_request_id")),
+                        reason=_md(item.get("reason")),
+                    )
+                )
         tools = cycle.get("toolExecutions", [])
         if tools:
             lines.extend(
@@ -459,14 +511,24 @@ def render_cycle_audit_markdown(report: dict[str, Any]) -> str:
                     "",
                     "### Tool executions",
                     "",
-                    "| Request | Tool | Scope | Status | Results | ms |",
-                    "|---|---|---|---|---:|---:|",
+                    (
+                        "| Request | WorkItem | Hypotheses | Tool | Scope | "
+                        "Status | Results | ms |"
+                    ),
+                    "|---|---|---|---|---|---|---:|---:|",
                 ]
             )
             for item in tools:
                 lines.append(
-                    "| {request} | {tool} | {scope} | {status} | {results} | {ms} |".format(
+                    (
+                        "| {request} | {work_item} | {hypotheses} | {tool} | "
+                        "{scope} | {status} | {results} | {ms} |"
+                    ).format(
                         request=_md(item.get("requestId")),
+                        work_item=_md(item.get("workItemId")),
+                        hypotheses=_md(
+                            ", ".join(item.get("hypothesisIds", []))
+                        ),
                         tool=_md(item.get("toolName")),
                         scope=_md(_tool_scope(item.get("arguments", {}))),
                         status=_md(item.get("status")),
@@ -768,11 +830,85 @@ def _work_item_session_findings(
     return findings
 
 
+def _work_item_tool_activity(
+    records: tuple[dict[str, Any], ...],
+) -> list[dict[str, Any]]:
+    """Tool実行をWorkItem別に集計し、並列枠の偏りを可視化する。"""
+
+    grouped: dict[str, dict[str, Any]] = {}
+    for record in records:
+        if record.get("event") != "tool_execution":
+            continue
+        work_item_id = record.get("workItemId")
+        if not isinstance(work_item_id, str):
+            continue
+        item = grouped.setdefault(
+            work_item_id,
+            {
+                "workItemId": work_item_id,
+                "callCount": 0,
+                "searchCallCount": 0,
+                "graphCallCount": 0,
+                "fetchCallCount": 0,
+                "fetchedArticleIds": [],
+                "elapsedMs": 0,
+            },
+        )
+        tool_name = record.get("toolName")
+        item["callCount"] += 1
+        item["elapsedMs"] += int(record.get("elapsedMs") or 0)
+        if tool_name == "legal_search":
+            item["searchCallCount"] += 1
+        elif tool_name == "legal_graph_neighbors":
+            item["graphCallCount"] += 1
+        elif tool_name == "fetch_articles":
+            item["fetchCallCount"] += 1
+            article_ids = (record.get("arguments") or {}).get("article_ids", [])
+            item["fetchedArticleIds"] = list(
+                dict.fromkeys(
+                    [
+                        *item["fetchedArticleIds"],
+                        *(value for value in article_ids if isinstance(value, str)),
+                    ]
+                )
+            )
+    return [grouped[key] for key in sorted(grouped)]
+
+
 def _execution_findings(
     records: tuple[dict[str, Any], ...],
     model_calls: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
+    for record in records:
+        if record.get("event") != "contract_violation":
+            continue
+        decision = record.get("solverDecision") or {}
+        requests = decision.get("tool_requests") or []
+        findings.append(
+            _finding(
+                "CONTRACT_VIOLATION",
+                "Solver出力が構造契約に違反し、再試行対象になりました。",
+                sequence=record.get("sequence"),
+                purpose=record.get("purpose"),
+                violation=record.get("violation"),
+                workItemIds=list(
+                    dict.fromkeys(
+                        request.get("work_item_id")
+                        for request in requests
+                        if isinstance(request.get("work_item_id"), str)
+                    )
+                ),
+                hypothesisIds=list(
+                    dict.fromkeys(
+                        hypothesis_id
+                        for request in requests
+                        for hypothesis_id in request.get("hypothesis_ids", [])
+                        if isinstance(hypothesis_id, str)
+                    )
+                ),
+            )
+        )
     observation_by_scope: dict[tuple[int, str], list[int]] = {}
     model_call_by_sequence = {
         int(call.get("sequence") or 0): call for call in model_calls
@@ -902,6 +1038,7 @@ def _execution_findings(
             continue
         key = (
             record.get("cycleNo"),
+            record.get("workItemId"),
             record.get("toolName"),
             json.dumps(
                 record.get("arguments") or {},

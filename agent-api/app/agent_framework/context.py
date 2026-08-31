@@ -23,6 +23,7 @@ from .state import (
     ToolResult,
     ToolStatus,
     WorkItem,
+    fetched_article_ids_by_work_item,
 )
 from .tool_contracts import ToolDefinition
 
@@ -402,7 +403,13 @@ class SearchSelectionInput(SearchAssessmentInput):
     )
     current_fetch_request_capacity: int = Field(
         ge=0,
-        description="今回1回の本文取得要求で選べるArticle数の上限。",
+        description="今回すべてのWorkItemで選べるArticle数の合計上限。",
+    )
+    remaining_fetch_capacity_by_work_item: dict[str, int] = Field(
+        description=(
+            "各WorkItemが現在Cycleで追加取得できるArticle数。選択Articleは、"
+            "matched_hypothesis_idsが属するWorkItemの残数内に収める。"
+        ),
     )
 
 
@@ -562,14 +569,31 @@ class SolverContext(FrameworkModel):
         description="今回のSolverDecisionで返せるToolRequest総数の上限。",
     )
     max_fetched_resources_per_cycle: int = Field(
-        description="1 Cycleで本文取得できるArticle総数の上限。",
+        description="1 WorkItemが1 Cycleで本文取得できるArticle数の上限。",
     )
     fetched_resource_ids_this_cycle: tuple[str, ...] = Field(
-        description="現在Cycleですでに本文取得したArticle ID。",
+        description="現在の投影範囲で、現在Cycleに本文取得したArticle ID。",
+    )
+    fetched_resource_ids_by_work_item_this_cycle: dict[str, tuple[str, ...]] = Field(
+        default_factory=dict,
+        exclude=True,
+        description="現在Cycleで本文取得したArticle IDを既知WorkItem ID別に集計した値。",
+    )
+    remaining_fetch_capacity_by_work_item: dict[str, int] = Field(
+        default_factory=dict,
+        exclude=True,
+        description="各open WorkItemが現在Cycleで追加取得できるArticle数。",
     )
     remaining_fetch_capacity: int = Field(
         ge=0,
-        description="現在Cycleでfetch_articlesに追加できるArticle数。WorkItem数の上限ではない。",
+        description=(
+            "現在の投影範囲でfetch_articlesに追加できるArticle数。"
+            "WorkItem専属入力ではそのWorkItemの残数。"
+        ),
+    )
+    max_parallel_work_items: int = Field(
+        default=4,
+        description="WorkItem専属のLLM処理を同時実行する最大数。",
     )
     max_selected_frontier_per_step: int = Field(
         description="今回のGraph reviewでselectedにできる候補数上限。",
@@ -760,7 +784,7 @@ class SolverContext(FrameworkModel):
 
 
 class HypothesisRevisionWorkItem(FrameworkModel):
-    """仮説見直しへ渡す、既存の非dropped WorkItemの最小投影。"""
+    """反証済みHypothesisが属するWorkItemの最小投影。"""
 
     work_item_id: str = Field(description="既存の非dropped WorkItemの完全一致ID。")
     question: str = Field(description="このWorkItemが確認する事項。")
@@ -770,11 +794,11 @@ class HypothesisRevisionWorkItem(FrameworkModel):
 
 
 class HypothesisRevisionHypothesis(FrameworkModel):
-    """仮説見直しへ渡す、既存Hypothesisの最小投影。"""
+    """当Cycleの取得本文で反証されたHypothesisの最小投影。"""
 
     hypothesis_id: str = Field(description="既存Hypothesisの完全一致ID。")
     work_item_id: str = Field(description="所属する既存WorkItem ID。")
-    statement: str = Field(description="既存Hypothesisの不変statement。")
+    statement: str = Field(description="見直し前の現在版statement。")
     judgment: str = Field(description="既存Hypothesisの現在の判定。")
     gaps: tuple[str, ...] = Field(description="既存Hypothesisの未確認事項。")
 
@@ -788,16 +812,16 @@ class HypothesisRevisionEvidence(FrameworkModel):
 
 
 class HypothesisRevisionInput(FrameworkModel):
-    """Cycle境界の仮説追加判断に必要なread model。"""
+    """Cycle境界の仮説見直しに必要な最小read model。"""
 
     work_items: tuple[HypothesisRevisionWorkItem, ...] = Field(
-        description="状態がdroppedではない既存WorkItem。"
+        description="反証済みHypothesisが所属する既存WorkItem。"
     )
     hypotheses: tuple[HypothesisRevisionHypothesis, ...] = Field(
-        description="上記WorkItemへ所属する既存Hypothesis。"
+        description="現在のCycleで取得した本文により反証された既存Hypothesis。"
     )
     acquired_evidence: tuple[HypothesisRevisionEvidence, ...] = Field(
-        description="現在のCycleで新たに取得した本文Evidence。"
+        description="上記Hypothesisを反証した現在Cycleの本文Evidence。"
     )
 
 
@@ -881,14 +905,16 @@ def build_solver_context(
     )
     recent_requests_by_id = {item.request_id: item for item in recent_requests}
     all_requests_by_id = {item.request_id: item for item in state.tool_requests}
-    successfully_fetched_article_ids = set(
-        _fetched_article_ids_for_cycle(state, None)
+    current_cycle_no = max(1, state.research_cycle_count)
+    fetched_by_work_item = fetched_article_ids_by_work_item(
+        state,
+        cycle_no=current_cycle_no,
     )
     carried_search_candidates = _carried_search_candidate_projection(
         state=state,
         requests_by_id=all_requests_by_id,
         evidence_by_id=evidence_by_id,
-        successfully_fetched_article_ids=successfully_fetched_article_ids,
+        fetched_article_ids_by_work_item=fetched_by_work_item,
     )
     carried_search_evidence_ids = tuple(
         evidence_id
@@ -911,12 +937,9 @@ def build_solver_context(
         if hypothesis.hypothesis_id in work_item.basis_hypothesis_ids
         for evidence_id in hypothesis.evidence_ids
     )
-    active_hypothesis_evidence_ids = tuple(
-        evidence_id
-        for work_item in state.work_items
-        if work_item.state != "dropped"
-        for hypothesis in hypotheses_by_work.get(work_item.work_item_id, ())
-        for evidence_id in hypothesis.evidence_ids
+    active_hypothesis_evidence_ids = _round_robin_hypothesis_evidence_ids(
+        state,
+        hypotheses_by_work=hypotheses_by_work,
     )
     active_hypothesis_article_ids = {
         article_id
@@ -984,14 +1007,28 @@ def build_solver_context(
         for item in state.evidence
         if item.metadata.get("docType") == "graph_navigation"
     )
-    fetched_resource_ids_this_cycle = _fetched_article_ids_for_cycle(
-        state,
-        max(1, state.research_cycle_count),
+    open_work_item_ids = tuple(
+        item.work_item_id for item in state.work_items if item.state == "open"
     )
-    remaining_fetch_capacity = max(
-        0,
-        limits.max_fetched_resources_per_cycle
-        - len(fetched_resource_ids_this_cycle),
+    remaining_by_work_item = {
+        work_item_id: max(
+            0,
+            limits.max_fetched_resources_per_cycle
+            - len(fetched_by_work_item.get(work_item_id, ())),
+        )
+        for work_item_id in open_work_item_ids
+    }
+    fetched_resource_ids_this_cycle = tuple(
+        dict.fromkeys(
+            article_id
+            for work_item_id in open_work_item_ids
+            for article_id in fetched_by_work_item.get(work_item_id, ())
+        )
+    )
+    remaining_fetch_capacity = (
+        sum(remaining_by_work_item.values())
+        if open_work_item_ids
+        else limits.max_fetched_resources_per_cycle
     )
     time_requires_cycle_close = (
         not finalize_only
@@ -1005,6 +1042,40 @@ def build_solver_context(
         graph_candidate_catalog,
         max_candidates=limits.max_graph_candidates_per_review_batch,
     )
+    graph_review_batch = _project_graph_content_status_by_work_item(
+        graph_review_batch,
+        fetched_by_work_item=fetched_by_work_item,
+    )
+    graph_review_ledger = tuple(
+        item.model_copy(
+            update={
+                "content_status": (
+                    "succeeded"
+                    if item.article_id
+                    in fetched_by_work_item.get(item.work_item_id or "", ())
+                    else (
+                        "not_requested"
+                        if item.content_status == "succeeded"
+                        else item.content_status
+                    )
+                )
+            }
+        )
+        for item in graph_review_ledger
+    )
+    graph_work_item_id = next(
+        (
+            item.work_item_id
+            for item in graph_review_batch.candidates
+            if item.work_item_id is not None
+        ),
+        None,
+    )
+    if graph_work_item_id is not None:
+        remaining_fetch_capacity = remaining_by_work_item.get(
+            graph_work_item_id,
+            0,
+        )
     graph_fetch_completed_hypothesis_ids = tuple(
         hypothesis.hypothesis_id
         for hypothesis in state.hypotheses
@@ -1087,11 +1158,6 @@ def build_solver_context(
             ]
         )
     )
-    fetchable_article_ids = tuple(
-        item
-        for item in fetchable_article_ids
-        if item not in successfully_fetched_article_ids
-    )
     reviewed_search_request_ids = {
         request_id
         for review in state.search_candidate_reviews
@@ -1109,6 +1175,7 @@ def build_solver_context(
         recent_requests_by_id=recent_requests_by_id,
         evidence_by_id=evidence_by_id,
         fetchable_article_ids=fetchable_article_ids,
+        fetched_article_ids_by_work_item=fetched_by_work_item,
     )
     fresh_search_request_ids = tuple(
         dict.fromkeys(
@@ -1319,14 +1386,23 @@ def build_solver_context(
         max_tool_requests_per_step=limits.max_tool_requests_per_step,
         max_fetched_resources_per_cycle=limits.max_fetched_resources_per_cycle,
         fetched_resource_ids_this_cycle=fetched_resource_ids_this_cycle,
+        fetched_resource_ids_by_work_item_this_cycle=fetched_by_work_item,
+        remaining_fetch_capacity_by_work_item=remaining_by_work_item,
         remaining_fetch_capacity=remaining_fetch_capacity,
+        max_parallel_work_items=limits.max_parallel_work_items,
         max_selected_frontier_per_step=limits.max_selected_frontier_per_step,
         max_graph_articles_per_hypothesis_per_cycle=(
             limits.max_graph_articles_per_hypothesis_per_cycle
         ),
-        cycle_budget_reached=remaining_fetch_capacity == 0,
+        cycle_budget_reached=(
+            bool(open_work_item_ids)
+            and all(value == 0 for value in remaining_by_work_item.values())
+        ),
         cycle_close_required=(
-            remaining_fetch_capacity == 0
+            (
+                bool(open_work_item_ids)
+                and all(value == 0 for value in remaining_by_work_item.values())
+            )
             or time_requires_cycle_close
             or state.cycle_step_timeout
         ),
@@ -1552,11 +1628,13 @@ def _search_candidate_projection(
     recent_requests_by_id: dict[str, ToolRequest],
     evidence_by_id: dict[str, Evidence],
     fetchable_article_ids: tuple[str, ...],
+    fetched_article_ids_by_work_item: dict[str, tuple[str, ...]] | None = None,
     assessment_by_article: dict[str, Any] | None = None,
 ) -> tuple[SearchCandidateArticle, ...]:
     """検索要求と候補Articleの既存参照だけをArticle単位にまとめる。"""
 
     fetchable_ids = set(fetchable_article_ids)
+    fetched_by_work_item = fetched_article_ids_by_work_item or {}
     candidates: dict[str, dict[str, Any]] = {}
     for result in recent_results:
         request = recent_requests_by_id.get(result.request_id)
@@ -1568,6 +1646,8 @@ def _search_candidate_projection(
                 continue
             for article_id in _evidence_article_ids(evidence):
                 if article_id not in fetchable_ids:
+                    continue
+                if article_id in fetched_by_work_item.get(request.work_item_id, ()):
                     continue
                 candidate = candidates.setdefault(
                     article_id,
@@ -1648,7 +1728,7 @@ def _carried_search_candidate_projection(
     state: CaseState,
     requests_by_id: dict[str, ToolRequest],
     evidence_by_id: dict[str, Evidence],
-    successfully_fetched_article_ids: set[str],
+    fetched_article_ids_by_work_item: dict[str, tuple[str, ...]],
 ) -> tuple[SearchCandidateArticle, ...]:
     """Review済みで本文未取得の検索候補をCase履歴から再投影する。"""
 
@@ -1670,7 +1750,6 @@ def _carried_search_candidate_projection(
                 *review.selected_article_ids,
                 *review.deferred_article_ids,
             )
-            if article_id not in successfully_fetched_article_ids
         )
     )
     if not carried_article_ids:
@@ -1692,7 +1771,39 @@ def _carried_search_candidate_projection(
         recent_requests_by_id=requests_by_id,
         evidence_by_id=evidence_by_id,
         fetchable_article_ids=carried_article_ids,
+        fetched_article_ids_by_work_item=fetched_article_ids_by_work_item,
         assessment_by_article=assessment_by_article,
+    )
+
+
+def _project_graph_content_status_by_work_item(
+    batch: GraphReviewBatch,
+    *,
+    fetched_by_work_item: dict[str, tuple[str, ...]],
+) -> GraphReviewBatch:
+    """Graph候補の本文取得状態を、候補のWorkItemから決定的に投影する。"""
+
+    return batch.model_copy(
+        update={
+            "candidates": tuple(
+                item.model_copy(
+                    update={
+                        "content_status": (
+                            "succeeded"
+                            if item.work_item_id is not None
+                            and item.article_id
+                            in fetched_by_work_item.get(item.work_item_id, ())
+                            else (
+                                "not_requested"
+                                if item.content_status == "succeeded"
+                                else item.content_status
+                            )
+                        )
+                    }
+                )
+                for item in batch.candidates
+            )
+        }
     )
 
 
@@ -2284,6 +2395,37 @@ def _round_robin_result_evidence_ids(
             if index >= len(result.evidence_ids):
                 continue
             evidence_id = result.evidence_ids[index]
+            if evidence_id not in seen:
+                seen.add(evidence_id)
+                ordered.append(evidence_id)
+    return tuple(ordered)
+
+
+def _round_robin_hypothesis_evidence_ids(
+    state: CaseState,
+    *,
+    hypotheses_by_work: dict[str, list[Hypothesis]],
+) -> tuple[str, ...]:
+    """openなWorkItem間で既存Evidenceの提示順が偏らないよう交互に並べる。"""
+
+    buckets = [
+        tuple(
+            dict.fromkeys(
+                evidence_id
+                for hypothesis in hypotheses_by_work.get(work_item.work_item_id, ())
+                for evidence_id in hypothesis.evidence_ids
+            )
+        )
+        for work_item in state.work_items
+        if work_item.state != "dropped"
+    ]
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for index in range(max((len(bucket) for bucket in buckets), default=0)):
+        for bucket in buckets:
+            if index >= len(bucket):
+                continue
+            evidence_id = bucket[index]
             if evidence_id not in seen:
                 seen.add(evidence_id)
                 ordered.append(evidence_id)

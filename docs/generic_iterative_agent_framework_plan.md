@@ -460,6 +460,12 @@ class Hypothesis:
     judgment: Literal["supported", "contradicted", "unresolved"]
     evidence_ids: list[str]
     gaps: list[str]
+
+class HypothesisHistoryRecord:
+    hypothesis: Hypothesis
+    version: int
+    revised_cycle: int
+    reason: str
 ```
 
 - Hypothesisは必ず1つのWorkItemへ所属する。
@@ -477,7 +483,11 @@ class Hypothesis:
   元の質問から直接作るopen WorkItemでは通常は空にし、別Hypothesisを前提に作る子WorkItemでは
   その前提IDを設定する。
 - Evidenceは複数HypothesisからIDで共有参照し、WorkItemごとに複製しない。
-- Hypothesisのstatementを別の意味へ上書きしない。見立てを変更する場合は新しいHypothesisを作る。
+- 同じ法的命題の見立てをブラッシュアップする場合は、同じHypothesis IDの現在版を更新し、
+  更新前の完全なsnapshotを`HypothesisHistoryRecord`としてCaseStoreへ保存する。
+  通常のAgentViewには現在版だけを投影する。既存命題とは独立した確認事項だけを新IDで追加する。
+- 見直しLLMには、当Cycleの本文評価で`contradicted`になったHypothesisと、その判定に直接対応する
+  当CycleのEvidenceだけを投影する。反証されていないHypothesisや旧版履歴は投影しない。
 - WorkItemのquestionを別の問いへ上書きしない。問いを変更する場合は旧WorkItemを`dropped`にし、
   `replaces_work_item_id`を持つ新しいWorkItemを作る。
 - 親子関係は作業分解を表す。WorkItem間に別の依存関係Graphを作らず、次の対象は
@@ -1315,12 +1325,12 @@ Hypothesisが`contradicted`になったとき、プログラムは`basis_hypothe
 終了・変更しない。
 
 Solverは「そのWorkItemの`question`を変えずに、引き続き親の問いを解くために使えるか」で判断する。
-仮説、検索語、検索先、根拠候補が誤っていただけならWorkItemを置き換えず、新しいHypothesisや
-ToolRequestを追加する。観点が不足していた場合も、既存WorkItemを置き換えず子または兄弟WorkItemを追加する。
+仮説、検索語、検索先、根拠候補が誤っていただけならWorkItemを置き換えず、既存Hypothesisの現在版又は
+ToolRequestを更新する。観点が不足していた場合も、既存WorkItemを置き換えず子または兄弟WorkItemを追加する。
 `replace`は、WorkItemの`question`自体を別の意味へ変えなければ親の問いに寄与できない場合だけに使う。
 質問との無関係または重複が根拠から判明した場合だけ`drop`する。
 
-問いが有効でHypothesisだけが外れた場合は`retain`して新Hypothesisを追加し、探索方法だけが外れた場合は
+問いが有効でHypothesisだけが外れた場合は`retain`して同じIDの現在版を更新し、探索方法だけが外れた場合は
 ToolRequestを変更する。不足観点は子または兄弟WorkItemとして追加する。問い自体の意味を変える場合だけ
 `replace`し、無関係または重複の場合だけ`drop`する。
 
@@ -2396,7 +2406,7 @@ Phase 1の主要な実装リスクは`contract_rendering.py`である。Enum、�
 - CaseUpdateに現れなかった別系統のWorkItemと未完了WorkItemが消えない。
 - WorkItemの親子循環、未知basis ID、未知focus IDを拒否する。
 - Hypothesis反証時に、プログラムが影響WorkItemを自動的にdropしない。
-- 仮説だけが反証されたfixtureではWorkItemを維持し、新Hypothesisを追加できる。
+- 仮説だけが反証されたfixtureではWorkItemとHypothesis IDを維持し、現在版を更新して旧版を履歴保存できる。
 - 不足観点のfixtureでは既存WorkItemをreplaceせず、子または兄弟WorkItemを追加できる。
 - 問い自体が不適切なfixtureだけで旧部分木を閉じ、新しい部分木へreplaceできる。
 - プログラムがHypothesisの意味statusを書き換えない。

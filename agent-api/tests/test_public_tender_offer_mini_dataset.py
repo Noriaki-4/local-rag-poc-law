@@ -24,16 +24,17 @@ def test_public_tender_offer_dataset_is_frozen_complete_and_gold_separated():
 
     report = module.validate_dataset(DATASET_DIR, repo_root=REPO_ROOT)
 
-    assert report["lawCount"] == 3
-    assert report["selectedArticleCount"] == 13
+    assert report["lawCount"] == 4
+    assert report["selectedArticleCount"] == 15
     assert report["selectedArticleCountByLaw"] == {
-        "323AC0000000025": 3,
+        "323AC0000000025": 4,
+        "348M50000040005": 1,
         "340CO0000000321": 4,
         "402M50000040038": 6,
     }
     assert report["paragraphCount"] >= 13
     assert report["articleTextChars"] > 10_000
-    assert report["expectedReferenceCount"] == 4
+    assert report["expectedReferenceCount"] == 5
     assert report["requiredNavigationCount"] == 5
     assert report["forbiddenNavigationCount"] == 1
     assert report["questionCount"] == 9

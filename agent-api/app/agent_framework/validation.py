@@ -8,14 +8,21 @@ from typing import TypeVar
 
 from pydantic import ValidationError
 
-from .contracts import CaseUpdate, SolverDecision, WorkItemImpactDecision
+from .contracts import (
+    CaseUpdate,
+    HypothesisRevisionDecision,
+    SolverDecision,
+    WorkItemImpactDecision,
+)
 from .profiles import AgentLimits
 from .state import (
     CaseState,
     FrameworkModel,
     Hypothesis,
+    HypothesisHistoryRecord,
     ToolRequest,
     WorkItem,
+    fetched_article_ids_by_work_item,
     merge_hypothesis_evidence_ids,
     utc_now,
 )
@@ -39,6 +46,151 @@ class ActionRejected(ContractViolation):
         super().__init__(message)
         self.code = "already_completed"
         self.rejected_requests = rejected_requests
+
+
+def apply_hypothesis_revision(
+    state: CaseState,
+    revision: HypothesisRevisionDecision,
+    *,
+    material_evidence_ids: Collection[str],
+    eligible_work_item_ids: Collection[str],
+    eligible_hypothesis_ids: Collection[str] | None = None,
+) -> CaseState:
+    """LLMが選んだ現在版更新・独立命題追加を参照整合だけ検証して適用する。"""
+
+    if state.run_status != "running":
+        raise ContractViolation("hypothesis revision requires a running case")
+    work_items = {item.work_item_id: item for item in state.work_items}
+    hypotheses = {item.hypothesis_id: item for item in state.hypotheses}
+    eligible_ids = set(eligible_work_item_ids)
+    eligible_revision_ids = (
+        set(eligible_hypothesis_ids)
+        if eligible_hypothesis_ids is not None
+        else set(hypotheses)
+    )
+    material_ids = set(material_evidence_ids)
+    evidence_by_id = {item.evidence_id: item for item in state.evidence}
+
+    revise_ids = [item.hypothesis_id for item in revision.revise_hypotheses]
+    add_ids = [item.hypothesis_id for item in revision.add_hypotheses]
+    _reject_duplicate_delta_ids(revise_ids, "revised hypothesis")
+    _reject_duplicate_delta_ids(add_ids, "new hypothesis")
+    if set(revise_ids).intersection(add_ids):
+        raise ContractViolation("a hypothesis cannot be revised and added together")
+
+    history = list(state.hypothesis_history)
+    revised_work_item_ids: set[str] = set()
+    for update in revision.revise_hypotheses:
+        current = hypotheses.get(update.hypothesis_id)
+        if current is None:
+            raise ContractViolation(
+                f"unknown revised hypothesis: {update.hypothesis_id}"
+            )
+        if current.hypothesis_id not in eligible_revision_ids:
+            raise ContractViolation(
+                "hypothesis revision must target a presented contradicted Hypothesis"
+            )
+        if current.work_item_id not in eligible_ids:
+            raise ContractViolation(
+                "hypothesis revision must target a non-dropped WorkItem"
+            )
+        _validate_revision_evidence_ids(
+            update.evidence_ids,
+            material_ids=material_ids,
+            evidence_by_id=evidence_by_id,
+        )
+        if (
+            update.statement == current.statement
+            and update.judgment == current.judgment
+            and update.evidence_ids == current.evidence_ids
+            and update.gaps == current.gaps
+        ):
+            continue
+        version = 1 + sum(
+            item.hypothesis.hypothesis_id == current.hypothesis_id
+            for item in history
+        )
+        history.append(
+            HypothesisHistoryRecord(
+                hypothesis=current,
+                version=version,
+                revised_cycle=max(1, state.research_cycle_count),
+                reason=revision.decision_reason,
+            )
+        )
+        hypotheses[current.hypothesis_id] = Hypothesis(
+            hypothesis_id=current.hypothesis_id,
+            work_item_id=current.work_item_id,
+            statement=update.statement,
+            judgment=update.judgment,
+            evidence_ids=update.evidence_ids,
+            gaps=update.gaps,
+        )
+        revised_work_item_ids.add(current.work_item_id)
+
+    for proposal in revision.add_hypotheses:
+        if proposal.hypothesis_id in hypotheses:
+            raise ContractViolation(
+                f"duplicate hypothesis ID: {proposal.hypothesis_id}"
+            )
+        if proposal.work_item_id not in eligible_ids:
+            raise ContractViolation(
+                "hypothesis revision must target a non-dropped WorkItem"
+            )
+        _validate_revision_evidence_ids(
+            proposal.evidence_ids,
+            material_ids=material_ids,
+            evidence_by_id=evidence_by_id,
+        )
+        hypotheses[proposal.hypothesis_id] = Hypothesis(
+            hypothesis_id=proposal.hypothesis_id,
+            work_item_id=proposal.work_item_id,
+            statement=proposal.statement,
+            evidence_ids=proposal.evidence_ids,
+            gaps=proposal.gaps,
+        )
+        revised_work_item_ids.add(proposal.work_item_id)
+
+    for work_item_id in revised_work_item_ids:
+        current = work_items[work_item_id]
+        if current.state == "resolved":
+            work_items[work_item_id] = _validated_copy(
+                current,
+                state="open",
+                resolution=None,
+            )
+
+    candidate = _validated_copy(
+        state,
+        work_items=tuple(work_items.values()),
+        hypotheses=tuple(hypotheses.values()),
+        hypothesis_history=tuple(history),
+        updated_at=utc_now(),
+    )
+    _validate_work_tree(
+        {item.work_item_id: item for item in candidate.work_items},
+        {item.hypothesis_id: item for item in candidate.hypotheses},
+    )
+    return candidate
+
+
+def _validate_revision_evidence_ids(
+    evidence_ids: Collection[str],
+    *,
+    material_ids: set[str],
+    evidence_by_id: Mapping[str, object],
+) -> None:
+    unknown_ids = set(evidence_ids) - set(evidence_by_id)
+    if unknown_ids:
+        raise ContractViolation(
+            f"hypothesis revision references unknown Evidence: {sorted(unknown_ids)}"
+        )
+    hidden_ids = set(evidence_ids) - material_ids
+    if hidden_ids:
+        raise ContractViolation(
+            "hypothesis revision references Evidence not shown in full: "
+            f"{sorted(hidden_ids)}"
+        )
 
 
 def apply_solver_decision(
@@ -76,6 +228,7 @@ def apply_solver_decision(
     cycle_close_required: bool = False,
     can_start_next_cycle: bool = True,
     allow_dependency_action_without_tool: bool = False,
+    allow_parallel_work_item_actions: bool = False,
     hypothesis_revision_work_item_ids: Collection[str] | None = None,
 ) -> CaseState:
     if state.run_status != "running":
@@ -102,7 +255,20 @@ def apply_solver_decision(
         raise ContractViolation(
             "Cycle boundary requires finalize or start_next_cycle before new Tools"
         )
-    if len(decision.tool_requests) > limits.max_tool_requests_per_step:
+    if allow_parallel_work_item_actions:
+        requests_by_work_item: dict[str, int] = {}
+        for request in decision.tool_requests:
+            requests_by_work_item[request.work_item_id] = (
+                requests_by_work_item.get(request.work_item_id, 0) + 1
+            )
+        if any(
+            count > limits.max_tool_requests_per_step
+            for count in requests_by_work_item.values()
+        ):
+            raise ContractViolation(
+                "tool request count exceeds the per-WorkItem step limit"
+            )
+    elif len(decision.tool_requests) > limits.max_tool_requests_per_step:
         raise ContractViolation("tool request count exceeds the step limit")
     if len(decision.retain_evidence_ids) > limits.max_retained_evidence:
         raise ContractViolation("retained evidence count exceeds the profile limit")
@@ -439,6 +605,7 @@ def apply_solver_decision(
         )
     execution_scopes = [
         (
+            request.work_item_id,
             request.tool_name,
             json.dumps(
                 request.arguments,
@@ -453,7 +620,7 @@ def apply_solver_decision(
     if len(execution_scopes) != len(set(execution_scopes)):
         raise ContractViolation(
             "identical legal_graph_neighbors arguments must be consolidated "
-            "into one request"
+            "within one WorkItem"
         )
     for request in decision.tool_requests:
         if request.request_id in request_ids or request.request_id in new_request_ids:
@@ -486,6 +653,10 @@ def apply_solver_decision(
                 raise ContractViolation(
                     f"tool request references unknown hypothesis: {hypothesis_id}"
                 )
+            if hypotheses[hypothesis_id].work_item_id != request.work_item_id:
+                raise ContractViolation(
+                    "tool request Hypotheses must belong to its WorkItem"
+                )
         requested_article_ids = request.arguments.get("article_ids")
         if requested_article_ids is not None:
             if not isinstance(requested_article_ids, list) or any(
@@ -508,24 +679,46 @@ def apply_solver_decision(
                     f"{sorted(unknown_article_ids)}"
                 )
 
-    effective_fetch_capacity = (
-        limits.max_fetched_resources_per_cycle
-        if decision.start_next_cycle
-        else (0 if cycle_close_required else remaining_fetch_capacity)
-    )
-    if graph_review_fetch_tool_name is not None and effective_fetch_capacity is not None:
-        requested_articles = {
-            article_id
-            for request in decision.tool_requests
-            if request.tool_name == graph_review_fetch_tool_name
-            for article_id in request.arguments.get("article_ids", ())
-            if isinstance(article_id, str)
-        }
-        if len(requested_articles) > effective_fetch_capacity:
-            raise ContractViolation(
-                "Article body fetch exceeds the remaining Cycle capacity of "
-                f"{effective_fetch_capacity} items"
+    if graph_review_fetch_tool_name is not None:
+        fetched_by_work_item = fetched_article_ids_by_work_item(
+            state,
+            cycle_no=max(1, state.research_cycle_count),
+        )
+        requested_by_work_item: dict[str, set[str]] = {}
+        for request in decision.tool_requests:
+            if request.tool_name != graph_review_fetch_tool_name:
+                continue
+            owners = {request.work_item_id}
+            owners.update(
+                hypotheses[hypothesis_id].work_item_id
+                for hypothesis_id in request.hypothesis_ids
+                if hypothesis_id in hypotheses
             )
+            article_ids = {
+                article_id
+                for article_id in request.arguments.get("article_ids", ())
+                if isinstance(article_id, str)
+            }
+            for work_item_id in owners:
+                requested_by_work_item.setdefault(work_item_id, set()).update(
+                    article_ids
+                )
+        for work_item_id, requested_articles in requested_by_work_item.items():
+            existing = set(fetched_by_work_item.get(work_item_id, ()))
+            capacity = (
+                limits.max_fetched_resources_per_cycle
+                if decision.start_next_cycle
+                else max(
+                    0,
+                    limits.max_fetched_resources_per_cycle - len(existing),
+                )
+            )
+            new_articles = requested_articles - existing
+            if len(new_articles) > capacity:
+                raise ContractViolation(
+                    "Article body fetch exceeds the remaining Cycle capacity "
+                    f"for WorkItem {work_item_id}: {capacity} items"
+                )
 
     if graph_review_fetch_tool_name is not None:
         article_fetch_requests = tuple(
@@ -533,19 +726,28 @@ def apply_solver_decision(
             for request in decision.tool_requests
             if request.tool_name == graph_review_fetch_tool_name
         )
-        if len(article_fetch_requests) > 1:
+        requests_per_work_item: dict[str, list[ToolRequest]] = {}
+        for request in article_fetch_requests:
+            requests_per_work_item.setdefault(request.work_item_id, []).append(request)
+        if any(len(items) > 1 for items in requests_per_work_item.values()):
             raise ContractViolation(
-                "Article body fetches in one SolverDecision must be consolidated "
-                "into exactly one request"
+                "Article body fetches for one WorkItem must be consolidated into "
+                "one request"
             )
-        if article_fetch_requests:
-            article_ids = article_fetch_requests[0].arguments.get("article_ids")
+        for article_fetch_request in article_fetch_requests:
+            article_ids = article_fetch_request.arguments.get("article_ids")
             if isinstance(article_ids, list) and len(article_ids) != len(
                 set(article_ids)
             ):
                 raise ContractViolation(
                     "Article body fetch request contains duplicate Article IDs"
                 )
+
+    effective_fetch_capacity = (
+        limits.max_fetched_resources_per_cycle
+        if decision.start_next_cycle
+        else (0 if cycle_close_required else remaining_fetch_capacity)
+    )
 
     expected_deferred = dict(deferred_frontiers or {})
     deferred_resolutions = decision.deferred_frontier_resolutions
@@ -840,16 +1042,28 @@ def apply_solver_decision(
                     "search candidate references unknown Hypothesis IDs: "
                     f"{sorted(unknown_matched_ids)}"
                 )
-        max_selected = (
-            effective_fetch_capacity
-            if effective_fetch_capacity is not None
-            else limits.max_selected_frontier_per_step
+        fetched_by_work_item = fetched_article_ids_by_work_item(
+            state,
+            cycle_no=max(1, state.research_cycle_count),
         )
-        if len(selected_ids) > max_selected:
-            raise ContractViolation(
-                "search review selected Article count exceeds the remaining limit "
-                f"of {max_selected} items"
+        selected_by_work_item: dict[str, set[str]] = {}
+        for selection in search_review.selections:
+            for hypothesis_id in selection.matched_hypothesis_ids:
+                work_item_id = hypotheses[hypothesis_id].work_item_id
+                selected_by_work_item.setdefault(work_item_id, set()).add(
+                    selection.article_id
+                )
+        for work_item_id, article_ids in selected_by_work_item.items():
+            remaining = max(
+                0,
+                limits.max_fetched_resources_per_cycle
+                - len(fetched_by_work_item.get(work_item_id, ())),
             )
+            if len(article_ids) > remaining:
+                raise ContractViolation(
+                    "search review selected Article count exceeds the remaining "
+                    f"limit for WorkItem {work_item_id}: {remaining} items"
+                )
         if decision.tool_requests:
             raise ContractViolation(
                 "Search candidate review returns selections only; AgentLoop executes "

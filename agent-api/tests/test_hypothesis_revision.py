@@ -9,8 +9,10 @@ from app.adapters.models.structured_json import (
 from app.agent_framework.context import build_solver_context
 from app.agent_framework.profiles import AgentLimits
 from app.agent_framework.state import CaseState, Evidence, Hypothesis, WorkItem
-from app.agent_framework.contracts import CaseUpdate, SolverDecision
-from app.agent_framework.validation import apply_solver_decision
+from app.agent_framework.contracts import SolverDecision
+from app.agent_framework.validation import (
+    apply_hypothesis_revision,
+)
 from app.domains.legal.profiles import legal_agent_profile
 from app.llm import StructuredJSONResult
 
@@ -67,8 +69,8 @@ def _context(*, resolved: bool = False):
                     hypothesis_id="h-1",
                     work_item_id="wi-1",
                     statement="既存の命題",
-                    judgment="supported" if resolved else "unresolved",
-                    evidence_ids=("e-1",) if resolved else (),
+                    judgment="contradicted",
+                    evidence_ids=("e-1",),
                 ),
             ),
             evidence=(
@@ -90,6 +92,7 @@ def test_revision_adds_child_and_reopens_resolved_work_item() -> None:
     client = FakeRevisionClient(
         {
             "decision_reason": "本文に別の未確認事項がある",
+            "revise_hypotheses": [],
             "add_hypotheses": [
                 {
                     "hypothesis_id": "h-2",
@@ -107,7 +110,7 @@ def test_revision_adds_child_and_reopens_resolved_work_item() -> None:
 
     result = StructuredJSONModelAdapter(client).solve(context, profile)
     assert result.hypothesis_revision is not None
-    updated = apply_solver_decision(
+    updated = apply_hypothesis_revision(
         CaseState(
             case_id="revision-case",
             question="確認事項",
@@ -139,37 +142,104 @@ def test_revision_adds_child_and_reopens_resolved_work_item() -> None:
                 ),
             ),
         ),
-        SolverDecision(
-            next="continue",
-            decision_reason="x",
-            update=CaseUpdate(
-                add_hypotheses=tuple(
-                    Hypothesis(
-                        hypothesis_id=item.hypothesis_id,
-                        work_item_id=item.work_item_id,
-                        statement=item.statement,
-                        evidence_ids=item.evidence_ids,
-                        gaps=item.gaps,
-                    )
-                    for item in result.hypothesis_revision.add_hypotheses
-                )
-            ),
-        ),
-        limits=AgentLimits(),
-        known_tool_names=(),
+        result.hypothesis_revision,
         material_evidence_ids={"e-1"},
-        finalize_only=False,
-        hypothesis_revision_work_item_ids={"wi-1"},
+        eligible_work_item_ids={"wi-1"},
     )
     assert [item.hypothesis_id for item in updated.hypotheses] == ["h-1", "h-2"]
     assert updated.hypotheses[0].statement == "既存の命題"
     assert updated.work_items[0].state == "open"
 
 
+def test_revision_replaces_current_hypothesis_and_keeps_old_version_out_of_view() -> None:
+    client = FakeRevisionClient(
+        {
+            "decision_reason": "本文により現在の見立てを修正する",
+            "revise_hypotheses": [
+                {
+                    "hypothesis_id": "h-1",
+                    "statement": "本文を踏まえた現在の命題",
+                    "judgment": "supported",
+                    "evidence_ids": ["e-1"],
+                    "gaps": ["次Cycleで確認する条件"],
+                }
+            ],
+            "add_hypotheses": [],
+        }
+    )
+    state = CaseState(
+        case_id="revision-current-version",
+        question="確認事項",
+        research_cycle_count=1,
+        work_items=(
+            WorkItem(
+                work_item_id="wi-1",
+                question="既存の確認事項",
+                state="open",
+            ),
+        ),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h-1",
+                work_item_id="wi-1",
+                statement="更新前の命題",
+                judgment="contradicted",
+                evidence_ids=("e-1",),
+            ),
+        ),
+        evidence=(
+            Evidence(
+                evidence_id="e-1",
+                source_ref="source-1",
+                content="Cycleで取得した本文",
+                created_cycle=1,
+            ),
+        ),
+    )
+    context = build_solver_context(
+        state,
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+    )
+    profile = legal_agent_profile().solver_hypothesis_revision
+    assert profile is not None
+
+    result = StructuredJSONModelAdapter(client).solve(context, profile)
+    assert result.hypothesis_revision is not None
+    updated = apply_hypothesis_revision(
+        state,
+        result.hypothesis_revision,
+        material_evidence_ids={"e-1"},
+        eligible_work_item_ids={"wi-1"},
+    )
+
+    assert len(updated.hypotheses) == 1
+    assert updated.hypotheses[0].hypothesis_id == "h-1"
+    assert updated.hypotheses[0].statement == "本文を踏まえた現在の命題"
+    assert updated.hypotheses[0].judgment == "supported"
+    assert updated.work_items[0].state == "open"
+    assert len(updated.hypothesis_history) == 1
+    assert updated.hypothesis_history[0].hypothesis.statement == "更新前の命題"
+    assert updated.hypothesis_history[0].version == 1
+
+    next_context = build_solver_context(
+        updated,
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+    )
+    assert [item.statement for item in next_context.hypotheses] == [
+        "本文を踏まえた現在の命題"
+    ]
+    assert "hypothesis_history" not in next_context.model_dump()
+
+
 def test_revision_returns_no_hypothesis_for_search_strategy_only() -> None:
     client = FakeRevisionClient(
         {
             "decision_reason": "本文に独立した新しい命題はない",
+            "revise_hypotheses": [],
             "add_hypotheses": [],
         }
     )
@@ -197,12 +267,14 @@ def test_revision_repairs_transport_shape_once_without_changing_meaning() -> Non
         [
             {
                 "decision_reason": "本文に別の未確認事項がある",
+                "revise_hypotheses": [],
                 "add_hypotheses": [
                     {**proposal, "evidence_ids": ["e-1"] * 13}
                 ],
             },
             {
                 "decision_reason": "本文に別の未確認事項がある",
+                "revise_hypotheses": [],
                 "add_hypotheses": [proposal],
             },
         ]
@@ -233,6 +305,8 @@ def test_revision_projection_only_includes_current_cycle_evidence() -> None:
                 hypothesis_id="h-1",
                 work_item_id="wi-1",
                 statement="既存の命題",
+                judgment="contradicted",
+                evidence_ids=("e-new",),
             ),
         ),
         evidence=(

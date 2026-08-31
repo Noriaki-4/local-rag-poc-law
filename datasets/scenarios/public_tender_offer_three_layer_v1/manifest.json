@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "datasetId": "public-tender-offer-three-layer-mini-v1",
   "datasetType": "egov_article_subset_scenario",
-  "datasetSnapshotId": "public-tender-offer-mini-1bf7d65f0c426c8423e1de1dcef8c293caf03d2bad70a71c905e8b366a4443a4",
+  "datasetSnapshotId": "public-tender-offer-mini-cc2ee5326a9d13b78b334eca69a2467efe946aeedca7e0338c55886b9287f856",
   "parentDatasetSnapshotId": "egov-law-corpus-4458d52586f9a2a4233e05ffc7e06f07c9c5429a4916043ad233908a4d911e1c",
   "sourceReusePolicy": "frozen_local_xml_only",
   "articleAllowlistPath": "article_allowlist.json",
@@ -35,6 +35,14 @@
       "familyRoot": "323AC0000000025",
       "sourcePath": "datasets/lawqa_jp/egov_law_corpus/documents/402M50000040038/2889d3017c9385bb3728cba51f6014e5efe11a345a7e1a288b037641218d714f.xml",
       "sourceSha256": "sha256:2889d3017c9385bb3728cba51f6014e5efe11a345a7e1a288b037641218d714f"
+    },
+    {
+      "lawId": "348M50000040005",
+      "title": "企業内容等の開示に関する内閣府令",
+      "authorityType": "cabinet_office_ordinance",
+      "familyRoot": "323AC0000000025",
+      "sourcePath": "datasets/lawqa_jp/egov_law_corpus/documents/348M50000040005/71f4d02bed3547172af07799585ff9473a2a406b691a3a11089b2f0a27bc6d83.xml",
+      "sourceSha256": "sha256:71f4d02bed3547172af07799585ff9473a2a406b691a3a11089b2f0a27bc6d83"
     }
   ]
 }

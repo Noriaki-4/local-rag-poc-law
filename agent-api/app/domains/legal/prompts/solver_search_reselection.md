@@ -16,6 +16,7 @@
 - 候補のある未確認Hypothesisへ、取得枠を偏りなく配分している。
 - 同じArticleを重複して選択していない。
 - 選択数が`current_fetch_request_capacity`以内である。
+- 各WorkItemの選択数が`remaining_fetch_capacity_by_work_item`の残数以内である。
 
 ## 手順
 
@@ -41,8 +42,11 @@
 - 質問の中心命題を直接検証する候補があれば、まず1件を選びます。特定の法的機能を常に中心とはみなしません。
 - 同じHypothesisの候補を複数選ぶ前に、候補のある他の未確認Hypothesisへ1枠ずつ配分します。
   2件目は、別々の`gaps`を直接埋める場合だけ選びます。
-- `current_fetch_request_capacity`は今回1回の本文取得要求の上限であり、Cycle全体の上限ではありません。
-  上限まで選ぶ必要はありません。内容が重複する候補は追加しません。
+- `current_fetch_request_capacity`は今回選べるArticle数の合計上限です。
+- 各Articleは、`matched_hypothesis_ids`が属するWorkItemの
+  `remaining_fetch_capacity_by_work_item`を1件使います。複数WorkItemのHypothesisへ対応付けたArticleは、
+  各WorkItemで1件ずつ数えます。
+- 上限まで選ぶ必要はありません。内容が重複する候補は追加しません。
 
 ### 根拠条文の要求
 

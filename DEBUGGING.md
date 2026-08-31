@@ -127,7 +127,7 @@ Cycle開始時と終了時の`CaseState`から作る監査用の投影です。
 診断JSONLから、追加のLLM呼出しなしでJSONとMarkdownの報告を作れます。
 
 ```bash
-python3 scripts/summarize_agent_diagnostic.py \
+agent-api/.venv/bin/python scripts/summarize_agent_diagnostic.py \
   --input eval-results/agent-framework-diagnostics/legal-....jsonl \
   --output-dir eval-results/cycle-audits/legal-...
 ```
@@ -149,11 +149,14 @@ Cycle数や一処理の短縮だけで性能改善と判断しません。監査
 同一Tool scopeの再要求、同一の指示・入力・schemaによるモデル再呼出しを構造上の確認事項として表示します。
 新しいTool結果を受けた同一Hypothesisの再評価は、通常のaction-observation反復であり警告対象にしません。これらは誤りの断定ではなく、
 取得結果をまとめられるか、処理を別名で重複実行していないかを調べる起点です。
+並列処理では、Tool実行をWorkItem別に集計し、本文取得Article数と検索・Graph・本文取得の回数を確認します。
+Toolの重複scopeもWorkItem単位で判定し、別WorkItemの同じ検索や本文取得を重複とは扱いません。
+契約違反は再試行で回復した場合も`CONTRACT_VIOLATION`として残し、違反時のWorkItemとHypothesisを確認します。
 
 変更前後を比較する場合は、現在の診断JSONLに`--baseline`で比較元を指定します。
 
 ```bash
-python3 scripts/summarize_agent_diagnostic.py \
+agent-api/.venv/bin/python scripts/summarize_agent_diagnostic.py \
   --baseline eval-results/agent-framework-diagnostics/legal-before.jsonl \
   --input eval-results/agent-framework-diagnostics/legal-after.jsonl \
   --output-dir eval-results/cycle-audits/comparison
@@ -176,6 +179,14 @@ python3 scripts/summarize_agent_diagnostic.py \
 資料3/3・必要Article 4/4・回答要点4/4に合格しました。Cycle監査は、回答へ影響しなかった0件の
 意味関係Graph探索2件について逆方向未試行を警告し、本文未統合・Evidence未対応付けは検出しませんでした。
 これにより、最終回答の合格と途中経路の確認事項を分けて表示できることを実データでも確認しました。
+
+2026-08-31のWorkItem別並列処理対応では、監査報告へ次を追加し、全1135テストで回帰を確認しました。
+
+- Tool実行をWorkItem別に集計し、検索・Graph・本文取得回数と取得Article数を表示する。
+- Cycle内のTool一覧にWorkItem IDとHypothesis IDを表示する。
+- Cycle終了時の下位規範確認状態と、残っている`needs_action`を表示する。
+- 別WorkItemの同じTool引数を重複scopeとして扱わない。
+- 再試行で回復した契約違反も、違反時のWorkItem・Hypothesisとともに表示する。
 
 ## 中止条件
 

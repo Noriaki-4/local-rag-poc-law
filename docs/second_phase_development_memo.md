@@ -89,7 +89,8 @@ Projectorが作る入力から再生成する。API送信処理と成果物出�
 
 Step 1では、`datasets/scenarios/public_tender_offer_three_layer_v1/`を固定入力として、
 「法律→施行令→府令」の連続1ホップ探索を実装・検証する。架空条文やgold本文は作らず、既に保存した
-3法令のe-Gov XMLから本則Article全文を選ぶ。
+4法令のe-Gov XMLから本則Article全文を選ぶ。公開買付け3階層の13 Articleに加え、少人数私募の
+告知根拠をたどるため、開示府令14条の15と金商法23条の13を含める。
 
 | 法令 | 対象Article | 主な検証目的 |
 |---|---|---|
@@ -133,8 +134,9 @@ Step 1の実行順と完了条件は次のとおり。
 python3 scripts/validate_public_tender_offer_mini_dataset.py
 ```
 
-2026-08-21時点では、全件ではなくこのsubsetだけを再indexした。専用OpenSearch indexは69文書、
-Neo4jは3 Document、13 Article、46 Paragraph、20 Item、100構造Relationである。17分類候補は
+2026-08-21時点の旧snapshotでは、全件ではなく3法令13 Articleのsubsetだけを再indexした。
+専用OpenSearch indexは69文書、Neo4jは3 Document、13 Article、46 Paragraph、20 Item、
+100構造Relationである。17分類候補は
 Luna Worker / Reviewerで17/17承認され、24 RelationAssertionを
 `classification-run-public-tender-mini-v1-v23`としてpublishした。固定selectorの直接確認では、
 金商法27条の2から施行令7条、施行令7条から府令2条の5、金商法27条の3から府令10条へ到達できる。

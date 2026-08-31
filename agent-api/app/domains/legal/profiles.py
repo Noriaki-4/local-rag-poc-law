@@ -28,7 +28,7 @@ def legal_agent_profile() -> AgentProfile:
     timeout_sec = settings.agent_framework_model_timeout_sec
     return AgentProfile(
         name="legal-default",
-        version="446",
+        version="449",
         provider=settings.llm_provider,
         solver_research=_model_profile(
             model=settings.agent_framework_research_model,
@@ -117,6 +117,14 @@ def legal_agent_profile() -> AgentProfile:
             ),
             dependency_completion_check_prompt=_read_prompt(
                 "solver_dependency_assessment_check.md"
+            ),
+            dependency_action_system_prompt=_join_prompts(
+                solver_identity_prompt,
+                _read_prompt("solver_dependency_action.md"),
+                tool_prompt,
+            ),
+            dependency_action_completion_check_prompt=_read_prompt(
+                "solver_dependency_action_check.md"
             ),
             context_projection="observation_integration",
             available_tool_names=None,
@@ -223,7 +231,7 @@ def legal_agent_profile() -> AgentProfile:
                 settings.agent_framework_max_tool_requests_per_step
             ),
             max_fetched_resources_per_cycle=(
-                settings.agent_framework_max_fetched_resources_per_cycle
+                settings.agent_framework_max_fetched_resources_per_work_item_per_cycle
             ),
             max_selected_frontier_per_step=(
                 settings.agent_framework_max_selected_frontier_per_step
@@ -233,6 +241,9 @@ def legal_agent_profile() -> AgentProfile:
                 settings.agent_framework_max_graph_candidates_per_review_batch
             ),
             max_parallel_tools=settings.agent_framework_max_parallel_tools,
+            max_parallel_work_items=(
+                settings.agent_framework_max_parallel_work_items
+            ),
             max_retained_evidence=settings.agent_framework_max_retained_evidence,
             max_material_evidence_chars=(
                 settings.agent_framework_max_material_evidence_chars

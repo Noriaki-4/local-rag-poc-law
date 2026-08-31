@@ -97,8 +97,9 @@ XMLの `MainProvision`（本則）と `SupplProvision`（附則）は条番号�
 
 ### 第二期Step 1の小規模scenario dataset
 
-`datasets/scenarios/public_tender_offer_three_layer_v1/`は、保存済みe-Gov XMLを複製せず、3法令・
-本則13 Articleだけをallowlistで選ぶ固定subsetである。検索・seed入力と`eval/`のgoldを分離し、
+`datasets/scenarios/public_tender_offer_three_layer_v1/`は、保存済みe-Gov XMLを複製せず、4法令・
+本則15 Articleだけをallowlistで選ぶ固定subsetである。公開買付け3階層に加え、開示府令14条の15から
+金商法23条の13へ進む少人数私募の明示参照を含む。検索・seed入力と`eval/`のgoldを分離し、
 同じXMLからOpenSearchとNeo4jを再構築する。詳細な対象、代表経路、検証コマンドは同ディレクトリの
 `README.md`と[第二期開発備忘録](second_phase_development_memo.md#21-第二期step-1公開買付け3階層ミニデータセット)を参照する。
 

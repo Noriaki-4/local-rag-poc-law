@@ -5196,3 +5196,51 @@ def test_profile_accepts_legacy_finalize_key_as_integration_alias() -> None:
     profile = AgentProfile.model_validate(payload)
 
     assert profile.solver_integration.model == "integration-model"
+
+
+def test_fetch_capacity_is_counted_per_work_item_in_one_cycle() -> None:
+    work_items = (
+        WorkItem(work_item_id="w1", question="条件を確認する"),
+        WorkItem(work_item_id="w2", question="手続を確認する"),
+    )
+    hypotheses = (
+        Hypothesis(hypothesis_id="h1", work_item_id="w1", statement="条件がある"),
+        Hypothesis(hypothesis_id="h2", work_item_id="w2", statement="手続がある"),
+    )
+    requests = tuple(
+        ToolRequest(
+            request_id=f"fetch-w1-{index}",
+            work_item_id="w1",
+            tool_name="fetch_articles",
+            arguments={"article_ids": [f"article-{index}"]},
+            purpose="本文を確認する",
+            hypothesis_ids=("h1",),
+        )
+        for index in range(5)
+    )
+    results = tuple(
+        ToolResult(
+            request_id=request.request_id,
+            status="succeeded",
+            cycle_no=1,
+        )
+        for request in requests
+    )
+    context = build_solver_context(
+        CaseState(
+            case_id="case-per-work-item-capacity",
+            question="質問",
+            research_cycle_count=1,
+            work_items=work_items,
+            hypotheses=hypotheses,
+            tool_requests=requests,
+            tool_results=results,
+        ),
+        AgentLimits(max_fetched_resources_per_cycle=5),
+        remaining_wall_time_sec=120,
+        finalize_only=False,
+    )
+
+    assert context.remaining_fetch_capacity_by_work_item == {"w1": 0, "w2": 5}
+    assert context.remaining_fetch_capacity == 5
+    assert context.cycle_close_required is False

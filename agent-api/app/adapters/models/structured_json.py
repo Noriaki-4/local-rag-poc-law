@@ -399,7 +399,7 @@ class StructuredJSONModelAdapter:
         context: SolverContext,
         profile: ModelCallProfile,
     ) -> SolverCallResult:
-        """Cycle境界で、取得本文から独立した未解決命題だけを追加する。"""
+        """Cycle境界で、Hypothesisの現在版更新又は独立命題追加を行う。"""
 
         rendered = render_hypothesis_revision_model_call(context, profile)
         provider = getattr(self._client, "provider", None)
@@ -550,6 +550,32 @@ class StructuredJSONModelAdapter:
             )
         )
         observation = _derive_observation_work_item_updates(context, observation)
+        closed_work_item_ids = {
+            item.work_item_id
+            for item in observation.update_work_items
+            if item.state != "open"
+        }
+        next_focus_work_item_ids = tuple(
+            dict.fromkeys(
+                request.work_item_id
+                for request in observation.tool_requests
+                if request.work_item_id not in closed_work_item_ids
+            )
+        )
+        if not next_focus_work_item_ids:
+            open_work_item_ids = {
+                item.work_item_id
+                for item in context.work_tree
+                if item.state == "open"
+            }
+            next_focus_work_item_ids = tuple(
+                dict.fromkeys(
+                    request.work_item_id
+                    for request in context.recent_tool_requests
+                    if request.work_item_id in open_work_item_ids
+                    and request.work_item_id not in closed_work_item_ids
+                )
+            )
         return SolverCallResult(
             decision=SolverDecision(
                 next="continue",
@@ -559,12 +585,7 @@ class StructuredJSONModelAdapter:
                     update_hypotheses=observation.update_hypotheses,
                 ),
                 dependency_decisions=observation.dependency_decisions,
-                next_focus_work_item_ids=tuple(
-                    dict.fromkeys(
-                        request.work_item_id
-                        for request in observation.tool_requests
-                    )
-                ),
+                next_focus_work_item_ids=next_focus_work_item_ids,
                 tool_requests=observation.tool_requests,
             ),
             input_tokens=input_tokens,
@@ -832,8 +853,7 @@ class StructuredJSONModelAdapter:
         projected_contexts = _allocate_observation_fetch_capacity(
             _observation_work_item_contexts(
                 _project_available_tools(context, profile.available_tool_names)
-            ),
-            total_capacity=context.remaining_fetch_capacity,
+            )
         )
         if not projected_contexts:
             return ObservationIntegrationDecision(
@@ -841,6 +861,12 @@ class StructuredJSONModelAdapter:
             ), 0, 0, 0
 
         assignments = self._work_item_sessions.assign(projected_contexts)
+        pending_action_contexts = (
+            _pending_dependency_action_contexts(context)
+            if profile.dependency_action_system_prompt is not None
+            else ()
+        )
+        action_profile = profile.model_copy(update={"context_projection": "full"})
 
         def solve_one(
             assignment: tuple[WorkItemSession, SolverContext],
@@ -929,11 +955,40 @@ class StructuredJSONModelAdapter:
                 1 + result.retryCount,
             )
 
-        executor = ThreadPoolExecutor(max_workers=min(4, len(assignments)))
+        def solve_pending_action(
+            projected_context: SolverContext,
+        ) -> tuple[ObservationIntegrationDecision, int | None, int | None, int]:
+            action_result = self.solve(projected_context, action_profile)
+            return (
+                ObservationIntegrationDecision(
+                    decision_reason=action_result.decision.decision_reason,
+                    dependency_decisions=action_result.decision.dependency_decisions,
+                    tool_requests=action_result.decision.tool_requests,
+                ),
+                action_result.input_tokens,
+                action_result.output_tokens,
+                action_result.attempt_count,
+            )
+
+        executor = ThreadPoolExecutor(
+            max_workers=min(
+                context.max_parallel_work_items,
+                len(assignments) + len(pending_action_contexts),
+            )
+        )
         futures = {
-            executor.submit(solve_one, assignment): index
+            executor.submit(solve_one, assignment): ("observation", index)
             for index, assignment in enumerate(assignments)
         }
+        futures.update(
+            {
+                executor.submit(solve_pending_action, projected_context): (
+                    "action",
+                    index,
+                )
+                for index, projected_context in enumerate(pending_action_contexts)
+            }
+        )
         remaining_timeout = max(
             0.0,
             profile.timeout_sec - (monotonic() - started_at),
@@ -943,39 +998,61 @@ class StructuredJSONModelAdapter:
             future.cancel()
         executor.shutdown(wait=not pending, cancel_futures=True)
 
-        indexed_results = []
-        timed_out = bool(pending)
+        indexed_observations = []
+        indexed_actions = []
+        observation_timed_out = any(
+            futures[future][0] == "observation" for future in pending
+        )
         protocol_errors: list[ModelProtocolError] = []
         for future in completed:
             try:
-                indexed_results.append((futures[future], future.result()))
+                kind, index = futures[future]
+                target = (
+                    indexed_observations
+                    if kind == "observation"
+                    else indexed_actions
+                )
+                target.append((index, future.result()))
             except TimeoutError:
-                timed_out = True
+                if futures[future][0] == "observation":
+                    observation_timed_out = True
             except ModelProtocolError as exc:
-                protocol_errors.append(exc)
+                if futures[future][0] == "observation":
+                    protocol_errors.append(exc)
 
         if protocol_errors:
             raise protocol_errors[0]
 
-        results = [
-            result for _, result in sorted(indexed_results, key=lambda item: item[0])
+        observation_results = [
+            result
+            for _, result in sorted(
+                indexed_observations,
+                key=lambda item: item[0],
+            )
         ]
-        if timed_out:
-            if not results:
+        action_results = [
+            result
+            for _, result in sorted(indexed_actions, key=lambda item: item[0])
+        ]
+        results = [*observation_results, *action_results]
+        if observation_timed_out:
+            if not observation_results:
                 raise TimeoutError("observation integration batch timed out")
             observation = _derive_observation_work_item_updates(
                 context,
-                _merge_observation_integrations([item[0] for item in results]),
+                _merge_observation_integrations(
+                    [item[0] for item in observation_results]
+                ),
             )
             raise _cycle_close_checkpoint_timeout(
                 "observation integration batch partially timed out",
                 observation=observation,
                 completed_stage="work_item_sessions_partial",
                 input_tokens=_sum_optional_tokens(
-                    *(item[1] for item in results)
+                    *(item[1] for item in observation_results)
                 ),
                 output_tokens=_sum_optional_tokens(
-                    *(item[2] for item in results)
+                    *(item[2] for item in observation_results)
                 ),
             )
         return (
@@ -1787,7 +1864,15 @@ def _solver_context_payload(
             "completed_graph_searches",
             "available_tools",
             "remaining_fetch_capacity",
+            "remaining_fetch_capacity_by_work_item",
         )
+        payload["remaining_fetch_capacity_by_work_item"] = {
+            work_item_id: context.remaining_fetch_capacity_by_work_item.get(
+                work_item_id,
+                context.remaining_fetch_capacity,
+            )
+            for work_item_id in active_work_item_ids
+        }
         available_action_tools = list(
             _dependency_action_available_tools(context)
         )
@@ -2335,15 +2420,15 @@ def render_hypothesis_revision_model_call(
     context: SolverContext,
     profile: ModelCallProfile,
 ) -> RenderedModelCall:
-    """取得本文から新しい命題を追加するCycle境界の専用呼出し。"""
+    """反証済みHypothesisの現在版を見直すCycle境界の専用呼出し。"""
 
-    eligible_work_item_ids = {
-        item.work_item_id
-        for item in context.work_tree
-        if item.state != "dropped"
-    }
+    (
+        eligible_work_item_ids,
+        eligible_hypotheses,
+        eligible_evidence_ids,
+    ) = _hypothesis_revision_scope(context)
     hypotheses_by_work: dict[str, list[Hypothesis]] = {}
-    for item in context.hypotheses:
+    for item in eligible_hypotheses:
         if item.work_item_id in eligible_work_item_ids:
             hypotheses_by_work.setdefault(item.work_item_id, []).append(item)
     input_model = HypothesisRevisionInput(
@@ -2357,7 +2442,7 @@ def render_hypothesis_revision_model_call(
                 ),
             )
             for item in context.work_tree
-            if item.state != "dropped"
+            if item.work_item_id in eligible_work_item_ids
         ),
         hypotheses=tuple(
             HypothesisRevisionHypothesis(
@@ -2367,8 +2452,7 @@ def render_hypothesis_revision_model_call(
                 judgment=item.judgment,
                 gaps=item.gaps,
             )
-            for item in context.hypotheses
-            if item.work_item_id in eligible_work_item_ids
+            for item in eligible_hypotheses
         ),
         acquired_evidence=tuple(
             HypothesisRevisionEvidence(
@@ -2377,6 +2461,7 @@ def render_hypothesis_revision_model_call(
                 title=item.title,
             )
             for item in context.hypothesis_revision_evidence
+            if item.evidence_id in eligible_evidence_ids
         ),
     )
     input_payload = input_model.model_dump(mode="json")
@@ -2759,19 +2844,26 @@ def _observation_work_item_contexts(
 
 def _allocate_observation_fetch_capacity(
     contexts: tuple[SolverContext, ...],
-    *,
-    total_capacity: int,
 ) -> tuple[SolverContext, ...]:
-    """WorkItem別の並列出力が、全体の本文取得枠を超えないよう配分する。"""
+    """WorkItem別の本文取得残量を、対応する専属入力へ投影する。"""
 
     if not contexts:
         return ()
-    quotas = [0] * len(contexts)
-    for slot in range(min(total_capacity, 4 * len(contexts))):
-        quotas[slot % len(contexts)] += 1
 
     projected: list[SolverContext] = []
-    for context, quota in zip(contexts, quotas, strict=True):
+    for context in contexts:
+        work_item_id = next(
+            (item.work_item_id for item in context.work_tree),
+            None,
+        )
+        quota = context.remaining_fetch_capacity_by_work_item.get(
+            work_item_id or "",
+            context.remaining_fetch_capacity,
+        )
+        fetched_ids = context.fetched_resource_ids_by_work_item_this_cycle.get(
+            work_item_id or "",
+            (),
+        )
         available_tools = context.available_tools
         fetchable_article_ids = context.fetchable_article_ids
         if quota == 0:
@@ -2787,6 +2879,15 @@ def _allocate_observation_fetch_capacity(
             context.model_copy(
                 update={
                     "remaining_fetch_capacity": quota,
+                    "remaining_fetch_capacity_by_work_item": (
+                        {work_item_id: quota} if work_item_id is not None else {}
+                    ),
+                    "fetched_resource_ids_this_cycle": fetched_ids,
+                    "fetched_resource_ids_by_work_item_this_cycle": (
+                        {work_item_id: fetched_ids}
+                        if work_item_id is not None
+                        else {}
+                    ),
                     "fetchable_article_ids": fetchable_article_ids,
                     "available_tools": available_tools,
                 }
@@ -2813,6 +2914,49 @@ def _dependency_work_item_contexts(
         projected.append(
             item.model_copy(
                 update={"required_dependency_work_item_ids": item_ids}
+            )
+        )
+    return tuple(projected)
+
+
+def _pending_dependency_action_contexts(
+    context: SolverContext,
+) -> tuple[SolverContext, ...]:
+    """直近本文の担当外に残るneeds_actionをWorkItem別へ投影する。"""
+
+    observed_work_item_ids = {
+        item.work_item_id for item in _active_observation_items(context)[0]
+    }
+    open_work_item_ids = {
+        item.work_item_id
+        for item in context.work_tree
+        if item.state == "open"
+    }
+    pending_ids = tuple(
+        dict.fromkeys(
+            item.work_item_id
+            for item in context.dependency_decisions
+            if item.status == "needs_action"
+            and item.work_item_id in context.required_dependency_work_item_ids
+            and item.work_item_id in open_work_item_ids
+            and item.work_item_id not in observed_work_item_ids
+        )
+    )
+    projected = []
+    for work_item_id in pending_ids:
+        quota = context.remaining_fetch_capacity_by_work_item.get(
+            work_item_id,
+            context.remaining_fetch_capacity,
+        )
+        projected.append(
+            context.model_copy(
+                update={
+                    "required_dependency_work_item_ids": (work_item_id,),
+                    "remaining_fetch_capacity": quota,
+                    "remaining_fetch_capacity_by_work_item": {
+                        work_item_id: quota
+                    },
+                }
             )
         )
     return tuple(projected)
@@ -2869,10 +3013,6 @@ def _merge_observation_integrations(
         for item in observations
         for request in item.tool_requests
     ]
-    tool_requests = _consolidate_fetch_article_requests(
-        tool_requests,
-        dependency_decisions,
-    )
     tool_requests = _consolidate_identical_graph_requests(
         tool_requests,
         dependency_decisions,
@@ -4251,11 +4391,9 @@ def _search_selection_context_payload(context: SolverContext) -> dict[str, Any]:
             )
             for candidate in context.search_candidates
         ),
-        current_fetch_request_capacity=_tool_array_argument_capacity(
-            context,
-            tool_name="fetch_articles",
-            argument_name="article_ids",
-            fallback=context.remaining_fetch_capacity,
+        current_fetch_request_capacity=_search_selection_capacity(context),
+        remaining_fetch_capacity_by_work_item=(
+            context.remaining_fetch_capacity_by_work_item
         ),
     )
     return input_model.model_dump(mode="json")
@@ -4309,12 +4447,7 @@ def render_search_reselection_model_call(
     candidate_by_id = {
         item.article_id: item for item in context.search_candidates
     }
-    current_fetch_request_capacity = _tool_array_argument_capacity(
-        context,
-        tool_name="fetch_articles",
-        argument_name="article_ids",
-        fallback=context.remaining_fetch_capacity,
-    )
+    current_fetch_request_capacity = _search_selection_capacity(context)
     input_payload = {
         "question": context.question,
         "work_items": [
@@ -4330,6 +4463,9 @@ def render_search_reselection_model_call(
             item.model_dump(mode="json") for item in context.hypotheses
         ],
         "current_fetch_request_capacity": current_fetch_request_capacity,
+        "remaining_fetch_capacity_by_work_item": (
+            context.remaining_fetch_capacity_by_work_item
+        ),
         "assessments": [
             {
                 **item,
@@ -4491,15 +4627,11 @@ def render_solver_transport_repair_model_call(
     output_schema = deepcopy(base_call.output_schema)
     tool_requests = output_schema.get("properties", {}).get("tool_requests")
     error_detail = _transport_error_detail(error)
-    if isinstance(tool_requests, dict) and any(
-        message in error_detail
-        for message in (
-            "all fetch_articles requests combined must contain at most",
-            "Article body fetches in one SolverDecision must be consolidated",
-        )
+    if (
+        isinstance(tool_requests, dict)
+        and "identical legal_graph_neighbors arguments must be consolidated"
+        in error_detail
     ):
-        # Usually each fetch request is bounded separately. During this repair the
-        # aggregate one-request rule must also be visible in provider grammar.
         tool_requests["maxItems"] = 1
     rendered = build_rendered_model_call(
         stage="solver_transport_repair",
@@ -5310,12 +5442,7 @@ def _search_selection_transport_schema(context: SolverContext) -> dict[str, Any]
         if item.requires_follow_up
         and item.work_item_id in open_work_item_ids
     )
-    selection_limit = _tool_array_argument_capacity(
-        context,
-        tool_name="fetch_articles",
-        argument_name="article_ids",
-        fallback=context.remaining_fetch_capacity,
-    )
+    selection_limit = _search_selection_capacity(context)
     selection = _strict_object(
         {
             "article_id": _described(
@@ -5342,7 +5469,10 @@ def _search_selection_transport_schema(context: SolverContext) -> dict[str, Any]
                 "summary",
             ),
             "matched_hypothesis_ids": _described(
-                _bounded_enum_array(hypothesis_ids),
+                {
+                    **_bounded_enum_array(hypothesis_ids),
+                    "minItems": 1,
+                },
                 SearchCandidateAssessment,
                 "matched_hypothesis_ids",
             ),
@@ -5390,12 +5520,7 @@ def _search_reselection_transport_schema(
             article_id: all_hypothesis_ids for article_id in candidate_ids
         }
     if selection_limit is None:
-        selection_limit = _tool_array_argument_capacity(
-            context,
-            tool_name="fetch_articles",
-            argument_name="article_ids",
-            fallback=context.remaining_fetch_capacity,
-        )
+        selection_limit = _search_selection_capacity(context)
     allowed_hypothesis_ids = tuple(
         dict.fromkeys(
             hypothesis_id
@@ -5472,6 +5597,17 @@ def _tool_array_argument_capacity(
             capacity = min(capacity, max_items)
         break
     return capacity
+
+
+def _search_selection_capacity(context: SolverContext) -> int:
+    """WorkItem別本文取得枠の合計を、検索候補選択の上限へ投影する。"""
+
+    capacities = context.remaining_fetch_capacity_by_work_item
+    return (
+        sum(capacities.values())
+        if capacities
+        else context.remaining_fetch_capacity
+    )
 
 
 def _dependency_action_transport_schema(
@@ -5699,15 +5835,47 @@ def _solver_compact_transport_schema(context: SolverContext) -> dict:
 def _hypothesis_revision_transport_schema(
     context: SolverContext,
 ) -> dict[str, Any]:
-    """Provider共通の小さな仮説追加schema。"""
+    """Provider共通の小さな仮説見直しschema。"""
 
-    open_work_item_ids = tuple(
-        item.work_item_id
-        for item in context.work_tree
-        if item.state != "dropped"
+    (
+        open_work_item_ids,
+        eligible_hypotheses,
+        revision_evidence_ids,
+    ) = _hypothesis_revision_scope(context)
+    existing_hypothesis_ids = tuple(
+        item.hypothesis_id for item in eligible_hypotheses
     )
-    revision_evidence_ids = tuple(
-        item.evidence_id for item in context.hypothesis_revision_evidence
+    shared_fields = {
+        "statement": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1200,
+            "description": "取得本文を踏まえ、次Cycleで検証する法的命題。",
+        },
+        "evidence_ids": {
+            **_bounded_enum_array(revision_evidence_ids),
+            "description": "命題を直接示した取得済み本文Evidence ID。不要なら空配列。",
+        },
+        "gaps": {
+            "type": "array",
+            "items": {"type": "string", "maxLength": 300},
+            "maxItems": 12,
+            "description": "命題を確認するため本文で残る具体的な未確認事項。",
+        },
+    }
+    revision_update = _strict_object(
+        {
+            "hypothesis_id": {
+                **_enum_string(existing_hypothesis_ids),
+                "description": "現在版を更新する既存Hypothesis ID。",
+            },
+            **shared_fields,
+            "judgment": {
+                "type": "string",
+                "enum": ["supported", "contradicted", "unresolved"],
+                "description": "更新後の命題を提示本文で評価した現在の判定。",
+            },
+        }
     )
     proposal = _strict_object(
         {
@@ -5721,22 +5889,7 @@ def _hypothesis_revision_transport_schema(
                 **_enum_string(open_work_item_ids),
                 "description": "追加先となる既存の非dropped WorkItemのID。",
             },
-            "statement": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 1200,
-                "description": "取得本文から独立して導かれた、新しい未確認の法的命題。",
-            },
-            "evidence_ids": {
-                **_bounded_enum_array(revision_evidence_ids),
-                "description": "この提案を生んだ取得済み本文Evidence ID。不要なら空配列。",
-            },
-            "gaps": {
-                "type": "array",
-                "items": {"type": "string", "maxLength": 300},
-                "maxItems": 12,
-                "description": "命題を確認するため本文で残る具体的な未確認事項。",
-            },
+            **shared_fields,
         }
     )
     return _strict_object(
@@ -5745,7 +5898,13 @@ def _hypothesis_revision_transport_schema(
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 1200,
-                "description": "追加または追加しなかった理由。",
+                "description": "更新、追加または維持した理由。",
+            },
+            "revise_hypotheses": {
+                "type": "array",
+                "items": revision_update,
+                "maxItems": 8,
+                "description": "同じ命題の見立てを直す場合だけ返す。なければ空配列。",
             },
             "add_hypotheses": {
                 "type": "array",
@@ -5754,6 +5913,46 @@ def _hypothesis_revision_transport_schema(
                 "description": "独立した新しい未解決命題がある場合だけ返す。なければ空配列。",
             },
         }
+    )
+
+
+def _hypothesis_revision_scope(
+    context: SolverContext,
+) -> tuple[tuple[str, ...], tuple[Hypothesis, ...], tuple[str, ...]]:
+    """Promptとschemaが共有する、反証済みHypothesisの最小投影。"""
+
+    active_work_item_ids = {
+        item.work_item_id
+        for item in context.work_tree
+        if item.state != "dropped"
+    }
+    visible_evidence_ids = {
+        item.evidence_id for item in context.hypothesis_revision_evidence
+    }
+    eligible_hypotheses = tuple(
+        item
+        for item in context.hypotheses
+        if item.work_item_id in active_work_item_ids
+        and item.judgment == "contradicted"
+        and not visible_evidence_ids.isdisjoint(item.evidence_ids)
+    )
+    eligible_work_item_ids = tuple(
+        dict.fromkeys(item.work_item_id for item in eligible_hypotheses)
+    )
+    referenced_evidence_ids = {
+        evidence_id
+        for item in eligible_hypotheses
+        for evidence_id in item.evidence_ids
+    }
+    eligible_evidence_ids = tuple(
+        item.evidence_id
+        for item in context.hypothesis_revision_evidence
+        if item.evidence_id in referenced_evidence_ids
+    )
+    return (
+        eligible_work_item_ids,
+        eligible_hypotheses,
+        eligible_evidence_ids,
     )
 
 
@@ -5793,6 +5992,16 @@ def _solver_common_transport_schema(context: SolverContext) -> dict[str, Any]:
 
     schema = _solver_compact_transport_schema(context)
     properties = schema["properties"]
+    finalization_citation_ids = (
+        _verified_answer_evidence_ids(
+            context,
+            ObservationIntegrationDecision(
+                decision_reason="確認済み根拠を最終回答へ投影する。"
+            ),
+        )
+        if context.finalize_only
+        else ()
+    )
     graph_review_mode = bool(
         context.graph_review_batch.candidates and not context.finalize_only
     )
@@ -5836,7 +6045,7 @@ def _solver_common_transport_schema(context: SolverContext) -> dict[str, Any]:
         answer_schema = properties["answer"]
         if answer_schema.get("type") == "object":
             answer_schema["properties"]["citation_ids"] = _described(
-                _bounded_enum_array(context.grounding_evidence_ids),
+                _bounded_enum_array(finalization_citation_ids),
                 FinalAnswer,
                 "citation_ids",
             )
@@ -5860,7 +6069,7 @@ def _solver_common_transport_schema(context: SolverContext) -> dict[str, Any]:
     if context.finalize_only and "answer" in schema.get("properties", {}):
         _constrain_finalization_citation_ids(
             schema,
-            context.grounding_evidence_ids,
+            finalization_citation_ids,
         )
     _constrain_active_deferred_frontier_ids(schema, context)
     if (
@@ -6458,17 +6667,91 @@ def _tool_requests_transport_schema(context: SolverContext) -> dict[str, Any]:
     }
     variants: list[dict[str, Any]] = []
     for definition in context.available_tools:
-        argument_schema = deepcopy(definition.input_schema)
         if definition.name == "fetch_articles":
-            article_ids = argument_schema.get("properties", {}).get("article_ids")
-            if isinstance(article_ids, dict):
-                article_ids["items"] = _enum_string(context.fetchable_article_ids)
-                article_ids["maxItems"] = min(
-                    4,
-                    context.remaining_fetch_capacity,
-                    len(context.fetchable_article_ids),
+            hypotheses_by_work_item = {
+                work_item_id: tuple(
+                    item.hypothesis_id
+                    for item in context.hypotheses
+                    if item.work_item_id == work_item_id
                 )
-        elif definition.name == "load_evidence":
+                for work_item_id in projected_open_work_item_ids
+            }
+            fetch_work_item_ids: tuple[str | None, ...] = (
+                tuple(projected_open_work_item_ids)
+                if projected_open_work_item_ids
+                else (None,)
+            )
+            for work_item_id in fetch_work_item_ids:
+                work_item_capacity = (
+                    context.remaining_fetch_capacity_by_work_item.get(
+                        work_item_id,
+                        context.remaining_fetch_capacity,
+                    )
+                    if work_item_id is not None
+                    else context.remaining_fetch_capacity
+                )
+                if (
+                    context.remaining_fetch_capacity_by_work_item
+                    and work_item_capacity <= 0
+                ):
+                    continue
+                argument_schema = deepcopy(definition.input_schema)
+                article_ids = argument_schema.get("properties", {}).get(
+                    "article_ids"
+                )
+                if isinstance(article_ids, dict):
+                    article_ids["items"] = _enum_string(
+                        context.fetchable_article_ids
+                    )
+                    article_ids["maxItems"] = min(
+                        work_item_capacity,
+                        len(context.fetchable_article_ids),
+                    )
+                work_item_hypothesis_ids = (
+                    hypotheses_by_work_item[work_item_id]
+                    if work_item_id is not None
+                    else projected_hypothesis_ids
+                )
+                fetch_properties = {
+                    **common_properties,
+                    "tool_name": _described(
+                        {
+                            "type": "string",
+                            "enum": [definition.name],
+                            "description": definition.description,
+                        },
+                        ToolRequest,
+                        "tool_name",
+                        append=True,
+                    ),
+                    "arguments": _described(
+                        argument_schema,
+                        ToolRequest,
+                        "arguments",
+                    ),
+                }
+                if work_item_id is not None:
+                    fetch_properties["work_item_id"] = _described(
+                        _enum_string((work_item_id,)),
+                        ToolRequest,
+                        "work_item_id",
+                    )
+                    fetch_properties["hypothesis_ids"] = _described(
+                        (
+                            _bounded_enum_array(work_item_hypothesis_ids)
+                            if work_item_hypothesis_ids
+                            else _string_array_schema()
+                        ),
+                        ToolRequest,
+                        "hypothesis_ids",
+                    )
+                variants.append(
+                    _strict_object(fetch_properties)
+                )
+            continue
+
+        argument_schema = deepcopy(definition.input_schema)
+        if definition.name == "load_evidence":
             evidence_ids = argument_schema.get("properties", {}).get("evidence_ids")
             if isinstance(evidence_ids, dict):
                 evidence_ids["items"] = _enum_string(context.omitted_evidence_ids)
@@ -6514,21 +6797,10 @@ def _tool_requests_transport_schema(context: SolverContext) -> dict[str, Any]:
         )
     max_items = context.max_tool_requests_per_step
     if context.contract_feedback is not None:
-        previous_tool_names = {
-            request.tool_name
-            for request in context.contract_feedback.previous_decision.tool_requests
-        }
-        requires_single_request = any(
-            message in context.contract_feedback.violation
-            for message in (
-                "Article body fetches in one SolverDecision must be consolidated",
-                "identical legal_graph_neighbors arguments must be consolidated",
-            )
+        requires_single_request = (
+            "identical legal_graph_neighbors arguments must be consolidated"
+            in context.contract_feedback.violation
         )
-        # A repair may reveal a second violation after consolidating fetches. Keep
-        # the already-correct single-request shape while that violation is fixed.
-        if previous_tool_names == {"fetch_articles"}:
-            requires_single_request = True
         if requires_single_request:
             max_items = 1
     return {
@@ -7042,77 +7314,71 @@ def _consolidate_fetch_article_requests(
     requests: list[Any],
     dependency_decisions: list[Any],
 ) -> list[Any]:
-    """本文取得の選択内容を変えず、同じDecision内の1要求へ束ねる。"""
+    """本文取得をWorkItemごとに束ね、所有関係を保つ。"""
 
-    fetches = [
-        request
-        for request in requests
-        if isinstance(request, dict)
-        and request.get("tool_name") == "fetch_articles"
-    ]
-    if len(fetches) <= 1:
-        return requests
-
-    retained = dict(fetches[0])
-    retained_arguments = dict(retained["arguments"])
-    retained_arguments["article_ids"] = list(
-        dict.fromkeys(
-            article_id
-            for request in fetches
-            for article_id in request["arguments"].get("article_ids", ())
-        )
-    )
-    retained["arguments"] = retained_arguments
-    retained["hypothesis_ids"] = list(
-        dict.fromkeys(
-            hypothesis_id
-            for request in fetches
-            for hypothesis_id in request.get("hypothesis_ids", ())
-        )
-    )
-
-    old_request_ids = {
-        request.get("request_id")
-        for request in fetches
-        if isinstance(request.get("request_id"), str)
-    }
-    fetch_work_item_ids = {
-        request.get("work_item_id")
-        for request in fetches
-        if isinstance(request.get("work_item_id"), str)
-    }
-    retained_request_id = retained.get("request_id")
-    if isinstance(retained_request_id, str):
-        for dependency in dependency_decisions:
-            if (
-                isinstance(dependency, dict)
-                and dependency.get("status") == "needs_action"
-                and (
-                    dependency.get("action_request_id") in old_request_ids
-                    or dependency.get("work_item_id") in fetch_work_item_ids
-                )
-            ):
-                dependency["action_request_id"] = retained_request_id
-
-    fetch_ids = {id(request) for request in fetches}
-    consolidated: list[Any] = []
-    inserted = False
+    groups: dict[str, list[dict[str, Any]]] = {}
     for request in requests:
-        if id(request) not in fetch_ids:
-            consolidated.append(request)
-        elif not inserted:
-            consolidated.append(retained)
-            inserted = True
-    return consolidated
+        if (
+            isinstance(request, dict)
+            and request.get("tool_name") == "fetch_articles"
+        ):
+            groups.setdefault(str(request.get("work_item_id")), []).append(request)
+
+    replacements: dict[int, dict[str, Any]] = {}
+    removed_ids: set[int] = set()
+    for work_item_id, fetches in groups.items():
+        if len(fetches) <= 1:
+            continue
+        retained = dict(fetches[0])
+        retained_arguments = dict(retained["arguments"])
+        retained_arguments["article_ids"] = list(
+            dict.fromkeys(
+                article_id
+                for request in fetches
+                for article_id in request["arguments"].get("article_ids", ())
+            )
+        )
+        retained["arguments"] = retained_arguments
+        retained["hypothesis_ids"] = list(
+            dict.fromkeys(
+                hypothesis_id
+                for request in fetches
+                for hypothesis_id in request.get("hypothesis_ids", ())
+            )
+        )
+        replacements[id(fetches[0])] = retained
+        removed_ids.update(id(request) for request in fetches[1:])
+
+        old_request_ids = {
+            request.get("request_id")
+            for request in fetches
+            if isinstance(request.get("request_id"), str)
+        }
+        retained_request_id = retained.get("request_id")
+        if isinstance(retained_request_id, str):
+            for dependency in dependency_decisions:
+                if (
+                    isinstance(dependency, dict)
+                    and dependency.get("status") == "needs_action"
+                    and dependency.get("work_item_id") == work_item_id
+                    and dependency.get("action_request_id") in old_request_ids
+                ):
+                    dependency["action_request_id"] = retained_request_id
+
+    return [
+        replacements.get(id(request), request)
+        for request in requests
+        if id(request) not in removed_ids
+    ]
 
 
 def _consolidate_identical_graph_requests(
     requests: list[Any],
     dependency_decisions: list[Any],
 ) -> list[Any]:
-    """同じGraph探索を1回にし、Hypothesisとの対応を保持する。"""
+    """同じWorkItem内の同一Graph探索だけを1回にまとめる。"""
 
-    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
     for request in requests:
         if (
             not isinstance(request, dict)
@@ -7121,6 +7387,7 @@ def _consolidate_identical_graph_requests(
         ):
             continue
         scope = (
+            str(request.get("work_item_id")),
             str(request.get("tool_name")),
             json.dumps(
                 request["arguments"],
@@ -7474,6 +7741,20 @@ def normalize_dependency_action_decision(
                 request.model_dump(mode="json")
                 for request in action.tool_requests
             ],
+            "unreviewed_graph_resolution": (
+                {
+                    "action": "review_next_cycle",
+                    "reason": (
+                        "次Cycleへの移行に伴い、未評価Graph候補を次Cycleへ"
+                        "引き継ぐ。"
+                    ),
+                }
+                if (
+                    action.start_next_cycle
+                    and context.graph_review_batch.remaining_unreviewed_count > 0
+                )
+                else None
+            ),
             "answer": None,
         }
     )
@@ -8010,17 +8291,6 @@ def _normalize_absent_context_branches(
         )
 
     article_aliases = _article_fetch_alias_map(context)
-    fetched_article_ids = {
-        article_id
-        for evidence in context.material_evidence
-        if evidence.evidence_id in context.grounding_evidence_ids
-        if isinstance(
-            article_id := evidence.metadata.get("articleId"),
-            str,
-        )
-        and article_id
-    }
-    fetched_article_ids.update(context.fetched_resource_ids_this_cycle)
     for request in normalized.get("tool_requests") or []:
         if not isinstance(request, dict):
             continue
@@ -8051,6 +8321,27 @@ def _normalize_absent_context_branches(
             continue
         if request.get("tool_name") != "fetch_articles":
             continue
+        request_work_item_id = request.get("work_item_id")
+        fetched_article_ids = set(
+            context.fetched_resource_ids_by_work_item_this_cycle.get(
+                request_work_item_id
+                if isinstance(request_work_item_id, str)
+                else "",
+                (),
+            )
+        )
+        if not context.fetched_resource_ids_by_work_item_this_cycle:
+            fetched_article_ids.update(context.fetched_resource_ids_this_cycle)
+            fetched_article_ids.update(
+                article_id
+                for evidence in context.material_evidence
+                if evidence.evidence_id in context.grounding_evidence_ids
+                if isinstance(
+                    article_id := evidence.metadata.get("articleId"),
+                    str,
+                )
+                and article_id
+            )
         article_ids = arguments.get("article_ids")
         if isinstance(article_ids, list):
             resolved_article_ids = [
@@ -8077,7 +8368,7 @@ def _normalize_absent_context_branches(
         if isinstance(request, dict)
         and request.get("tool_name") == "fetch_articles"
     ]
-    current_limit = min(4, context.remaining_fetch_capacity)
+    current_limit = context.remaining_fetch_capacity
     if fetch_requests and current_limit > 0:
         primary_request = fetch_requests[0]
         requested_article_ids = list(
