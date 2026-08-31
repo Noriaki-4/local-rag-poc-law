@@ -1,0 +1,191 @@
+{
+  "hashes": {
+    "input": "20558b82600853dc8457690e1539a437c7f5cf010b173ea86d4cb99b591e6a71",
+    "instructions": "2c6db1265ae89ec5d5944e1023dbaeb322fc1913af87bfa4d057a3ff0cc79d94",
+    "normalizedSchema": "268aa16500feb62bf529d0ca063da528e41d1689205006f71f27da3b1b8cba34",
+    "outputSchema": "268aa16500feb62bf529d0ca063da528e41d1689205006f71f27da3b1b8cba34",
+    "prompt": "35106c051ecd004a730edc40f030c053251fb22d7626e2a14efee330ee003734"
+  },
+  "model": "gpt-4o-mini",
+  "normalizedSchema": {
+    "$defs": {
+      "QuestionClarificationChoice": {
+        "additionalProperties": false,
+        "properties": {
+          "choice_id": {
+            "description": "確認候補を参照するための、この応答内で一意なID。",
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+            "title": "Choice Id",
+            "type": "string"
+          },
+          "label": {
+            "description": "利用者が解釈の違いを選べる、法的結論を含まない短い表示文。",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "refined_question": {
+            "description": "この候補を選んだ場合に一回の検索へ渡す修正後の質問。曖昧さを解消する場合は元の明示要求を保持する。複数の主体・行為ペアから一つを選ぶ場合は、必要な共通事実を保持して選択したペアの調査要求だけに絞り、質問にない事実を追加しない。",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Refined Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "choice_id",
+          "label",
+          "refined_question"
+        ],
+        "title": "QuestionClarificationChoice",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "choices": {
+        "description": "確認質問に対する2件から4件の相互に区別できる解釈候補。readyでは空配列。自由入力欄はUIが別に提供する。",
+        "items": {
+          "$ref": "#/$defs/QuestionClarificationChoice"
+        },
+        "maxItems": 4,
+        "title": "Choices",
+        "type": "array"
+      },
+      "clarification_question": {
+        "anyOf": [
+          {
+            "maxLength": 600,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "利用者へ一度に尋ねる最重要の確認質問。readyではnull。",
+        "title": "Clarification Question"
+      },
+      "decision": {
+        "description": "readyは一つの主たる主体・行為ペアを原文から特定して調査開始可能、clarification_requiredはペアが不明・曖昧又は複数あるため利用者確認が必要であることを示す。",
+        "enum": [
+          "ready",
+          "clarification_required"
+        ],
+        "title": "Decision",
+        "type": "string"
+      },
+      "reason": {
+        "description": "判断理由。clarification_requiredでは主体・行為ペアの欠落、曖昧さ又は複数性が検索をどう分けるかを、法的結論を断定せず説明する。",
+        "maxLength": 1000,
+        "minLength": 1,
+        "title": "Reason",
+        "type": "string"
+      }
+    },
+    "required": [
+      "decision",
+      "reason",
+      "clarification_question",
+      "choices"
+    ],
+    "title": "QuestionReadiness",
+    "type": "object"
+  },
+  "outputSchema": {
+    "$defs": {
+      "QuestionClarificationChoice": {
+        "additionalProperties": false,
+        "properties": {
+          "choice_id": {
+            "description": "確認候補を参照するための、この応答内で一意なID。",
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+            "title": "Choice Id",
+            "type": "string"
+          },
+          "label": {
+            "description": "利用者が解釈の違いを選べる、法的結論を含まない短い表示文。",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "refined_question": {
+            "description": "この候補を選んだ場合に一回の検索へ渡す修正後の質問。曖昧さを解消する場合は元の明示要求を保持する。複数の主体・行為ペアから一つを選ぶ場合は、必要な共通事実を保持して選択したペアの調査要求だけに絞り、質問にない事実を追加しない。",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Refined Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "choice_id",
+          "label",
+          "refined_question"
+        ],
+        "title": "QuestionClarificationChoice",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "choices": {
+        "description": "確認質問に対する2件から4件の相互に区別できる解釈候補。readyでは空配列。自由入力欄はUIが別に提供する。",
+        "items": {
+          "$ref": "#/$defs/QuestionClarificationChoice"
+        },
+        "maxItems": 4,
+        "title": "Choices",
+        "type": "array"
+      },
+      "clarification_question": {
+        "anyOf": [
+          {
+            "maxLength": 600,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "利用者へ一度に尋ねる最重要の確認質問。readyではnull。",
+        "title": "Clarification Question"
+      },
+      "decision": {
+        "description": "readyは一つの主たる主体・行為ペアを原文から特定して調査開始可能、clarification_requiredはペアが不明・曖昧又は複数あるため利用者確認が必要であることを示す。",
+        "enum": [
+          "ready",
+          "clarification_required"
+        ],
+        "title": "Decision",
+        "type": "string"
+      },
+      "reason": {
+        "description": "判断理由。clarification_requiredでは主体・行為ペアの欠落、曖昧さ又は複数性が検索をどう分けるかを、法的結論を断定せず説明する。",
+        "maxLength": 1000,
+        "minLength": 1,
+        "title": "Reason",
+        "type": "string"
+      }
+    },
+    "required": [
+      "decision",
+      "reason",
+      "clarification_question",
+      "choices"
+    ],
+    "title": "QuestionReadiness",
+    "type": "object"
+  },
+  "profileName": "legal-question-readiness",
+  "profileVersion": "7",
+  "prompt": "# 法令調査Solver：検索単位の確認\n\n## 目的\n\n一回の法令検索で主に調べる「主体と、その主体自身の行為」のペアを一つにします。ペアを誤ると別の規律を検索するため、質問分解より前に確認します。\n\n主体は規律を調べる個人又は組織です。行為は法律行為に限らず、手続、届出、不作為その他の規律対象となる行動を含みます。相手方、対象又は条件として登場する者は、その者自身の行為も調べる場合だけ別のペアです。\n\n## 出力\n\n- 原文から一つの主たるペアを特定して検索を開始できれば`decision=ready`とします。\n- 利用者確認が必要なら`decision=clarification_required`とし、一つの`clarification_question`と、その回答候補を`choices`へ返します。\n- 法的な回答、検索語、WorkItem、Hypothesis又は根拠は作りません。\n\n## 完了条件\n\n- `ready`では主たるペアが一つに定まっている。\n- `clarification_required`の各`refined_question`は一つのペアだけを調査対象にしている。\n- 質問にない事実又は調査要求を追加していない。\n\n## 手順\n\n1. 質問に明示された主体・行為ペアだけを読み取ります。行為の主体が書かれていないとき、利用者、質問者又は「その行為をする者」を主体として補いません。\n2. 次の三つに分けます。\n   - 一つのペアを特定できる: `ready`。\n   - 主体又は行為が欠けるか複数に解釈でき、検索先が変わり得る: 最も影響する一項目を確認します。各選択肢はその一項目だけを変え、他の不明点は補いません。\n   - 独立したペアが複数明示されている: どれを先に調べるか確認します。質問中の各ペアに同じ順序で一つずつ`choice`を対応させ、それ以外の選択肢は作りません。\n3. 各`refined_question`を、選んだ一ペアの要求と、それに必要な原文中の共通事実だけを含む質問にします。\n\n## 判断例\n\n- 「Xをする場合の要件」: 主体がないため確認します。主体だけが異なる候補を作り、方法や目的は補いません。\n- 「AがXをし、BがYをする場合の双方の義務」: `A / X`と`B / Y`の二ペアなので、`choices`もこの二件だけにします。\n\n## 判断ルール\n\n- 質問にない事実、法令名、条番号、数値基準又は法的分類を推測して追加しません。\n- 「双方」「共通」「全体」は一つの主体・行為ペアではありません。\n- 一般的説明又は条件付き回答が可能という理由だけで、必要なペアの確認を省略しません。\n- 選択肢の`label`は利用者が事実関係の違いを選ぶための表現とし、正解、推奨又は法的結論を含めません。\n- `reason`は確認が回答へ与える影響を説明し、どの選択肢が法的に有利かを評価しません。\n- `ready`では`clarification_question=null`、`choices=[]`とします。\n- `clarification_required`では`clarification_question`を設定し、`choices`を2件から4件返します。\n\n<input_contract>\n以下は今回の入力項目と意味です。\n- `question`: 利用者が入力した確認前の質問。質問に書かれていない事実を補わず、この本文だけから調査開始可能性を判断する。\n</input_contract>\n\n## 入力\n\n<question_readiness_input>{\"question\":\"会社が市場外で株式を買う場合、何か手続が必要ですか。\"}</question_readiness_input>",
+  "promptAssets": [],
+  "provider": "openai",
+  "stage": "question_readiness",
+  "transportNote": "promptは実際に送信した結合後テキスト。outputSchemaはProviderへ別項目として送信した構造化出力契約。"
+}

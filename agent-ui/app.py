@@ -19,6 +19,23 @@ from example_questions import (
 
 API_URL = os.getenv("AGENT_API_URL", "http://localhost:8000").rstrip("/")
 DEFAULT_PATTERN = "pattern_4_deepsearch"
+QUESTION_READINESS_TIMEOUT_SEC = 200
+
+
+def _apply_confirmed_question(question: str, reason: str) -> None:
+    """選択済みの修正版を既存入力欄へ戻し、調査前の最終確認状態にする。"""
+
+    normalized = question.strip()
+    if not normalized:
+        return
+    st.session_state.question_text = normalized
+    st.session_state.question_readiness_source = normalized
+    st.session_state.question_readiness = {
+        "decision": "ready",
+        "reason": reason,
+        "clarification_question": None,
+        "choices": [],
+    }
 
 st.set_page_config(page_title="法令RAG 質問デモ", layout="wide")
 st.title("法令RAG 質問デモ")
@@ -41,6 +58,10 @@ with st.expander("📚 回答できる範囲（対応している法令・ガイ
 
 if "question_text" not in st.session_state:
     st.session_state.question_text = ""
+if "question_readiness" not in st.session_state:
+    st.session_state.question_readiness = None
+if "question_readiness_source" not in st.session_state:
+    st.session_state.question_readiness_source = None
 
 with st.expander(f"🧭 法令横断の質問例（Lv.1〜Lv.{LEVELS[-1].level}）", expanded=True):
     st.caption(
@@ -98,6 +119,12 @@ with st.expander("詳細設定（開発者向け・通常は変更不要）", ex
         "選択式（lawqa_jp 4択スタイル）で質問する",
         help="デジタル庁データセットのような4択問題を試す場合にオン。",
     )
+    skip_question_readiness = st.checkbox(
+        "質問確認を省略して直接実行",
+        help=(
+            "質問確認機能自体の比較・回帰確認用。通常の自由記述質問ではオフにしてください。"
+        ),
+    )
     choices = None
     if use_choices:
         cols = st.columns(4)
@@ -139,13 +166,105 @@ with st.expander("詳細設定（開発者向け・通常は変更不要）", ex
     )
     show_trace = st.checkbox("検索ルート・グラフ・trace を表示", value=False)
 
-if st.button("質問する", type="primary"):
+normalized_choices = {
+    key: value for key, value in (choices or {}).items() if value.strip()
+} or None
+answer_requested = False
+
+if use_choices or skip_question_readiness:
+    answer_requested = st.button("質問する", type="primary")
+else:
+    readiness = (
+        st.session_state.question_readiness
+        if st.session_state.question_readiness_source == question
+        else None
+    )
+    if readiness is None and st.button("質問を確認する", type="primary"):
+        if not (question or "").strip():
+            st.warning("質問を入力してください。")
+        else:
+            try:
+                with st.spinner("質問の前提と曖昧さを確認しています"):
+                    response = requests.post(
+                        f"{API_URL}/question/readiness",
+                        json={"question": question},
+                        timeout=QUESTION_READINESS_TIMEOUT_SEC,
+                    )
+                    response.raise_for_status()
+                readiness = response.json()
+                st.session_state.question_readiness = readiness
+                st.session_state.question_readiness_source = question
+            except requests.RequestException as exc:
+                st.error(f"質問確認に失敗しました: {exc}")
+
+    if readiness and readiness.get("decision") == "ready":
+        st.success("この質問は、そのまま法令調査を開始できます。")
+        st.caption(readiness.get("reason") or "質問の確認が完了しました。")
+        answer_requested = st.button("この内容で調べる", type="primary")
+    elif readiness and readiness.get("decision") == "clarification_required":
+        st.info(readiness.get("reason") or "回答の前提となる情報を確認してください。")
+        st.caption(
+            "複数の主体・行為を調べたい場合は、一つずつ選び、"
+            "残りは調査完了後に別の質問として実行してください。"
+        )
+        readiness_choices = readiness.get("choices") or []
+        choice_by_id = {
+            item.get("choice_id"): item
+            for item in readiness_choices
+            if item.get("choice_id") and item.get("refined_question")
+        }
+        choice_ids = list(choice_by_id)
+        if choice_ids:
+            current_choice = st.session_state.get("clarification_choice_id")
+            if current_choice not in choice_by_id:
+                st.session_state.clarification_choice_id = choice_ids[0]
+            selected_id = st.radio(
+                readiness.get("clarification_question") or "確認してください",
+                options=choice_ids,
+                format_func=lambda choice_id: choice_by_id[choice_id].get(
+                    "label", choice_id
+                ),
+                key="clarification_choice_id",
+            )
+            selected = choice_by_id[selected_id]
+            st.markdown("**選択した場合の質問案**")
+            st.info(selected["refined_question"])
+            st.button(
+                "この質問案を入力欄へ反映",
+                on_click=_apply_confirmed_question,
+                args=(
+                    selected["refined_question"],
+                    "利用者が確認候補を選択し、修正後の質問を確認しました。",
+                ),
+            )
+
+        st.markdown("**選択肢に当てはまらない場合**")
+        custom_question = st.text_area(
+            "質問を直接修正してください",
+            key="custom_refined_question",
+            height=100,
+            help=(
+                "一回の検索で主に調べる主体とその行為を一組にし、"
+                "必要な相手方、対象や条件を補った質問全文を入力してください。"
+            ),
+        )
+        st.button(
+            "直接修正した質問を入力欄へ反映",
+            disabled=not custom_question.strip(),
+            on_click=_apply_confirmed_question,
+            args=(
+                custom_question,
+                "利用者が質問を直接修正し、その内容を確認しました。",
+            ),
+        )
+
+if answer_requested:
     if not (question or "").strip():
         st.warning("質問を入力してください。")
         st.stop()
     payload = {
         "question": question,
-        "choices": {k: v for k, v in (choices or {}).items() if v.strip()} or None,
+        "choices": normalized_choices,
         "pattern": pattern,
         "userClearanceLevel": user_clearance,
         "topK": top_k,

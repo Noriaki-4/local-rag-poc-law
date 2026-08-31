@@ -4,6 +4,10 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 
 from .config import settings
+from .domains.legal.question_readiness import (
+    QuestionReadinessModelProtocolError,
+    QuestionReadinessService,
+)
 from .framework_agent import LegalFrameworkAgentService
 from .framework_audit import (
     AuditContextCapacityError,
@@ -20,6 +24,7 @@ from .models import (
     AnswerRequest,
     FrameworkAuditRequest,
     GraphPathRequest,
+    QuestionReadinessRequest,
     SearchRequest,
 )
 from .opensearch_client import OpenSearchClient
@@ -35,6 +40,7 @@ framework_agent_service = LegalFrameworkAgentService(
     llm_client,
 )
 framework_audit_service = FrameworkPostRunAuditService(llm_client)
+question_readiness_service = QuestionReadinessService(llm_client)
 
 
 @asynccontextmanager
@@ -152,6 +158,28 @@ def answer(request: AnswerRequest) -> dict[str, Any]:
     except Exception as exc:
         raise _internal_http_error(
             "answer_failed", "回答処理に失敗しました。", exc
+        ) from exc
+
+
+@app.post("/question/readiness")
+def question_readiness(request: QuestionReadinessRequest) -> dict[str, Any]:
+    """検索を開始せず、質問が原文のまま調査可能かだけを確認する。"""
+
+    try:
+        return question_readiness_service.check(request).model_dump(mode="json")
+    except QuestionReadinessModelProtocolError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "question_readiness_model_protocol_error",
+                "message": "質問確認モデルの応答を検証できませんでした。",
+            },
+        ) from exc
+    except Exception as exc:
+        raise _internal_http_error(
+            "question_readiness_failed",
+            "質問確認処理に失敗しました。",
+            exc,
         ) from exc
 
 

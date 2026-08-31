@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Pattern = Literal[
     "pattern_1_baseline_rag",
@@ -88,6 +88,106 @@ class AnswerResponse(BaseModel):
     citations: list[Citation]
     graphPaths: list[dict[str, Any]]
     trace: dict[str, Any]
+
+
+class QuestionReadinessRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    question: str = Field(
+        min_length=1,
+        max_length=4000,
+        description=(
+            "利用者が入力した確認前の質問。質問に書かれていない事実を補わず、"
+            "この本文だけから調査開始可能性を判断する。"
+        ),
+    )
+
+
+class QuestionClarificationChoice(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    choice_id: str = Field(
+        min_length=1,
+        max_length=80,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$",
+        description="確認候補を参照するための、この応答内で一意なID。",
+    )
+    label: str = Field(
+        min_length=1,
+        max_length=200,
+        description=(
+            "利用者が解釈の違いを選べる、法的結論を含まない短い表示文。"
+        ),
+    )
+    refined_question: str = Field(
+        min_length=1,
+        max_length=4000,
+        description=(
+            "この候補を選んだ場合に一回の検索へ渡す修正後の質問。曖昧さを"
+            "解消する場合は元の明示要求を保持する。複数の主体・行為ペアから"
+            "一つを選ぶ場合は、必要な共通事実を保持して選択したペアの調査要求"
+            "だけに絞り、質問にない事実を追加しない。"
+        ),
+    )
+
+
+class QuestionReadiness(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    decision: Literal["ready", "clarification_required"] = Field(
+        description=(
+            "readyは一つの主たる主体・行為ペアを原文から特定して調査開始可能、"
+            "clarification_requiredはペアが不明・曖昧又は複数あるため利用者確認が"
+            "必要であることを示す。"
+        )
+    )
+    reason: str = Field(
+        min_length=1,
+        max_length=1000,
+        description=(
+            "判断理由。clarification_requiredでは主体・行為ペアの欠落、曖昧さ"
+            "又は複数性が検索をどう分けるかを、法的結論を断定せず説明する。"
+        ),
+    )
+    clarification_question: str | None = Field(
+        max_length=600,
+        description=(
+            "利用者へ一度に尋ねる最重要の確認質問。readyではnull。"
+        ),
+    )
+    choices: list[QuestionClarificationChoice] = Field(
+        max_length=4,
+        description=(
+            "確認質問に対する2件から4件の相互に区別できる解釈候補。"
+            "readyでは空配列。自由入力欄はUIが別に提供する。"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def validate_decision_shape(self):
+        if self.decision == "ready":
+            if self.clarification_question is not None or self.choices:
+                raise ValueError(
+                    "ready question readiness must not include clarification"
+                )
+            return self
+
+        if not self.clarification_question:
+            raise ValueError(
+                "clarification_required must include clarification_question"
+            )
+        if len(self.choices) < 2:
+            raise ValueError("clarification_required must include at least 2 choices")
+        choice_ids = [choice.choice_id for choice in self.choices]
+        labels = [choice.label for choice in self.choices]
+        refined_questions = [choice.refined_question for choice in self.choices]
+        if len(choice_ids) != len(set(choice_ids)):
+            raise ValueError("question readiness choice IDs must be unique")
+        if len(labels) != len(set(labels)):
+            raise ValueError("question readiness choice labels must be unique")
+        if len(refined_questions) != len(set(refined_questions)):
+            raise ValueError("refined questions must be unique")
+        return self
 
 
 class FrameworkAuditRequest(BaseModel):
