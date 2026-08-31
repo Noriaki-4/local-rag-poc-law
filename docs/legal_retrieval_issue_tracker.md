@@ -1,6 +1,6 @@
 # 法令検索 課題管理
 
-> 更新日: 2026-08-31
+> 更新日: 2026-09-01
 >
 > 本書は、法令検索の現在地、未解決課題、優先順位、完了条件を管理する。
 > 設計仕様の正本ではない。Agent契約は
@@ -104,7 +104,8 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-043` | P0 | 実装済み・実モデル6/6確認 | WorkItem並列処理と単一Solver時代の共有上限を整合させる | 本文取得枠を`WorkItem × Cycle`ごとに5件とし、検索・Graph要求を別WorkItem間で統合しない。別WorkItemが取得済みのArticleも通常の本文取得対象にでき、Evidence IDはCaseStoreで重複排除する。Evidence提示順はWorkItem間でround-robinにする | APIを使わない全1135テストに合格。公開買付け総合問題で固定した必要Article 6/6を実モデルで取得する |
 | `LR-044` | P0 | 対応中 | IDの種類と所有scopeの誤認を構造的に減らす | Article ID、Paragraph・Item由来のEvidence ID、WorkItem ID、Hypothesis ID及びToolRequest IDは文字列として似ており、Prompt・Provider輸送・並列結果の結合境界で誤用が増えている。Profile v449実測ではParagraph Evidence IDをGraphのArticle起点へ指定したほか、修正前adapterが別WorkItemの本文取得要求を統合してHypothesis IDの所有関係を壊した | IDごとの正本、利用可能な処理、所有WorkItemを入力契約で区別する。Programは種類・既知性・所有scopeだけを検証し、法的対応先は判断しない。監査でID違反の種類と発生箇所を集計し、Article/Evidence混同、WorkItem/Hypothesis交差、Request参照切れの回帰を用意する |
 | `LR-045` | P0 | 未着手 | 未評価候補を残したまま新しい探索へ進み、必要Articleを取りこぼす | Profile v449の公開買付け総合問題では、公開買付府令2条の5をOpenSearchで2回発見したが、同時に返った本文の統合後、候補評価より新しい検索・Graph探索が先行した。Cycle Close開始まで本文取得対象に選ばれず、必要Articleは5/6となった | 同一WorkItemでは、選択済み本文の取得・統合を完了した後、未評価の検索・Graph候補をLLMに評価させてから新しい探索を許す。別WorkItemの取得・統合と候補評価は並列に進めてよい。Programは処理順、既知ID及び状態だけを管理し、候補の関連性やArticleの優先度は判断しない |
-| `LR-046` | P1 | 未着手 | 最終回答の引用を使用根拠へ絞り、条数と根拠箇所数を区別して表示する | 有価証券報告書の例題は採点8/8だったが、最終回答は3法令・11 Articleから32 Evidence IDを引用した。UIはParagraph・Item単位のEvidenceを全て「引用件数」と表示し、回答本文で直接使わない4 Articleも引用集合へ残った | Finalizationでは回答中の主張に実際に使う確認済みEvidenceをLLMが選ぶ。Programは既知性・引用可能性・Hypothesis又は解決済み依存との対応だけを検証し、全Evidenceの引用を強制しない。UIは「法令数」「Article数」「根拠箇所数」を区別し、項・号の内訳は展開表示にする |
+| `LR-046` | P1 | 未着手 | 最終回答の引用を使用根拠へ絞り、条数と根拠箇所数を区別して表示する | 有価証券報告書の例題は採点8/8だったが、最終回答は3法令・11 Articleから32 Evidence IDを引用した。LawQA 2問目（case `legal-1528b4c40c9549ba89fbb9a29e34d0c0`）も正答Bに到達した一方、回答に直接使わない承認手続・準用規定を含む18 Evidence IDを引用した。UIはParagraph・Item単位のEvidenceを全て「引用件数」と表示し、探索中にHypothesisへ蓄積した根拠が回答本文で未使用でも引用集合へ残る | Finalizationでは回答中の主張に実際に使う確認済みEvidenceをLLMが選ぶ。Programは既知性・引用可能性・Hypothesis又は解決済み依存との対応だけを検証し、全Evidenceの引用を強制しない。UIは「法令数」「Article数」「根拠箇所数」を区別し、項・号の内訳は展開表示にする |
+| `LR-047` | P0 | 未着手 | 回答に十分な根拠を得た後、付随する例外・下位規範を新しい未確認事項として過剰追跡する | LawQA 2問目は施行令3条の4で外国会社の提出期限を判断できた後も、ただし書の承認手続を`gaps`へ追加し、開示府令15条の2の2・17条の4・7条3項等を追跡した。2 Cycle・24モデル呼出し・364.3秒・入力349,706 tokenに対し、Tool時間は1.3秒だった。最終統合には検索候補用`search_navigation`も`material_evidence`として入り、1回の入力が83,638 tokenまで増えた | WorkItemの結論が付随手続の詳細に依存する場合だけ下位規範を`gaps`へ追加する。回答範囲との関係はLLMが判断し、Programは構造整合だけを検証する。最終回答用Projectorからnavigation Evidenceを除き、通常統合ではなく小さいFinalization投影を使う。同じHypothesisを新しいTool結果なしで再統合しない。委任・準用・ただし書を含む複数設問で、正答・必要条文を維持しながら呼出し数、入力token、引用数が減ることを確認する |
 
 ### 3.1 LR-016 Tool観察とCycle Closeの単一責務化
 
@@ -1418,6 +1419,55 @@ Programは未処理結果の有無、WorkItem、既知ID及び処理順だけを
 - 回答本文で使用しないArticleが最終引用へ残らない。
 - 回答に必要な主張と根拠の対応を維持し、有価証券報告書の例題で8/8を保つ。
 - Programへ法的関連性や引用の重要度を判定する分岐を追加しない。
+
+### LR-047 回答範囲を超える下位規範追跡と最終Context肥大
+
+LawQA 2問目（case `legal-1528b4c40c9549ba89fbb9a29e34d0c0`）は正答Bへ到達したが、
+検索・回答経路は過剰だった。外国会社の提出期限は施行令3条の4の本文で判断できたにもかかわらず、
+Solverは同条ただし書の例外的な承認手続を新しい`gaps`へ追加した。その後、開示府令15条の2の2、
+17条の4及び7条3項等を追跡し、空結果のGraph検索3回を含む追加探索を行った。
+
+実測は次のとおりである。
+
+| 指標 | 実測 |
+|---|---:|
+| 総時間 | 364.3秒 |
+| Cycle | 2 |
+| モデル呼出し | 24回 |
+| モデル入力 | 349,706 token |
+| Tool呼出し | 20回 |
+| Tool合計時間 | 1.3秒 |
+| 最終回答の引用 | 18 Evidence ID |
+
+遅延の中心は検索基盤ではなく、Evidence IntegrationとIntegrationの反復である。特に対象WorkItemは
+6モデル呼出し・約137秒を使用した。最終回答を生成した通常Integrationには84件の
+`material_evidence`が投影され、候補選択専用の`search_navigation`も含まれたため、1回の入力が
+83,638 tokenになった。Finalization用の小さい投影を通らず、通常の統合Contextで回答したことも肥大の
+一因である。引用の過剰選択はLR-046で扱う。
+
+これは当該設問だけの問題ではない。委任、準用、ただし書又は例外手続を含む設問では、回答に十分な
+規定を確認した後も、本文中の付随的な下位規範を末端まで追跡する可能性がある。不要な探索は時間と
+Cycle枠を消費し、本当に必要なArticleを取得できない精度低下にもつながる。
+
+修正方針は次のとおりとする。
+
+1. 下位規範の確認は、WorkItemの結論がその具体的内容に依存する場合だけ行う。委任又は参照が本文に
+   存在するだけでは新しい`gaps`にしない。
+2. WorkItemの要求、Hypothesisの`statement`及び既存`gaps`との意味的な関係はLLMが判断する。
+   Programは既知ID、状態、件数及び参照整合だけを検証し、法的関連性を補わない。
+3. 最終回答用Projectorは、回答根拠候補となるgrounding Evidenceだけを投影し、検索・Graph候補用の
+   navigation Evidenceを`material_evidence`へ入れない。
+4. 最終回答は小さいFinalization用Contextを使用し、通常のEvidence Integration用Contextをそのまま
+   再利用しない。
+5. 同じCycle・Hypothesisを、新しいTool結果又は状態差分なしで再統合しない。監査で反復を検出する。
+
+完了条件は次のとおりとする。
+
+- LawQA 2問目で正答Bと直接必要な根拠を維持し、付随する承認手続を回答に必要な`gaps`として追跡しない。
+- 委任・準用・ただし書を含む別設問でも、回答範囲に必要な下位規範は引き続き取得できる。
+- 最終回答入力の`material_evidence`に`search_navigation`が含まれない。
+- 新しいTool結果を挟まないObservation Integration反復が0件になる。
+- モデル呼出し数、入力token、所要時間及び引用数を修正前実測と比較し、正答率・必要条文到達を落とさない。
 
 ### LR-019 統合契約と意味的行動選択の分離
 
