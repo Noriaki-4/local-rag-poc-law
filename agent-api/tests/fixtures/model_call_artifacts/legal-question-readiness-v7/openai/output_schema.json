@@ -1,0 +1,87 @@
+{
+  "$defs": {
+    "QuestionClarificationChoice": {
+      "additionalProperties": false,
+      "properties": {
+        "choice_id": {
+          "description": "確認候補を参照するための、この応答内で一意なID。",
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+          "title": "Choice Id",
+          "type": "string"
+        },
+        "label": {
+          "description": "利用者が解釈の違いを選べる、法的結論を含まない短い表示文。",
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "refined_question": {
+          "description": "この候補を選んだ場合に一回の検索へ渡す修正後の質問。曖昧さを解消する場合は元の明示要求を保持する。複数の主体・行為ペアから一つを選ぶ場合は、必要な共通事実を保持して選択したペアの調査要求だけに絞り、質問にない事実を追加しない。",
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Refined Question",
+          "type": "string"
+        }
+      },
+      "required": [
+        "choice_id",
+        "label",
+        "refined_question"
+      ],
+      "title": "QuestionClarificationChoice",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "choices": {
+      "description": "確認質問に対する2件から4件の相互に区別できる解釈候補。readyでは空配列。自由入力欄はUIが別に提供する。",
+      "items": {
+        "$ref": "#/$defs/QuestionClarificationChoice"
+      },
+      "maxItems": 4,
+      "title": "Choices",
+      "type": "array"
+    },
+    "clarification_question": {
+      "anyOf": [
+        {
+          "maxLength": 600,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "利用者へ一度に尋ねる最重要の確認質問。readyではnull。",
+      "title": "Clarification Question"
+    },
+    "decision": {
+      "description": "readyは一つの主たる主体・行為ペアを原文から特定して調査開始可能、clarification_requiredはペアが不明・曖昧又は複数あるため利用者確認が必要であることを示す。",
+      "enum": [
+        "ready",
+        "clarification_required"
+      ],
+      "title": "Decision",
+      "type": "string"
+    },
+    "reason": {
+      "description": "判断理由。clarification_requiredでは主体・行為ペアの欠落、曖昧さ又は複数性が検索をどう分けるかを、法的結論を断定せず説明する。",
+      "maxLength": 1000,
+      "minLength": 1,
+      "title": "Reason",
+      "type": "string"
+    }
+  },
+  "required": [
+    "decision",
+    "reason",
+    "clarification_question",
+    "choices"
+  ],
+  "title": "QuestionReadiness",
+  "type": "object"
+}
