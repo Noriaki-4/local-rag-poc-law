@@ -16,6 +16,7 @@
   ],
   "expectedAnswerKeys": [
     "text",
+    "selected_option_id",
     "citation_ids",
     "limitations",
     "unresolved_work_item_ids",

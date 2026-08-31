@@ -1,13 +1,13 @@
 {
   "inputHash": "a763100d5e67cfe0d45008ea6b6738d62c3944e41396c1cb1ba548d2fd30d044",
-  "instructionsHash": "4071417c95bca586b5c52c3a096d60d3e63de10d9b9832bfffb07ebc5540e59f",
+  "instructionsHash": "f69b0f272945330e25cb717a65b5cc480e15302d277f67524dba27e57163dcf2",
   "model": "gpt-4o-mini-2024-07-18",
-  "normalizedSchemaHash": "80ea66e5179d0c07901b4bef677d620b49fe2f7a185f9bdbdcf21b97e3555e96",
+  "normalizedSchemaHash": "af8fbae3d3bfa28f891a581c0ef9eb5815dbb69823b0dd7b04afbc36df45761b",
   "outputSchemaHash": "ac2e0bdea2adb94fbf8be03d5ddefe873d44374ee2f80802ad42f3289adaccc9",
   "profileName": "legal-default",
-  "profileVersion": "449",
+  "profileVersion": "450",
   "promptAssets": [],
   "provider": "openai",
-  "requestHash": "218c9e6f4dc232830273e7a97388bb11d9f0e6cdf1b5fddf9313256a66984d04",
+  "requestHash": "f67f9d08e956e26e5ba8749974c2f21e4508f72eef0c24549e6fd945a7c50620",
   "stage": "hypothesis_generation_research_hypothesis"
 }

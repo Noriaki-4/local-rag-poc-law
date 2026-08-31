@@ -1945,7 +1945,12 @@ def _solver_context_payload(
             "verified_hypothesis_ids",
             "required_answer_evidence_ids",
         )
-        return {name: payload[name] for name in finalization_fields}
+        finalization_payload = {
+            name: payload[name] for name in finalization_fields
+        }
+        if context.answer_options:
+            finalization_payload["answer_options"] = payload["answer_options"]
+        return finalization_payload
     if projection == "full":
         return payload
     if projection == "graph_review":
@@ -1998,6 +2003,7 @@ def _solver_context_payload(
     work_item_by_id = {item.work_item_id: item for item in context.work_tree}
     research_input = ResearchStepInput(
         question=context.question,
+        answer_options=context.answer_options,
         work_items=tuple(
             ResearchStepWorkItem(
                 work_item_id=item.work_item_id,
@@ -2026,9 +2032,18 @@ def _solver_context_payload(
         max_tool_requests_per_step=context.max_tool_requests_per_step,
     )
     if projection == "research_decomposition":
-        return research_input.model_dump(mode="json", include={"question"})
+        research_payload = research_input.model_dump(
+            mode="json",
+            include={"question"},
+        )
+        if research_input.answer_options:
+            research_payload["answer_options"] = [
+                item.model_dump(mode="json")
+                for item in research_input.answer_options
+            ]
+        return research_payload
     if projection == "research_hypothesis":
-        return {
+        research_payload = {
             "work_items": [
                 {
                     "work_item_id": item.work_item_id,
@@ -2038,8 +2053,14 @@ def _solver_context_payload(
                 for item in research_input.work_items
             ],
         }
+        if research_input.answer_options:
+            research_payload["answer_options"] = [
+                item.model_dump(mode="json")
+                for item in research_input.answer_options
+            ]
+        return research_payload
     if projection == "research_search":
-        return research_input.model_dump(
+        research_payload = research_input.model_dump(
             mode="json",
             include={
                 "question",
@@ -2049,11 +2070,18 @@ def _solver_context_payload(
                 "max_tool_requests_per_step",
             },
         )
+        if research_input.answer_options:
+            research_payload["answer_options"] = [
+                item.model_dump(mode="json")
+                for item in research_input.answer_options
+            ]
+        return research_payload
     if projection != "initial_research":
         raise ValueError(f"unknown solver context projection: {projection}")
     included_fields = (
         "case_id",
         "question",
+        "answer_options",
         "research_cycle_count",
         "remaining_research_cycles",
         "max_tool_requests_per_step",
@@ -4784,6 +4812,17 @@ def _solver_transport_schema(context: SolverContext) -> dict:
     answer = _strict_object(
         {
             "text": _described({"type": "string"}, FinalAnswer, "text"),
+            "selected_option_id": _described(
+                (
+                    _enum_string(
+                        tuple(item.option_id for item in context.answer_options)
+                    )
+                    if context.answer_options
+                    else {"type": "null"}
+                ),
+                FinalAnswer,
+                "selected_option_id",
+            ),
             "citation_ids": _described(
                 string_array,
                 FinalAnswer,

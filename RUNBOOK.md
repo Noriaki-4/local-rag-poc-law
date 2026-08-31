@@ -1880,6 +1880,9 @@ docker compose --profile eval run --rm eval-runner
 
 注意:
 
+- lawqa_jp固有の読込・正規化・採点は`eval-runner/lawqa_jp/`へ隔離している。
+  Agent APIの`/answer`は選択肢の有無にかかわらず新Agent Frameworkを実行し、
+  旧回答経路へは分岐しない。
 - `コンテキスト` と `output` は Agent API には送らない。
 - `output` と `references` は eval-runner の答え合わせだけに使う。
 - lawqa_jp はゴールデンセット（正解＋必要な条文を持つ）だが、それらは採点専用で、

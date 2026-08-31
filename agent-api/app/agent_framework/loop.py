@@ -1714,6 +1714,7 @@ class AgentLoop:
         return ReviewerView(
             case_id=state.case_id,
             question=state.question,
+            answer_options=state.answer_options,
             answer=state.final_answer,
             work_items=state.work_items,
             hypotheses=state.hypotheses,

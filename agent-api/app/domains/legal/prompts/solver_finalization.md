@@ -24,6 +24,7 @@
 - `required_answer_evidence_ids`：解決済みWorkItemの回答に必ず含める引用IDです。
 - `material_evidence[]`：`grounding_evidence_ids`に対応する確認済み本文です。
 - `non_work_item_requirements`：限定回答でも守る、回答全体への明示要求です。
+- `answer_options[]`：利用者が提示した任意の回答候補です。
 
 ### 完了条件
 
@@ -39,6 +40,7 @@
 4. `open_work_item_ids`を回答の`unresolved_work_item_ids`へ、入力の`unresolved_hypothesis_ids`を回答の同名項目へ、そのまま列挙します。
 5. `graph_review_ledger`に未処理の`relevant_deferred`があれば、全件を`deferred_frontier_resolutions`へ書きます。
 6. 回答を作るときは、`non_work_item_requirements`をすべて反映します。
+7. `answer_options[]`がある場合は、確認済み本文に最も合う候補の`option_id`を`selected_option_id`へ設定します。候補がなければnullにします。
 
 ### ルール
 
@@ -58,6 +60,7 @@
 - 回答は取得済み本文が示す範囲に限定します。
 - 法令名を回答へ書く場合は、対応する`material_evidence[].title`をそのまま使います。
 - `non_work_item_requirements`は法的結論の根拠にせず、根拠・出典の提示や表現・出力形式等の回答要件として適用します。
+- 回答候補の文面だけを根拠にせず、取得済み本文と照合して選びます。
 
 #### Graph候補
 

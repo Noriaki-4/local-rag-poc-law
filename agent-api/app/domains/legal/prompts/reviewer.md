@@ -27,6 +27,7 @@
   確認済みというSolver判断です。
 - `answer.limitations`は未確認事項、`unresolved_work_item_ids`と
   `unresolved_hypothesis_ids`はその対象です。
+- `answer_options`がある場合、`answer.selected_option_id`は選択された候補IDです。
 
 ## 検査順序
 

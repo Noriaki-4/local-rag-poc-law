@@ -10,6 +10,7 @@ from ..context import SolverContext
 from ..contracts import HypothesisRevisionDecision, SolverDecision
 from ..profiles import ModelCallProfile, ReviewerProfile
 from ..state import (
+    AnswerOption,
     DependencyDecision,
     Evidence,
     FinalAnswer,
@@ -58,6 +59,7 @@ class SolverCallResult(FrameworkModel):
 class ReviewerView(FrameworkModel):
     case_id: str
     question: str
+    answer_options: tuple[AnswerOption, ...] = ()
     answer: FinalAnswer
     work_items: tuple[WorkItem, ...]
     hypotheses: tuple[Hypothesis, ...]

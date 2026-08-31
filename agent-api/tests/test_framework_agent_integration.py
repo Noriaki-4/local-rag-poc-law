@@ -112,6 +112,7 @@ from app.agent_framework.profiles import (
     ReviewerProfile,
 )
 from app.agent_framework.state import (
+    AnswerOption,
     CaseState,
     DeferredFrontierResolution,
     DependencyDecision,
@@ -312,6 +313,52 @@ def test_provider_schema_explains_retained_evidence_uniqueness() -> None:
     ]
 
     assert "同じIDは重複させず1回だけ指定" in retained["description"]
+
+
+def test_finalization_schema_constrains_selected_option_to_presented_ids() -> None:
+    context = build_solver_context(
+        CaseState(
+            case_id="case-options",
+            question="正しい候補はどれか。",
+            answer_options=(
+                AnswerOption(option_id="A", text="候補A"),
+                AnswerOption(option_id="B", text="候補B"),
+            ),
+        ),
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=True,
+    )
+
+    answer_schema = _solver_transport_schema(context)["properties"]["answer"]
+    answer_object = next(
+        item for item in answer_schema["anyOf"] if item.get("type") == "object"
+    )
+
+    assert answer_object["properties"]["selected_option_id"]["enum"] == ["A", "B"]
+
+
+def test_final_answer_rejects_unknown_selected_option() -> None:
+    state = CaseState(
+        case_id="case-options",
+        question="正しい候補はどれか。",
+        answer_options=(AnswerOption(option_id="A", text="候補A"),),
+    )
+    decision = SolverDecision(
+        next="finalize",
+        decision_reason="候補を選択した。",
+        answer=FinalAnswer(text="候補B", selected_option_id="B"),
+    )
+
+    with pytest.raises(ContractViolation, match="presented answer option IDs"):
+        apply_solver_decision(
+            state,
+            decision,
+            limits=AgentLimits(),
+            known_tool_names=(),
+            material_evidence_ids=(),
+            finalize_only=True,
+        )
 
 
 @pytest.mark.parametrize(
@@ -752,7 +799,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "449"
+    assert diagnostic_records[0]["profileVersion"] == "450"
     assert diagnostic_records[0]["runElapsedMs"] >= 0
     assert diagnostic_records[0]["recordedAt"].endswith("+00:00")
     assert len(diagnostic_records[0]["questionHash"]) == 64
@@ -763,7 +810,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "449"
+    assert transport_input["profileVersion"] == "450"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -791,6 +838,36 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
         item for item in diagnostic_records if item["event"] == "solver_output"
     )
     assert len(solver_output["solverDecisionHash"]) == 64
+
+
+def test_new_framework_returns_selected_option_id(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(
+        legal_profiles.settings,
+        "agent_framework_reviewer_enabled",
+        False,
+    )
+    monkeypatch.setattr(
+        legal_profiles.settings,
+        "agent_framework_diagnostics_mode",
+        "off",
+    )
+    monkeypatch.setattr(legal_profiles.settings, "eval_results_dir", tmp_path)
+    llm = FakeStructuredLLM()
+    llm.payloads[-1]["answer"]["selected_option_id"] = "A"
+    service = LegalFrameworkAgentService(FakeOpenSearch(), FakeGraph(), llm)
+
+    response = service.answer(
+        AnswerRequest(
+            question="正しい候補はどれですか。",
+            choices={"A": "要件がある。", "B": "要件はない。"},
+        )
+    )
+
+    assert response.predictedAnswer == "A"
+    assert response.route == ["agent_framework", "legal_domain"]
+    assert '"answer_options"' in llm.calls[0]["prompt"]
+    assert '"option_id":"A"' in llm.calls[0]["prompt"]
+    assert '"option_id":"B"' in llm.calls[0]["prompt"]
 
 
 def test_framework_diagnostics_off_avoids_detailed_output(monkeypatch) -> None:
@@ -1575,7 +1652,7 @@ def test_graph_review_moves_to_another_hypothesis_after_integrated_fetch() -> No
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "449"
+    assert profile.version == "450"
     assert profile.solver_graph_review is not None
     assert profile.solver_hypothesis_revision is not None
     assert profile.solver_graph_review.max_output_tokens == (
@@ -1866,7 +1943,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "449"
+    assert profile.version == "450"
     assert prompt.rindex("## 出力") > prompt.rindex(
         "</solver_context>"
     )
@@ -1917,7 +1994,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "449"
+    assert profile.version == "450"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -2049,7 +2126,7 @@ def test_research_missing_main_request_fixture_is_covered_by_prompt() -> None:
     assert observed["profileVersion"] == "127"
     assert len(observed["workItemQuestions"]) == 3
     assert observed["missingRequest"] not in observed["decisionReason"]
-    assert "元の質問から、明示された要求を取り出します" in prompt
+    assert "元の質問と`answer_options[]`から、明示された要求を取り出します" in prompt
     assert "法令上の条件、範囲、例外、手続等の内容" in prompt
     assert "元の質問に漏れ、重複、追加がない" in prompt
 
@@ -12808,7 +12885,7 @@ def test_finalization_does_not_reaudit_saved_dependency_decisions() -> None:
     ) == tuple(fixture["expectedBehavior"]["requiredDependencyWorkItemIds"])
 
 
-def test_explicit_framework_endpoint_does_not_use_legacy_service(monkeypatch) -> None:
+def test_explicit_framework_endpoint_uses_framework_service(monkeypatch) -> None:
     expected = AnswerResponse(
         pattern="agent_framework_v1",
         route=["agent_framework"],
@@ -12822,18 +12899,12 @@ def test_explicit_framework_endpoint_does_not_use_legacy_service(monkeypatch) ->
         "answer",
         lambda request: expected,
     )
-    monkeypatch.setattr(
-        main.agent_service,
-        "answer",
-        lambda request: (_ for _ in ()).throw(AssertionError("legacy called")),
-    )
-
     response = main.framework_answer(AnswerRequest(question="質問"))
 
     assert response["pattern"] == "agent_framework_v1"
 
 
-def test_answer_feature_flag_selects_new_framework(monkeypatch) -> None:
+def test_answer_always_uses_new_framework_for_choices(monkeypatch) -> None:
     expected = AnswerResponse(
         pattern="agent_framework_v1",
         route=["agent_framework"],
@@ -12842,14 +12913,15 @@ def test_answer_feature_flag_selects_new_framework(monkeypatch) -> None:
         graphPaths=[],
         trace={},
     )
-    monkeypatch.setattr(main.settings, "agent_framework_active", True)
     monkeypatch.setattr(
         main.framework_agent_service,
         "answer",
         lambda request: expected,
     )
 
-    response = main.answer(AnswerRequest(question="質問"))
+    response = main.answer(
+        AnswerRequest(question="質問", choices={"A": "候補A", "B": "候補B"})
+    )
 
     assert response["pattern"] == "agent_framework_v1"
 

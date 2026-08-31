@@ -63,6 +63,19 @@ class FrameworkModel(BaseModel):
     )
 
 
+class AnswerOption(FrameworkModel):
+    option_id: str = Field(
+        min_length=1,
+        max_length=160,
+        description="回答候補を参照するためのCase内一意ID。",
+    )
+    text: str = Field(
+        min_length=1,
+        max_length=4000,
+        description="利用者から提示された回答候補の本文。確認済み事実とは扱わない。",
+    )
+
+
 class WorkItem(FrameworkModel):
     work_item_id: str = Field(
         min_length=1,
@@ -677,6 +690,14 @@ class ToolResult(FrameworkModel):
 
 class FinalAnswer(FrameworkModel):
     text: str = Field(min_length=1, description="質問へ返す根拠付き回答本文。")
+    selected_option_id: str | None = Field(
+        default=None,
+        max_length=160,
+        description=(
+            "回答候補が提示された場合に選ぶAnswerOption.option_id。"
+            "候補がない場合はnull。"
+        ),
+    )
     citation_ids: tuple[str, ...] = Field(
         default=(),
         description="回答で実際に使用したgrounding Evidence ID。",
@@ -792,6 +813,12 @@ class ReviewResult(FrameworkModel):
 class CaseState(FrameworkModel):
     case_id: str = Field(min_length=1, max_length=160)
     question: str = Field(min_length=1)
+    answer_options: tuple[AnswerOption, ...] = Field(
+        default=(),
+        description=(
+            "利用者から提示された任意の回答候補。正解や採点情報は含めない。"
+        ),
+    )
     non_work_item_requirements: tuple[str, ...] = Field(
         default=(),
         description=(
@@ -843,6 +870,9 @@ class CaseState(FrameworkModel):
 
     @model_validator(mode="after")
     def validate_hypothesis_revision_cycles(self) -> CaseState:
+        option_ids = [item.option_id for item in self.answer_options]
+        if len(option_ids) != len(set(option_ids)):
+            raise ValueError("answer option IDs must be unique")
         if len(self.hypothesis_revision_cycles) != len(
             set(self.hypothesis_revision_cycles)
         ):

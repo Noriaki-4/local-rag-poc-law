@@ -8,7 +8,7 @@ from app.adapters.models import StructuredJSONModelAdapter
 from app.adapters.persistence.simple_in_memory import InMemoryCaseStore
 from app.agent_framework.diagnostics import AgentDiagnostics
 from app.agent_framework.loop import AgentLoop
-from app.agent_framework.state import CaseState, Evidence
+from app.agent_framework.state import AnswerOption, CaseState, Evidence
 from app.config import settings
 from app.domains.legal import legal_agent_profile, legal_tool_registry
 from app.graph_client import GraphClient
@@ -29,16 +29,15 @@ class LegalFrameworkAgentService:
         self._llm_client = llm_client
 
     def answer(self, request: AnswerRequest) -> AnswerResponse:
-        if request.choices:
-            raise ValueError(
-                "new agent framework currently supports natural-language questions only"
-            )
-
         profile = legal_agent_profile()
         store = InMemoryCaseStore()
         initial = CaseState(
             case_id=f"legal-{uuid4().hex}",
             question=request.question,
+            answer_options=tuple(
+                AnswerOption(option_id=option_id, text=text)
+                for option_id, text in (request.choices or {}).items()
+            ),
         )
         diagnostics = AgentDiagnostics(
             mode=settings.agent_framework_diagnostics_mode,
@@ -179,6 +178,9 @@ class LegalFrameworkAgentService:
             pattern="agent_framework_v1",
             route=["agent_framework", "legal_domain"],
             answer=answer_text,
+            predictedAnswer=(
+                final_answer.selected_option_id if final_answer is not None else None
+            ),
             citations=citations,
             graphPaths=[],
             trace={"agentFramework": framework_trace},

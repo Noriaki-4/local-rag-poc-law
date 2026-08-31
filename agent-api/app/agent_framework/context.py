@@ -11,6 +11,7 @@ from pydantic import Field, model_validator
 from .contracts import SolverDecision
 from .profiles import AgentLimits
 from .state import (
+    AnswerOption,
     CaseState,
     DeferredFrontierResolutionAction,
     DependencyDecision,
@@ -446,6 +447,13 @@ class ResearchStepInput(FrameworkModel):
     """初回Researchの各Stepへ必要な項目だけを渡すread model。"""
 
     question: str = Field(description="利用者が回答を求めている元の質問。")
+    answer_options: tuple[AnswerOption, ...] = Field(
+        default=(),
+        description=(
+            "利用者が提示した任意の回答候補。候補の内容は未確認であり、"
+            "法令本文による調査対象として扱う。"
+        ),
+    )
     work_items: tuple[ResearchStepWorkItem, ...] = Field(
         default=(),
         description=(
@@ -550,6 +558,13 @@ class CompletedGraphSearch(FrameworkModel):
 class SolverContext(FrameworkModel):
     case_id: str = Field(description="Programが管理する現在CaseのID。")
     question: str = Field(description="利用者が回答を求めている元の質問。")
+    answer_options: tuple[AnswerOption, ...] = Field(
+        default=(),
+        description=(
+            "利用者が提示した任意の回答候補。候補の内容は未確認であり、"
+            "正解や採点情報は含まない。"
+        ),
+    )
     non_work_item_requirements: tuple[str, ...] = Field(
         default=(),
         description=(
@@ -1370,6 +1385,7 @@ def build_solver_context(
     return SolverContext(
         case_id=state.case_id,
         question=state.question,
+        answer_options=state.answer_options,
         non_work_item_requirements=state.non_work_item_requirements,
         research_cycle_count=state.research_cycle_count,
         remaining_research_cycles=max(

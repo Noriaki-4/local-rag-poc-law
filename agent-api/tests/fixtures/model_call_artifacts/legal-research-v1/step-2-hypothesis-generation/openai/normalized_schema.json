@@ -238,6 +238,20 @@
           "title": "Limitations",
           "type": "array"
         },
+        "selected_option_id": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "回答候補が提示された場合に選ぶAnswerOption.option_id。候補がない場合はnull。",
+          "title": "Selected Option Id"
+        },
         "text": {
           "description": "質問へ返す根拠付き回答本文。",
           "minLength": 1,

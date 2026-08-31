@@ -22,7 +22,13 @@ class SearchRequest(BaseModel):
 
 class AnswerRequest(BaseModel):
     question: str
-    choices: dict[str, str] | None = None
+    choices: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "任意の回答候補。キーは候補ID、値は未確認の候補本文。"
+            "正解や採点情報は含めない。"
+        ),
+    )
     pattern: Pattern = "pattern_2_rule_based_agentic_rag"
     userClearanceLevel: int = Field(default=2, ge=1, le=3)
     topK: int = Field(default=5, ge=1, le=20)
@@ -31,6 +37,14 @@ class AnswerRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_top_k_order(self):
+        if self.choices is not None:
+            normalized = {
+                option_id.strip(): text.strip()
+                for option_id, text in self.choices.items()
+            }
+            if not normalized or any(not key or not value for key, value in normalized.items()):
+                raise ValueError("choices must contain non-empty option IDs and text")
+            self.choices = normalized
         if self.candidateTopK is not None and self.candidateTopK < self.topK:
             raise ValueError("candidateTopK must be greater than or equal to topK")
         if self.rerankTopK is not None and self.rerankTopK < self.topK:

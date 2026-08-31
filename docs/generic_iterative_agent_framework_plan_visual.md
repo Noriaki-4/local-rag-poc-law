@@ -507,7 +507,7 @@ flowchart LR
     NEW[新Framework経路<br/>agent_framework<br/>domains/legal<br/>simple_in_memory]
     TARGET[本計画の移行先]
 
-    OLD -. baseline比較後に削除 .-> TARGET
+    OLD -. /answerから削除済み<br/>残存型参照の解消後にソース削除 .-> TARGET
     CORE -. 参照元を解消して削除 .-> TARGET
     NEW -->|契約を完成| TARGET
 ```

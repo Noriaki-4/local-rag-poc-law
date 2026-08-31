@@ -1293,6 +1293,16 @@ def apply_solver_decision(
             )
 
     if decision.answer is not None:
+        option_ids = {item.option_id for item in state.answer_options}
+        selected_option_id = decision.answer.selected_option_id
+        if option_ids and selected_option_id not in option_ids:
+            raise ContractViolation(
+                "final answer must select one of the presented answer option IDs"
+            )
+        if not option_ids and selected_option_id is not None:
+            raise ContractViolation(
+                "final answer cannot select an option when none were presented"
+            )
         unknown_citations = set(decision.answer.citation_ids) - material_ids
         if unknown_citations:
             raise ContractViolation(

@@ -11,7 +11,7 @@ def test_answer_error_does_not_expose_internal_exception(monkeypatch) -> None:
     def fail(_request):
         raise RuntimeError(secret)
 
-    monkeypatch.setattr(main.agent_service, "answer", fail)
+    monkeypatch.setattr(main.framework_agent_service, "answer", fail)
 
     with pytest.raises(HTTPException) as caught:
         main.answer(AnswerRequest(question="質問"))
@@ -32,12 +32,6 @@ def test_health_component_failure_changes_overall_status(monkeypatch) -> None:
         "health",
         lambda: {"provider": "anthropic", "ok": False},
     )
-    monkeypatch.setattr(
-        main.reranker_client,
-        "status",
-        lambda: {"provider": "none", "ok": True},
-    )
-
     result = main.health()
 
     assert result["status"] == "degraded"

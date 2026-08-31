@@ -2239,15 +2239,15 @@ OpenSearch、Neo4j、Anthropic等のSDKも`agent_framework`から直接importし
 
 | 系統 | 主な場所 | 扱い |
 |---|---|---|
-| 旧回答経路 | `research_case_store.py`, `llm_research_loop.py`, `llm_directed_research.py` | 切替完了まで比較対象として維持し、Phase 4合格後に削除する |
-| 新Framework経路 | `agent_framework/`, `domains/legal/`, `framework_agent.py`, `adapters/persistence/simple_in_memory.py` | 本計画に沿って完成させる移行先 |
+| 旧回答経路 | `research_case_store.py`, `llm_research_loop.py`, `llm_directed_research.py` | `/answer`からは削除済み。`LLMClient`から残る型参照を解消した後にソースを削除する |
+| 新Framework経路 | `agent_framework/`, `domains/legal/`, `framework_agent.py`, `adapters/persistence/simple_in_memory.py` | 自然言語と任意の回答候補を処理する現行経路 |
 | 別CaseStore試作 | `agent_core/`, `adapters/persistence/in_memory.py` | `llm.py`等から参照中だが移行先には含めない。参照元を解消してから削除する |
 
 10章の目標ディレクトリに`agent_core/`を載せないのは見落としではなく、EventJournal、Repository、
 transaction等を初期Frameworkへ持ち込まないためである。`framework_agent.py`は現在も
 `adapters/persistence/simple_in_memory.py`を使い、`agent_core/`を直接使用しない。
 
-- 新経路はFeature Flagで有効化し、Phase 4の合格前に既定経路へしない。
+- `/answer`は回答候補の有無にかかわらず新Frameworkを使用する。
 - 既存OpenSearch・Neo4j・本文取得はLegal Tool Adapterで利用し、法令固有ロジックをFrameworkへコピーしない。
 - 現行の自動Graph、旧Graph relation・方向・status、二重encodeされたSolver出力を互換契約として新設計へ持ち込まない。
 - 新経路が合格した後、参照を確認したうえで旧回答経路と`agent_core/`試作を別変更で削除する。
@@ -2505,7 +2505,7 @@ publishする別単位とする。Graph schema、抽出規則、入力データ�
   選択本文を統合した後、同じHypothesisの未処理候補は次Cycleまで再提示しない。
 - 7.4の通り、最小の`solver_common.md`、共有fragment、処理モード別Prompt、Provider schemaを
   型・Profile version・契約テストと同時に更新する。構造値から選ばれないモードの手順を混入させない。
-- `/answer`に新経路のFeature Flagを追加する。
+- `/answer`はFeature Flagで旧経路へ分岐させず、新Frameworkへ一本化する。
 - Solverのresearch/integrationで別modelを設定できるようにする。
 - 法令固有型や法令関係判断がFrameworkへ漏れていないことを確認する。
 
