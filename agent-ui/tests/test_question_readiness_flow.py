@@ -53,6 +53,20 @@ def _readiness_response(url, **kwargs):
     )
 
 
+def _answer_response(url, **_kwargs):
+    if not url.endswith("/answer"):
+        raise AssertionError(f"unexpected request: {url}")
+    return _Response(
+        {
+            "answer": "直接調査した回答です。",
+            "citations": [],
+            "graphPaths": [],
+            "route": [],
+            "trace": {},
+        }
+    )
+
+
 def _button(app, label):
     return next(item for item in app.button if item.label == label)
 
@@ -63,7 +77,14 @@ class QuestionReadinessFlowTest(unittest.TestCase):
         app = AppTest.from_file(str(APP_PATH)).run()
         app.text_area(key="question_text").set_value("一般的な要件は何ですか。")
 
-        _button(app, "質問を確認する").click().run()
+        self.assertTrue(
+            any(item.label == "質問を整理する" for item in app.button)
+        )
+        self.assertTrue(
+            any(item.label == "このまま調べる" for item in app.button)
+        )
+
+        _button(app, "質問を整理する").click().run()
 
         self.assertFalse(app.exception)
         self.assertTrue(
@@ -73,11 +94,23 @@ class QuestionReadinessFlowTest(unittest.TestCase):
             any("そのまま法令調査" in item.value for item in app.success)
         )
 
+    @patch("requests.post", side_effect=_answer_response)
+    def test_direct_research_skips_question_readiness(self, post):
+        app = AppTest.from_file(str(APP_PATH)).run()
+        app.text_area(key="question_text").set_value("このまま調べる質問です。")
+
+        _button(app, "このまま調べる").click().run()
+
+        self.assertFalse(app.exception)
+        self.assertEqual(post.call_count, 1)
+        self.assertTrue(post.call_args.args[0].endswith("/answer"))
+        self.assertTrue(any(item.value == "回答" for item in app.subheader))
+
     @patch("requests.post", side_effect=_readiness_response)
     def test_clarification_choice_updates_existing_question_field(self, _post):
         app = AppTest.from_file(str(APP_PATH)).run()
         app.text_area(key="question_text").set_value("曖昧な質問です。")
-        _button(app, "質問を確認する").click().run()
+        _button(app, "質問を整理する").click().run()
 
         self.assertFalse(app.exception)
         self.assertEqual(app.radio[0].value, "company")
