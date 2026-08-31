@@ -1297,6 +1297,7 @@ def build_solver_context(
         for item in state.evidence
         if item.evidence_id not in included_ids
         and item.evidence_id not in graph_navigation_ids
+        and item.metadata.get("citationEligible") is not False
     )
 
     return SolverContext(

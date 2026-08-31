@@ -142,6 +142,63 @@ def _observation_result(hypothesis_id: str) -> StructuredJSONResult:
     )
 
 
+def test_observation_skips_model_when_tool_added_no_grounding_text() -> None:
+    graph_request = ToolRequest(
+        request_id="graph-1",
+        work_item_id="wi-1",
+        tool_name="legal_graph_neighbors",
+        arguments={"article_ids": ["article-1"]},
+        purpose="隣接候補を探す",
+        hypothesis_ids=("h-1",),
+    )
+    state = CaseState(
+        case_id="work-item-no-grounding-test",
+        question="確認する。",
+        research_cycle_count=1,
+        work_items=(WorkItem(work_item_id="wi-1", question="事項を確認する。"),),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h-1",
+                work_item_id="wi-1",
+                statement="事項が定められている。",
+            ),
+        ),
+        tool_requests=(graph_request,),
+        tool_results=(
+            ToolResult(
+                request_id="graph-1",
+                status="succeeded",
+                evidence_ids=(),
+                cycle_no=1,
+            ),
+        ),
+    )
+    context = build_solver_context(
+        state,
+        AgentLimits(),
+        remaining_wall_time_sec=120,
+        finalize_only=False,
+    )
+
+    class UnexpectedModelCall:
+        provider = "openai"
+
+        def generate_structured_json(self, **kwargs: Any) -> StructuredJSONResult:
+            raise AssertionError("grounding本文がなければModelを呼ばない")
+
+    profile = legal_agent_profile().solver_observation_integration
+    assert profile is not None
+    result = StructuredJSONModelAdapter(UnexpectedModelCall()).solve(
+        context,
+        profile,
+    )
+
+    assert result.input_tokens == 0
+    assert result.output_tokens == 0
+    assert result.decision.next_focus_work_item_ids == ("wi-1",)
+    assert result.decision.update.update_hypotheses == ()
+
+
 def test_parallel_work_item_timeout_preserves_completed_session_delta() -> None:
     class PartialTimeoutClient:
         provider = "openai"
@@ -272,7 +329,5 @@ def test_omitted_evidence_is_projected_by_tool_request_work_item() -> None:
     )
     projected = _observation_work_item_contexts(context)
 
-    assert [item.omitted_evidence_ids for item in projected] == [
-        ("search-e-1",),
-        ("search-e-2",),
-    ]
+    assert [item.omitted_evidence_ids for item in projected] == [(), ()]
+    assert context.omitted_evidence_ids == ()

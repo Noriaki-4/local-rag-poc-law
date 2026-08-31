@@ -472,6 +472,7 @@ class SolverDecision(FrameworkModel):
                 and not self.deferred_frontier_resolutions
                 and self.unreviewed_graph_resolution is None
                 and not self.start_next_cycle
+                and not self.next_focus_work_item_ids
             ):
                 raise ValueError("continue decision requires a state update or action")
             if self.answer is not None:

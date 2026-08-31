@@ -505,6 +505,42 @@ class StructuredJSONModelAdapter:
     ) -> SolverCallResult:
         """Persist new Tool observations before asking for another action."""
 
+        grounding_ids = set(context.grounding_evidence_ids)
+        has_new_grounding = any(
+            grounding_ids.intersection(result.evidence_ids)
+            for result in context.recent_tool_results
+        )
+        if context.recent_tool_results and not has_new_grounding:
+            open_work_item_ids = {
+                item.work_item_id
+                for item in context.work_tree
+                if item.state == "open"
+            }
+            next_focus_work_item_ids = tuple(
+                dict.fromkeys(
+                    request.work_item_id
+                    for request in context.recent_tool_requests
+                    if request.work_item_id in open_work_item_ids
+                )
+            )
+            if not next_focus_work_item_ids:
+                next_focus_work_item_ids = tuple(
+                    item.work_item_id
+                    for item in context.work_tree
+                    if item.work_item_id in open_work_item_ids
+                )
+            return SolverCallResult(
+                decision=SolverDecision(
+                    next="continue",
+                    decision_reason=(
+                        "新しい回答根拠本文がないため、本文評価を省略した。"
+                    ),
+                    next_focus_work_item_ids=next_focus_work_item_ids,
+                ),
+                input_tokens=0,
+                output_tokens=0,
+                attempt_count=1,
+            )
         started_at = monotonic()
         observation, input_tokens, output_tokens, attempt_count = (
             self._solve_observation_integrations(
@@ -2678,6 +2714,7 @@ def _observation_work_item_contexts(
             evidence_id
             for evidence_id in scoped_omitted_evidence_ids
             if evidence_id not in completed_load_ids
+            and evidence_id not in visible_id_set
         )
         projected.append(
             context.model_copy(

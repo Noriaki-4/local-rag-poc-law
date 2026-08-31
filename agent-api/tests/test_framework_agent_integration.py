@@ -5079,6 +5079,10 @@ def test_real_model_cycle2_repeated_search_fixture_keeps_replanning_options() ->
                 "evidence_manifest": rebuilt.evidence_manifest,
                 "grounding_evidence_ids": rebuilt.grounding_evidence_ids,
                 "navigation_evidence_ids": rebuilt.navigation_evidence_ids,
+                "omitted_evidence_ids": rebuilt.omitted_evidence_ids,
+                "omitted_evidence_ids_by_work_item": (
+                    rebuilt.omitted_evidence_ids_by_work_item
+                ),
             }
         ).model_dump(mode="json")
     assert rebuilt.completed_legal_searches
