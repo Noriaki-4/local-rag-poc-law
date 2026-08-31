@@ -104,6 +104,7 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-043` | P0 | 実装済み・実モデル6/6確認 | WorkItem並列処理と単一Solver時代の共有上限を整合させる | 本文取得枠を`WorkItem × Cycle`ごとに5件とし、検索・Graph要求を別WorkItem間で統合しない。別WorkItemが取得済みのArticleも通常の本文取得対象にでき、Evidence IDはCaseStoreで重複排除する。Evidence提示順はWorkItem間でround-robinにする | APIを使わない全1135テストに合格。公開買付け総合問題で固定した必要Article 6/6を実モデルで取得する |
 | `LR-044` | P0 | 対応中 | IDの種類と所有scopeの誤認を構造的に減らす | Article ID、Paragraph・Item由来のEvidence ID、WorkItem ID、Hypothesis ID及びToolRequest IDは文字列として似ており、Prompt・Provider輸送・並列結果の結合境界で誤用が増えている。Profile v449実測ではParagraph Evidence IDをGraphのArticle起点へ指定したほか、修正前adapterが別WorkItemの本文取得要求を統合してHypothesis IDの所有関係を壊した | IDごとの正本、利用可能な処理、所有WorkItemを入力契約で区別する。Programは種類・既知性・所有scopeだけを検証し、法的対応先は判断しない。監査でID違反の種類と発生箇所を集計し、Article/Evidence混同、WorkItem/Hypothesis交差、Request参照切れの回帰を用意する |
 | `LR-045` | P0 | 未着手 | 未評価候補を残したまま新しい探索へ進み、必要Articleを取りこぼす | Profile v449の公開買付け総合問題では、公開買付府令2条の5をOpenSearchで2回発見したが、同時に返った本文の統合後、候補評価より新しい検索・Graph探索が先行した。Cycle Close開始まで本文取得対象に選ばれず、必要Articleは5/6となった | 同一WorkItemでは、選択済み本文の取得・統合を完了した後、未評価の検索・Graph候補をLLMに評価させてから新しい探索を許す。別WorkItemの取得・統合と候補評価は並列に進めてよい。Programは処理順、既知ID及び状態だけを管理し、候補の関連性やArticleの優先度は判断しない |
+| `LR-046` | P1 | 未着手 | 最終回答の引用を使用根拠へ絞り、条数と根拠箇所数を区別して表示する | 有価証券報告書の例題は採点8/8だったが、最終回答は3法令・11 Articleから32 Evidence IDを引用した。UIはParagraph・Item単位のEvidenceを全て「引用件数」と表示し、回答本文で直接使わない4 Articleも引用集合へ残った | Finalizationでは回答中の主張に実際に使う確認済みEvidenceをLLMが選ぶ。Programは既知性・引用可能性・Hypothesis又は解決済み依存との対応だけを検証し、全Evidenceの引用を強制しない。UIは「法令数」「Article数」「根拠箇所数」を区別し、項・号の内訳は展開表示にする |
 
 ### 3.1 LR-016 Tool観察とCycle Closeの単一責務化
 
@@ -1376,6 +1377,47 @@ Programは未処理結果の有無、WorkItem、既知ID及び処理順だけを
 - 別WorkItemの選択済み本文取得・統合を、不必要に待機させない。
 - 候補のArticle ID、順位又は法的内容をProgramが評価せず、LLMの選択結果だけを検証する。
 - 公開買付け総合問題で公開買付府令2条の5を本文取得し、固定した必要Article 6/6に到達する。
+
+### LR-046 最終引用の過剰選択と件数表示
+
+有価証券報告書の例題（case `legal-ebe07930431d40cfa33bd3bb391f0aae`）は、想定資料2/2、
+必要条文3/3、回答要点3/3の合計8/8だった。一方、最終回答の`citation_ids`は32件あり、
+3法令・11 Articleに対応していた。内訳は次のとおりである。
+
+| 資料 | Evidence ID数 | Article数 |
+|---|---:|---:|
+| 金融商品取引法 | 6 | 1 |
+| 金融商品取引法施行令 | 11 | 3 |
+| 企業内容等の開示に関する内閣府令 | 15 | 7 |
+| 合計 | 32 | 11 |
+
+32件の多くは、同じArticle内のParagraph・Itemを別Evidenceとして数えたものであるため、32の独立した
+条文を参照したわけではない。ただし表示上の問題だけではない。回答本文が明示的に使用したのは主に
+金商法24条、施行令3条の4・3条の6、開示府令15条・15条の2・15条の2の2・17条の7 Articleであり、
+施行令4条、開示府令7条・16条の3及び附則の一部は回答中の主張へ直接使わず引用集合に残った。
+
+原因を次の二つに分ける。
+
+1. UIがEvidence ID数をそのまま「引用件数」と表示し、Article数と根拠箇所数を区別していない。
+2. FinalizationでLLMが回答に使う根拠を選べる一方、解決済みWorkItemの全basis Evidenceを引用へ
+   含める検証・機械追記があり、探索中にHypothesisへ蓄積した根拠が最終引用へ残りやすい。
+
+修正方針は次のとおりとする。
+
+- Finalizationは、回答中の主張に実際に使う確認済みEvidenceだけを`citation_ids`へ選ぶ。
+- Programは引用IDの既知性、本文提示済み、引用可能性、Hypothesis Evidence又は解決済みDependency basisとの
+  対応を検証する。どの根拠が回答に必要かは判断しない。
+- 解決済みWorkItemに対応する全Evidence IDの引用を機械的に強制しない。少なくとも各回答項目が
+  根拠を持つことは、LLMの最終確認又はReviewerで検査する。
+- UIは法令数、Article数、Paragraph・Item単位の根拠箇所数を別々に表示する。Graphの主要ノードは
+  Article単位とし、根拠箇所はArticleの詳細として展開できるようにする。
+
+完了条件は次のとおりとする。
+
+- 同じArticleの項・号を複数引用しても、UI上のArticle数は1件として表示される。
+- 回答本文で使用しないArticleが最終引用へ残らない。
+- 回答に必要な主張と根拠の対応を維持し、有価証券報告書の例題で8/8を保つ。
+- Programへ法的関連性や引用の重要度を判定する分岐を追加しない。
 
 ### LR-019 統合契約と意味的行動選択の分離
 
