@@ -710,6 +710,11 @@ class SolverContext(FrameworkModel):
     material_evidence: tuple[Evidence, ...] = Field(
         description="今回のPromptに本文が実際に含まれるEvidence。本文評価はこの内容だけで行う。",
     )
+    hypothesis_revision_evidence: tuple[Evidence, ...] = Field(
+        default=(),
+        exclude=True,
+        description="Cycle境界のHypothesis見直しへ渡す、当Cycle取得済みEvidence。",
+    )
     omitted_evidence_ids: tuple[str, ...] = Field(
         description="Caseでは既知だが今回本文を省略したEvidence ID。必要ならload_evidenceで取得する。",
     )
@@ -752,6 +757,48 @@ class SolverContext(FrameworkModel):
     @property
     def material_evidence_ids(self) -> frozenset[str]:
         return frozenset(item.evidence_id for item in self.material_evidence)
+
+
+class HypothesisRevisionWorkItem(FrameworkModel):
+    """仮説見直しへ渡す、既存の非dropped WorkItemの最小投影。"""
+
+    work_item_id: str = Field(description="既存の非dropped WorkItemの完全一致ID。")
+    question: str = Field(description="このWorkItemが確認する事項。")
+    hypothesis_ids: tuple[str, ...] = Field(
+        description="このWorkItemへ既に所属するHypothesis IDの一覧。"
+    )
+
+
+class HypothesisRevisionHypothesis(FrameworkModel):
+    """仮説見直しへ渡す、既存Hypothesisの最小投影。"""
+
+    hypothesis_id: str = Field(description="既存Hypothesisの完全一致ID。")
+    work_item_id: str = Field(description="所属する既存WorkItem ID。")
+    statement: str = Field(description="既存Hypothesisの不変statement。")
+    judgment: str = Field(description="既存Hypothesisの現在の判定。")
+    gaps: tuple[str, ...] = Field(description="既存Hypothesisの未確認事項。")
+
+
+class HypothesisRevisionEvidence(FrameworkModel):
+    """仮説見直しへ渡す、取得済み本文の最小投影。"""
+
+    evidence_id: str = Field(description="取得済みEvidenceの完全一致ID。")
+    content: str = Field(description="Evidenceの取得本文。")
+    title: str | None = Field(description="Evidenceの表示名。なければnull。")
+
+
+class HypothesisRevisionInput(FrameworkModel):
+    """Cycle境界の仮説追加判断に必要なread model。"""
+
+    work_items: tuple[HypothesisRevisionWorkItem, ...] = Field(
+        description="状態がdroppedではない既存WorkItem。"
+    )
+    hypotheses: tuple[HypothesisRevisionHypothesis, ...] = Field(
+        description="上記WorkItemへ所属する既存Hypothesis。"
+    )
+    acquired_evidence: tuple[HypothesisRevisionEvidence, ...] = Field(
+        description="現在のCycleで新たに取得した本文Evidence。"
+    )
 
 
 def build_solver_context(
@@ -849,6 +896,13 @@ def build_solver_context(
         for evidence_id in candidate.navigation_evidence_ids
     )
     new_evidence_ids = _round_robin_result_evidence_ids(recent_results)
+    cycle_acquired_evidence = tuple(
+        item
+        for item in state.evidence
+        if item.created_cycle == max(1, state.research_cycle_count)
+        and item.metadata.get("citationEligible") is not False
+        and item.metadata.get("docType") != "graph_navigation"
+    )
     declared_basis_evidence_ids = tuple(
         evidence_id
         for work_item in state.work_items
@@ -1312,6 +1366,7 @@ def build_solver_context(
         required_graph_review_request_ids=required_graph_review_request_ids,
         required_search_review_request_ids=required_search_review_request_ids,
         material_evidence=material,
+        hypothesis_revision_evidence=cycle_acquired_evidence,
         omitted_evidence_ids=omitted_evidence_ids,
         omitted_evidence_ids_by_work_item=(
             _omitted_evidence_ids_by_work_item(

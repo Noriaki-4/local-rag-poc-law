@@ -452,6 +452,10 @@ class FakeStructuredLLM:
                 "tool_requests": [],
             },
             {
+                "decision_reason": "独立して確認する新しい命題はない",
+                "add_hypotheses": [],
+            },
+            {
                 "next": "finalize",
                 "decision_reason": "要件本文と下位規範不要判断の根拠が揃ったため完了する",
                 "update": {
@@ -653,13 +657,14 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert "answerStatus" not in framework_trace
     assert framework_trace["answerCompleteness"] == "complete"
     assert framework_trace["researchCycleCount"] == 1
-    assert len(framework_trace["modelCalls"]) == 6
+    assert len(framework_trace["modelCalls"]) == 7
     assert [item["purpose"] for item in framework_trace["modelCalls"]] == [
         "research",
         "hypothesis_generation",
         "search_planning",
         "search_selection",
         "observation_integration",
+        "hypothesis_revision",
         "integration",
     ]
     assert framework_trace["toolCalls"][0]["arguments"] == {
@@ -672,7 +677,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
         "legal_search",
         "fetch_articles",
     ]
-    assert len(llm.calls) == 6
+    assert len(llm.calls) == 7
     assert "decision_json" not in llm.calls[0]["schema"]["properties"]
     assert set(llm.calls[0]["schema"]["properties"]) == {
         "work_items",
@@ -709,6 +714,10 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
         "tool_requests",
     }
     assert set(llm.calls[5]["schema"]["properties"]) == {
+        "decision_reason",
+        "add_hypotheses",
+    }
+    assert set(llm.calls[6]["schema"]["properties"]) == {
         "next",
         "decision_reason",
         "start_next_cycle",
@@ -718,10 +727,10 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
         "tool_requests",
         "answer",
     }
-    assert llm.calls[5]["schema"]["properties"]["decision_reason"][
+    assert llm.calls[6]["schema"]["properties"]["decision_reason"][
         "description"
     ] == contract_field_description(SolverDecision, "decision_reason")
-    assert "未確認" in llm.calls[5]["schema"]["properties"]["update"][
+    assert "未確認" in llm.calls[6]["schema"]["properties"]["update"][
         "properties"
     ]["update_hypotheses"]["items"]["properties"]["gaps"]["description"]
     final_dependency_schema = llm.calls[4]["schema"]["properties"][
@@ -739,7 +748,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     )
     assert framework_trace["dependencyDecisions"][0]["status"] == "not_required"
     assert framework_trace["elapsedMs"] >= 0
-    assert len(framework_trace["appliedDecisionSequences"]) == 6
+    assert len(framework_trace["appliedDecisionSequences"]) == 7
     diagnostic_records = [
         json.loads(record_line)
         for output_path in (tmp_path / "agent-framework-diagnostics").glob(
@@ -751,7 +760,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "441"
+    assert diagnostic_records[0]["profileVersion"] == "446"
     assert diagnostic_records[0]["runElapsedMs"] >= 0
     assert diagnostic_records[0]["recordedAt"].endswith("+00:00")
     assert len(diagnostic_records[0]["questionHash"]) == 64
@@ -762,7 +771,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "441"
+    assert transport_input["profileVersion"] == "446"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -1308,13 +1317,17 @@ def test_graph_review_moves_to_another_hypothesis_after_integrated_fetch() -> No
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "441"
+    assert profile.version == "446"
     assert profile.solver_graph_review is not None
+    assert profile.solver_hypothesis_revision is not None
     assert profile.solver_graph_review.max_output_tokens == (
         profile.solver_integration.max_output_tokens
     )
     mode_prompts = {
         "research": profile.solver_research.system_prompt,
+        "hypothesis_revision": (
+            profile.solver_hypothesis_revision.system_prompt
+        ),
         "integration": profile.solver_integration.system_prompt,
         "cycle_close": profile.solver_cycle_close.system_prompt,
         "finalization": profile.solver_finalization.system_prompt,
@@ -1323,6 +1336,9 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     assert all(prompt is not None for prompt in mode_prompts.values())
     completion_checks = {
         "research": profile.solver_research.completion_check_prompt,
+        "hypothesis_revision": (
+            profile.solver_hypothesis_revision.completion_check_prompt
+        ),
         "integration": profile.solver_integration.completion_check_prompt,
         "cycle_close": profile.solver_cycle_close.completion_check_prompt,
         "finalization": profile.solver_finalization.completion_check_prompt,
@@ -1362,6 +1378,9 @@ def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
         "research_hypothesis"
     )
     assert profile.solver_search_planning.context_projection == "research_search"
+    assert profile.solver_hypothesis_revision.context_projection == (
+        "hypothesis_revision"
+    )
     assert profile.solver_integration.context_projection == "full"
     assert profile.solver_cycle_close.context_projection == "cycle_close"
     assert "# 法令調査Solver：質問の要求分解" in research_prompt
@@ -1589,7 +1608,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "441"
+    assert profile.version == "446"
     assert prompt.rindex("## 出力") > prompt.rindex(
         "</solver_context>"
     )
@@ -1640,7 +1659,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "441"
+    assert profile.version == "446"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -3392,11 +3411,25 @@ def test_dependency_action_projection_focuses_required_work_items() -> None:
         item["work_item_id"]
         for item in rendered.input_payload["dependency_decisions"]
     } == required_ids
-    assert rendered.input_payload["fetchable_article_ids"] == []
+    active_hypothesis_ids = {
+        item.hypothesis_id
+        for item in context.hypotheses
+        if item.work_item_id in required_ids
+    }
+    expected_candidate_ids = {
+        item.article_id
+        for item in context.search_candidates
+        if required_ids.intersection(item.discovery_work_item_ids)
+        or active_hypothesis_ids.intersection(item.discovery_hypothesis_ids)
+        or active_hypothesis_ids.intersection(item.matched_hypothesis_ids)
+    }
+    assert set(rendered.input_payload["fetchable_article_ids"]) == (
+        expected_candidate_ids
+    )
     available_tool_names = {
         item["name"] for item in rendered.input_payload["available_tools"]
     }
-    assert "fetch_articles" not in available_tool_names
+    assert "fetch_articles" in available_tool_names
     assert "legal_search" not in available_tool_names
     assert "legal_graph_neighbors" in available_tool_names
     graph_tool = next(
@@ -3412,6 +3445,80 @@ def test_dependency_action_projection_focuses_required_work_items() -> None:
     assert "他のopen" in rendered.instructions
     assert "## 下位規範を確認する次の行動" in rendered.instructions
     assert "## Tool結果の統合と次の行動" not in rendered.instructions
+
+
+def test_dependency_action_keeps_deferred_candidate_by_discovery_scope() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "framework"
+        / "tob_overview_cycle2_repeats_search_before_fetch_v1.json"
+    )
+    context = SolverContext.model_validate(
+        json.loads(fixture_path.read_text(encoding="utf-8"))["solverContext"]
+    )
+    work_item_id = context.required_dependency_work_item_ids[0]
+    hypothesis_id = next(
+        item.hypothesis_id
+        for item in context.hypotheses
+        if item.work_item_id == work_item_id
+    )
+    candidate = SearchCandidateArticle(
+        article_id="law-ordinance-article-10",
+        document_id="law-ordinance",
+        title="府令",
+        headings=("第十条",),
+        discovery_work_item_ids=(work_item_id,),
+        discovery_hypothesis_ids=(hypothesis_id,),
+        search_request_ids=("search-previous",),
+        navigation_evidence_ids=("search-nav-10",),
+    )
+    context = context.model_copy(
+        update={
+            "required_dependency_work_item_ids": (work_item_id,),
+            "dependency_decisions": tuple(
+                item
+                for item in context.dependency_decisions
+                if item.work_item_id == work_item_id
+            ),
+            "search_candidates": (candidate,),
+            "fetchable_article_ids": (candidate.article_id,),
+        }
+    )
+
+    rendered = render_solver_model_call(
+        context,
+        legal_profiles.legal_agent_profile().solver_integration,
+        provider="openai",
+    )
+
+    assert rendered.input_payload["fetchable_article_ids"] == [
+        candidate.article_id
+    ]
+    assert rendered.input_payload["search_candidates"][0]["article_id"] == (
+        candidate.article_id
+    )
+    assert "fetch_articles" in {
+        item["name"] for item in rendered.input_payload["available_tools"]
+    }
+    decision = normalize_dependency_action_decision(
+        {
+            "decision_reason": "既知候補の本文を確認する。",
+            "start_next_cycle": False,
+            "tool_requests": [
+                {
+                    "request_id": "fetch-deferred",
+                    "work_item_id": work_item_id,
+                    "tool_name": "fetch_articles",
+                    "arguments": {"article_ids": [candidate.article_id]},
+                    "purpose": "未取得の候補本文を確認する。",
+                    "hypothesis_ids": [hypothesis_id],
+                }
+            ],
+        },
+        context=context,
+    )
+    assert decision.tool_requests[0].tool_name == "fetch_articles"
 
 
 def test_dependency_action_allows_following_named_reference() -> None:
@@ -3432,6 +3539,8 @@ def test_dependency_action_allows_following_named_reference() -> None:
                 for item in context.dependency_decisions
                 if item.work_item_id == work_item_id
             ),
+            "search_candidates": (),
+            "fetchable_article_ids": (),
         }
     )
     hypothesis_id = next(
@@ -6212,7 +6321,8 @@ def test_action_feedback_removes_the_rejected_tool_kind_from_repair() -> None:
 
     assert repaired_context.can_start_next_cycle is True
     assert not (allowed_tools & rejected_tool_names)
-    assert "legal_search" in allowed_tools
+    assert "fetch_articles" in allowed_tools
+    assert "legal_search" not in allowed_tools
     assert "fetch_articles" in allowed_tools
     assert rendered.input_payload["action_feedback"]["code"] == (
         "already_completed"

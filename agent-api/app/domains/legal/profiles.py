@@ -28,7 +28,7 @@ def legal_agent_profile() -> AgentProfile:
     timeout_sec = settings.agent_framework_model_timeout_sec
     return AgentProfile(
         name="legal-default",
-        version="441",
+        version="446",
         provider=settings.llm_provider,
         solver_research=_model_profile(
             model=settings.agent_framework_research_model,
@@ -53,6 +53,17 @@ def legal_agent_profile() -> AgentProfile:
             ),
             completion_check_prompt=_read_prompt(
                 "solver_hypothesis_generation_check.md"
+            ),
+            available_tool_names=(),
+        ),
+        solver_hypothesis_revision=_model_profile(
+            model=settings.agent_framework_hypothesis_revision_model,
+            max_tokens=settings.agent_framework_research_max_tokens,
+            timeout_sec=timeout_sec,
+            context_projection="hypothesis_revision",
+            prompts=(_read_prompt("solver_hypothesis_revision.md"),),
+            completion_check_prompt=_read_prompt(
+                "solver_hypothesis_revision_check.md"
             ),
             available_tool_names=(),
         ),
@@ -264,6 +275,7 @@ def _model_profile(
         "research_decomposition",
         "research_hypothesis",
         "research_search",
+        "hypothesis_revision",
         "graph_review",
         "observation_integration",
         "cycle_close",

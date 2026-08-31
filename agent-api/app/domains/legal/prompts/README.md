@@ -50,6 +50,7 @@ Cycle境界：取得本文と下位規範依存の統合 ──→ Cycleの終�
 |---|---|---|
 | `research` | question_decompositionのみ | 質問の明示要求を、独立した法的結論を要するWorkItemと、それ以外の明示要求へ分ける。 |
 | `hypothesis_generation` | hypothesis_generationのみ | HypothesisがないWorkItemを1件受け取り、検索前の暫定的な法的命題を作る。 |
+| `hypothesis_revision` | hypothesis_revisionのみ | Cycle境界で取得本文から独立した新しい未解決命題が見つかった場合だけ、既存WorkItemへ追加する。 |
 | `search_planning` | search_planningのみ | 入力済みHypothesisを検証する今回の`legal_search`要求を作る。 |
 | `integration` | 通常はidentity + integration + common + tools + completion。新しい本文がなく既存の下位規範依存だけを進める場合はidentity + dependency_action + tools | 新しい取得本文がない通常Stepでは、状態から次の行動又は完了を決める。既存の未解決依存だけを進める場合は、その依存に対する次のToolRequestだけを専用契約で決める。 |
 | `evidence_integration` | evidence_integrationのみ | 1つのopen WorkItemとそのHypothesisを直近取得本文と照合し、状態差分、下位規範確認及び直後のToolを最大1件返す。対象WorkItemが複数ある場合はWorkItem単位の呼出しを最大4件並列実行する。Programは本文とIDを投影し、既知IDと構造だけを検証する。 |
@@ -93,6 +94,7 @@ Anthropicの「明確で直接的な指示、必要時だけ順序付き手順�
 | `solver_completion.md` | grounding Evidence、citation、下位規範、通常完了と上限時限定回答の共通条件。 |
 | `solver_question_decomposition.md` | 初回Step 1。WorkItemと`non_work_item_requirements`への要求分解。 |
 | `solver_hypothesis_generation.md` | 初回Step 2。Hypothesisがない既知WorkItem 1件から、法的仮説と未確認の`gaps`を立案する。 |
+| `solver_hypothesis_revision.md` | Cycle境界。取得本文から独立した新しい未解決命題を既存WorkItemへ追加する。 |
 | `solver_search_planning.md` | 初回Step 3。既知Hypothesisに対する`legal_search`要求の作成。 |
 | `solver_integration.md` | 観察結果の評価、状態更新、下位規範監査、次の行動。 |
 | `solver_evidence_integration.md` | 取得本文のHypothesis反映、下位規範確認及び同じWorkItemを直ちに進めるTool最大1件を扱う。Toolを選べるため、完成Promptには`solver_tools.md`も合成する。WorkItem完了、Cycle移行、回答は扱わない。 |

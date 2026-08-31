@@ -377,6 +377,10 @@ class Settings:
         or os.getenv("AGENT_FRAMEWORK_RESEARCH_MODEL")
         or llm_research_stage_model
     )
+    agent_framework_hypothesis_revision_model = (
+        os.getenv("AGENT_FRAMEWORK_HYPOTHESIS_REVISION_MODEL")
+        or agent_framework_research_model
+    )
     agent_framework_integration_model = (
         llm_model
         or os.getenv("AGENT_FRAMEWORK_INTEGRATION_MODEL")
@@ -513,7 +517,7 @@ class Settings:
     agent_framework_cycle_close_reserve_sec = max(
         5,
         min(
-            int(os.getenv("AGENT_FRAMEWORK_CYCLE_CLOSE_RESERVE_SEC", "30")),
+            int(os.getenv("AGENT_FRAMEWORK_CYCLE_CLOSE_RESERVE_SEC", "60")),
             179,
         ),
     )

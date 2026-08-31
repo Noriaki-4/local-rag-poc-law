@@ -76,6 +76,7 @@ def apply_solver_decision(
     cycle_close_required: bool = False,
     can_start_next_cycle: bool = True,
     allow_dependency_action_without_tool: bool = False,
+    hypothesis_revision_work_item_ids: Collection[str] | None = None,
 ) -> CaseState:
     if state.run_status != "running":
         raise ContractViolation("solver can update only a running case")
@@ -172,6 +173,8 @@ def apply_solver_decision(
     changed_hypothesis_ids: set[str] = set()
     evidence_ids_requiring_material: dict[str, set[str]] = {}
     added_work_item_ids = {item.work_item_id for item in decision.update.add_work_items}
+    if hypothesis_revision_work_item_ids is not None and decision.update.add_work_items:
+        raise ContractViolation("hypothesis revision cannot add WorkItems")
     dependency_scope_ids = (
         set(required_dependency_work_item_ids)
         if required_dependency_work_item_ids is not None
@@ -215,6 +218,22 @@ def apply_solver_decision(
         evidence_ids_requiring_material[new_hypothesis.hypothesis_id] = set(
             new_hypothesis.evidence_ids
         )
+        if hypothesis_revision_work_item_ids is not None:
+            if new_hypothesis.work_item_id not in hypothesis_revision_work_item_ids:
+                raise ContractViolation(
+                    "hypothesis revision must target an existing WorkItem"
+                )
+            target = work_items.get(new_hypothesis.work_item_id)
+            if target is None or target.state == "dropped":
+                raise ContractViolation(
+                    "hypothesis revision must target a non-dropped WorkItem"
+                )
+            if target.state == "resolved":
+                work_items[target.work_item_id] = _validated_copy(
+                    target,
+                    state="open",
+                    resolution=None,
+                )
 
     newly_contradicted: set[str] = set()
     affected_source_items = dict(work_items)

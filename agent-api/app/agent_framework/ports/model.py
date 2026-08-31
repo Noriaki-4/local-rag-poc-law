@@ -7,7 +7,7 @@ from typing import Protocol
 from pydantic import Field
 
 from ..context import SolverContext
-from ..contracts import SolverDecision
+from ..contracts import HypothesisRevisionDecision, SolverDecision
 from ..profiles import ModelCallProfile, ReviewerProfile
 from ..state import (
     DependencyDecision,
@@ -45,6 +45,11 @@ class SolverCheckpointTimeout(TimeoutError):
 
 class SolverCallResult(FrameworkModel):
     decision: SolverDecision
+    hypothesis_revision: HypothesisRevisionDecision | None = Field(
+        default=None,
+        exclude=True,
+        description="専用Hypothesis見直し結果。通常Solver呼出しではnull。",
+    )
     input_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, ge=0)
     attempt_count: int = Field(default=1, ge=1)

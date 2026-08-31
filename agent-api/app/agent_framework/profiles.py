@@ -29,6 +29,7 @@ class ModelCallProfile(FrameworkModel):
         "research_decomposition",
         "research_hypothesis",
         "research_search",
+        "hypothesis_revision",
         "graph_review",
         "observation_integration",
         "cycle_close",
@@ -185,6 +186,7 @@ class AgentProfile(FrameworkModel):
     provider: str = Field(min_length=1, max_length=80)
     solver_research: ModelCallProfile
     solver_hypothesis_generation: ModelCallProfile | None = None
+    solver_hypothesis_revision: ModelCallProfile | None = None
     solver_search_planning: ModelCallProfile | None = None
     solver_integration: ModelCallProfile = Field(
         validation_alias=AliasChoices("solver_integration", "solver_finalize")

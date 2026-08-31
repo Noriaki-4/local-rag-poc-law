@@ -81,7 +81,7 @@ Neo4jから指定条件の1ホップ候補を取得する
 | `LR-019` | P0 | 検証待ち | 統合の意味的な行動選択を違反別契約からSolver loopへ戻す | v373で、Promptは処理上限内のWorkItem選択を許す一方、validatorが全`needs_action`への同時Graph要求を強制する不整合を再現した。v374で全件同時強制を削除し、LLMが今回選んだWorkItemだけを進め、残りを後続stepへ保持する契約へ統一した。Haiku総合問題でGraph要求と後続Graph Reviewが実行され、`protocol_error`は解消した | 公告・例外の回帰と、総合問題で複数の`needs_action`が次stepへ欠落せず残ることを確認する |
 | `LR-020` | P1 | 要設計 | 検索又は結論を変える質問の欠落・曖昧さを一方的に補わず、利用者へ確認する | 現在は行為者が不明でも`action_actor=不明`として調査を続ける。これは一般論の質問には適切だが、確認対象となる行為や主体の欠落により複数の検索経路・法的結論が成立する場合を、検索前に止める契約がない。検索後に候補本文から異なる規律主体が判明する場合もある | まず検索前の独立した質問確認をStreamlitへ追加し、必要な場合だけ確認・質問文修正・利用者確認を行う。検索後の分岐で必要となるCaseの確認待ち・再開は次段階として設計する |
 | `LR-021` | P0 | 対応中 | 検索候補の内容評価と取得選択を整合させる | v376でSearch AssessmentとReselectionを一つのSearch Selectionへ統合した。LLMは全候補を比較するが、出力は選択した最大5件の内容評価・対応Hypothesis・選択理由だけとする。Programはこの単一出力を保存用評価と本文取得選択へ分け、非選択IDを入力候補との差集合として保留する。意味上の採否はLLM、既知ID・件数・構造変換はProgramが扱う | Luna `high`の総合問題で、対応Hypothesisと選択Articleが同じ判断内で整合し、必要候補が後段で脱落しないことを確認する |
-| `LR-022` | P0 | 未着手 | 後続Cycleで既存WorkItemへ代替Hypothesisを追加する | 設計ではHypothesisの`statement`を別の意味へ上書きせず、見立てを変える場合は新しいHypothesisを追加する。しかし現行の段階別経路は、Hypothesisが1件もないopen WorkItemだけを生成処理へ送り、本文評価は既存Hypothesisの更新だけを許す。そのため、初期仮説が反証された場合も、同じWorkItemへ新しい見立てを追加して次Cycleで仕切り直せない | H1が`contradicted`または新しい規律構造が判明したfixtureで、H1と根拠を履歴として保持し、Cycle 2で同じWorkItemへ新IDのH2を追加できることを確認する。検索方法だけを変える場合は不要なHypothesisを追加しない |
+| `LR-022` | P0 | 実装済み・実モデル検証中 | 後続Cycleで既存WorkItemへ代替Hypothesisを追加する | Cycle境界で、当該Cycleに取得した本文から既存Hypothesisでは扱えない規律が判明した場合だけ、専用LLM処理が同じWorkItemへ新IDのHypothesisを追加する。既存Hypothesisは上書き・削除せず、新規Hypothesisが未解決ならProgramがWorkItemを再度openにする。検索方法の変更、既存statement/gapsの言い換え、取得本文だけで確認済みの内容は追加しない | ローカル回帰は通過。Luna `high`の公開買付け総合で12/12を1回確認済み。全Level 3を1並列で再検証し、その後、同一の共通契約・ロジックをAnthropicで再検証する |
 | `LR-023` | P0 | 完了（Profile v435） | Hypothesisに合うGraph方向と候補の対応先を安定して選ぶ | Profile v425では、具体化規定を探す4件の`IMPLEMENTS`要求が全て`to_subject`となった。Profile v426で意味関係の端点役割を明記したが、Profile v434では出力前チェックに残った旧`incoming / outgoing`表現が正しい`from_subject / to_subject`定義と矛盾し、下位具体化目的の要求が再び`to_subject`となった。Profile v435では意味関係と物理参照をmode別に分離し、旧方向語を削除した | v434失敗fixtureの結合後Prompt回帰と関連251テストに合格した。Luna `high`総合E2Eでは初回の意味関係Graph要求3件が全て`IMPLEMENTS / from_subject`となり、施行令7条から府令2条の5、金商法27条の3から府令10条を取得した。2 Cycle・268.8秒、修復・timeoutなしで11/11。物理`reference_edges`は引き続き探索目的をProgramが方向へ機械変換する |
 | `LR-024` | P0 | 完了 | Hypothesisが支持された内容と未確認事項を同時に保持する | Haiku・Profile v375では、H-3は府令2条の5、H-4は府令10条を未取得だった。それぞれ上位規定から一部内容を確認できたが、`judgment=supported`への更新と同時に`gaps=[]`となった。WorkItemは下位規範Dependencyにより`open`を維持したものの、Hypothesis単体では必要な具体的内容を確認済みのように見える不整合が残った | Profile v383で`judgment`をstatementの判定、`gaps`をWorkItemへの回答に必要な未確認事項として契約・Promptへ明記した。Evidence Integrationでは下位規範状態を先に判断し、`terminal_text_missing`と同時に更新したWorkItemの全Hypothesisで`gaps=[]`となる矛盾だけをProgramが拒否する。固定fixtureで誤出力の拒否と、`supported`のまま府令の具体的条件を`gaps`へ保持する更新を確認した |
 | `LR-025` | P0 | 完了 | 取得済みEvidenceとHypothesisの対応付けを後続処理へ引き継ぐ | Profile v382で`HypothesisUpdate.evidence_ids`を今回新たに対応付けたEvidenceの差分とし、CaseStore保存時とCycle Close向け投影時の両方で既存対応へ追記する共通処理へ変更した。意味的な対応付けはLLM、既存対応の保持・既知ID検証・重複除去はProgramが担当する | 前CycleのEvidenceをLLMが再出力せず、現在CycleのEvidenceだけを返すfixtureで、両方の対応が後続入力とCaseStoreに保持されることを確認済み |
@@ -666,6 +666,24 @@ Profile v389ではGraph Evidence ID衝突を解消して最終化へ到達した
   新しい見立てが必要か、その内容は何かを決めない。
 - 「初期仮説の反証後に代替仮説を追加する場合」と「既存仮説のまま検索だけを変更する場合」を
   別fixtureで確認する。
+
+Profile v442では、次を実装した。
+
+- Cycle境界または最終化直前に、当該Cycleで取得した引用可能な本文だけを
+  `hypothesis_revision`へ投影する。
+- 既存Hypothesisにない規律を追加確認する必要がある場合だけ、同じWorkItemへ新IDを追加する。
+- 既存Hypothesisの`statement`は変更せず、追加された未解決Hypothesisを含むWorkItemは
+  Programが機械的に`open`へ戻す。
+- 同一Cycleでは1回だけ実行し、実行済みCycle番号をCaseStateへ保存する。
+- 更新対象本文がない場合は仮説見直しを呼ばず、Cycle Close又はFinalizationを妨げない。
+- モデルは`AGENT_FRAMEWORK_HYPOTHESIS_REVISION_MODEL`で切替可能であり、未指定時は
+  Research用モデルへフォールバックする。法令上の追加要否はLLM、既知ID、重複、Cycle番号、
+  WorkItem再開はProgramが担当する。
+
+Luna `high`による公開買付け総合の初回実測では12/12へ到達した一方、既存`gaps`の言い換えを
+新規Hypothesisとして追加した。Promptを、既存`statement`又は`gaps`と同じ内容、検索方針だけの変更、
+取得本文だけで確認済みの内容を追加しない形へ修正した。全Level 3の合格後、Provider固有の法令ロジックを
+追加せず、同じSolver、Cycle、Graph及び検証契約をAnthropicで再検証する。
 
 ### LR-018 Graph探索の開始判断
 
@@ -1418,6 +1436,7 @@ LR-010  必要性と費用を再評価して全件分類を再開
 | 2026-08-30 | Profile v431・LR-037・公開買付け総合・Luna `high` | Cycle Closeを次Cycleの引継ぎ専用とし、調査終了時は直接Finalizationへ移るよう変更した。直接移行時に途中処理用Dependency判断と未処理OpenSearch候補ReviewをFinalizationへ要求する契約不整合も回帰で修正した。全1103テスト合格。最終実測は2 Cycle・17モデル呼出し・256.8秒で、Cycle CloseはCycle 1の1回7.7秒だけ、Finalizationは1回36.9秒、timeout・契約修復とも0回。v430より102.1秒短縮した。回答観点4/4だが府令2条の5を欠く必要Article 3/4、10/11相当 | `eval-results/agent-framework-diagnostics/legal-59cc933dca0d448cba74e1a759da923c.jsonl` |
 | 2026-08-30 | Profile v435・LR-023・公開買付け総合・Luna `high` | v434の結合後Promptでは正しい意味関係定義と、下位規範を旧`incoming`へ誘導する出力前チェックが矛盾していた。チェックをmode別の正規入力へ統一した。実モデルは2 Cycle・21モデル呼出し・268.8秒で正常完了し、初回の意味関係Graph要求3件は全て正方向だった。府令2条の5・10条を含む資料3/3、必要Article 4/4、回答要点4/4の11/11に合格した | `eval-results/e2e-v435-luna-overview/response.json`、`eval-results/agent-framework-diagnostics/legal-6b7778bf72844f10a49e3f8c88a275c2.jsonl`、`eval-results/cycle-audits/v435-overview/cycle-audit.md` |
 | 2026-08-30 | Profile v438・LR-040 / LR-041・公告・例外・総合・Luna `high` | 公告は2 Cycle・350.4秒で11/11相当。例外は2 Cycle・226.9秒で10/10相当となり、最終回答の法令名もEvidence titleと一致した。総合は3 Cycle・348.7秒で、金商法27条の2・27条の3、施行令6条・7条、府令2条の5・10条を取得し11/11。3問ともtimeout・`protocol_error`はなく、監査上の実行構造警告は0件だった。公告と総合は質問から広げた詳細を未確認として残したため、実行上の完全性は`limited`とした | `eval-results/e2e-v438-luna-announcement/response.json`、`eval-results/e2e-v438-luna-exception/response.json`、`eval-results/e2e-v438-luna-overview/response.json`、`eval-results/cycle-audits/v438-announcement/cycle-audit.md`、`eval-results/cycle-audits/v438-exception/cycle-audit.md`、`eval-results/cycle-audits/v438-overview/cycle-audit.md` |
+| 2026-08-31 | Profile v446・後続Cycle候補とCycle Close・Luna `high` | `matched_hypothesis_ids`をまだ持たない保留候補を「候補なし」と誤認してGraphだけを強制する不備を修正し、発見元WorkItem・Hypothesisの来歴がある未取得候補をLLMの選択対象へ残した。少人数私募で10KBのCycle Close入力が30秒でtimeoutしたため、予約兼最大待機を60秒へ変更した。総合11/11（4 Cycle・547.0秒）、少人数私募12/12（3 Cycle・542.5秒）、譲渡制限付株式9/9（1 Cycle・219.6秒）に合格し、全1125テストに合格した。総合の最終化本文48件中47件はHypothesisに紐づき、本文の二重送信はなかった。Dependency Actionは`needs_action`の3 WorkItem・18候補を一括処理しており、WorkItem別投影は精度修正と分離した性能課題として残す | `eval-results/e2e-v446-luna-overview/results.jsonl`、`eval-results/e2e-v446-luna-small-private-r2/results.jsonl`、`eval-results/e2e-v446-luna-common-two/results.jsonl` |
 ### 2026-08-25: 質問分解と仮説立案の主体表現を分離
 
 - WorkItemの主体情報を`action_actor`、`target_actor`、`actor_relation`へ分離し、Hypothesisには重複保存しない。

@@ -19,14 +19,15 @@
 
 1. `action_feedback`がある場合は、棄却されたTool種類を使わず、別種のToolまたは次Cycleを選びます。
 2. `basis_evidence_ids`の本文から、確認済みの規定と残る未確認事項を把握します。
-3. 次の判断基準から、未確認事項を最も直接進めるToolを選びます。順番は固定しません。
+3. 本文未取得の既知候補が、未確認事項を直接扱うか確認します。該当する候補があれば本文取得を選びます。
+4. 該当する既知候補がなければ、次の判断基準から未確認事項を最も直接進めるToolを選びます。
    - 同じ事項を扱う既知候補の本文が必要：`fetch_articles`
    - 起点Articleと調べる関係・方向を説明できる：`legal_graph_neighbors`
    - Articleまたは関係がまだ分からない：`legal_search`
    - 必要な既知Evidence本文が今回省略されている：`load_evidence`
    - Graphを使う場合は、Hypothesisに合う意味関係を説明できれば`semantic_assertion`を優先し、新規候補が得られなかった場合だけ明示参照へ切り替えます。
-4. 有効な行動がある場合は、処理上限内で今回進める`needs_action` WorkItemを選び、各WorkItemにToolRequestを1件返して`start_next_cycle=false`にします。今回選ばないWorkItemは次stepへ残します。
-5. 成功済みscope以外に未確認事項を進める行動がない場合は、ToolRequestを返さず`start_next_cycle=true`にします。
+5. 有効な行動がある場合は、処理上限内で今回進める`needs_action` WorkItemを選び、各WorkItemにToolRequestを1件返して`start_next_cycle=false`にします。今回選ばないWorkItemは次stepへ残します。
+6. 成功済みscope以外に未確認事項を進める行動がない場合は、ToolRequestを返さず`start_next_cycle=true`にします。
 
 ### ルール
 

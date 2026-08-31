@@ -16,6 +16,10 @@ from pydantic import BaseModel, ValidationError
 from app.agent_framework.context import (
     ContextCapacityExceeded,
     GraphReviewLedgerItem,
+    HypothesisRevisionEvidence,
+    HypothesisRevisionHypothesis,
+    HypothesisRevisionInput,
+    HypothesisRevisionWorkItem,
     ResearchStepHypothesis,
     ResearchStepInput,
     ResearchStepWorkItem,
@@ -38,6 +42,7 @@ from app.agent_framework.contracts import (
     DependencyActionDecision,
     DependencyAssessmentDecision,
     HypothesisUpdate,
+    HypothesisRevisionDecision,
     ObservationIntegrationDecision,
     SearchAssessmentDecision,
     SearchCandidateAssessment,
@@ -125,6 +130,8 @@ class StructuredJSONModelAdapter:
         provider = getattr(self._client, "provider", None)
         if profile.context_projection == "research_hypothesis":
             context = _project_next_hypothesis_work_item(context)
+        if profile.context_projection == "hypothesis_revision":
+            return self._solve_hypothesis_revision(context, profile)
         if (
             context.required_search_review_request_ids
             and not context.graph_review_batch.candidates
@@ -385,6 +392,110 @@ class StructuredJSONModelAdapter:
             input_tokens=result.inputTokens,
             output_tokens=result.outputTokens,
             attempt_count=1 + result.retryCount,
+        )
+
+    def _solve_hypothesis_revision(
+        self,
+        context: SolverContext,
+        profile: ModelCallProfile,
+    ) -> SolverCallResult:
+        """Cycle境界で、取得本文から独立した未解決命題だけを追加する。"""
+
+        rendered = render_hypothesis_revision_model_call(context, profile)
+        provider = getattr(self._client, "provider", None)
+        started_at = monotonic()
+        input_tokens = 0
+        output_tokens = 0
+        input_tokens_known = True
+        output_tokens_known = True
+        attempt_count = 0
+        last_error: ModelProtocolError | ValidationError | None = None
+
+        for repair_index in range(2):
+            remaining_timeout = profile.timeout_sec - (monotonic() - started_at)
+            if remaining_timeout <= 1:
+                raise TimeoutError("hypothesis revision repair timed out")
+            if self._diagnostics is not None:
+                self._diagnostics.record_transport_input(
+                    context=context,
+                    profile=profile,
+                    rendered=rendered,
+                    repair_index=repair_index,
+                    transport_stage="hypothesis_revision",
+                    provider=provider,
+                )
+            try:
+                result = self._client.generate_structured_json(
+                    prompt=rendered.request,
+                    schema=rendered.output_schema,
+                    model=profile.model,
+                    max_tokens=profile.max_output_tokens,
+                    timeout_sec=max(1, round(remaining_timeout)),
+                )
+            except requests.Timeout as exc:
+                if self._diagnostics is not None:
+                    self._diagnostics.record_transport_timeout(
+                        context=context,
+                        repair_index=repair_index,
+                        reason="hypothesis revision timed out",
+                        transport_stage="hypothesis_revision",
+                    )
+                raise TimeoutError("hypothesis revision timed out") from exc
+
+            attempt_count += 1 + result.retryCount
+            if result.inputTokens is None:
+                input_tokens_known = False
+            else:
+                input_tokens += result.inputTokens
+            if result.outputTokens is None:
+                output_tokens_known = False
+            else:
+                output_tokens += result.outputTokens
+            revision: HypothesisRevisionDecision | None = None
+            if result.validationError or result.payload is None:
+                last_error = ModelProtocolError(
+                    "hypothesis revision transport invalid: "
+                    f"{result.validationError or 'empty'}"
+                )
+            else:
+                try:
+                    revision = HypothesisRevisionDecision.model_validate(result.payload)
+                except ValidationError as exc:
+                    last_error = exc
+            if self._diagnostics is not None:
+                self._diagnostics.record_transport_output(
+                    context=context,
+                    repair_index=repair_index,
+                    payload=result.payload,
+                    validation_error=(None if revision is not None else str(last_error)),
+                    input_tokens=result.inputTokens,
+                    output_tokens=result.outputTokens,
+                    provider_retry_count=result.retryCount,
+                    latency_ms=result.latencyMs,
+                    transport_stage="hypothesis_revision",
+                )
+            if revision is not None:
+                return SolverCallResult(
+                    decision=SolverDecision(
+                        next="continue",
+                        decision_reason=revision.decision_reason,
+                        start_next_cycle=True,
+                    ),
+                    hypothesis_revision=revision,
+                    input_tokens=(input_tokens if input_tokens_known else None),
+                    output_tokens=(output_tokens if output_tokens_known else None),
+                    attempt_count=attempt_count,
+                )
+            if repair_index == 0 and last_error is not None:
+                rendered = render_hypothesis_revision_transport_repair_model_call(
+                    context,
+                    base_call=rendered,
+                    payload=result.payload,
+                    error=last_error,
+                )
+
+        raise ModelProtocolError(
+            f"hypothesis revision transport invalid: {last_error or 'unavailable'}"
         )
 
     def _solve_observation_only(
@@ -1037,6 +1148,8 @@ def render_solver_model_call(
             profile,
             provider=provider,
         )
+    if profile.context_projection == "hypothesis_revision":
+        return render_hypothesis_revision_model_call(projected_context, profile)
     if profile.context_projection == "graph_review":
         return render_graph_review_model_call(projected_context, profile)
     if profile.context_projection in {
@@ -1357,16 +1470,18 @@ def _dependency_action_blocked_tool_names(
             else ()
         )
     }
-    if _dependency_action_has_matched_fetch_candidate(context):
+    if _dependency_action_has_scoped_fetch_candidate(context):
         blocked.add("legal_search")
     elif _dependency_action_requires_graph(context):
         blocked.add("legal_search")
     return frozenset(blocked)
 
 
-def _dependency_action_has_matched_fetch_candidate(
+def _dependency_action_has_scoped_fetch_candidate(
     context: SolverContext,
 ) -> bool:
+    """対象作業の探索で得た未取得候補がModel入力にあるか。"""
+
     required_ids = set(context.required_dependency_work_item_ids)
     required_hypothesis_ids = {
         hypothesis.hypothesis_id
@@ -1379,6 +1494,12 @@ def _dependency_action_has_matched_fetch_candidate(
         and bool(
             required_hypothesis_ids.intersection(
                 candidate.matched_hypothesis_ids
+            )
+            or required_hypothesis_ids.intersection(
+                candidate.discovery_hypothesis_ids
+            )
+            or required_ids.intersection(
+                candidate.discovery_work_item_ids
             )
         )
         for candidate in context.search_candidates
@@ -1416,7 +1537,7 @@ def _dependency_action_requires_graph(
     context: SolverContext,
 ) -> bool:
     return (
-        not _dependency_action_has_matched_fetch_candidate(context)
+        not _dependency_action_has_scoped_fetch_candidate(context)
         and _dependency_action_has_unexplored_graph_root(context)
     )
 
@@ -1531,8 +1652,16 @@ def _solver_context_payload(
         active_candidates = [
             item
             for item in payload["search_candidates"]
-            if active_hypothesis_ids.intersection(
-                item["matched_hypothesis_ids"]
+            if (
+                active_hypothesis_ids.intersection(
+                    item["matched_hypothesis_ids"]
+                )
+                or active_hypothesis_ids.intersection(
+                    item["discovery_hypothesis_ids"]
+                )
+                or active_work_item_ids.intersection(
+                    item["discovery_work_item_ids"]
+                )
             )
         ]
         active_candidate_ids = {
@@ -2161,6 +2290,74 @@ def render_cycle_close_model_call(
             _cycle_close_transport_schema(context, observation)
         ),
         normalized_schema=CycleCloseDecision.model_json_schema(),
+    )
+    _ensure_solver_prompt_capacity(rendered.request, context.max_solver_input_chars)
+    return rendered
+
+
+def render_hypothesis_revision_model_call(
+    context: SolverContext,
+    profile: ModelCallProfile,
+) -> RenderedModelCall:
+    """取得本文から新しい命題を追加するCycle境界の専用呼出し。"""
+
+    eligible_work_item_ids = {
+        item.work_item_id
+        for item in context.work_tree
+        if item.state != "dropped"
+    }
+    hypotheses_by_work: dict[str, list[Hypothesis]] = {}
+    for item in context.hypotheses:
+        if item.work_item_id in eligible_work_item_ids:
+            hypotheses_by_work.setdefault(item.work_item_id, []).append(item)
+    input_model = HypothesisRevisionInput(
+        work_items=tuple(
+            HypothesisRevisionWorkItem(
+                work_item_id=item.work_item_id,
+                question=item.question,
+                hypothesis_ids=tuple(
+                    hypothesis.hypothesis_id
+                    for hypothesis in hypotheses_by_work.get(item.work_item_id, ())
+                ),
+            )
+            for item in context.work_tree
+            if item.state != "dropped"
+        ),
+        hypotheses=tuple(
+            HypothesisRevisionHypothesis(
+                hypothesis_id=item.hypothesis_id,
+                work_item_id=item.work_item_id,
+                statement=item.statement,
+                judgment=item.judgment,
+                gaps=item.gaps,
+            )
+            for item in context.hypotheses
+            if item.work_item_id in eligible_work_item_ids
+        ),
+        acquired_evidence=tuple(
+            HypothesisRevisionEvidence(
+                evidence_id=item.evidence_id,
+                content=item.content,
+                title=item.title,
+            )
+            for item in context.hypothesis_revision_evidence
+        ),
+    )
+    input_payload = input_model.model_dump(mode="json")
+    output_schema = _hypothesis_revision_transport_schema(context)
+    instructions = (
+        f"{profile.system_prompt}\n\n"
+        f"{render_model_input_glossary(HypothesisRevisionInput)}\n\n"
+        f"{RUNTIME_INPUT_MARKER}"
+        f"{_post_context_completion_check(profile.completion_check_prompt)}"
+    )
+    rendered = build_rendered_model_call(
+        stage="hypothesis_revision",
+        instructions=instructions,
+        input_tag="hypothesis_revision_input",
+        input_payload=input_payload,
+        output_schema=output_schema,
+        normalized_schema=HypothesisRevisionDecision.model_json_schema(),
     )
     _ensure_solver_prompt_capacity(rendered.request, context.max_solver_input_chars)
     return rendered
@@ -4280,6 +4477,40 @@ def render_solver_transport_repair_model_call(
     return rendered
 
 
+def render_hypothesis_revision_transport_repair_model_call(
+    context: SolverContext,
+    *,
+    base_call: RenderedModelCall,
+    payload: dict[str, Any] | None,
+    error: ModelProtocolError | ValidationError,
+) -> RenderedModelCall:
+    """仮説見直しの意味を変えず、輸送違反だけを1回修復させる。"""
+
+    instructions = (
+        f"{base_call.instructions}\n\n"
+        f"{render_prompt_section('solver_transport_repair.md', 'stable')}"
+    )
+    input_payload = dict(base_call.input_payload)
+    input_payload["transport_repair"] = {
+        "validation_error": _transport_error_detail(error),
+        "previous_solver_decision": payload,
+    }
+    rendered = build_rendered_model_call(
+        stage="hypothesis_revision_transport_repair",
+        instructions=instructions,
+        input_tag=base_call.input_tag,
+        input_payload=input_payload,
+        output_schema=deepcopy(base_call.output_schema),
+        normalized_schema=base_call.normalized_schema,
+        prompt_assets=(
+            *base_call.prompt_assets,
+            prompt_asset_trace("solver_transport_repair.md", ("stable",)),
+        ),
+    )
+    _ensure_solver_prompt_capacity(rendered.request, context.max_solver_input_chars)
+    return rendered
+
+
 def _render_staged_research_repair_model_call(
     context: SolverContext,
     *,
@@ -4353,7 +4584,9 @@ def _solver_prompt_assets(context: SolverContext) -> tuple[PromptAssetTrace, ...
 def _solver_transport_schema(context: SolverContext) -> dict:
     string_array = {"type": "array", "items": {"type": "string"}}
     open_work_item_ids = tuple(
-        item.work_item_id for item in context.work_tree if item.state == "open"
+        item.work_item_id
+        for item in context.work_tree
+        if item.state == "open"
     )
     open_work_item_id_set = set(open_work_item_ids)
     unresolved_hypothesis_ids = tuple(
@@ -5424,6 +5657,67 @@ def _solver_compact_transport_schema(context: SolverContext) -> dict:
         for item in schema["required"]
     ]
     return schema
+
+
+def _hypothesis_revision_transport_schema(
+    context: SolverContext,
+) -> dict[str, Any]:
+    """Provider共通の小さな仮説追加schema。"""
+
+    open_work_item_ids = tuple(
+        item.work_item_id
+        for item in context.work_tree
+        if item.state != "dropped"
+    )
+    revision_evidence_ids = tuple(
+        item.evidence_id for item in context.hypothesis_revision_evidence
+    )
+    proposal = _strict_object(
+        {
+            "hypothesis_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160,
+                "description": "新しいHypothesisのCase内一意ID。既存IDは再利用しない。",
+            },
+            "work_item_id": {
+                **_enum_string(open_work_item_ids),
+                "description": "追加先となる既存の非dropped WorkItemのID。",
+            },
+            "statement": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1200,
+                "description": "取得本文から独立して導かれた、新しい未確認の法的命題。",
+            },
+            "evidence_ids": {
+                **_bounded_enum_array(revision_evidence_ids),
+                "description": "この提案を生んだ取得済み本文Evidence ID。不要なら空配列。",
+            },
+            "gaps": {
+                "type": "array",
+                "items": {"type": "string", "maxLength": 300},
+                "maxItems": 12,
+                "description": "命題を確認するため本文で残る具体的な未確認事項。",
+            },
+        }
+    )
+    return _strict_object(
+        {
+            "decision_reason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1200,
+                "description": "追加または追加しなかった理由。",
+            },
+            "add_hypotheses": {
+                "type": "array",
+                "items": proposal,
+                "maxItems": 8,
+                "description": "独立した新しい未解決命題がある場合だけ返す。なければ空配列。",
+            },
+        }
+    )
 
 
 def _graph_review_transport_schema(context: SolverContext) -> dict[str, Any]:

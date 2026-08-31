@@ -337,6 +337,51 @@ class CycleCloseDecision(FrameworkModel):
     )
 
 
+class HypothesisRevisionProposal(FrameworkModel):
+    """既存の非dropped WorkItemへ追加する、新しい未確認Hypothesisの提案。"""
+
+    hypothesis_id: str = Field(
+        min_length=1,
+        max_length=160,
+        description="新しいHypothesisのCase内一意ID。",
+    )
+    work_item_id: str = Field(
+        min_length=1,
+        max_length=160,
+        description="追加先の既存WorkItem ID。",
+    )
+    statement: str = Field(
+        min_length=1,
+        max_length=1200,
+        description="取得本文から判明した、独立して確認する新しい命題。",
+    )
+    evidence_ids: tuple[str, ...] = Field(
+        default=(),
+        max_length=12,
+        description="この命題の必要性を示した取得済みEvidence ID。",
+    )
+    gaps: tuple[str, ...] = Field(
+        default=(),
+        max_length=12,
+        description="この命題について本文で未確認の事項。",
+    )
+
+
+class HypothesisRevisionDecision(FrameworkModel):
+    """取得本文に独立した未解決命題があった場合だけ返す追加差分。"""
+
+    decision_reason: str = Field(
+        min_length=1,
+        max_length=1200,
+        description="Hypothesisを追加した又は追加しなかった理由。",
+    )
+    add_hypotheses: tuple[HypothesisRevisionProposal, ...] = Field(
+        default=(),
+        max_length=8,
+        description="既存WorkItemへ追加する新しいHypothesis。",
+    )
+
+
 class SolverDecision(FrameworkModel):
     next: Literal["continue", "finalize"] = Field(
         description=(

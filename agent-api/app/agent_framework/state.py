@@ -781,6 +781,10 @@ class CaseState(FrameworkModel):
     )
     run_status: RunStatus = "running"
     research_cycle_count: int = Field(default=0, ge=0)
+    hypothesis_revision_cycles: tuple[int, ...] = Field(
+        default=(),
+        description="専用Hypothesis見直しを完了したResearch Cycle番号。",
+    )
     work_items: tuple[WorkItem, ...] = ()
     hypotheses: tuple[Hypothesis, ...] = ()
     tool_requests: tuple[ToolRequest, ...] = ()
@@ -808,3 +812,20 @@ class CaseState(FrameworkModel):
     cycle_step_timeout: bool = False
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+
+    @model_validator(mode="after")
+    def validate_hypothesis_revision_cycles(self) -> CaseState:
+        if len(self.hypothesis_revision_cycles) != len(
+            set(self.hypothesis_revision_cycles)
+        ):
+            raise ValueError("hypothesis revision cycles must be unique")
+        if any(cycle < 1 for cycle in self.hypothesis_revision_cycles):
+            raise ValueError("hypothesis revision cycle must be positive")
+        if any(
+            cycle > self.research_cycle_count
+            for cycle in self.hypothesis_revision_cycles
+        ):
+            raise ValueError(
+                "hypothesis revision cycle cannot exceed research cycle count"
+            )
+        return self

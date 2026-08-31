@@ -21,6 +21,7 @@ from .context import (
     SolverContractFeedback,
     build_solver_context,
 )
+from .contracts import CaseUpdate, SolverDecision
 from .diagnostics import AgentDiagnostics
 from .observability import (
     AgentRunResult,
@@ -41,6 +42,7 @@ from .state import (
     DeferredFrontierResolution,
     Evidence,
     GraphCandidateReview,
+    Hypothesis,
     ReviewFinding,
     ReviewResult,
     RunStatus,
@@ -284,6 +286,14 @@ class AgentLoop:
                 self._store.save(state)
 
             integration_call = bool(state.research_cycle_count or reviewer_findings)
+            hypothesis_revision_call = bool(
+                state.research_cycle_count
+                and state.research_cycle_count
+                not in state.hypothesis_revision_cycles
+                and self._profile.solver_hypothesis_revision is not None
+                and any(item.state != "dropped" for item in state.work_items)
+                and not reviewer_findings
+            )
             pending_grounding_observation = bool(
                 integration_call
                 and not reviewer_findings
@@ -359,6 +369,10 @@ class AgentLoop:
                 elif context.cycle_close_required and (
                     not context.can_start_next_cycle
                     or not any(item.state == "open" for item in context.work_tree)
+                ) and not (
+                    hypothesis_revision_call
+                    and bool(context.hypothesis_revision_evidence)
+                    and not pending_grounding_observation
                 ):
                     # Cycle Closeは次Cycleへの引継ぎ専用とする。最終回答は
                     # 専用Finalizationへ十分な時間を残して一度だけ生成させる。
@@ -433,6 +447,18 @@ class AgentLoop:
                     has_reviewer_findings=bool(reviewer_findings),
                     observation_integration_call=(
                         pending_grounding_observation
+                    ),
+                    hypothesis_revision_call=(
+                        hypothesis_revision_call
+                        and (
+                            context.cycle_close_required
+                            or not any(
+                                item.state == "open" for item in context.work_tree
+                            )
+                        )
+                        and bool(context.hypothesis_revision_evidence)
+                        and not pending_grounding_observation
+                        and not finalize_only
                     ),
                 )
                 if purpose == "finalization":
@@ -590,113 +616,160 @@ class AgentLoop:
                         output_tokens=solver_call.output_tokens,
                     )
                 try:
-                    candidate = apply_solver_decision(
-                        state,
-                        solver_call.decision,
-                        limits=self._profile.limits,
-                        known_tool_names=self._read_only_tool_names,
-                        material_evidence_ids=context.material_evidence_ids,
-                        fetchable_article_ids=context.fetchable_article_ids,
-                        required_dependency_kind=context.required_dependency_kind,
-                        required_dependency_work_item_ids=(
-                            context.required_dependency_work_item_ids
-                        ),
-                        require_dependency_decisions=bool(
-                            context.required_dependency_work_item_ids
-                        )
-                        and purpose != "observation_integration",
-                        required_review_finding_ids=tuple(
-                            item.finding_id for item in context.reviewer_findings
-                        ),
-                        tool_list_argument_limits={
-                            (item.tool_name, item.argument_name): item.max_items
-                            for item in self._profile.tool_list_argument_limits
-                        },
-                        required_graph_review_request_ids=(
-                            context.required_graph_review_request_ids
-                        ),
-                        required_search_review_request_ids=(
-                            context.required_search_review_request_ids
-                        ),
-                        search_candidate_article_ids=tuple(
-                            item.article_id for item in context.search_candidates
-                        ),
-                        graph_candidate_article_ids=tuple(
-                            item.article_id
-                            for item in context.graph_review_batch.candidates
-                            if item.content_status
-                            in {"not_requested", "failed", "timeout"}
-                        ),
-                        graph_known_article_ids=tuple(
-                            dict.fromkeys(
-                                [
-                                    *(
-                                        item.article_id
-                                        for item in context.graph_review_batch.candidates
-                                    ),
-                                    *(
-                                        item.article_id
-                                        for item in context.graph_review_ledger
-                                    ),
-                                ]
+                    applied_decision = solver_call.decision
+                    if purpose == "hypothesis_revision":
+                        revision = solver_call.hypothesis_revision
+                        if revision is None:
+                            raise ContractViolation(
+                                "hypothesis revision result is missing"
                             )
-                        ),
-                        graph_review_fetch_tool_name=(
-                            self._profile.graph_review_fetch_tool_name
-                        ),
-                        graph_review_frontiers={
-                            item.frontier_item_id: (
-                                item.article_id,
-                                item.work_item_id,
-                                item.hypothesis_id,
+                        if revision.add_hypotheses:
+                            applied_decision = SolverDecision(
+                                next="continue",
+                                decision_reason=revision.decision_reason,
+                                update=CaseUpdate(
+                                    add_hypotheses=tuple(
+                                        Hypothesis(
+                                            hypothesis_id=item.hypothesis_id,
+                                            work_item_id=item.work_item_id,
+                                            statement=item.statement,
+                                            evidence_ids=item.evidence_ids,
+                                            gaps=item.gaps,
+                                        )
+                                        for item in revision.add_hypotheses
+                                    )
+                                ),
                             )
-                            for item in context.graph_review_batch.candidates
-                        },
-                        graph_review_link_ids=tuple(
-                            dict.fromkeys(
-                                link.link_id
+                            candidate = apply_solver_decision(
+                                state,
+                                applied_decision,
+                                limits=self._profile.limits,
+                                known_tool_names=self._read_only_tool_names,
+                                material_evidence_ids=(
+                                    context.material_evidence_ids
+                                    | frozenset(
+                                        item.evidence_id
+                                        for item in context.hypothesis_revision_evidence
+                                    )
+                                ),
+                                finalize_only=False,
+                                hypothesis_revision_work_item_ids={
+                                    item.work_item_id
+                                    for item in context.work_tree
+                                    if item.state != "dropped"
+                                },
+                            )
+                        else:
+                            candidate = state
+                    else:
+                        candidate = apply_solver_decision(
+                            state,
+                            applied_decision,
+                            limits=self._profile.limits,
+                            known_tool_names=self._read_only_tool_names,
+                            material_evidence_ids=context.material_evidence_ids,
+                            fetchable_article_ids=context.fetchable_article_ids,
+                            required_dependency_kind=context.required_dependency_kind,
+                            required_dependency_work_item_ids=(
+                                context.required_dependency_work_item_ids
+                            ),
+                            hypothesis_revision_work_item_ids=None,
+                            require_dependency_decisions=bool(
+                                context.required_dependency_work_item_ids
+                            )
+                            and purpose != "observation_integration",
+                            required_review_finding_ids=tuple(
+                                item.finding_id for item in context.reviewer_findings
+                            ),
+                            tool_list_argument_limits={
+                                (item.tool_name, item.argument_name): item.max_items
+                                for item in self._profile.tool_list_argument_limits
+                            },
+                            required_graph_review_request_ids=(
+                                context.required_graph_review_request_ids
+                            ),
+                            required_search_review_request_ids=(
+                                context.required_search_review_request_ids
+                            ),
+                            search_candidate_article_ids=tuple(
+                                item.article_id for item in context.search_candidates
+                            ),
+                            graph_candidate_article_ids=tuple(
+                                item.article_id
                                 for item in context.graph_review_batch.candidates
-                                for link in item.links
-                            )
-                        ),
-                        graph_selectable_frontiers={
-                            item.frontier_item_id: (
-                                item.article_id,
-                                item.work_item_id,
-                                item.hypothesis_id,
-                            )
-                            for item in context.graph_review_batch.candidates
-                            if item.content_status
-                            in {"not_requested", "failed", "timeout"}
-                        },
-                        deferred_frontiers={
-                            item.frontier_item_id: (
-                                item.article_id,
-                                item.work_item_id,
-                                item.hypothesis_id,
-                            )
-                            for item in context.graph_review_ledger
-                            if item.review_status == "relevant_deferred"
-                            and item.content_status
-                            in {"not_requested", "failed", "timeout"}
-                            and item.deferred_resolution_action
-                            != "no_longer_needed"
-                        },
-                        unreviewed_graph_candidate_count=(
-                            context.graph_review_batch.remaining_unreviewed_count
-                        ),
-                        remaining_fetch_capacity=context.remaining_fetch_capacity,
-                        cycle_close_required=(
-                            context.cycle_close_required
-                            and purpose != "observation_integration"
-                        ),
-                        can_start_next_cycle=context.can_start_next_cycle,
-                        finalize_only=context.finalize_only,
-                        allow_dependency_action_without_tool=(
-                            purpose == "observation_integration"
-                            or bool(context.required_dependency_work_item_ids)
-                        ),
-                    )
+                                if item.content_status
+                                in {"not_requested", "failed", "timeout"}
+                            ),
+                            graph_known_article_ids=tuple(
+                                dict.fromkeys(
+                                    [
+                                        *(
+                                            item.article_id
+                                            for item in context.graph_review_batch.candidates
+                                        ),
+                                        *(
+                                            item.article_id
+                                            for item in context.graph_review_ledger
+                                        ),
+                                    ]
+                                )
+                            ),
+                            graph_review_fetch_tool_name=(
+                                self._profile.graph_review_fetch_tool_name
+                            ),
+                            graph_review_frontiers={
+                                item.frontier_item_id: (
+                                    item.article_id,
+                                    item.work_item_id,
+                                    item.hypothesis_id,
+                                )
+                                for item in context.graph_review_batch.candidates
+                            },
+                            graph_review_link_ids=tuple(
+                                dict.fromkeys(
+                                    link.link_id
+                                    for item in context.graph_review_batch.candidates
+                                    for link in item.links
+                                )
+                            ),
+                            graph_selectable_frontiers={
+                                item.frontier_item_id: (
+                                    item.article_id,
+                                    item.work_item_id,
+                                    item.hypothesis_id,
+                                )
+                                for item in context.graph_review_batch.candidates
+                                if item.content_status
+                                in {"not_requested", "failed", "timeout"}
+                            },
+                            deferred_frontiers={
+                                item.frontier_item_id: (
+                                    item.article_id,
+                                    item.work_item_id,
+                                    item.hypothesis_id,
+                                )
+                                for item in context.graph_review_ledger
+                                if item.review_status == "relevant_deferred"
+                                and item.content_status
+                                in {"not_requested", "failed", "timeout"}
+                                and item.deferred_resolution_action
+                                != "no_longer_needed"
+                            },
+                            unreviewed_graph_candidate_count=(
+                                context.graph_review_batch.remaining_unreviewed_count
+                            ),
+                            remaining_fetch_capacity=context.remaining_fetch_capacity,
+                            cycle_close_required=(
+                                context.cycle_close_required
+                                and purpose != "observation_integration"
+                            ),
+                            can_start_next_cycle=context.can_start_next_cycle,
+                            finalize_only=context.finalize_only,
+                            allow_dependency_action_without_tool=(
+                                purpose == "observation_integration"
+                                or bool(context.required_dependency_work_item_ids)
+                            ),
+                        )
                     consumed_result_request_ids: tuple[str, ...] = ()
                     if purpose in {"observation_integration", "cycle_close"}:
                         consumed_result_request_ids = tuple(
@@ -725,6 +798,18 @@ class AgentLoop:
                                 integrated_request_ids
                             ),
                         )
+                    if purpose == "hypothesis_revision":
+                        candidate = self._replace_state(
+                            candidate,
+                            hypothesis_revision_cycles=tuple(
+                                dict.fromkeys(
+                                    (
+                                        *candidate.hypothesis_revision_cycles,
+                                        max(1, candidate.research_cycle_count),
+                                    )
+                                )
+                            ),
+                        )
                     if self._diagnostics is not None:
                         self._diagnostics.record_decision_applied(
                             state_before=state,
@@ -732,7 +817,7 @@ class AgentLoop:
                             context=context,
                             purpose=purpose,
                             contract_attempt=decision_attempt,
-                            decision=solver_call.decision,
+                            decision=applied_decision,
                         )
                     break
                 except ActionRejected as exc:
@@ -863,6 +948,7 @@ class AgentLoop:
             if not decision_requests:
                 if (
                     solver_call.decision.start_next_cycle
+                    and purpose != "hypothesis_revision"
                     and not graph_review_call
                     and not search_review_call
                 ):
@@ -931,6 +1017,7 @@ class AgentLoop:
         integration_call: bool,
         has_reviewer_findings: bool,
         observation_integration_call: bool = False,
+        hypothesis_revision_call: bool = False,
     ) -> tuple[ModelCallProfile, str]:
         if graph_review_call and self._profile.solver_graph_review is not None:
             return self._profile.solver_graph_review, "graph_selection"
@@ -953,6 +1040,11 @@ class AgentLoop:
                 ),
                 "observation_integration",
             )
+        if (
+            hypothesis_revision_call
+            and self._profile.solver_hypothesis_revision is not None
+        ):
+            return self._profile.solver_hypothesis_revision, "hypothesis_revision"
         if context.finalize_only and self._profile.solver_finalization is not None:
             return self._profile.solver_finalization, "finalization"
         if (

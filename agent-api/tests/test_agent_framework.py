@@ -1399,6 +1399,123 @@ def test_cycle_close_hands_final_answer_to_dedicated_finalization() -> None:
     assert result.state.run_status == "completed"
 
 
+def test_finalization_is_not_deferred_when_revision_has_no_current_text() -> None:
+    class ManualClock:
+        now = 305.0
+
+        def __call__(self) -> float:
+            return self.now
+
+    clock = ManualClock()
+    limits = AgentLimits(
+        max_wall_time_sec=420,
+        finalization_reserve_sec=90,
+        cycle_close_reserve_sec=30,
+        min_next_cycle_budget_sec=400,
+    )
+
+    def finalize(
+        context: SolverContext,
+        profile: ModelCallProfile,
+    ) -> SolverDecision:
+        assert context.finalize_only is True
+        assert profile.context_projection == "finalization"
+        return SolverDecision(
+            next="finalize",
+            answer=FinalAnswer(
+                text="確認できた範囲の回答",
+                limitations=("追加確認が必要",),
+                unresolved_work_item_ids=("w1",),
+                unresolved_hypothesis_ids=("h1",),
+            ),
+        )
+
+    model = FakeModel([finalize])
+    profile = _profile().model_copy(
+        update={
+            "limits": limits,
+            "solver_hypothesis_revision": ModelCallProfile(
+                model="revision-model",
+                system_prompt="hypothesis revision",
+                timeout_sec=180,
+                context_projection="hypothesis_revision",
+            ),
+            "solver_cycle_close": ModelCallProfile(
+                model="cycle-close-model",
+                system_prompt="cycle close",
+                timeout_sec=180,
+                context_projection="cycle_close",
+            ),
+            "solver_finalization": ModelCallProfile(
+                model="finalization-model",
+                system_prompt="finalization",
+                timeout_sec=180,
+                context_projection="finalization",
+            ),
+        }
+    )
+    store = InMemoryCaseStore()
+    store.create(
+        CaseState(
+            case_id="case-no-revision-text",
+            question="質問",
+            research_cycle_count=2,
+            work_items=(WorkItem(work_item_id="w1", question="確認事項"),),
+            hypotheses=(
+                Hypothesis(
+                    hypothesis_id="h1",
+                    work_item_id="w1",
+                    statement="確認する命題",
+                ),
+            ),
+            evidence=(
+                Evidence(
+                    evidence_id="navigation-evidence",
+                    source_ref="fixture:navigation",
+                    content="検索候補",
+                    created_cycle=2,
+                    metadata={"citationEligible": False},
+                ),
+            ),
+            tool_requests=(
+                ToolRequest(
+                    request_id="fetch-current-cycle",
+                    work_item_id="w1",
+                    tool_name="fetch_articles",
+                    arguments={
+                        "article_ids": ["a1", "a2", "a3", "a4", "a5"]
+                    },
+                    purpose="本文取得",
+                    hypothesis_ids=("h1",),
+                ),
+            ),
+            tool_results=(
+                ToolResult(
+                    request_id="fetch-current-cycle",
+                    status="succeeded",
+                    evidence_ids=(),
+                    elapsed_ms=1,
+                    cycle_no=2,
+                ),
+            ),
+            integrated_tool_result_request_ids=("fetch-current-cycle",),
+        )
+    )
+
+    result = AgentLoop(
+        store=store,
+        model=model,
+        tools=ToolRegistry(()),
+        profile=profile,
+        clock=clock,
+    ).run("case-no-revision-text")
+
+    assert result.state.run_status == "completed"
+    assert [item.context_projection for item in model.solver_profiles] == [
+        "finalization"
+    ]
+
+
 def test_finalization_drops_pending_exploration_requirements() -> None:
     context = build_solver_context(
         CaseState(case_id="case-1", question="質問"),
