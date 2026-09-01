@@ -45,7 +45,7 @@
     "graphSchemaVersion": 9,
     "s3Prefix": "knowledge-root/bootstrap/current-search-validation",
     "imageRepositoryName": "bootstrap-admin",
-    "imageTag": "snapshot-bootstrap-v1"
+    "imageTag": "snapshot-bootstrap-v7"
   },
   "compute": {
     "repositoryNames": [
@@ -62,7 +62,7 @@
     "enabled": true,
     "runtimeName": "LocalRagLawPoc",
     "imageRepositoryName": "agent-api",
-    "imageTag": "agentcore-bootstrap",
+    "imageTag": "agentcore-bootstrap-v3",
     "networkMode": "VPC"
   },
   "tags": {

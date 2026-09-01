@@ -18,6 +18,10 @@ Japan geo inference profileへ固定する。`aws_adapters.py`は`app.main`よ�
 `agent-api/app`の検索・Agentロジックを複製しない。Runtime roleはOpenSearch / NeptuneのreadとBedrock invoke
 だけを持ち、bootstrap write処理は公開endpointから呼び出せない。
 
+Bedrock Converseでは可能な限りnative JSON Schema outputを使う。Agent Frameworkの大きいsolver schemaが
+Haiku 4.5のcompiled grammar上限を超えた場合だけ、同じschemaを持つ非strict tool-useへfallbackし、
+返されたtool inputを既存のapplication schema validatorで検証する。他のValidationExceptionはfallbackせず失敗させる。
+
 ## テスト
 
 ```bash

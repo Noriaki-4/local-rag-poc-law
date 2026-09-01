@@ -8,19 +8,24 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import math
+import os
 import re
 import sys
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Iterable
 
 LABEL_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 BULK_SIZE = 25
 GRAPH_BATCH_SIZE = 50
+DEFAULT_EMBEDDING_WORKERS = 2
+EMBEDDING_ATTEMPTS = 6
 
 
 def _json(path: Path) -> dict[str, Any]:
@@ -53,6 +58,98 @@ def _sha256(path: Path) -> str:
 def _chunks(values: list[Any], size: int) -> Iterable[list[Any]]:
     for offset in range(0, len(values), size):
         yield values[offset : offset + size]
+
+
+def _embedding_workers() -> int:
+    raw_value = os.environ.get(
+        "BOOTSTRAP_EMBEDDING_WORKERS", str(DEFAULT_EMBEDDING_WORKERS)
+    )
+    try:
+        workers = int(raw_value)
+    except ValueError as error:
+        raise ValueError("BOOTSTRAP_EMBEDDING_WORKERS must be an integer") from error
+    if not 1 <= workers <= 32:
+        raise ValueError("BOOTSTRAP_EMBEDDING_WORKERS must be between 1 and 32")
+    return workers
+
+
+def _serverless_index_definition(
+    definition: dict[str, Any], expected_dimensions: int
+) -> dict[str, Any]:
+    """Adapt the exported local mapping without changing the snapshot artifact."""
+    result = copy.deepcopy(definition)
+    try:
+        embedding = result["mappings"]["properties"]["embedding"]
+        method = embedding["method"]
+    except (KeyError, TypeError) as error:
+        raise ValueError("OpenSearch mapping has no embedding method") from error
+    if embedding.get("type") != "knn_vector":
+        raise ValueError("OpenSearch embedding field must be knn_vector")
+    if embedding.get("dimension") != expected_dimensions:
+        raise ValueError("OpenSearch embedding dimension does not match environment config")
+    engine = method.get("engine")
+    if engine not in {"lucene", "faiss"}:
+        raise ValueError(f"unsupported exported OpenSearch vector engine: {engine}")
+    # OpenSearch Serverless vector collections support Faiss, while the local
+    # provisioned index was exported with Lucene. The source vector is excluded
+    # from the artifact and regenerated with Titan, so this changes no source data.
+    method["engine"] = "faiss"
+    return result
+
+
+def _index_not_found(response: Any) -> bool:
+    return response is None or (
+        isinstance(response, dict) and response.get("status") == 404
+    )
+
+
+def _wait_for_index(
+    client: Any,
+    index: str,
+    *,
+    attempts: int = 60,
+    delay_seconds: float = 5,
+) -> None:
+    for _attempt in range(attempts):
+        response = client.request("GET", index, allowed=(200, 404))
+        if not _index_not_found(response):
+            return
+        time.sleep(delay_seconds)
+    raise RuntimeError(f"OpenSearch index did not become visible: {index}")
+
+
+def _serverless_bulk_action(index: str) -> dict[str, dict[str, str]]:
+    # Vector collections reject caller-supplied document IDs. contentUnitId in
+    # _source remains the stable application identifier.
+    return {"index": {"_index": index}}
+
+
+def _snapshot_count(client: Any, index: str, snapshot_id: str) -> int:
+    return int(
+        client.request(
+            "POST",
+            f"{index}/_count",
+            json_body={"query": {"term": {"sourceSnapshotId": snapshot_id}}},
+        )["count"]
+    )
+
+
+def _wait_for_snapshot_count(
+    client: Any,
+    index: str,
+    snapshot_id: str,
+    expected: int,
+    *,
+    attempts: int = 60,
+    delay_seconds: float = 5,
+) -> int:
+    count = -1
+    for _attempt in range(attempts):
+        count = _snapshot_count(client, index, snapshot_id)
+        if count == expected:
+            return count
+        time.sleep(delay_seconds)
+    return count
 
 
 def validate_artifact(artifact_dir: Path, config: dict[str, Any]) -> dict[str, Any]:
@@ -129,7 +226,11 @@ class SignedOpenSearch:
         body = data
         if json_body is not None:
             body = json.dumps(json_body, ensure_ascii=False).encode("utf-8")
-        headers = {"Content-Type": content_type, "Accept": "application/json"}
+        headers = {
+            "Content-Type": content_type,
+            "Accept": "application/json",
+            "X-Amz-Content-SHA256": hashlib.sha256(body or b"").hexdigest(),
+        }
         credentials = self.session.get_credentials().get_frozen_credentials()
         aws_request = AWSRequest(method=method, url=url, data=body, headers=headers)
         SigV4Auth(credentials, "aoss", self.region).add_auth(aws_request)
@@ -155,18 +256,30 @@ def _normalize_embedding_input(text: str, max_chars: int) -> str:
 
 
 def _embed(client: Any, model_id: str, text: str, dimensions: int, max_chars: int) -> list[float]:
-    response = client.invoke_model(
-        modelId=model_id,
-        contentType="application/json",
-        accept="application/json",
-        body=json.dumps(
+    request = {
+        "modelId": model_id,
+        "contentType": "application/json",
+        "accept": "application/json",
+        "body": json.dumps(
             {
                 "inputText": _normalize_embedding_input(text, max_chars),
                 "dimensions": dimensions,
                 "normalize": True,
             }
         ),
-    )
+    }
+    for attempt in range(EMBEDDING_ATTEMPTS):
+        try:
+            response = client.invoke_model(**request)
+            break
+        except Exception as error:
+            details = getattr(error, "response", {}).get("Error", {})
+            if (
+                details.get("Code") not in {"ThrottlingException", "TooManyRequestsException"}
+                or attempt == EMBEDDING_ATTEMPTS - 1
+            ):
+                raise
+            time.sleep(min(2**attempt, 30))
     payload = json.loads(response["body"].read())
     vector = payload.get("embedding")
     if not isinstance(vector, list) or len(vector) != dimensions:
@@ -217,6 +330,29 @@ def _rewrite_object_uris(
     return result
 
 
+def _prepare_search_document(
+    item: dict[str, Any],
+    *,
+    bedrock: Any,
+    s3: Any,
+    bucket: str,
+    prefix: str,
+    artifact_dir: Path,
+    search: dict[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    document = _rewrite_object_uris(
+        item["_source"], bucket, prefix, artifact_dir, s3
+    )
+    document["embedding"] = _embed(
+        bedrock,
+        search["embeddingModelId"],
+        str(document.get("text") or ""),
+        search["embeddingDimensions"],
+        search["embeddingMaxChars"],
+    )
+    return str(item["_id"]), document
+
+
 def _write_checkpoint(path: Path, manifest_sha256: str, completed: set[str]) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(
@@ -264,10 +400,17 @@ def _load_opensearch(
 ) -> None:
     search = config["openSearchServerless"]
     index = search["indexName"]
+    snapshot_id = config["bootstrapData"]["searchSnapshotId"]
+    existing_count = 0
     existing = client.request("GET", index, allowed=(200, 404))
-    if existing is None or (isinstance(existing, dict) and existing.get("status") == 404):
-        definition = _json(artifact_dir / "opensearch-index.json")
+    if _index_not_found(existing):
+        definition = _serverless_index_definition(
+            _json(artifact_dir / "opensearch-index.json"),
+            search["embeddingDimensions"],
+        )
         client.request("PUT", index, json_body=definition, allowed=(200, 201))
+        # Serverless can accept index creation before the index is queryable.
+        _wait_for_index(client, index)
     else:
         total = client.request("POST", f"{index}/_count", json_body={"query": {"match_all": {}}})[
             "count"
@@ -278,7 +421,7 @@ def _load_opensearch(
             json_body={
                 "query": {
                     "term": {
-                        "sourceSnapshotId": config["bootstrapData"]["searchSnapshotId"]
+                        "sourceSnapshotId": snapshot_id
                     }
                 }
             },
@@ -287,6 +430,7 @@ def _load_opensearch(
             raise RuntimeError(
                 "OpenSearch index contains another snapshot; bootstrap will not overwrite it"
             )
+        existing_count = current
     client.request(
         "POST",
         f"{index}/_analyze",
@@ -297,54 +441,54 @@ def _load_opensearch(
     checkpoint_key = f"{prefix}/state/opensearch-checkpoint.json"
     _restore_s3_checkpoint(s3, bucket, checkpoint_key, checkpoint_path)
     completed = _load_checkpoint(checkpoint_path, manifest_sha256)
-    pending = [item for item in documents if str(item["_id"]) not in completed]
-    for batch in _chunks(pending, BULK_SIZE):
-        lines: list[str] = []
-        batch_ids: list[str] = []
-        for item in batch:
-            document = _rewrite_object_uris(item["_source"], bucket, prefix, artifact_dir, s3)
-            document["embedding"] = _embed(
-                bedrock,
-                search["embeddingModelId"],
-                str(document.get("text") or ""),
-                search["embeddingDimensions"],
-                search["embeddingMaxChars"],
-            )
-            document_id = str(item["_id"])
-            lines.append(json.dumps({"index": {"_index": index, "_id": document_id}}))
-            lines.append(json.dumps(document, ensure_ascii=False, separators=(",", ":")))
-            batch_ids.append(document_id)
-        body = ("\n".join(lines) + "\n").encode("utf-8")
-        response = client.request(
-            "POST",
-            "_bulk",
-            data=body,
-            content_type="application/x-ndjson",
+    if existing_count != len(completed):
+        existing_count = _wait_for_snapshot_count(
+            client, index, snapshot_id, len(completed)
         )
-        if response.get("errors"):
-            failures = [item for item in response.get("items", []) if item.get("index", {}).get("error")]
-            raise RuntimeError(f"OpenSearch bulk failed: {failures[:3]}")
-        completed.update(batch_ids)
-        _write_checkpoint(checkpoint_path, manifest_sha256, completed)
-        s3.upload_file(str(checkpoint_path), bucket, checkpoint_key)
-    count = -1
-    for _attempt in range(60):
-        count = client.request(
-            "POST",
-            f"{index}/_count",
-            json_body={
-                "query": {
-                    "term": {
-                        "sourceSnapshotId": config["bootstrapData"][
-                            "searchSnapshotId"
-                        ]
-                    }
-                }
-            },
-        )["count"]
-        if count == len(documents):
-            break
-        time.sleep(5)
+    if existing_count != len(completed):
+        raise RuntimeError(
+            "OpenSearch document count does not match the S3 checkpoint; "
+            "bootstrap refuses to create duplicate Serverless vector documents"
+        )
+    pending = [item for item in documents if str(item["_id"]) not in completed]
+    with ThreadPoolExecutor(max_workers=_embedding_workers()) as executor:
+        for batch in _chunks(pending, BULK_SIZE):
+            prepared = list(
+                executor.map(
+                    lambda item: _prepare_search_document(
+                        item,
+                        bedrock=bedrock,
+                        s3=s3,
+                        bucket=bucket,
+                        prefix=prefix,
+                        artifact_dir=artifact_dir,
+                        search=search,
+                    ),
+                    batch,
+                )
+            )
+            lines: list[str] = []
+            batch_ids: list[str] = []
+            for document_id, document in prepared:
+                lines.append(json.dumps(_serverless_bulk_action(index)))
+                lines.append(json.dumps(document, ensure_ascii=False, separators=(",", ":")))
+                batch_ids.append(document_id)
+            body = ("\n".join(lines) + "\n").encode("utf-8")
+            response = client.request(
+                "POST",
+                "_bulk",
+                data=body,
+                content_type="application/x-ndjson",
+            )
+            if response.get("errors"):
+                failures = [item for item in response.get("items", []) if item.get("index", {}).get("error")]
+                raise RuntimeError(f"OpenSearch bulk failed: {failures[:3]}")
+            completed.update(batch_ids)
+            _write_checkpoint(checkpoint_path, manifest_sha256, completed)
+            s3.upload_file(str(checkpoint_path), bucket, checkpoint_key)
+    count = _wait_for_snapshot_count(
+        client, index, snapshot_id, len(documents)
+    )
     if count != len(documents):
         raise RuntimeError(
             f"OpenSearch verification count did not converge: {count} != {len(documents)}"

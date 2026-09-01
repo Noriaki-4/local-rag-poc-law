@@ -90,10 +90,16 @@ AWS_PROFILE=rag-poc-admin infra/aws/scripts/run-bootstrap-task.sh
 ```
 
 OpenSearch投入はmanifest hashを含むcheckpointをS3へbatchごとに保存し、同じIDを`index`するため、one-off
-ECS taskを作り直しても完了batchの次から再開できる。
+ECS taskを作り直しても完了batchの次から再開できる。Serverless vector collectionは明示的な文書`_id`を
+受け付けないため、AWS側の文書IDは自動生成し、安定IDは`contentUnitId`としてsourceへ保持する。
+再実行時はS3 checkpoint件数と実index件数が一致しない場合に停止し、重複投入を許さない。
+ローカルsnapshotのvector engineは`lucene`だが、Serverlessへのindex作成時だけ`faiss`へ変換する。
+元のbge-m3 vectorは成果物に含まずTitanで再生成するため、snapshot本文やsource metadataは変更しない。
 task実行スクリプトは16,459件のTitan再Embeddingを考慮して最大12時間待つ。環境ごとに変更する場合は
 `BOOTSTRAP_WAIT_TIMEOUT_SECONDS`を正の秒数で指定する。待機がtimeoutしてもtaskを停止・削除はしないため、
 表示されたtask ARNの状態を確認してから再実行する。
+Embeddingは既定2 workerで並列実行し、Titanのthrottling時は指数backoffする。実行環境のquotaを確認して
+変更する場合だけ`BOOTSTRAP_EMBEDDING_WORKERS`を1〜32で指定する。bulk投入とcheckpoint更新は直列である。
 Graphは`graphNodeId` / `graphEdgeId`で`MERGE`し、別snapshotが存在するGraphには混在投入せず停止する。
 正規seedやRelation分類はこのコマンドから起動できない。
 
@@ -224,7 +230,7 @@ AWS_PROFILE=rag-poc-admin infra/aws/scripts/build-bootstrap-image.sh
 
 cd infra/aws/cdk
 AWS_PROFILE=rag-poc-admin npm run deploy -- -c environment=poc \
-  local-rag-law-poc-management
+  --exclusively local-rag-law-poc-management
 
 cd ../../..
 AWS_PROFILE=rag-poc-admin infra/aws/scripts/run-bootstrap-task.sh
@@ -239,12 +245,18 @@ AWS_PROFILE=rag-poc-admin infra/aws/scripts/build-agentcore-image.sh
 
 cd infra/aws/cdk
 AWS_PROFILE=rag-poc-admin npm run deploy -- -c environment=poc \
-  local-rag-law-poc-runtime
+  --exclusively local-rag-law-poc-runtime
 ```
 
 Runtime ARNは`AgentCoreRuntimeArn` outputへ出力される。この値をGenU側の
 `agentCoreExternalRuntimes[].arn`へ設定する。このリポジトリからAWSへのdeployとimage pushは
-まだ実行していない。
+`poc`環境で実施している。実resourceと投入状況は[ISSUES.md](ISSUES.md)の確認証跡を正本とする。
+
+現行の`ConfigurationHash`は環境設定全体から生成され、全stackのresource tagへ伝播する。
+OpenSearch Serverless collectionはtag変更でも置換扱いになるため、bootstrap image tagだけの変更でも
+data stackを依存deployへ含めるとcollection置換を要求される。`AWS-013`でstack別fingerprintと既存resourceの
+移行手順を実装するまでは、既存data stackを更新対象に含めずmanagement / runtimeを`--exclusively`でdeployする。
+data stackの変更が必要な場合は、新collectionへの再投入・比較・endpoint切替・rollbackを先に計画する。
 
 ## AWS環境の変更へ対応する原則
 

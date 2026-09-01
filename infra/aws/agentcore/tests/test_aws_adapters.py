@@ -3,7 +3,88 @@ import json
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 import aws_adapters
+
+
+def test_bedrock_converse_falls_back_when_compiled_grammar_is_too_large():
+    requests = []
+
+    class ValidationException(Exception):
+        response = {
+            "Error": {
+                "Code": "ValidationException",
+                "Message": "The compiled grammar is too large, simplify the schema",
+            }
+        }
+
+    class Runtime:
+        def converse(self, **request):
+            requests.append(request)
+            if len(requests) == 1:
+                raise ValidationException()
+            return {"output": {"message": {"content": [{"text": "{}"}]}}}
+
+    result = aws_adapters._bedrock_converse_with_schema_fallback(
+        Runtime(),
+        {
+            "modelId": "haiku",
+            "messages": [],
+            "outputConfig": {
+                "textFormat": {
+                    "type": "json_schema",
+                    "structure": {
+                        "jsonSchema": {"schema": '{"type":"object"}'}
+                    },
+                }
+            },
+        },
+    )
+
+    assert result["output"]["message"]["content"][0]["text"] == "{}"
+    assert "outputConfig" in requests[0]
+    assert "outputConfig" not in requests[1]
+    assert requests[1]["toolConfig"]["tools"][0]["toolSpec"]["inputSchema"] == {
+        "json": {"type": "object"}
+    }
+
+
+def test_bedrock_converse_does_not_hide_other_validation_errors():
+    class ValidationException(Exception):
+        response = {
+            "Error": {"Code": "ValidationException", "Message": "invalid model"}
+        }
+
+    class Runtime:
+        def converse(self, **_request):
+            raise ValidationException()
+
+    with pytest.raises(ValidationException):
+        aws_adapters._bedrock_converse_with_schema_fallback(
+            Runtime(), {"modelId": "haiku"}
+        )
+
+
+def test_bedrock_response_prefers_tool_input_as_json():
+    response = {
+        "output": {
+            "message": {
+                "content": [
+                    {
+                        "toolUse": {
+                            "name": "legal_agent_response",
+                            "input": {"decision": "search"},
+                        }
+                    }
+                ]
+            }
+        }
+    }
+
+    assert json.loads(aws_adapters._bedrock_response_json_text(response)) == {
+        "decision": "search"
+    }
 
 
 def test_neptune_session_adapts_execute_query_results():
@@ -101,3 +182,56 @@ def test_serverless_msearch_uses_supported_get_operation(monkeypatch):
             {"data": b"{}\n"},
         )
     ]
+
+
+def test_serverless_signing_includes_payload_hash(monkeypatch):
+    class AWSRequest:
+        def __init__(self, *, method, url, data, headers):
+            self.method = method
+            self.url = url
+            self.data = data
+            self.headers = headers
+
+    class SigV4Auth:
+        def __init__(self, credentials, service, region):
+            assert credentials.access_key == "access-key"
+            assert service == "aoss"
+            assert region == "ap-northeast-1"
+
+        def add_auth(self, request):
+            request.headers["Authorization"] = "signed"
+            request.headers["X-Amz-Security-Token"] = "session-token"
+
+    monkeypatch.setitem(sys.modules, "botocore", SimpleNamespace())
+    monkeypatch.setitem(
+        sys.modules, "botocore.auth", SimpleNamespace(SigV4Auth=SigV4Auth)
+    )
+    monkeypatch.setitem(
+        sys.modules, "botocore.awsrequest", SimpleNamespace(AWSRequest=AWSRequest)
+    )
+
+    class Credentials:
+        def get_frozen_credentials(self):
+            return SimpleNamespace(
+                access_key="access-key",
+                secret_key="secret-key",
+                token="session-token",
+            )
+
+    adapter = object.__new__(aws_adapters._SignedRequests)
+    adapter.session = SimpleNamespace(get_credentials=lambda: Credentials())
+    captured = {}
+
+    def request(method, url, **kwargs):
+        captured.update({"method": method, "url": url, **kwargs})
+        return SimpleNamespace(ok=True)
+
+    monkeypatch.setattr(aws_adapters.http_requests, "request", request)
+    monkeypatch.setenv("AWS_REGION", "ap-northeast-1")
+
+    adapter.post("https://collection.example/index/_search", json={"size": 1})
+
+    assert captured["headers"]["X-Amz-Content-SHA256"] == (
+        "ce9ae3ceabbd877466092a7ed74e24f1c8eea7672f9cfc6dc5aa259fff248e5e"
+    )
+    assert "X-Amz-Security-Token" in captured["headers"]

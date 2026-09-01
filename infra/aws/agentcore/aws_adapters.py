@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -17,6 +18,54 @@ def _region() -> str:
     if not value:
         raise ValueError("AWS_REGION is required for AgentCore AWS adapters")
     return value
+
+
+def _bedrock_converse_with_schema_fallback(
+    runtime: Any, request: dict[str, Any]
+) -> dict[str, Any]:
+    try:
+        return runtime.converse(**request)
+    except Exception as error:
+        response = getattr(error, "response", {})
+        details = response.get("Error", {}) if isinstance(response, dict) else {}
+        message = str(details.get("Message") or error)
+        if details.get("Code") != "ValidationException" or "compiled grammar is too large" not in message:
+            raise
+        fallback = dict(request)
+        output_config = fallback.pop("outputConfig", {})
+        schema_text = (
+            output_config.get("textFormat", {})
+            .get("structure", {})
+            .get("jsonSchema", {})
+            .get("schema")
+        )
+        if not isinstance(schema_text, str):
+            raise
+        # Non-strict tool use avoids the native compiled-grammar size limit.
+        # The existing LLM client still validates tool input against the same
+        # application schema before accepting the decision.
+        fallback["toolConfig"] = {
+            "tools": [
+                {
+                    "toolSpec": {
+                        "name": "legal_agent_response",
+                        "description": "Return the Legal Agent structured response",
+                        "inputSchema": {"json": json.loads(schema_text)},
+                    }
+                }
+            ],
+            "toolChoice": {"tool": {"name": "legal_agent_response"}},
+        }
+        return runtime.converse(**fallback)
+
+
+def _bedrock_response_json_text(response: dict[str, Any]) -> str:
+    blocks = response.get("output", {}).get("message", {}).get("content", [])
+    for block in blocks:
+        tool_input = block.get("toolUse", {}).get("input")
+        if isinstance(tool_input, dict):
+            return json.dumps(tool_input, ensure_ascii=False)
+    return "".join(str(block.get("text") or "") for block in blocks).strip()
 
 
 def _neptune_rows(payload: Any) -> list[dict[str, Any]]:
@@ -165,13 +214,18 @@ class _SignedRequests:
         if json_body is not None:
             body = json.dumps(json_body, ensure_ascii=False).encode("utf-8")
             headers.setdefault("Content-Type", "application/json")
+        payload = body.encode("utf-8") if isinstance(body, str) else body
+        headers.setdefault(
+            "X-Amz-Content-SHA256",
+            hashlib.sha256(payload or b"").hexdigest(),
+        )
         credentials = self.session.get_credentials().get_frozen_credentials()
-        request = AWSRequest(method=method, url=url, data=body, headers=headers)
+        request = AWSRequest(method=method, url=url, data=payload, headers=headers)
         SigV4Auth(credentials, "aoss", _region()).add_auth(request)
         return http_requests.request(
             method,
             url,
-            data=body,
+            data=payload,
             headers=dict(request.headers),
             **kwargs,
         )
@@ -267,9 +321,9 @@ def _bedrock_llm_class(llm_module: Any) -> type:
             del timeout_sec, effort
             started = perf_counter()
             model_id = os.environ.get("BEDROCK_MODEL_ID", model)
-            response = self._runtime.converse(
-                modelId=model_id,
-                messages=[
+            converse_request = {
+                "modelId": model_id,
+                "messages": [
                     {
                         "role": "user",
                         "content": [
@@ -280,8 +334,8 @@ def _bedrock_llm_class(llm_module: Any) -> type:
                         ],
                     }
                 ],
-                inferenceConfig={"maxTokens": max_tokens, "temperature": 0},
-                outputConfig={
+                "inferenceConfig": {"maxTokens": max_tokens, "temperature": 0},
+                "outputConfig": {
                     "textFormat": {
                         "type": "json_schema",
                         "structure": {
@@ -296,9 +350,11 @@ def _bedrock_llm_class(llm_module: Any) -> type:
                         },
                     }
                 },
+            }
+            response = _bedrock_converse_with_schema_fallback(
+                self._runtime, converse_request
             )
-            blocks = response.get("output", {}).get("message", {}).get("content", [])
-            raw_text = "".join(str(block.get("text") or "") for block in blocks).strip()
+            raw_text = _bedrock_response_json_text(response)
             usage = response.get("usage", {})
             return (
                 raw_text,
