@@ -329,5 +329,8 @@ test("management stack creates a one-off bootstrap task with a separate role", (
   template.hasOutput("BootstrapTaskDefinitionArn", {});
   template.hasOutput("BootstrapSubnetIds", {});
   const policies = template.findResources("AWS::IAM::Policy");
-  expect(JSON.stringify(policies)).not.toContain("s3:DeleteObject");
+  const renderedPolicies = JSON.stringify(policies);
+  expect(renderedPolicies).toContain("neptune-graph:WriteDataViaQuery");
+  expect(renderedPolicies).toContain("neptune-graph:DeleteDataViaQuery");
+  expect(renderedPolicies).not.toContain("s3:DeleteObject");
 });

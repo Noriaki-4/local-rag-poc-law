@@ -74,6 +74,29 @@ def test_serverless_bulk_action_uses_generated_id():
     assert "_id" not in action["index"]
 
 
+def test_neptune_properties_encode_lists_without_mutating_artifact():
+    source = {
+        "citationTexts": ["第七条", "第八条"],
+        "sourceSpanStarts": [1, 10],
+        "citationText": "第七条",
+    }
+
+    result = bootstrap_aws_data._neptune_properties(source)
+
+    assert source["citationTexts"] == ["第七条", "第八条"]
+    assert result["citationText"] == "第七条"
+    assert json.loads(
+        result["citationTexts"].removeprefix(
+            bootstrap_aws_data.NEPTUNE_JSON_LIST_PREFIX
+        )
+    ) == ["第七条", "第八条"]
+    assert json.loads(
+        result["sourceSpanStarts"].removeprefix(
+            bootstrap_aws_data.NEPTUNE_JSON_LIST_PREFIX
+        )
+    ) == [1, 10]
+
+
 def test_embedding_workers_are_bounded(monkeypatch):
     monkeypatch.setenv("BOOTSTRAP_EMBEDDING_WORKERS", "2")
     assert bootstrap_aws_data._embedding_workers() == 2

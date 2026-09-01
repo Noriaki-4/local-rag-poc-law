@@ -107,6 +107,7 @@ export class ManagementStack extends cdk.Stack {
           "neptune-graph:GetGraph",
           "neptune-graph:ReadDataViaQuery",
           "neptune-graph:WriteDataViaQuery",
+          "neptune-graph:DeleteDataViaQuery",
         ],
         resources: [props.neptuneGraph.attrGraphArn],
       }),

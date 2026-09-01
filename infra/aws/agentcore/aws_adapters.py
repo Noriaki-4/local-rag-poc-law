@@ -12,6 +12,8 @@ from typing import Any, Iterator
 
 import requests as http_requests
 
+NEPTUNE_JSON_LIST_PREFIX = "local-rag-json-list:v1:"
+
 
 def _region() -> str:
     value = os.environ.get("AWS_REGION", "").strip()
@@ -68,17 +70,38 @@ def _bedrock_response_json_text(response: dict[str, Any]) -> str:
     return "".join(str(block.get("text") or "") for block in blocks).strip()
 
 
+def _decode_neptune_value(value: Any) -> Any:
+    if isinstance(value, str) and value.startswith(NEPTUNE_JSON_LIST_PREFIX):
+        decoded = json.loads(value.removeprefix(NEPTUNE_JSON_LIST_PREFIX))
+        if not isinstance(decoded, list):
+            raise ValueError("Neptune encoded list property did not contain a list")
+        return [_decode_neptune_value(item) for item in decoded]
+    if isinstance(value, dict):
+        return {key: _decode_neptune_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_decode_neptune_value(item) for item in value]
+    return value
+
+
 def _neptune_rows(payload: Any) -> list[dict[str, Any]]:
     if payload is None:
         return []
     if isinstance(payload, list):
-        return [dict(value) for value in payload if isinstance(value, dict)]
+        return [
+            _decode_neptune_value(dict(value))
+            for value in payload
+            if isinstance(value, dict)
+        ]
     if not isinstance(payload, dict):
         return []
     for key in ("results", "data", "records"):
         values = payload.get(key)
         if isinstance(values, list):
-            return [dict(value) for value in values if isinstance(value, dict)]
+            return [
+                _decode_neptune_value(dict(value))
+                for value in values
+                if isinstance(value, dict)
+            ]
     return []
 
 

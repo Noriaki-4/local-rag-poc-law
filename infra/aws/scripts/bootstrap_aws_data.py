@@ -26,6 +26,7 @@ BULK_SIZE = 25
 GRAPH_BATCH_SIZE = 50
 DEFAULT_EMBEDDING_WORKERS = 2
 EMBEDDING_ATTEMPTS = 6
+NEPTUNE_JSON_LIST_PREFIX = "local-rag-json-list:v1:"
 
 
 def _json(path: Path) -> dict[str, Any]:
@@ -58,6 +59,20 @@ def _sha256(path: Path) -> str:
 def _chunks(values: list[Any], size: int) -> Iterable[list[Any]]:
     for offset in range(0, len(values), size):
         yield values[offset : offset + size]
+
+
+def _neptune_properties(properties: dict[str, Any]) -> dict[str, Any]:
+    """Encode list properties for Neptune openCypher without changing the artifact."""
+
+    result = copy.deepcopy(properties)
+    for key, value in result.items():
+        if isinstance(value, list):
+            result[key] = NEPTUNE_JSON_LIST_PREFIX + json.dumps(
+                value,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+    return result
 
 
 def _embedding_workers() -> int:
@@ -542,7 +557,7 @@ def _load_graph(client: Any, graph_id: str, artifact_dir: Path) -> None:
         labels = tuple(sorted({str(label) for label in item["labels"]}))
         if not labels or not all(LABEL_PATTERN.fullmatch(label) for label in labels):
             raise ValueError(f"invalid Graph labels: {labels}")
-        properties = dict(item["properties"])
+        properties = _neptune_properties(dict(item["properties"]))
         graph_node_id = properties.get("graphNodeId")
         if not graph_node_id:
             raise ValueError("Graph node has no graphNodeId")
@@ -562,7 +577,7 @@ def _load_graph(client: Any, graph_id: str, artifact_dir: Path) -> None:
         edge_type = str(item["relationType"])
         if not LABEL_PATTERN.fullmatch(edge_type):
             raise ValueError(f"invalid Graph relation type: {edge_type}")
-        properties = dict(item["properties"])
+        properties = _neptune_properties(dict(item["properties"]))
         graph_edge_id = properties.get("graphEdgeId")
         if not graph_edge_id:
             raise ValueError("Graph edge has no graphEdgeId")

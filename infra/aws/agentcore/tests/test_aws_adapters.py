@@ -106,6 +106,39 @@ def test_neptune_session_adapts_execute_query_results():
     assert result.single() == {"value": 1}
 
 
+def test_neptune_session_decodes_list_properties_from_nested_maps():
+    encoded = aws_adapters.NEPTUNE_JSON_LIST_PREFIX
+
+    class Client:
+        def execute_query(self, **_request):
+            payload = {
+                "results": [
+                    {
+                        "basis": {
+                            "citationTexts": encoded + '["第七条","第八条"]',
+                            "sourceSpanStarts": encoded + "[1,10]",
+                            "citationText": "第七条",
+                        }
+                    }
+                ]
+            }
+            return {
+                "payload": io.BytesIO(json.dumps(payload).encode())
+            }
+
+    result = aws_adapters._NeptuneSession(Client(), "g-123").run(
+        "MATCH ()-[basis:REFERENCES]->() RETURN properties(basis) AS basis"
+    )
+
+    assert result.single() == {
+        "basis": {
+            "citationTexts": ["第七条", "第八条"],
+            "sourceSpanStarts": [1, 10],
+            "citationText": "第七条",
+        }
+    }
+
+
 def test_neptune_session_rewrites_neo4j_predicates_and_passes_timeout():
     requests = []
 

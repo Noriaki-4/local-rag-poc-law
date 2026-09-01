@@ -91,6 +91,8 @@ hashを再検証する。
   source objectは成果物内の原本PDFを指すS3 URIへ書き換える。HTTPのe-Gov source URLは維持する。
 - Graph 124 node / 172 edgeは小規模なため、専用bulk CSVへ変換せず、parameterized openCypherを
   `graphNodeId` / `graphEdgeId`で冪等実行する。別snapshotが既にあるGraphへは混在投入しない。
+- Neptune openCypherで保存できないlist propertyは、AWS投入adapterでversion付きJSON文字列へ変換する。
+  固定成果物は変更せず、AgentCore Runtime adapterがquery結果をローカルGraph契約のlistへ復元する。
 - private endpointへの投入はapplication subnetのone-off ECS taskから行う。task roleだけにwrite権限を付け、
   利用者向けAgentCore Runtimeのroleはread-onlyのままにする。
 - S3配置、Titan再Embedding、OpenSearch投入、Neptune投入が終わるまで`AWS-016`を完了にしない。
