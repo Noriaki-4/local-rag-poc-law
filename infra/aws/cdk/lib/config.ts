@@ -66,6 +66,17 @@ export interface AgentCoreConfig {
   readonly networkMode: "VPC" | "PUBLIC";
 }
 
+export interface ConfigurationTrackingConfig {
+  readonly dataStackHashOverride: string | null;
+}
+
+export type StackConfigurationScope =
+  | "network"
+  | "data"
+  | "compute"
+  | "management"
+  | "runtime";
+
 export interface EnvironmentConfig {
   readonly schemaVersion: 8;
   readonly projectName: string;
@@ -80,6 +91,7 @@ export interface EnvironmentConfig {
   readonly bootstrapData: BootstrapDataConfig;
   readonly compute: ComputeConfig;
   readonly agentCore: AgentCoreConfig;
+  readonly configurationTracking: ConfigurationTrackingConfig;
   readonly tags: Readonly<Record<string, string>>;
 }
 
@@ -97,6 +109,7 @@ const TOP_LEVEL_KEYS = [
   "bootstrapData",
   "compute",
   "agentCore",
+  "configurationTracking",
   "tags",
 ] as const;
 
@@ -150,6 +163,7 @@ const AGENT_CORE_KEYS = [
   "imageTag",
   "networkMode",
 ] as const;
+const CONFIGURATION_TRACKING_KEYS = ["dataStackHashOverride"] as const;
 
 const LOG_RETENTION_DAYS = new Set([
   1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653,
@@ -246,6 +260,10 @@ export function validateEnvironmentConfig(
     );
   }
   const agentCore = validateAgentCore(config.agentCore, compute, source);
+  const configurationTracking = validateConfigurationTracking(
+    config.configurationTracking,
+    source,
+  );
   const tags = validateTags(config.tags, environmentName, source);
 
   return {
@@ -262,6 +280,7 @@ export function validateEnvironmentConfig(
     bootstrapData,
     compute,
     agentCore,
+    configurationTracking,
     tags,
   };
 }
@@ -542,10 +561,76 @@ export function openSearchServerlessResourceName(
 }
 
 export function configFingerprint(config: EnvironmentConfig): string {
-  return createHash("sha256")
-    .update(JSON.stringify(sortForHash(config)))
-    .digest("hex")
-    .slice(0, 16);
+  return fingerprint(config);
+}
+
+export function desiredStackConfigFingerprint(
+  config: EnvironmentConfig,
+  scope: StackConfigurationScope,
+): string {
+  const identity = {
+    schemaVersion: config.schemaVersion,
+    projectName: config.projectName,
+    environmentName: config.environmentName,
+    account: config.account,
+    region: config.region,
+    tags: config.tags,
+  };
+
+  switch (scope) {
+    case "network":
+      return fingerprint({ identity, network: config.network });
+    case "data":
+      return fingerprint({
+        identity,
+        network: config.network,
+        data: config.data,
+        openSearchServerless: config.openSearchServerless,
+        neptuneAnalytics: config.neptuneAnalytics,
+      });
+    case "compute":
+      return fingerprint({
+        identity,
+        network: config.network,
+        compute: config.compute,
+      });
+    case "management":
+      return fingerprint({
+        identity,
+        network: config.network,
+        data: config.data,
+        openSearchServerless: config.openSearchServerless,
+        neptuneAnalytics: config.neptuneAnalytics,
+        bedrock: config.bedrock,
+        bootstrapData: config.bootstrapData,
+        compute: config.compute,
+      });
+    case "runtime":
+      return fingerprint({
+        identity,
+        network: config.network,
+        data: config.data,
+        openSearchServerless: config.openSearchServerless,
+        neptuneAnalytics: config.neptuneAnalytics,
+        bedrock: config.bedrock,
+        classificationRunId: config.bootstrapData.classificationRunId,
+        compute: config.compute,
+        agentCore: config.agentCore,
+      });
+  }
+}
+
+export function stackConfigFingerprint(
+  config: EnvironmentConfig,
+  scope: StackConfigurationScope,
+): string {
+  if (
+    scope === "data" &&
+    config.configurationTracking.dataStackHashOverride !== null
+  ) {
+    return config.configurationTracking.dataStackHashOverride;
+  }
+  return desiredStackConfigFingerprint(config, scope);
 }
 
 function validateNetwork(
@@ -754,6 +839,31 @@ function validateAgentCore(
   };
 }
 
+function validateConfigurationTracking(
+  value: unknown,
+  source: string,
+): ConfigurationTrackingConfig {
+  const config = requireRecord(value, `${source}.configurationTracking`);
+  requireExactKeys(
+    config,
+    CONFIGURATION_TRACKING_KEYS,
+    `${source}.configurationTracking`,
+  );
+  if (config.dataStackHashOverride === null) {
+    return { dataStackHashOverride: null };
+  }
+  const dataStackHashOverride = requireString(
+    config.dataStackHashOverride,
+    `${source}.configurationTracking.dataStackHashOverride`,
+  );
+  if (!/^[0-9a-f]{16}$/.test(dataStackHashOverride)) {
+    throw new Error(
+      `${source}.configurationTracking.dataStackHashOverride must be a 16 character lowercase hexadecimal hash or null`,
+    );
+  }
+  return { dataStackHashOverride };
+}
+
 function validateTags(
   value: unknown,
   environmentName: string,
@@ -842,6 +952,13 @@ function requireInteger(
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function fingerprint(value: unknown): string {
+  return createHash("sha256")
+    .update(JSON.stringify(sortForHash(value)))
+    .digest("hex")
+    .slice(0, 16);
 }
 
 function sortForHash(value: unknown): unknown {

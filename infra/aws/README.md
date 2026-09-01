@@ -252,11 +252,18 @@ Runtime ARNは`AgentCoreRuntimeArn` outputへ出力される。この値をGenU�
 `agentCoreExternalRuntimes[].arn`へ設定する。このリポジトリからAWSへのdeployとimage pushは
 `poc`環境で実施している。実resourceと投入状況は[ISSUES.md](ISSUES.md)の確認証跡を正本とする。
 
-現行の`ConfigurationHash`は環境設定全体から生成され、全stackのresource tagへ伝播する。
-OpenSearch Serverless collectionはtag変更でも置換扱いになるため、bootstrap image tagだけの変更でも
-data stackを依存deployへ含めるとcollection置換を要求される。`AWS-013`でstack別fingerprintと既存resourceの
-移行手順を実装するまでは、既存data stackを更新対象に含めずmanagement / runtimeを`--exclusively`でdeployする。
-data stackの変更が必要な場合は、新collectionへの再投入・比較・endpoint切替・rollbackを先に計画する。
+`ConfigurationHash`はstackごとに、そのstackと依存先が使用する設定だけから生成する。bootstrap image tagは
+management stack、AgentCore image tagはruntime stackだけのhashを変更し、どちらもdata stackのhashを変更しない。
+
+既存`poc`のdata stackは、OpenSearch Serverless collectionのtag変更による置換を避けるため、
+`configurationTracking.dataStackHashOverride`を実resourceと同じ`d165b6c70fb0b264`へ固定している。この値は
+既存resourceをIaCの新しい追跡方式へ移すための一時的なpinであり、新しい環境では`null`にする。既存data stackで
+値を変更または解除する前にCloudFormation change setを作成し、collectionとGraphの`Replacement`が`False`である
+ことを確認する。置換が必要なdata設定変更ではpinで差分を隠さず、新resourceへの再投入・比較・endpoint切替・
+rollbackを先に計画する。
+
+この修正をAWSへ反映し、data stackに置換がないことを確認するまでは、投入中resourceを更新対象に含めず、
+management / runtimeの更新には引き続き`--exclusively`を使用する。
 
 ## AWS環境の変更へ対応する原則
 
@@ -277,8 +284,9 @@ data stackの変更が必要な場合は、新collectionへの再投入・比較
 
 アプリケーションは環境別設定を直接読まず、deploy時に渡される環境変数、Secrets、IaC outputから
 接続情報を受け取る。AWSサービス固有の違いはadapter境界へ閉じ込め、検索・Agent契約を変更しない。
-各stackには設定内容から生成した`ConfigurationHash` tagを付け、どの環境設定から作られたresourceかを
-CloudFormationとAWS resourceの両方で追跡できるようにする。
+各stackには、そのstackが使用する設定内容から生成した`ConfigurationHash` tagを付け、どの環境設定から作られた
+resourceかをCloudFormationとAWS resourceの両方で追跡できるようにする。既存のstateful resourceだけは上記の
+移行用overrideを許可し、通常は自動生成したhashを使用する。
 
 環境別設定にはschemaまたはvalidationを用意し、未定義値、許可しない組合せ、別account向けの
 誤deployをplan前に検出する。秘密値は環境別設定へ保存せず、Secrets Manager等への参照だけを持つ。
@@ -293,7 +301,8 @@ CloudFormationとAWS resourceの両方で追跡できるようにする。
 変更中の課題と完了条件は[ISSUES.md](ISSUES.md)で管理し、採用済み構成を変更した場合は
 確認証跡に対象環境、構成version、IaC planまたはdiff、検証結果を残す。
 
-環境を追加するときは`config/environments/poc.json`をコピーし、別の`environmentName`で保存する。
+環境を追加するときは`config/environments/poc.json`をコピーし、別の`environmentName`で保存する。その際、既存
+`poc`専用の`configurationTracking.dataStackHashOverride`は必ず`null`へ戻す。
 同じ環境のaccountやregionを変更する場合もこのファイルだけを変更し、CDK本体は変更しない。
 `network.availabilityZoneIds`には、対象regionでAgentCoreが対応するAZ IDを2個または3個指定する。
 AZ IDはAWSアカウント間で一貫するため、アカウント固有の`ap-northeast-1a`等は指定しない。

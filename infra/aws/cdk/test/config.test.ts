@@ -1,7 +1,9 @@
 import {
   configFingerprint,
+  desiredStackConfigFingerprint,
   EnvironmentConfig,
   openSearchServerlessResourceName,
+  stackConfigFingerprint,
   validateCdkEnvironment,
   validateEnvironmentConfig,
 } from "../lib/config";
@@ -70,6 +72,9 @@ const VALID_CONFIG: EnvironmentConfig = {
     imageRepositoryName: "agent-api",
     imageTag: "agentcore-test",
     networkMode: "VPC",
+  },
+  configurationTracking: {
+    dataStackHashOverride: null,
   },
   tags: {
     Project: "local-rag-poc-law",
@@ -271,6 +276,66 @@ test("offline synthesis does not require AWS credentials", () => {
 test("configuration fingerprint changes with an environment value", () => {
   const changed = { ...VALID_CONFIG, region: "ap-northeast-3" };
   expect(configFingerprint(changed)).not.toBe(configFingerprint(VALID_CONFIG));
+});
+
+test("data fingerprint ignores bootstrap and runtime image changes", () => {
+  const changed: EnvironmentConfig = {
+    ...VALID_CONFIG,
+    bootstrapData: {
+      ...VALID_CONFIG.bootstrapData,
+      imageTag: "snapshot-bootstrap-v2",
+    },
+    agentCore: {
+      ...VALID_CONFIG.agentCore,
+      imageTag: "agentcore-v2",
+    },
+  };
+  expect(desiredStackConfigFingerprint(changed, "data")).toBe(
+    desiredStackConfigFingerprint(VALID_CONFIG, "data"),
+  );
+  expect(desiredStackConfigFingerprint(changed, "management")).not.toBe(
+    desiredStackConfigFingerprint(VALID_CONFIG, "management"),
+  );
+  expect(desiredStackConfigFingerprint(changed, "runtime")).not.toBe(
+    desiredStackConfigFingerprint(VALID_CONFIG, "runtime"),
+  );
+});
+
+test("data fingerprint changes with a data resource setting", () => {
+  const changed: EnvironmentConfig = {
+    ...VALID_CONFIG,
+    openSearchServerless: {
+      ...VALID_CONFIG.openSearchServerless,
+      standbyReplicas: "ENABLED",
+    },
+  };
+  expect(desiredStackConfigFingerprint(changed, "data")).not.toBe(
+    desiredStackConfigFingerprint(VALID_CONFIG, "data"),
+  );
+});
+
+test("data hash override preserves a deployed stateful resource tag", () => {
+  const pinned: EnvironmentConfig = {
+    ...VALID_CONFIG,
+    configurationTracking: {
+      dataStackHashOverride: "d165b6c70fb0b264",
+    },
+  };
+  expect(stackConfigFingerprint(pinned, "data")).toBe("d165b6c70fb0b264");
+  expect(stackConfigFingerprint(pinned, "management")).toBe(
+    desiredStackConfigFingerprint(pinned, "management"),
+  );
+});
+
+test("rejects an invalid data stack hash override", () => {
+  expect(() =>
+    validateEnvironmentConfig({
+      ...VALID_CONFIG,
+      configurationTracking: {
+        dataStackHashOverride: "D165",
+      },
+    }),
+  ).toThrow("must be a 16 character lowercase hexadecimal hash or null");
 });
 
 test("bounds derived OpenSearch Serverless resource names", () => {

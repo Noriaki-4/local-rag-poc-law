@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import * as cdk from "aws-cdk-lib";
 import {
-  configFingerprint,
   loadEnvironmentConfig,
   resourcePrefix,
+  stackConfigFingerprint,
+  StackConfigurationScope,
   validateCdkEnvironment,
 } from "../lib/config";
 import { ComputeStack } from "../lib/compute-stack";
@@ -68,11 +69,14 @@ managementStack.addStackDependency(networkStack);
 managementStack.addStackDependency(dataStack);
 managementStack.addStackDependency(computeStack);
 
-const stacks: cdk.Stack[] = [
-  networkStack,
-  dataStack,
-  computeStack,
-  managementStack,
+const stacks: Array<{
+  readonly stack: cdk.Stack;
+  readonly scope: StackConfigurationScope;
+}> = [
+  { stack: networkStack, scope: "network" },
+  { stack: dataStack, scope: "data" },
+  { stack: computeStack, scope: "compute" },
+  { stack: managementStack, scope: "management" },
 ];
 if (config.agentCore.enabled) {
   const runtimeStack = new RuntimeStack(app, `${prefix}-runtime`, {
@@ -89,10 +93,10 @@ if (config.agentCore.enabled) {
   runtimeStack.addStackDependency(networkStack);
   runtimeStack.addStackDependency(dataStack);
   runtimeStack.addStackDependency(computeStack);
-  stacks.push(runtimeStack);
+  stacks.push({ stack: runtimeStack, scope: "runtime" });
 }
 
-for (const stack of stacks) {
+for (const { stack, scope } of stacks) {
   for (const [key, value] of Object.entries(config.tags)) {
     cdk.Tags.of(stack).add(key, value);
   }
@@ -100,7 +104,10 @@ for (const stack of stacks) {
     "ConfigurationSchemaVersion",
     String(config.schemaVersion),
   );
-  cdk.Tags.of(stack).add("ConfigurationHash", configFingerprint(config));
+  cdk.Tags.of(stack).add(
+    "ConfigurationHash",
+    stackConfigFingerprint(config, scope),
+  );
 }
 
 app.synth();

@@ -65,6 +65,9 @@
     "imageTag": "agentcore-bootstrap-v3",
     "networkMode": "VPC"
   },
+  "configurationTracking": {
+    "dataStackHashOverride": "d165b6c70fb0b264"
+  },
   "tags": {
     "Project": "local-rag-poc-law",
     "Environment": "poc",

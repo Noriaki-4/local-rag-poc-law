@@ -72,6 +72,9 @@ const CONFIG: EnvironmentConfig = {
     imageTag: "agentcore-test",
     networkMode: "VPC",
   },
+  configurationTracking: {
+    dataStackHashOverride: null,
+  },
   tags: {
     Project: "local-rag-poc-law",
     Environment: "test",
