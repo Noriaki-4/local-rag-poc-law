@@ -169,12 +169,39 @@ def apply_hypothesis_revision(
 
     for work_item_id in revised_work_item_ids:
         current = work_items[work_item_id]
-        if current.state == "resolved":
+        if current.state != "resolved":
+            continue
+        current_hypotheses = tuple(
+            hypothesis
+            for hypothesis in hypotheses.values()
+            if hypothesis.work_item_id == work_item_id
+        )
+        has_open_child = any(
+            item.parent_work_item_id == work_item_id and item.state == "open"
+            for item in work_items.values()
+        )
+        if (
+            not current_hypotheses
+            or has_open_child
+            or any(
+                hypothesis.judgment == "unresolved"
+                or hypothesis.gaps
+                or not hypothesis.evidence_ids
+                for hypothesis in current_hypotheses
+            )
+        ):
             work_items[work_item_id] = _validated_copy(
                 current,
                 state="open",
                 resolution=None,
             )
+            continue
+        work_items[work_item_id] = _validated_copy(
+            current,
+            basis_hypothesis_ids=tuple(
+                hypothesis.hypothesis_id for hypothesis in current_hypotheses
+            ),
+        )
 
     stale_request_ids = tuple(
         request.request_id

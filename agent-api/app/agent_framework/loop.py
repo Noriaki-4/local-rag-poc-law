@@ -1917,6 +1917,7 @@ def _defer_actions_until_candidate_review(
     deferred_request_ids = {
         request.request_id
         for request in decision.tool_requests
+        if request.work_item_id in work_item_ids
     }
     if not deferred_request_ids:
         return decision

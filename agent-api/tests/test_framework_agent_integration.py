@@ -830,7 +830,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "488"
+    assert diagnostic_records[0]["profileVersion"] == "489"
     assert diagnostic_records[0]["runElapsedMs"] >= 0
     assert diagnostic_records[0]["recordedAt"].endswith("+00:00")
     assert len(diagnostic_records[0]["questionHash"]) == 64
@@ -841,7 +841,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "488"
+    assert transport_input["profileVersion"] == "489"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -1715,7 +1715,7 @@ def test_graph_review_moves_to_another_hypothesis_after_integrated_fetch() -> No
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "488"
+    assert profile.version == "489"
     assert "要件、制限、例外又は追加手続も求めていると広げません" in (
         profile.solver_research.system_prompt
     )
@@ -2012,7 +2012,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "488"
+    assert profile.version == "489"
     assert prompt.rindex("## 出力") > prompt.rindex(
         "</solver_context>"
     )
@@ -2063,7 +2063,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "488"
+    assert profile.version == "489"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -6575,8 +6575,12 @@ def test_observation_prompt_limits_follow_up_to_work_item_scope() -> None:
         profile,
     )
 
-    assert "質問への回答に関係しない参照先" in rendered.instructions
-    assert "Hypothesisの判断に必要な未確認事項" in rendered.instructions
+    assert "本文に委任、準用、定義、参照又は例外があること自体" in (
+        rendered.instructions
+    )
+    assert "WorkItemへの回答が変わる又は必要な限定を示せない場合" in (
+        rendered.instructions
+    )
     assert "今回の本文で確認できた項目の`gap_id`だけ" in rendered.instructions
     assert "新しい未確認事項だけを`add_gaps[]`" in (
         rendered.instructions
@@ -6713,7 +6717,9 @@ def test_observation_prompt_keeps_question_scoped_delegation_open() -> None:
         profile,
     )
 
-    assert "Hypothesisの判断に必要な未確認事項" in rendered.instructions
+    assert "委任された実施内容を確認するまで`not_required`にしません" in (
+        rendered.instructions
+    )
     assert "今回の本文で確認できた項目の`gap_id`だけ" in rendered.instructions
     assert "親規定から具体化規定を探す場合は`from_subject`" in (
         rendered.instructions
@@ -6750,12 +6756,14 @@ def test_observation_prompt_rejects_confirmed_dependency_with_lower_norm_gap(
     assert profile is not None
     rendered = render_observation_integration_model_call(projected, profile)
 
-    assert "未解決の既存gapと`add_gaps[]`、取得本文から" in rendered.instructions
+    assert "未解決の既存gapと`add_gaps[]`から下位規範の状態" in (
+        rendered.instructions
+    )
     assert "`terminal_text_confirmed`と併存させません" in (
         rendered.instructions
     )
     assert rendered.instructions.index("既存の`gaps[]`を1件ずつ本文と照合します") < (
-        rendered.instructions.index("未解決の既存gapと`add_gaps[]`、取得本文から")
+        rendered.instructions.index("未解決の既存gapと`add_gaps[]`から下位規範の状態")
     )
     assert "gapsとして残す場合" in rendered.output_schema["properties"][
         "dependency_decisions"
@@ -7843,6 +7851,85 @@ def test_solver_context_stops_carrying_search_candidate_after_fetch() -> None:
     assert context.search_candidates == ()
     assert "law-test-article-2" not in context.fetchable_article_ids
     assert navigation_evidence_id not in context.navigation_evidence_ids
+
+
+def test_solver_context_does_not_reintroduce_fetched_article_from_search_excerpt(
+) -> None:
+    search_request = ToolRequest(
+        request_id="search-1",
+        work_item_id="w1",
+        tool_name="legal_search",
+        arguments={"query": "確認語", "doc_types": ["law"]},
+        purpose="候補を探す",
+        hypothesis_ids=("h1",),
+    )
+    fetch_request = ToolRequest(
+        request_id="fetch-1",
+        work_item_id="w1",
+        tool_name="fetch_articles",
+        arguments={"article_ids": ["law-test-article-2"]},
+        purpose="候補本文を取得する",
+        hypothesis_ids=("h1",),
+    )
+    navigation = Evidence(
+        evidence_id="search-nav-1",
+        source_ref="opensearch://search-nav-1",
+        content="第2条の検索抜粋",
+        created_cycle=1,
+        metadata={
+            "articleId": "law-test-article-2",
+            "citationEligible": False,
+        },
+    )
+    body = Evidence(
+        evidence_id="body-1",
+        source_ref="opensearch://body-1",
+        content="第2条の本文",
+        created_cycle=1,
+        metadata={
+            "articleId": "law-test-article-2",
+            "citationEligible": True,
+        },
+    )
+    state = CaseState(
+        case_id="case-fetched-search-excerpt",
+        question="質問",
+        research_cycle_count=1,
+        work_items=(WorkItem(work_item_id="w1", question="確認する"),),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h1",
+                work_item_id="w1",
+                statement="確認命題",
+            ),
+        ),
+        tool_requests=(search_request, fetch_request),
+        evidence=(navigation, body),
+        tool_results=(
+            ToolResult(
+                request_id=search_request.request_id,
+                status="succeeded",
+                evidence_ids=(navigation.evidence_id,),
+                cycle_no=1,
+            ),
+            ToolResult(
+                request_id=fetch_request.request_id,
+                status="succeeded",
+                evidence_ids=(body.evidence_id,),
+                cycle_no=1,
+            ),
+        ),
+    )
+
+    context = build_solver_context(
+        state,
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+    )
+
+    assert context.search_candidates == ()
+    assert "law-test-article-2" not in context.fetchable_article_ids
 
 
 def test_fresh_search_review_does_not_mix_prior_deferred_candidates() -> None:

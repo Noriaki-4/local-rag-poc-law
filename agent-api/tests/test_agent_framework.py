@@ -661,11 +661,13 @@ def test_observation_defers_new_actions_until_pending_candidates_are_reviewed(
         work_item_ids=frozenset({"w1"}),
     )
 
-    assert deferred.tool_requests == ()
+    assert tuple(request.request_id for request in deferred.tool_requests) == (
+        "next-w2",
+    )
     assert {
         item.work_item_id: item.action_request_id
         for item in deferred.dependency_decisions
-    } == {"w1": None, "w2": None}
+    } == {"w1": None, "w2": "next-w2"}
 
 
 def test_load_evidence_grounding_result_is_integrated_before_other_results() -> None:

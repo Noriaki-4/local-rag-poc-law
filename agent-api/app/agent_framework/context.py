@@ -1168,7 +1168,7 @@ def build_solver_context(
             ]
         )
     )
-    fetchable_article_ids = tuple(
+    candidate_article_ids = tuple(
         dict.fromkeys(
             [
                 *(
@@ -1198,7 +1198,7 @@ def build_solver_context(
         recent_results=unreviewed_search_results,
         recent_requests_by_id=recent_requests_by_id,
         evidence_by_id=evidence_by_id,
-        fetchable_article_ids=fetchable_article_ids,
+        fetchable_article_ids=candidate_article_ids,
         fetched_article_ids_by_work_item=fetched_by_work_item,
     )
     fresh_search_request_ids = tuple(
@@ -1223,6 +1223,38 @@ def build_solver_context(
         fresh_search_candidates
         if fresh_search_request_ids
         else carried_search_candidates
+    )
+    passthrough_navigation_article_ids = tuple(
+        dict.fromkeys(
+            article_id
+            for result in recent_results
+            if (request := recent_requests_by_id.get(result.request_id)) is not None
+            and request.tool_name not in {"legal_search", "legal_graph_neighbors"}
+            for evidence_id in result.evidence_ids
+            if (evidence := evidence_by_id.get(evidence_id)) is not None
+            and evidence.metadata.get("citationEligible") is False
+            for article_id in _evidence_article_ids(evidence)
+            if article_id not in fetched_by_work_item.get(request.work_item_id, ())
+        )
+    )
+    allowed_fetchable_article_ids = {
+        *(item.article_id for item in search_candidates),
+        *graph_fetchable_article_ids,
+        *passthrough_navigation_article_ids,
+    }
+    fetchable_article_ids = tuple(
+        dict.fromkeys(
+            [
+                *(
+                    article_id
+                    for article_id in candidate_article_ids
+                    if article_id in allowed_fetchable_article_ids
+                ),
+                *(item.article_id for item in search_candidates),
+                *graph_fetchable_article_ids,
+                *passthrough_navigation_article_ids,
+            ]
+        )
     )
     manifest = tuple(
         EvidenceManifestItem(

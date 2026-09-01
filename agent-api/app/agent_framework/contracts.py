@@ -81,8 +81,9 @@ class HypothesisGapAddition(FrameworkModel):
         min_length=1,
         max_length=300,
         description=(
-            "取得本文から、このHypothesisの判断に新たに必要だと判明した"
-            "未確認の具体的な規律要素。gap_idはProgramが発行する。"
+            "取得本文から、このHypothesisの判断又は所属WorkItemへの回答に"
+            "新たに必要だと判明した未確認の具体的な規律要素。"
+            "gap_idはProgramが発行する。"
         ),
     )
 

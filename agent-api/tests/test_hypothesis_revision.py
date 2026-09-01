@@ -255,6 +255,127 @@ def test_revision_replaces_current_hypothesis_and_keeps_old_version_out_of_view(
     assert "hypothesis_history" not in next_context.model_dump()
 
 
+def test_completed_revision_keeps_resolved_work_item_consistent() -> None:
+    state = CaseState(
+        case_id="revision-completed-current-version",
+        question="転売制限を確認する。",
+        research_cycle_count=1,
+        work_items=(
+            WorkItem(
+                work_item_id="wi-1",
+                question="転売制限の内容は何か。",
+                state="resolved",
+                resolution="既存命題を確認済み",
+                basis_hypothesis_ids=("h-1",),
+            ),
+        ),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h-1",
+                work_item_id="wi-1",
+                statement="転売は制限される。",
+                judgment="contradicted",
+                evidence_ids=("e-1",),
+            ),
+        ),
+        evidence=(
+            Evidence(
+                evidence_id="e-1",
+                source_ref="source-1",
+                content=(
+                    "株券について転売制限を要件としていない本文"
+                ),
+                created_cycle=1,
+            ),
+        ),
+    )
+    revision = HypothesisRevisionDecision(
+        decision_reason="本文に合わせて見立てを修正する",
+        revise_hypotheses=(
+            HypothesisRevisionUpdate(
+                hypothesis_id="h-1",
+                statement=(
+                    "提示本文では株券の転売制限を要件としていない。"
+                ),
+                judgment="supported",
+                evidence_ids=("e-1",),
+            ),
+        ),
+    )
+
+    updated = apply_hypothesis_revision(
+        state,
+        revision,
+        material_evidence_ids={"e-1"},
+        eligible_work_item_ids={"wi-1"},
+        eligible_hypothesis_ids={"h-1"},
+    )
+
+    assert updated.work_items[0].state == "resolved"
+    assert updated.work_items[0].basis_hypothesis_ids == ("h-1",)
+    assert updated.hypotheses[0].judgment == "supported"
+    assert updated.hypotheses[0].gaps == ()
+
+
+def test_incomplete_revision_reopens_resolved_work_item() -> None:
+    state = CaseState(
+        case_id="revision-incomplete-current-version",
+        question="条件を確認する。",
+        research_cycle_count=1,
+        work_items=(
+            WorkItem(
+                work_item_id="wi-1",
+                question="条件は何か。",
+                state="resolved",
+                resolution="既存命題を確認済み",
+                basis_hypothesis_ids=("h-1",),
+            ),
+        ),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h-1",
+                work_item_id="wi-1",
+                statement="条件Aが必要である。",
+                judgment="contradicted",
+                evidence_ids=("e-1",),
+            ),
+        ),
+        evidence=(
+            Evidence(
+                evidence_id="e-1",
+                source_ref="source-1",
+                content="条件の一部だけを示す本文",
+                created_cycle=1,
+            ),
+        ),
+    )
+    revision = HypothesisRevisionDecision(
+        decision_reason="未確認条件を残して見立てを修正する",
+        revise_hypotheses=(
+            HypothesisRevisionUpdate(
+                hypothesis_id="h-1",
+                statement="条件Bが必要である。",
+                judgment="unresolved",
+                evidence_ids=("e-1",),
+                add_gaps=(
+                    {"description": "条件Bの具体的内容"},
+                ),
+            ),
+        ),
+    )
+
+    updated = apply_hypothesis_revision(
+        state,
+        revision,
+        material_evidence_ids={"e-1"},
+        eligible_work_item_ids={"wi-1"},
+        eligible_hypothesis_ids={"h-1"},
+    )
+
+    assert updated.work_items[0].state == "open"
+    assert updated.work_items[0].resolution is None
+
+
 def test_revision_invalidates_only_derived_state_from_the_old_version() -> None:
     state = CaseState(
         case_id="revision-derived-state",
