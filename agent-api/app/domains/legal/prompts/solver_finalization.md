@@ -20,7 +20,8 @@
 - `work_tree[]`：各IDの確認事項と現在の状態です。
 - `hypotheses[]`：確認済み・未確認を含む現在のHypothesisです。
 - `verified_hypothesis_ids`：本文根拠により`supported`又は`contradicted`と判断済みのHypothesis IDです。
-- `grounding_evidence_ids`：Hypothesisの確認済み部分又は解決済み下位規範判断に使用できる引用IDです。
+- `grounding_evidence_ids`：確認済み部分又は調査終了直前に取得した本文に使用できる引用IDです。
+- `evidence_hypothesis_candidates[]`：本文統合前に時間切れとなった取得本文とHypothesisの対応候補です。支持・反証は未確定です。
 - `required_answer_evidence_ids`：解決済みWorkItemの回答に必ず含める引用IDです。
 - `material_evidence[]`：`grounding_evidence_ids`に対応する確認済み本文です。
 - `non_work_item_requirements`：限定回答でも守る、回答全体への明示要求です。
@@ -37,7 +38,7 @@
 ### 手順
 
 1. `resolved_work_item_ids`と`open_work_item_ids`を確認します。
-2. `verified_hypothesis_ids`にある命題と、未解決HypothesisでもEvidenceにより確認できた部分を、本文が示す範囲だけ回答します。所属WorkItemがopenなら、そのWorkItem全体が解決したとは扱いません。
+2. `verified_hypothesis_ids`にある命題と、未解決HypothesisでもEvidenceにより確認できた部分を、本文が示す範囲だけ回答します。`evidence_hypothesis_candidates[]`があれば対応する本文を直接評価し、命題を支持又は限定する場合だけ回答と引用に使います。所属WorkItemがopenなら、そのWorkItem全体が解決したとは扱いません。
 3. `grounding_evidence_ids=[]`なら、仮説の内容を回答へ転記せず、法的結論を確認できなかった旨だけを回答します。
 4. `open_work_item_ids`を回答の`unresolved_work_item_ids`へ、入力の`unresolved_hypothesis_ids`を回答の同名項目へ、そのまま列挙します。
 5. `graph_review_ledger`に未処理の`relevant_deferred`があれば、全件を`deferred_frontier_resolutions`へ書きます。

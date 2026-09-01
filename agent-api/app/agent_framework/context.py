@@ -692,6 +692,14 @@ class SolverContext(FrameworkModel):
             "発見元・検索抜粋の対応。本文取得対象としては未選択。"
         ),
     )
+    deferred_search_candidate_article_ids: tuple[str, ...] = Field(
+        default=(),
+        exclude=True,
+        description=(
+            "Search Reviewで本文取得対象に選ばれず、後続の新しい意味判断へ"
+            "未選択候補として再混入させないArticle ID。"
+        ),
+    )
     work_tree: tuple[WorkTreeItem, ...] = Field(
         description="WorkItemの階層、状態、対応HypothesisをProgramが投影した一覧。",
     )
@@ -1207,6 +1215,19 @@ def build_solver_context(
         for review in state.search_candidate_reviews
         for request_id in review.search_request_ids
     }
+    selected_search_article_ids = {
+        article_id
+        for review in state.search_candidate_reviews
+        for article_id in review.selected_article_ids
+    }
+    deferred_search_candidate_article_ids = tuple(
+        dict.fromkeys(
+            article_id
+            for review in state.search_candidate_reviews
+            for article_id in review.deferred_article_ids
+            if article_id not in selected_search_article_ids
+        )
+    )
     unreviewed_search_results = tuple(
         result
         for result in recent_results
@@ -1513,6 +1534,9 @@ def build_solver_context(
         navigation_evidence_ids=navigation_ids,
         fetchable_article_ids=fetchable_article_ids,
         search_candidates=search_candidates,
+        deferred_search_candidate_article_ids=(
+            deferred_search_candidate_article_ids
+        ),
         work_tree=work_tree,
         hypotheses=state.hypotheses,
         evidence_hypothesis_candidates=evidence_hypothesis_candidates,

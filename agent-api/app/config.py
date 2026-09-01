@@ -397,6 +397,10 @@ class Settings:
         os.getenv("AGENT_FRAMEWORK_EVIDENCE_INTEGRATION_MODEL")
         or agent_framework_integration_model
     )
+    agent_framework_dependency_assessment_model = (
+        os.getenv("AGENT_FRAMEWORK_DEPENDENCY_ASSESSMENT_MODEL")
+        or agent_framework_evidence_integration_model
+    )
     # 旧設定名は既存環境との互換性のためだけに残す。
     agent_framework_finalize_model = agent_framework_integration_model
     agent_framework_reviewer_model = (

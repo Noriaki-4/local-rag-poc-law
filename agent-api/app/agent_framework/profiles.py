@@ -19,6 +19,7 @@ class ModelCallProfile(FrameworkModel):
     followup_completion_check_prompt: str | None = None
     dependency_system_prompt: str | None = None
     dependency_completion_check_prompt: str | None = None
+    dependency_model: str | None = Field(default=None, min_length=1, max_length=200)
     dependency_action_system_prompt: str | None = None
     dependency_action_completion_check_prompt: str | None = None
     final_answer_check_system_prompt: str | None = None

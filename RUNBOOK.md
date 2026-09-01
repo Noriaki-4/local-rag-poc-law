@@ -1117,6 +1117,11 @@ Lunaで合格後、必要な場合だけ同じfixtureと合格条件のままHai
 `AGENT_FRAMEWORK_EVIDENCE_INTEGRATION_MODEL`を指定した場合だけ、取得本文をHypothesisへ反映する
 `evidence_integration`にそのモデルを使う。未指定時は`AGENT_FRAMEWORK_INTEGRATION_MODEL`へ戻る。
 Cycle Close、通常Integration、最終回答はこの専用設定の対象ではない。
+`AGENT_FRAMEWORK_DEPENDENCY_ASSESSMENT_MODEL`は、取得本文だけで回答できるか、同じ確認事項を
+定める下位規範本文が残るかを判断する完了監査だけを別モデルにする任意設定である。未指定時は
+`AGENT_FRAMEWORK_EVIDENCE_INTEGRATION_MODEL`、さらに未指定なら通常の統合モデルを使う。
+Haikuで複数項目を持つ長い規定の委任先を見落とす場合に限り、この監査をSonnet等で比較する。
+質問分解、探索、本文統合、Cycle Close、最終回答及びLunaの設定には影響しない。
 旧`AGENT_FRAMEWORK_FINALIZE_MODEL`も互換設定として読めるが、新規設定ではintegration名を使う。
 全Solver呼出しへ短い`solver_common.md`を合成する。Toolを使える処理だけへ`solver_tools.md`、
 完了判断を行う処理へ`solver_completion.md`を追加する。実行手順は`research / integration /

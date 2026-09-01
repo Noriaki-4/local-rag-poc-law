@@ -1519,6 +1519,22 @@ def apply_solver_decision(
             if dependency.status == "resolved"
             for evidence_id in dependency.basis_evidence_ids
         )
+        if finalize_only:
+            pending_fetch_request_ids = {
+                request.request_id
+                for request in state.tool_requests
+                if request.tool_name == "fetch_articles"
+                and request.hypothesis_ids
+                and request.request_id
+                not in state.integrated_tool_result_request_ids
+            }
+            citable_basis_evidence_ids.update(
+                evidence_id
+                for result in state.tool_results
+                if result.request_id in pending_fetch_request_ids
+                and result.status == "succeeded"
+                for evidence_id in result.evidence_ids
+            )
         unsupported_citations = (
             set(decision.answer.citation_ids) - citable_basis_evidence_ids
         )

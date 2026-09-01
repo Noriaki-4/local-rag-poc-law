@@ -577,7 +577,7 @@ class StructuredJSONModelAdapter:
                     ),
                     observation,
                     profile,
-                    started_at=started_at,
+                    started_at=monotonic(),
                     prior_input_tokens=input_tokens,
                     prior_output_tokens=output_tokens,
                     completion_audit=True,
@@ -586,6 +586,37 @@ class StructuredJSONModelAdapter:
             input_tokens = _sum_optional_tokens(input_tokens, audit_input)
             output_tokens = _sum_optional_tokens(output_tokens, audit_output)
             attempt_count += audit_attempts
+        fallback_contexts = _missing_observation_action_contexts(
+            context,
+            observation,
+        )
+        action_profile = profile.model_copy(update={"context_projection": "full"})
+        for fallback_context in fallback_contexts:
+            try:
+                action_result = self.solve(fallback_context, action_profile)
+            except (ModelProtocolError, TimeoutError):
+                continue
+            observation = _merge_observation_integrations(
+                (
+                    observation,
+                    ObservationIntegrationDecision(
+                        decision_reason=action_result.decision.decision_reason,
+                        dependency_decisions=(
+                            action_result.decision.dependency_decisions
+                        ),
+                        tool_requests=action_result.decision.tool_requests,
+                    ),
+                )
+            )
+            input_tokens = _sum_optional_tokens(
+                input_tokens,
+                action_result.input_tokens,
+            )
+            output_tokens = _sum_optional_tokens(
+                output_tokens,
+                action_result.output_tokens,
+            )
+            attempt_count += action_result.attempt_count
         observation = _derive_observation_work_item_updates(context, observation)
         closed_work_item_ids = {
             item.work_item_id
@@ -664,6 +695,9 @@ class StructuredJSONModelAdapter:
         def solve_one(
             projected_context: SolverContext,
         ) -> tuple[DependencyAssessmentDecision, int | None, int | None, int]:
+            dependency_profile = profile.model_copy(
+                update={"model": profile.dependency_model or profile.model}
+            )
             projected_observation = _project_observation_decision(
                 observation,
                 context=projected_context,
@@ -671,7 +705,7 @@ class StructuredJSONModelAdapter:
             dependency_call = render_dependency_assessment_model_call(
                 projected_context,
                 projected_observation,
-                profile,
+                dependency_profile,
             )
             remaining_timeout = profile.timeout_sec - (monotonic() - started_at)
             if remaining_timeout <= 1:
@@ -685,7 +719,7 @@ class StructuredJSONModelAdapter:
             if self._diagnostics is not None:
                 self._diagnostics.record_transport_input(
                     context=projected_context,
-                    profile=profile,
+                    profile=dependency_profile,
                     rendered=dependency_call,
                     repair_index=0,
                     transport_stage="dependency_assessment",
@@ -695,7 +729,7 @@ class StructuredJSONModelAdapter:
                 dependency_result = self._client.generate_structured_json(
                     prompt=dependency_call.request,
                     schema=dependency_call.output_schema,
-                    model=profile.model,
+                    model=dependency_profile.model,
                     max_tokens=profile.max_output_tokens,
                     timeout_sec=max(1, round(remaining_timeout)),
                 )
@@ -1149,8 +1183,30 @@ class StructuredJSONModelAdapter:
                     *(item[2] for item in observation_results)
                 ),
             )
+
+        merged_observation = _merge_observation_integrations(
+            [item[0] for item in results]
+        )
+        fallback_contexts = _missing_observation_action_contexts(
+            context,
+            merged_observation,
+        )
+        fallback_results = []
+        for fallback_context in fallback_contexts:
+            if profile.timeout_sec - (monotonic() - started_at) <= 1:
+                break
+            try:
+                fallback_results.append(solve_pending_action(fallback_context))
+            except (ModelProtocolError, TimeoutError):
+                # 本文評価済みの状態は保持し、次のSolver turnで再開できる。
+                continue
+        if fallback_results:
+            results.extend(fallback_results)
+            merged_observation = _merge_observation_integrations(
+                [item[0] for item in results]
+            )
         return (
-            _merge_observation_integrations([item[0] for item in results]),
+            merged_observation,
             _sum_optional_tokens(*(item[1] for item in results)),
             _sum_optional_tokens(*(item[2] for item in results)),
             sum(item[3] for item in results),
@@ -1596,6 +1652,23 @@ def _project_finalization_context(context: SolverContext) -> SolverContext:
         if decision.status == "resolved"
         for evidence_id in decision.basis_evidence_ids
     )
+    recent_grounding_ids = {
+        evidence_id
+        for result in context.recent_tool_results
+        if result.status == "succeeded"
+        for evidence_id in result.evidence_ids
+        if evidence_id in context.grounding_evidence_ids
+    }
+    candidate_article_ids = {
+        item.article_id for item in context.evidence_hypothesis_candidates
+    }
+    pending_candidate_evidence_ids = {
+        item.evidence_id
+        for item in context.material_evidence
+        if item.evidence_id in recent_grounding_ids
+        and item.metadata.get("articleId") in candidate_article_ids
+    }
+    citable_basis_evidence_ids.update(pending_candidate_evidence_ids)
     visible_grounding_ids = tuple(
         evidence_id
         for evidence_id in context.grounding_evidence_ids
@@ -1606,6 +1679,11 @@ def _project_finalization_context(context: SolverContext) -> SolverContext:
         )
     )
     visible_grounding_id_set = set(visible_grounding_ids)
+    visible_candidate_article_ids = {
+        item.metadata.get("articleId")
+        for item in context.material_evidence
+        if item.evidence_id in pending_candidate_evidence_ids
+    }
     visible_hypotheses = tuple(
         item
         for item in context.hypotheses
@@ -1656,7 +1734,11 @@ def _project_finalization_context(context: SolverContext) -> SolverContext:
             "omitted_evidence_ids": (),
             "fetchable_article_ids": (),
             "search_candidates": (),
-            "evidence_hypothesis_candidates": (),
+            "evidence_hypothesis_candidates": tuple(
+                item
+                for item in context.evidence_hypothesis_candidates
+                if item.article_id in visible_candidate_article_ids
+            ),
             "required_search_review_request_ids": (),
             "dependency_decisions": tuple(
                 item
@@ -1682,16 +1764,18 @@ def _dependency_action_blocked_tool_names(
         )
     }
     if _dependency_action_has_scoped_fetch_candidate(context):
-        blocked.add("legal_search")
+        blocked.update({"legal_search", "legal_graph_neighbors"})
     elif _dependency_action_requires_graph(context):
-        blocked.add("legal_search")
+        blocked.update({"legal_search", "fetch_articles"})
+    else:
+        blocked.update({"fetch_articles", "legal_graph_neighbors"})
     return frozenset(blocked)
 
 
 def _dependency_action_has_scoped_fetch_candidate(
     context: SolverContext,
 ) -> bool:
-    """対象作業の探索で得た未取得候補がModel入力にあるか。"""
+    """候補評価で対象Hypothesisへ対応付けた未取得Articleがあるか。"""
 
     required_ids = set(context.required_dependency_work_item_ids)
     required_hypothesis_ids = {
@@ -1700,12 +1784,14 @@ def _dependency_action_has_scoped_fetch_candidate(
         if hypothesis.work_item_id in required_ids
     }
     fetchable_ids = set(context.fetchable_article_ids)
+    deferred_ids = set(context.deferred_search_candidate_article_ids)
     return any(
         candidate.article_id in fetchable_ids
-        and _search_candidate_matches_scope(
-            candidate,
-            work_item_ids=required_ids,
-            hypothesis_ids=required_hypothesis_ids,
+        and candidate.article_id not in deferred_ids
+        and bool(
+            required_hypothesis_ids.intersection(
+                candidate.matched_hypothesis_ids
+            )
         )
         for candidate in context.search_candidates
     )
@@ -1729,7 +1815,7 @@ def _search_candidate_matches_scope(
 def _project_dependency_action_context(
     context: SolverContext,
 ) -> SolverContext:
-    """候補評価で対象Hypothesisに対応した未取得Articleだけを提示する。"""
+    """候補評価で対応済みかつ未取得のArticleだけを提示する。"""
 
     required_work_item_ids = set(context.required_dependency_work_item_ids)
     required_hypothesis_ids = {
@@ -1737,13 +1823,39 @@ def _project_dependency_action_context(
         for item in context.hypotheses
         if item.work_item_id in required_work_item_ids
     }
+    used_evidence_ids = {
+        evidence_id
+        for hypothesis in context.hypotheses
+        if hypothesis.work_item_id in required_work_item_ids
+        for evidence_id in hypothesis.evidence_ids
+    }
+    used_article_ids = {
+        article_id
+        for evidence in context.material_evidence
+        if evidence.evidence_id in used_evidence_ids
+        and isinstance(
+            article_id := evidence.metadata.get("articleId"),
+            str,
+        )
+    }
+    used_article_ids.update(
+        article_id
+        for work_item_id in required_work_item_ids
+        for article_id in context.fetched_resource_ids_by_work_item.get(
+            work_item_id,
+            (),
+        )
+    )
+    deferred_ids = set(context.deferred_search_candidate_article_ids)
     candidates = tuple(
         candidate
         for candidate in context.search_candidates
-        if _search_candidate_matches_scope(
-            candidate,
-            work_item_ids=required_work_item_ids,
-            hypothesis_ids=required_hypothesis_ids,
+        if candidate.article_id not in used_article_ids
+        and candidate.article_id not in deferred_ids
+        and bool(
+            required_hypothesis_ids.intersection(
+                candidate.matched_hypothesis_ids
+            )
         )
     )
     candidate_ids = {candidate.article_id for candidate in candidates}
@@ -1824,7 +1936,7 @@ def _canonicalize_dependency_graph_roots(
     payload: dict[str, Any],
     context: SolverContext,
 ) -> dict[str, Any]:
-    """Paragraph・Item Evidence参照を所属Article IDへ戻す。"""
+    """下位規範ActionのGraph起点とIMPLEMENTS方向を正規化する。"""
 
     evidence_to_article = {
         evidence.evidence_id: article_id
@@ -1855,16 +1967,25 @@ def _canonicalize_dependency_graph_roots(
         if not isinstance(article_ids, list):
             normalized_requests.append(request)
             continue
+        normalized_arguments = {
+            **arguments,
+            "article_ids": [
+                evidence_to_article.get(article_id, article_id)
+                for article_id in article_ids
+            ],
+        }
+        if (
+            normalized_arguments.get("mode") == "semantic_assertion"
+            and normalized_arguments.get("predicate") == "IMPLEMENTS"
+        ):
+            # この関数はneeds_actionとなった下位規範の探索だけで使う。
+            # IMPLEMENTSのSUBJECTは親規定、OBJECTは具体化規定なので、
+            # 親規定を起点とする方向は意味判断なしに一意に定まる。
+            normalized_arguments["direction"] = "from_subject"
         normalized_requests.append(
             {
                 **request,
-                "arguments": {
-                    **arguments,
-                    "article_ids": [
-                        evidence_to_article.get(article_id, article_id)
-                        for article_id in article_ids
-                    ],
-                },
+                "arguments": normalized_arguments,
             }
         )
     return {**payload, "tool_requests": normalized_requests}
@@ -2034,14 +2155,7 @@ def _solver_context_payload(
         ]
         return {name: payload[name] for name in dependency_action_fields}
     if projection == "finalization":
-        verified_evidence_ids = set(
-            _verified_answer_evidence_ids(
-                context,
-                ObservationIntegrationDecision(
-                    decision_reason="逐次統合済み状態から引用可能な根拠を投影する。"
-                ),
-            )
-        )
+        visible_evidence_ids = set(context.grounding_evidence_ids)
         payload["material_evidence"] = [
             {
                 "evidence_id": item["evidence_id"],
@@ -2049,7 +2163,7 @@ def _solver_context_payload(
                 "title": item["title"],
             }
             for item in payload["material_evidence"]
-            if item["evidence_id"] in verified_evidence_ids
+            if item["evidence_id"] in visible_evidence_ids
         ]
         material_evidence_ids = {
             item["evidence_id"] for item in payload["material_evidence"]
@@ -2102,6 +2216,7 @@ def _solver_context_payload(
             "hypotheses",
             "grounding_evidence_ids",
             "material_evidence",
+            "evidence_hypothesis_candidates",
             "graph_review_ledger",
             "contract_feedback",
             "resolved_work_item_ids",
@@ -2369,6 +2484,8 @@ def _staged_research_transport_schema(
                     "description": (
                         "法令の解釈又は適用について個別に結論を出す"
                         "1つの法的論点を、自然言語の問いで表したもの。"
+                        "この項目だけを後続処理へ渡しても判断できるよう、"
+                        "結論を変え得る質問中の事実や限定を残す。"
                         "質問が上位概念だけを示す場合は、質問にない構成要素を"
                         "予想して列挙せず、同じ抽象度を保つ。"
                     ),
@@ -3300,6 +3417,72 @@ def _pending_dependency_action_contexts(
     return tuple(projected)
 
 
+def _missing_observation_action_contexts(
+    context: SolverContext,
+    observation: ObservationIntegrationDecision,
+) -> tuple[SolverContext, ...]:
+    """本文統合が選ばなかったneeds_actionだけを単一タスクへ戻す。"""
+
+    requested_work_item_ids = {
+        request.work_item_id for request in observation.tool_requests
+    }
+    observed_work_item_ids = {
+        item.work_item_id for item in _active_observation_items(context)[0]
+    }
+    open_work_item_ids = {
+        item.work_item_id
+        for item in context.work_tree
+        if item.state == "open"
+    }
+    pending_review_work_item_ids = pending_candidate_review_work_item_ids(
+        context
+    )
+    missing_ids = tuple(
+        dict.fromkeys(
+            item.work_item_id
+            for item in observation.dependency_decisions
+            if item.status == "needs_action"
+            and item.action_request_id is None
+            and item.work_item_id not in requested_work_item_ids
+            and item.work_item_id in observed_work_item_ids
+            and item.work_item_id in open_work_item_ids
+            and item.work_item_id not in pending_review_work_item_ids
+        )
+    )
+    if not missing_ids or context.cycle_close_required:
+        return ()
+
+    work_tree, hypotheses = _project_observation_integration_state(
+        context,
+        observation,
+    )
+    dependencies = _merged_dependency_decisions(
+        context.dependency_decisions,
+        observation.dependency_decisions,
+    )
+    projected = []
+    for work_item_id in missing_ids:
+        quota = context.remaining_fetch_capacity_by_work_item.get(
+            work_item_id,
+            context.remaining_fetch_capacity,
+        )
+        projected.append(
+            context.model_copy(
+                update={
+                    "work_tree": work_tree,
+                    "hypotheses": hypotheses,
+                    "dependency_decisions": dependencies,
+                    "required_dependency_work_item_ids": (work_item_id,),
+                    "remaining_fetch_capacity": quota,
+                    "remaining_fetch_capacity_by_work_item": {
+                        work_item_id: quota
+                    },
+                }
+            )
+        )
+    return tuple(projected)
+
+
 def _project_observation_decision(
     observation: ObservationIntegrationDecision,
     *,
@@ -3341,11 +3524,13 @@ def _merge_observation_integrations(
         return ObservationIntegrationDecision(
             decision_reason="評価対象のopen WorkItemはない。"
         )
-    dependency_decisions = [
-        decision.model_dump(mode="json")
-        for item in observations
-        for decision in item.dependency_decisions
-    ]
+    dependency_decisions_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in observations:
+        for decision in item.dependency_decisions:
+            dependency_decisions_by_key[
+                (decision.dependency_kind, decision.work_item_id)
+            ] = decision.model_dump(mode="json")
+    dependency_decisions = list(dependency_decisions_by_key.values())
     tool_requests = [
         request.model_dump(mode="json")
         for item in observations
@@ -6587,14 +6772,7 @@ def _solver_common_transport_schema(context: SolverContext) -> dict[str, Any]:
     schema = _solver_compact_transport_schema(context)
     properties = schema["properties"]
     finalization_citation_ids = (
-        _verified_answer_evidence_ids(
-            context,
-            ObservationIntegrationDecision(
-                decision_reason="確認済み根拠を最終回答へ投影する。"
-            ),
-        )
-        if context.finalize_only
-        else ()
+        context.grounding_evidence_ids if context.finalize_only else ()
     )
     graph_review_mode = bool(
         context.graph_review_batch.candidates and not context.finalize_only
