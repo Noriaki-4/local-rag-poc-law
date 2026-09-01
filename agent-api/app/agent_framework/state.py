@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from hashlib import sha256
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -55,12 +56,77 @@ def merge_hypothesis_evidence_ids(
     return tuple(dict.fromkeys((*existing, *additions)))
 
 
+def hypothesis_gap_id(hypothesis_id: str, description: str) -> str:
+    """Hypothesis内のgap本文から、順序に依存しない安定IDを作る。"""
+
+    digest = sha256(
+        f"{hypothesis_id}\0{description}".encode("utf-8")
+    ).hexdigest()[:16]
+    return f"gap-{digest}"
+
+
 class FrameworkModel(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         frozen=True,
         str_strip_whitespace=True,
     )
+
+
+class HypothesisGap(FrameworkModel):
+    gap_id: str = Field(
+        min_length=1,
+        max_length=160,
+        description=(
+            "未確認事項を更新時に参照する安定ID。ProgramがHypothesis IDと"
+            "descriptionから生成し、LLMは新規発行しない。"
+        ),
+    )
+    description: str = Field(
+        min_length=1,
+        max_length=300,
+        description="法令本文でまだ確認すべき具体的な規律要素。",
+    )
+
+
+def structured_hypothesis_gaps(
+    hypothesis_id: str,
+    gaps: tuple[str, ...],
+) -> tuple[HypothesisGap, ...]:
+    """保存済み文字列をLLM更新用のID付きread modelへ投影する。"""
+
+    return tuple(
+        HypothesisGap(
+            gap_id=hypothesis_gap_id(hypothesis_id, description),
+            description=description,
+        )
+        for description in gaps
+    )
+
+
+def apply_hypothesis_gap_diff(
+    hypothesis_id: str,
+    existing: tuple[str, ...],
+    additions: tuple[str, ...],
+    resolved_gap_ids: tuple[str, ...],
+) -> tuple[str, ...]:
+    """既知gapだけを解決し、新規gapを重複なく追記する。"""
+
+    known_by_id = {
+        hypothesis_gap_id(hypothesis_id, description): description
+        for description in existing
+    }
+    unknown_ids = set(resolved_gap_ids) - set(known_by_id)
+    if unknown_ids:
+        raise ValueError(
+            f"unknown hypothesis gap IDs: {sorted(unknown_ids)}"
+        )
+    remaining = tuple(
+        description
+        for gap_id, description in known_by_id.items()
+        if gap_id not in set(resolved_gap_ids)
+    )
+    return tuple(dict.fromkeys((*remaining, *additions)))
 
 
 class AnswerOption(FrameworkModel):

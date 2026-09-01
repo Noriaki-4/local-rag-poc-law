@@ -288,6 +288,94 @@ def test_legal_search_uses_article_aggregation_and_document_scope() -> None:
     assert execution.evidence[1].metadata["articleId"] is None
 
 
+def test_legal_search_adds_bounded_article_context_to_a_paragraph_match() -> None:
+    class ParagraphMatchSearch(FakeArticleSearch):
+        def search_requirement_specs(
+            self,
+            specs,
+            *,
+            user_clearance_level: int,
+            timeout_sec: float,
+        ) -> dict[str, list[dict[str, Any]]]:
+            del timeout_sec
+            assert user_clearance_level == 2
+            return {
+                spec.requirement_id: [
+                    {
+                        "articleId": "law-ordinance-article-9",
+                        "chunks": [
+                            {
+                                "contentUnitId": "law-ordinance-article-9-paragraph-3",
+                                "articleContentUnitId": "law-ordinance-article-9",
+                                "documentId": "law-ordinance",
+                                "docType": "law",
+                                "heading": "第九条 第3項",
+                                "text": "別の公告について定める一致箇所。",
+                            }
+                        ],
+                    }
+                ]
+                for spec in specs
+            }
+
+        def get_article_navigation_contexts(
+            self,
+            article_ids,
+            user_clearance_level: int,
+            *,
+            max_chunks_per_article: int,
+            timeout_sec: float,
+        ) -> dict[str, list[dict[str, Any]]]:
+            assert article_ids == ["law-ordinance-article-9"]
+            assert user_clearance_level == 2
+            assert max_chunks_per_article == 3
+            assert timeout_sec == 12.5
+            return {
+                article_ids[0]: [
+                    {
+                        "contentUnitId": "law-ordinance-article-9-paragraph-1",
+                        "articleContentUnitId": article_ids[0],
+                        "heading": "第九条 第1項",
+                        "text": "公開買付開始公告は電子公告により行う。",
+                    },
+                    {
+                        "contentUnitId": "law-ordinance-article-9-paragraph-2",
+                        "articleContentUnitId": article_ids[0],
+                        "heading": "第九条 第2項",
+                        "text": "日刊新聞紙による公告の方法を定める。",
+                    },
+                    {
+                        "contentUnitId": "law-ordinance-article-9-paragraph-3",
+                        "articleContentUnitId": article_ids[0],
+                        "heading": "第九条 第3項",
+                        "text": "別の公告について定める一致箇所。",
+                    },
+                ]
+            }
+
+    execution = LegalSearchTool(
+        ParagraphMatchSearch(),  # type: ignore[arg-type]
+        user_clearance_level=2,
+        top_k=8,
+    ).execute(
+        _request(
+            "legal_search",
+            {"query": "公告 方法", "doc_types": ["law"], "document_ids": []},
+        ),
+        cycle_no=1,
+        timeout_sec=12.5,
+    )
+
+    candidate = execution.evidence[0]
+    assert "[Article文脈1（検索一致とは限らない）]" in candidate.content
+    assert "公開買付開始公告は電子公告により行う。" in candidate.content
+    assert "日刊新聞紙による公告の方法を定める。" in candidate.content
+    assert "[一致箇所1]" in candidate.content
+    assert candidate.content.count("別の公告について定める一致箇所。") == 1
+    assert candidate.metadata["matchedChunkCount"] == 1
+    assert candidate.metadata["articleContextChunkCount"] == 2
+
+
 def test_legal_search_resolves_explicit_article_before_ranked_search() -> None:
     class ExplicitArticleSearch(FakeArticleSearch):
         def explicit_article_ids(self, query: str) -> tuple[str, ...]:

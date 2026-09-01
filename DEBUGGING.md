@@ -132,6 +132,10 @@ agent-api/.venv/bin/python scripts/summarize_agent_diagnostic.py \
   --output-dir eval-results/cycle-audits/legal-...
 ```
 
+報告の`hypothesisGapActivity`には、Hypothesisごとのgap追加内容と解消した`gap_id`を
+sequence順に出力します。Cycle Close前に契約違反やtimeoutで停止し、`cycle_checkpoint`がない場合も、
+それ以前のモデル出力からgap差分を確認できます。
+
 警告を見つけたら、該当Cycleの`startSequence`と`decisionSequence`を起点に最小fixtureへ固定します。
 警告を新しい状態値や法令固有の補正条件へ変換しません。
 

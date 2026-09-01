@@ -24,6 +24,8 @@ from app.opensearch_client import OpenSearchClient, RequirementSearchSpec
 
 _SEARCH_NAVIGATION_TEXT_LIMIT = 400
 _DETAILED_ARTICLE_NAVIGATION_TEXT_LIMIT = 5000
+_ARTICLE_NAVIGATION_CONTEXT_CHUNKS = 3
+_ARTICLE_NAVIGATION_CONTEXT_TEXT_LIMIT = 1600
 _MAX_ARTICLES_PER_FETCH = 5
 _MAX_GRAPH_ROOT_ARTICLES = 4
 
@@ -256,6 +258,27 @@ class LegalSearchTool:
             user_clearance_level=self._user_clearance_level,
             timeout_sec=max(0.1, timeout_sec),
         )
+        article_contexts: dict[str, list[dict[str, Any]]] = {}
+        context_loader = getattr(
+            self._client, "get_article_navigation_contexts", None
+        )
+        if callable(context_loader):
+            article_ids = list(
+                dict.fromkeys(
+                    str(candidate.get("articleId") or "")
+                    for spec in specs
+                    if spec.doc_type == "law"
+                    for candidate in batches.get(spec.requirement_id, [])
+                    if candidate.get("articleId")
+                )
+            )
+            if article_ids:
+                article_contexts = context_loader(
+                    article_ids,
+                    self._user_clearance_level,
+                    max_chunks_per_article=_ARTICLE_NAVIGATION_CONTEXT_CHUNKS,
+                    timeout_sec=max(0.1, timeout_sec),
+                )
         results = []
         for spec in specs:
             for candidate_index, candidate in enumerate(
@@ -266,6 +289,9 @@ class LegalSearchTool:
                     representative = (
                         _law_navigation_candidate(
                             chunks,
+                            article_context_chunks=article_contexts.get(
+                                str(candidate.get("articleId") or ""), []
+                            ),
                             detail_chunk_limit=(
                                 len(chunks) if candidate_index == 0 else 1
                             ),
@@ -504,6 +530,9 @@ def _evidence_from_results(
                     "sourceObjectUri": source.get("sourceObjectUri"),
                     "sourcePage": source.get("sourcePage"),
                     "matchedChunkCount": source.get("matchedChunkCount"),
+                    "articleContextChunkCount": source.get(
+                        "articleContextChunkCount"
+                    ),
                     "navigationTextTruncated": bool(
                         source.get("navigationTextTruncated")
                     ),
@@ -517,24 +546,61 @@ def _law_navigation_candidate(
     chunks: list[dict[str, Any]],
     *,
     detail_chunk_limit: int,
+    article_context_chunks: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Article候補の上位一致chunkを、意味選別せず検索順位どおり提示する。"""
+    """検索一致chunkと、候補判断に必要な限定Article文脈を提示する。"""
     selected = chunks[: max(1, detail_chunk_limit)]
     representative = dict(selected[0])
-    if len(selected) == 1:
+    selected_ids = {
+        str(chunk.get("contentUnitId") or "") for chunk in selected
+    }
+    context_chunks = [
+        chunk
+        for chunk in (article_context_chunks or [])
+        if str(chunk.get("contentUnitId") or "") not in selected_ids
+    ]
+    if len(selected) == 1 and not context_chunks:
         return _bounded_navigation_document(representative)
 
     content_parts: list[str] = []
     content_unit_ids: list[str] = []
+    context_content_unit_ids: list[str] = []
     base_text = str(selected[0].get("text") or "").strip()
     repeated_prefix = base_text.lstrip("0123456789０１２３４５６７８９ ")
     truncated = False
+    context_chars = 0
+    for chunk_index, chunk in enumerate(context_chunks, start=1):
+        content_unit_id = str(chunk.get("contentUnitId") or "")
+        chunk_text = str(chunk.get("text") or "").strip()
+        if not content_unit_id or not chunk_text:
+            continue
+        heading = str(chunk.get("heading") or "").strip()
+        label = f"[Article文脈{chunk_index}（検索一致とは限らない）]"
+        if heading:
+            label = f"{label} {heading}"
+        part = f"{label}\n{chunk_text}"
+        remaining_context_chars = (
+            _ARTICLE_NAVIGATION_CONTEXT_TEXT_LIMIT - context_chars
+        )
+        if remaining_context_chars <= len(label) + 1:
+            truncated = True
+            break
+        context_part_truncated = len(part) > remaining_context_chars
+        if context_part_truncated:
+            part = part[:remaining_context_chars]
+            truncated = True
+        content_parts.append(part)
+        context_content_unit_ids.append(content_unit_id)
+        context_chars += len(part) + 2
+        if context_part_truncated:
+            break
+
     for chunk_index, chunk in enumerate(selected, start=1):
         content_unit_id = str(chunk.get("contentUnitId") or "")
         text = str(chunk.get("text") or "").strip()
         if not content_unit_id or not text:
             continue
-        if content_parts and repeated_prefix and text.startswith(repeated_prefix):
+        if chunk_index > 1 and repeated_prefix and text.startswith(repeated_prefix):
             text = text[len(repeated_prefix) :].lstrip()
             if not text:
                 continue
@@ -551,20 +617,25 @@ def _law_navigation_candidate(
         if remaining_chars <= len(label) + 1:
             truncated = True
             break
-        if len(part) > remaining_chars:
+        matched_part_truncated = len(part) > remaining_chars
+        if matched_part_truncated:
             part = part[:remaining_chars]
             truncated = True
         content_parts.append(part)
-        if truncated:
+        if matched_part_truncated:
             break
 
     if content_parts:
         representative["text"] = "\n\n".join(content_parts)
         representative["matchedChunkCount"] = len(content_unit_ids)
+        representative["articleContextChunkCount"] = len(
+            context_content_unit_ids
+        )
         representative["navigationTextTruncated"] = truncated
         signature = json.dumps(
             {
                 "contentUnitIds": content_unit_ids,
+                "articleContextContentUnitIds": context_content_unit_ids,
                 "content": representative["text"],
             },
             ensure_ascii=False,

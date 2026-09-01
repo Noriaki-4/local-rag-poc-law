@@ -42,6 +42,7 @@ from app.agent_framework.contracts import (
     CycleCloseDecision,
     DependencyActionDecision,
     DependencyAssessmentDecision,
+    HypothesisGapAddition,
     HypothesisUpdate,
     HypothesisRevisionDecision,
     ObservationIntegrationDecision,
@@ -86,7 +87,9 @@ from app.agent_framework.state import (
     UnreviewedGraphResolution,
     ToolRequest,
     WorkItem,
+    apply_hypothesis_gap_diff,
     merge_hypothesis_evidence_ids,
+    structured_hypothesis_gaps,
 )
 from app.agent_framework.tool_contracts import ToolDefinition
 from app.agent_framework.work_item_sessions import (
@@ -1611,12 +1614,27 @@ def _dependency_action_has_scoped_fetch_candidate(
     fetchable_ids = set(context.fetchable_article_ids)
     return any(
         candidate.article_id in fetchable_ids
-        and bool(
-            required_hypothesis_ids.intersection(
-                candidate.matched_hypothesis_ids
-            )
+        and _search_candidate_matches_scope(
+            candidate,
+            work_item_ids=required_ids,
+            hypothesis_ids=required_hypothesis_ids,
         )
         for candidate in context.search_candidates
+    )
+
+
+def _search_candidate_matches_scope(
+    candidate: SearchCandidateArticle,
+    *,
+    work_item_ids: set[str],
+    hypothesis_ids: set[str],
+) -> bool:
+    """候補の採用先または発見元が現在の作業範囲と重なるか。"""
+
+    return bool(
+        hypothesis_ids.intersection(candidate.matched_hypothesis_ids)
+        or hypothesis_ids.intersection(candidate.discovery_hypothesis_ids)
+        or work_item_ids.intersection(candidate.discovery_work_item_ids)
     )
 
 
@@ -1634,8 +1652,10 @@ def _project_dependency_action_context(
     candidates = tuple(
         candidate
         for candidate in context.search_candidates
-        if required_hypothesis_ids.intersection(
-            candidate.matched_hypothesis_ids
+        if _search_candidate_matches_scope(
+            candidate,
+            work_item_ids=required_work_item_ids,
+            hypothesis_ids=required_hypothesis_ids,
         )
     )
     candidate_ids = {candidate.article_id for candidate in candidates}
@@ -2629,7 +2649,10 @@ def render_hypothesis_revision_model_call(
                 work_item_id=item.work_item_id,
                 statement=item.statement,
                 judgment=item.judgment,
-                gaps=item.gaps,
+                gaps=structured_hypothesis_gaps(
+                    item.hypothesis_id,
+                    item.gaps,
+                ),
             )
             for item in eligible_hypotheses
         ),
@@ -2789,7 +2812,17 @@ def _observation_integration_context_payload(
             for item in active_work_items
         ],
         "hypotheses": [
-            item.model_dump(mode="json") for item in active_hypotheses
+            {
+                **item.model_dump(mode="json"),
+                "gaps": [
+                    gap.model_dump(mode="json")
+                    for gap in structured_hypothesis_gaps(
+                        item.hypothesis_id,
+                        item.gaps,
+                    )
+                ],
+            }
+            for item in active_hypotheses
         ],
         "evidence_hypothesis_candidates": [
             {
@@ -2924,9 +2957,7 @@ def _observation_work_item_contexts(
         search_candidates = tuple(
             item
             for item in context.search_candidates
-            if hypothesis_ids.intersection(
-                item.matched_hypothesis_ids
-            )
+            if hypothesis_ids.intersection(item.matched_hypothesis_ids)
         )
         search_candidate_article_ids = {
             item.article_id for item in search_candidates
@@ -2952,16 +2983,22 @@ def _observation_work_item_contexts(
         existing_evidence_ids = {
             evidence_id
             for hypothesis in hypotheses
+            if hypothesis.gaps
             for evidence_id in hypothesis.evidence_ids
         }
         visible_ids = tuple(
             item.evidence_id
             for item in context.material_evidence
-            if item.evidence_id in observation_grounding_ids
-            and (
-                not has_candidate_mappings
-                or item.metadata.get("articleId") in candidate_article_ids
-                or item.evidence_id in existing_evidence_ids
+            if (
+                item.evidence_id in existing_evidence_ids
+                or (
+                    item.evidence_id in observation_grounding_ids
+                    and (
+                        not has_candidate_mappings
+                        or item.metadata.get("articleId")
+                        in candidate_article_ids
+                    )
+                )
             )
         )
         visible_id_set = set(visible_ids)
@@ -3561,6 +3598,20 @@ def _project_observation_integration_state(
                 "unknown observation Hypothesis update: "
                 f"{update.hypothesis_id}"
             )
+        if update.legacy_replacement_gaps is not None:
+            updated_gaps = tuple(
+                dict.fromkeys(update.legacy_replacement_gaps)
+            )
+        else:
+            try:
+                updated_gaps = apply_hypothesis_gap_diff(
+                    current.hypothesis_id,
+                    current.gaps,
+                    tuple(item.description for item in update.add_gaps),
+                    update.resolve_gap_ids,
+                )
+            except ValueError as exc:
+                raise ModelProtocolError(str(exc)) from exc
         hypotheses[update.hypothesis_id] = current.model_copy(
             update={
                 "judgment": update.judgment,
@@ -3568,7 +3619,7 @@ def _project_observation_integration_state(
                     current.evidence_ids,
                     update.evidence_ids,
                 ),
-                "gaps": update.gaps,
+                "gaps": updated_gaps,
             }
         )
 
@@ -3614,6 +3665,23 @@ def _observation_integration_transport_schema(
         item.hypothesis_id for item in context.hypotheses
     )
     evidence_ids = context.grounding_evidence_ids
+    gap_ids = tuple(
+        gap.gap_id
+        for hypothesis in active_hypotheses
+        for gap in structured_hypothesis_gaps(
+            hypothesis.hypothesis_id,
+            hypothesis.gaps,
+        )
+    )
+    gap_addition = _strict_object(
+        {
+            "description": _described(
+                {"type": "string", "minLength": 1, "maxLength": 300},
+                HypothesisGapAddition,
+                "description",
+            )
+        }
+    )
     hypothesis_update = _strict_object(
         {
             "hypothesis_id": _described(
@@ -3634,14 +3702,19 @@ def _observation_integration_transport_schema(
                 HypothesisUpdate,
                 "evidence_ids",
             ),
-            "gaps": _described(
+            "add_gaps": _described(
                 {
                     "type": "array",
-                    "items": {"type": "string", "maxLength": 300},
+                    "items": gap_addition,
                     "maxItems": 12,
                 },
                 HypothesisUpdate,
-                "gaps",
+                "add_gaps",
+            ),
+            "resolve_gap_ids": _described(
+                _bounded_enum_array(gap_ids, max_items=12),
+                HypothesisUpdate,
+                "resolve_gap_ids",
             ),
         }
     )
@@ -3924,6 +3997,7 @@ def _normalize_observation_integration_payload(
             arguments[list_argument] = list(dict.fromkeys(values))
     if context is not None:
         _normalize_grounding_evidence_aliases(normalized, context)
+        _normalize_legacy_hypothesis_gap_replacements(normalized, context)
     for decision in normalized.get("dependency_decisions") or []:
         if not isinstance(decision, dict):
             continue
@@ -3931,37 +4005,47 @@ def _normalize_observation_integration_payload(
             "terminal_text_missing": "needs_action",
             "terminal_text_confirmed": "resolved",
         }.get(decision.get("status"), decision.get("status"))
-    if context is not None:
-        _preserve_known_gaps_for_missing_dependencies(normalized, context)
     return normalized
 
 
-def _preserve_known_gaps_for_missing_dependencies(
+def _normalize_legacy_hypothesis_gap_replacements(
     payload: dict[str, Any],
     context: SolverContext,
 ) -> None:
-    """末端本文未確認と同時に、既存の未確認事項を消さない。"""
+    """保存済み旧fixtureのgaps全置換を正規の差分契約へ移す。"""
 
-    missing_work_item_ids = {
-        item.get("work_item_id")
-        for item in payload.get("dependency_decisions") or []
-        if isinstance(item, dict) and item.get("status") == "needs_action"
-    }
-    if not missing_work_item_ids:
-        return
     existing_by_id = {
         item.hypothesis_id: item for item in context.hypotheses
     }
     for update in payload.get("update_hypotheses") or []:
-        if not isinstance(update, dict) or update.get("gaps"):
+        if not isinstance(update, dict) or "gaps" not in update:
             continue
+        if "add_gaps" in update or "resolve_gap_ids" in update:
+            raise ModelProtocolError(
+                "hypothesis update cannot mix legacy gaps with gap diffs"
+            )
         existing = existing_by_id.get(update.get("hypothesis_id"))
-        if (
-            existing is not None
-            and existing.work_item_id in missing_work_item_ids
-            and existing.gaps
-        ):
-            update["gaps"] = list(existing.gaps)
+        desired = update.pop("gaps")
+        if existing is None or not isinstance(desired, list):
+            continue
+        desired_descriptions = tuple(
+            item for item in desired if isinstance(item, str)
+        )
+        desired_set = set(desired_descriptions)
+        update["resolve_gap_ids"] = [
+            gap.gap_id
+            for gap in structured_hypothesis_gaps(
+                existing.hypothesis_id,
+                existing.gaps,
+            )
+            if gap.description not in desired_set
+        ]
+        existing_set = set(existing.gaps)
+        update["add_gaps"] = [
+            {"description": description}
+            for description in desired_descriptions
+            if description not in existing_set
+        ]
 
 
 def _normalize_grounding_evidence_aliases(
@@ -4411,13 +4495,7 @@ def _cycle_close_deferred_frontiers(
         for item in projected_work_items
         if item.state == "open"
     }
-    active_deferred = tuple(
-        item
-        for item in context.graph_review_ledger
-        if item.review_status == "relevant_deferred"
-        and item.content_status in {"not_requested", "failed", "timeout"}
-        and item.deferred_resolution_action != "no_longer_needed"
-    )
+    active_deferred = _all_active_deferred_frontiers(context)
     return (
         tuple(
             item
@@ -5305,13 +5383,8 @@ def _solver_transport_schema(context: SolverContext) -> dict:
             ),
         }
     )
-    active_deferred = tuple(
-        item
-        for item in context.graph_review_ledger
-        if item.review_status == "relevant_deferred"
-        and item.content_status in {"not_requested", "failed", "timeout"}
-        and item.deferred_resolution_action != "no_longer_needed"
-    )
+    all_active_deferred = _all_active_deferred_frontiers(context)
+    active_deferred = _llm_active_deferred_frontiers(context)
     deferred_frontier_resolution = _strict_object(
         {
             "frontier_item_id": _described(
@@ -6123,6 +6196,11 @@ def _hypothesis_revision_transport_schema(
     existing_hypothesis_ids = tuple(
         item.hypothesis_id for item in eligible_hypotheses
     )
+    existing_gap_ids = tuple(
+        gap.gap_id
+        for item in eligible_hypotheses
+        for gap in structured_hypothesis_gaps(item.hypothesis_id, item.gaps)
+    )
     shared_fields = {
         "statement": {
             "type": "string",
@@ -6133,12 +6211,6 @@ def _hypothesis_revision_transport_schema(
         "evidence_ids": {
             **_bounded_enum_array(revision_evidence_ids),
             "description": "命題を直接示した取得済み本文Evidence ID。不要なら空配列。",
-        },
-        "gaps": {
-            "type": "array",
-            "items": {"type": "string", "maxLength": 300},
-            "maxItems": 12,
-            "description": "命題を確認するため本文で残る具体的な未確認事項。",
         },
     }
     revision_update = _strict_object(
@@ -6152,6 +6224,26 @@ def _hypothesis_revision_transport_schema(
                 "type": "string",
                 "enum": ["supported", "contradicted", "unresolved"],
                 "description": "更新後の命題を提示本文で評価した現在の判定。",
+            },
+            "add_gaps": {
+                "type": "array",
+                "items": _strict_object(
+                    {
+                        "description": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 300,
+                            "description": "見直しで新たに判明した未確認事項。",
+                        }
+                    }
+                ),
+                "maxItems": 12,
+                "description": "新しい未確認事項の差分。なければ空配列。",
+            },
+            "resolve_gap_ids": {
+                **_bounded_enum_array(existing_gap_ids),
+                "maxItems": 12,
+                "description": "見直しで不要又は確認済みとなった既存gap ID。",
             },
         }
     )
@@ -6168,6 +6260,12 @@ def _hypothesis_revision_transport_schema(
                 "description": "追加先となる既存の非dropped WorkItemのID。",
             },
             **shared_fields,
+            "gaps": {
+                "type": "array",
+                "items": {"type": "string", "maxLength": 300},
+                "maxItems": 12,
+                "description": "新しい命題について本文で残る具体的な未確認事項。",
+            },
         }
     )
     return _strict_object(
@@ -6305,12 +6403,7 @@ def _solver_common_transport_schema(context: SolverContext) -> dict[str, Any]:
             included.add("dependency_decisions")
         if context.graph_review_ledger:
             included.add("frontier_re_adoptions")
-        if any(
-            item.review_status == "relevant_deferred"
-            and item.content_status in {"not_requested", "failed", "timeout"}
-            and item.deferred_resolution_action != "no_longer_needed"
-            for item in context.graph_review_ledger
-        ):
+        if _llm_active_deferred_frontiers(context):
             included.add("deferred_frontier_resolutions")
         if context.graph_review_batch.remaining_unreviewed_count:
             included.add("unreviewed_graph_resolution")
@@ -6373,13 +6466,7 @@ def _finalization_deferred_frontier_transport_schema(
 ) -> dict[str, Any]:
     """Use known Frontier IDs as keys; the Program restores their references."""
 
-    active_deferred = tuple(
-        item
-        for item in context.graph_review_ledger
-        if item.review_status == "relevant_deferred"
-        and item.content_status in {"not_requested", "failed", "timeout"}
-        and item.deferred_resolution_action != "no_longer_needed"
-    )
+    active_deferred = _llm_active_deferred_frontiers(context)
     resolution = _strict_object(
         {
             "action": _described(
@@ -6411,6 +6498,32 @@ def _finalization_deferred_frontier_transport_schema(
             "対応はProgramが既知Frontierから復元する。"
         ),
     }
+
+
+def _all_active_deferred_frontiers(
+    context: SolverContext,
+) -> tuple[GraphReviewLedgerItem, ...]:
+    return tuple(
+        item
+        for item in context.graph_review_ledger
+        if item.review_status == "relevant_deferred"
+        and item.content_status in {"not_requested", "failed", "timeout"}
+        and item.deferred_resolution_action != "no_longer_needed"
+    )
+
+
+def _llm_active_deferred_frontiers(
+    context: SolverContext,
+) -> tuple[GraphReviewLedgerItem, ...]:
+    active = _all_active_deferred_frontiers(context)
+    if not context.finalize_only:
+        return active
+    open_work_item_ids = {
+        item.work_item_id for item in context.work_tree if item.state == "open"
+    }
+    return tuple(
+        item for item in active if item.work_item_id in open_work_item_ids
+    )
 
 
 def _constrain_finalization_citation_ids(
@@ -6445,10 +6558,7 @@ def _constrain_active_deferred_frontier_ids(
 
     active_ids = tuple(
         item.frontier_item_id
-        for item in context.graph_review_ledger
-        if item.review_status == "relevant_deferred"
-        and item.content_status in {"not_requested", "failed", "timeout"}
-        and item.deferred_resolution_action != "no_longer_needed"
+        for item in _llm_active_deferred_frontiers(context)
     )
     if not active_ids:
         return
@@ -7206,7 +7316,28 @@ def _case_update_transport_schema() -> dict[str, Any]:
                 HypothesisUpdate,
                 "evidence_ids",
             ),
-            "gaps": _described(string_array, HypothesisUpdate, "gaps"),
+            "add_gaps": _described(
+                {
+                    "type": "array",
+                    "items": _strict_object(
+                        {
+                            "description": _described(
+                                {"type": "string", "maxLength": 300},
+                                HypothesisGapAddition,
+                                "description",
+                            )
+                        }
+                    ),
+                    "maxItems": 12,
+                },
+                HypothesisUpdate,
+                "add_gaps",
+            ),
+            "resolve_gap_ids": _described(
+                string_array,
+                HypothesisUpdate,
+                "resolve_gap_ids",
+            ),
         }
     )
     impact = _strict_object(
@@ -7564,6 +7695,7 @@ def _normalize_flattened_tool_request_transport(
         "tool_name",
         "purpose",
         "hypothesis_ids",
+        "arguments_json",
     }
     arguments = {
         key: value
@@ -8902,13 +9034,8 @@ def _normalize_absent_context_branches(
     normalized["search_candidate_review"] = None
     if not context.graph_review_ledger:
         normalized["frontier_re_adoptions"] = []
-    active_deferred = tuple(
-        item
-        for item in context.graph_review_ledger
-        if item.review_status == "relevant_deferred"
-        and item.content_status in {"not_requested", "failed", "timeout"}
-        and item.deferred_resolution_action != "no_longer_needed"
-    )
+    all_active_deferred = _all_active_deferred_frontiers(context)
+    active_deferred = _llm_active_deferred_frontiers(context)
     raw_deferred_resolutions = normalized.get("deferred_frontier_resolutions")
     active_deferred_by_id = {
         item.frontier_item_id: item for item in active_deferred
@@ -8950,6 +9077,26 @@ def _normalize_absent_context_branches(
         normalized["deferred_frontier_resolutions"] = canonical_resolutions
     if not active_deferred:
         normalized["deferred_frontier_resolutions"] = []
+    if context.finalize_only:
+        llm_frontier_ids = {
+            item.frontier_item_id for item in active_deferred
+        }
+        automatic_resolutions = [
+            {
+                "frontier_item_id": item.frontier_item_id,
+                "article_id": item.article_id,
+                "work_item_id": item.work_item_id,
+                "hypothesis_id": item.hypothesis_id,
+                "action": "no_longer_needed",
+                "reason": "所属WorkItemが終了済みのため、最終回答後へ保持しない。",
+            }
+            for item in all_active_deferred
+            if item.frontier_item_id not in llm_frontier_ids
+        ]
+        normalized["deferred_frontier_resolutions"] = [
+            *(normalized.get("deferred_frontier_resolutions") or []),
+            *automatic_resolutions,
+        ]
     if context.graph_review_batch.remaining_unreviewed_count == 0:
         normalized["unreviewed_graph_resolution"] = None
     if not context.reviewer_findings:
@@ -8999,7 +9146,7 @@ updateの状態契約:
 - add_work_items要素: work_item_id、parent_work_item_id、question、state、resolution、basis_hypothesis_ids、replaces_work_item_id。statusは使わない。
 - update_work_items要素: work_item_id、state、resolution、basis_hypothesis_ids。
 - add_hypotheses要素: hypothesis_id、work_item_id、statement、judgment、evidence_ids、gaps。statusは使わない。
-- update_hypotheses要素: hypothesis_id、judgment、evidence_ids、gaps。
+- update_hypotheses要素: hypothesis_id、judgment、evidence_ids、add_gaps、resolve_gap_ids。既存gaps全体は返さない。
 - 各差分配列では同じWorkItem IDまたはHypothesis IDを複数回返さず、今回適用する最終差分を1件だけ返す。
 - WorkItemのstate=openは未完了なのでresolution=null、resolved/droppedは終了状態なので空でないresolutionを持つ。
 - next_focus_work_item_idsと各ToolRequest.work_item_idは、このupdate適用後もstate=openのWorkItemだけを参照する。Toolが必要ならWorkItemを閉じない。

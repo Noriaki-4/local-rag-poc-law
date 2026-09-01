@@ -342,8 +342,14 @@
     {
       "evidence_ids": [],
       "gaps": [
-        "株主の数の具体的な基準",
-        "取得する株式の割合の具体的な基準"
+        {
+          "description": "株主の数の具体的な基準",
+          "gap_id": "gap-a6b6b031a41bca90"
+        },
+        {
+          "description": "取得する株式の割合の具体的な基準",
+          "gap_id": "gap-6dc9a8d9d978f400"
+        }
       ],
       "hypothesis_id": "h-1",
       "judgment": "unresolved",

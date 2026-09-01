@@ -130,6 +130,7 @@ from app.agent_framework.state import (
     ToolResult,
     UnreviewedGraphResolution,
     WorkItem,
+    structured_hypothesis_gaps,
 )
 from app.agent_framework.validation import (
     ContractViolation,
@@ -799,9 +800,9 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert llm.calls[5]["schema"]["properties"]["decision_reason"][
         "description"
     ] == contract_field_description(SolverDecision, "decision_reason")
-    assert "未確認" in llm.calls[5]["schema"]["properties"]["update"][
+    assert "新たに判明した未確認事項" in llm.calls[5]["schema"]["properties"]["update"][
         "properties"
-    ]["update_hypotheses"]["items"]["properties"]["gaps"]["description"]
+    ]["update_hypotheses"]["items"]["properties"]["add_gaps"]["description"]
     final_dependency_schema = llm.calls[4]["schema"]["properties"][
         "dependency_decisions"
     ]
@@ -829,7 +830,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "480"
+    assert diagnostic_records[0]["profileVersion"] == "488"
     assert diagnostic_records[0]["runElapsedMs"] >= 0
     assert diagnostic_records[0]["recordedAt"].endswith("+00:00")
     assert len(diagnostic_records[0]["questionHash"]) == 64
@@ -840,7 +841,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "480"
+    assert transport_input["profileVersion"] == "488"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -1714,7 +1715,7 @@ def test_graph_review_moves_to_another_hypothesis_after_integrated_fetch() -> No
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "480"
+    assert profile.version == "488"
     assert "要件、制限、例外又は追加手続も求めていると広げません" in (
         profile.solver_research.system_prompt
     )
@@ -2011,7 +2012,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "480"
+    assert profile.version == "488"
     assert prompt.rindex("## 出力") > prompt.rindex(
         "</solver_context>"
     )
@@ -2062,7 +2063,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "480"
+    assert profile.version == "488"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -3934,10 +3935,57 @@ def test_dependency_action_fetch_schema_uses_each_work_item_capacity() -> None:
         json.loads(fixture_path.read_text(encoding="utf-8"))["solverContext"]
     )
     work_item_ids = context.required_dependency_work_item_ids[:2]
+    hypotheses_by_work_item = {
+        work_item_id: {
+            item.hypothesis_id
+            for item in context.hypotheses
+            if item.work_item_id == work_item_id
+        }
+        for work_item_id in work_item_ids
+    }
+    candidates = (
+        SearchCandidateArticle(
+            article_id="article-1",
+            document_id=None,
+            title=None,
+            headings=(),
+            discovery_work_item_ids=(work_item_ids[0],),
+            discovery_hypothesis_ids=tuple(
+                hypotheses_by_work_item[work_item_ids[0]]
+            ),
+            search_request_ids=("search-1",),
+            navigation_evidence_ids=(),
+        ),
+        SearchCandidateArticle(
+            article_id="article-2",
+            document_id=None,
+            title=None,
+            headings=(),
+            discovery_work_item_ids=(work_item_ids[1],),
+            discovery_hypothesis_ids=tuple(
+                hypotheses_by_work_item[work_item_ids[1]]
+            ),
+            search_request_ids=("search-2",),
+            navigation_evidence_ids=(),
+        ),
+        SearchCandidateArticle(
+            article_id="article-3",
+            document_id=None,
+            title=None,
+            headings=(),
+            discovery_work_item_ids=(work_item_ids[1],),
+            discovery_hypothesis_ids=tuple(
+                hypotheses_by_work_item[work_item_ids[1]]
+            ),
+            search_request_ids=("search-3",),
+            navigation_evidence_ids=(),
+        ),
+    )
     context = context.model_copy(
         update={
             "required_dependency_work_item_ids": work_item_ids,
             "available_tools": (LegalFetchArticlesTool.definition,),
+            "search_candidates": candidates,
             "fetchable_article_ids": ("article-1", "article-2", "article-3"),
             "remaining_fetch_capacity": 3,
             "remaining_fetch_capacity_by_work_item": {
@@ -3968,14 +4016,6 @@ def test_dependency_action_fetch_schema_uses_each_work_item_capacity() -> None:
     assert limits_by_work_item == {
         work_item_ids[0]: 1,
         work_item_ids[1]: 2,
-    }
-    hypotheses_by_work_item = {
-        work_item_id: {
-            item.hypothesis_id
-            for item in context.hypotheses
-            if item.work_item_id == work_item_id
-        }
-        for work_item_id in work_item_ids
     }
     for item in variants:
         work_item_id = item["properties"]["work_item_id"]["enum"][0]
@@ -4169,6 +4209,28 @@ def test_anthropic_dependency_action_accepts_one_fetch_per_work_item() -> None:
         required_dependency_work_item_ids=("w1", "w2"),
     ).model_copy(
         update={
+            "search_candidates": (
+                SearchCandidateArticle(
+                    article_id="article-1",
+                    document_id=None,
+                    title=None,
+                    headings=(),
+                    discovery_work_item_ids=("w1",),
+                    discovery_hypothesis_ids=("h1",),
+                    search_request_ids=("search-1",),
+                    navigation_evidence_ids=(),
+                ),
+                SearchCandidateArticle(
+                    article_id="article-2",
+                    document_id=None,
+                    title=None,
+                    headings=(),
+                    discovery_work_item_ids=("w2",),
+                    discovery_hypothesis_ids=("h2",),
+                    search_request_ids=("search-2",),
+                    navigation_evidence_ids=(),
+                ),
+            ),
             "fetchable_article_ids": ("article-1", "article-2"),
             "remaining_fetch_capacity": 2,
             "remaining_fetch_capacity_by_work_item": {"w1": 1, "w2": 1},
@@ -5801,7 +5863,7 @@ def test_real_model_initial_research_decomposition_fixture_is_reproducible() -> 
     assert "質問にない判定軸や基準" in (
         hypothesis_prompt.system_prompt
     )
-    assert "複数の規範種別" in hypothesis_prompt.system_prompt
+    assert "候補となる法令種別が複数" in hypothesis_prompt.system_prompt
     assert "短い法令用語・法令表現の組合せ" in search_prompt.system_prompt
 
 
@@ -6515,8 +6577,8 @@ def test_observation_prompt_limits_follow_up_to_work_item_scope() -> None:
 
     assert "質問への回答に関係しない参照先" in rendered.instructions
     assert "Hypothesisの判断に必要な未確認事項" in rendered.instructions
-    assert "今回の本文で確認できた項目だけを除き" in rendered.instructions
-    assert "別の未確認事項が判明した場合は、残した項目に追加" in (
+    assert "今回の本文で確認できた項目の`gap_id`だけ" in rendered.instructions
+    assert "新しい未確認事項だけを`add_gaps[]`" in (
         rendered.instructions
     )
     assert "親規定から具体化規定を探す場合は`from_subject`" in (
@@ -6652,7 +6714,7 @@ def test_observation_prompt_keeps_question_scoped_delegation_open() -> None:
     )
 
     assert "Hypothesisの判断に必要な未確認事項" in rendered.instructions
-    assert "今回の本文で確認できた項目だけを除き" in rendered.instructions
+    assert "今回の本文で確認できた項目の`gap_id`だけ" in rendered.instructions
     assert "親規定から具体化規定を探す場合は`from_subject`" in (
         rendered.instructions
     )
@@ -6688,12 +6750,12 @@ def test_observation_prompt_rejects_confirmed_dependency_with_lower_norm_gap(
     assert profile is not None
     rendered = render_observation_integration_model_call(projected, profile)
 
-    assert "更新後の`gaps`と取得本文から" in rendered.instructions
+    assert "未解決の既存gapと`add_gaps[]`、取得本文から" in rendered.instructions
     assert "`terminal_text_confirmed`と併存させません" in (
         rendered.instructions
     )
-    assert rendered.instructions.index("既存の`gaps`を1件ずつ本文と照合します") < (
-        rendered.instructions.index("更新後の`gaps`と取得本文から")
+    assert rendered.instructions.index("既存の`gaps[]`を1件ずつ本文と照合します") < (
+        rendered.instructions.index("未解決の既存gapと`add_gaps[]`、取得本文から")
     )
     assert "gapsとして残す場合" in rendered.output_schema["properties"][
         "dependency_decisions"
@@ -6751,10 +6813,6 @@ def test_overview_graph_direction_fixture_exposes_subject_mapping() -> None:
     assert "親規定から具体化規定を探す場合は`from_subject`" in (
         rendered.instructions
     )
-    assert (
-        "親規定を起点に`IMPLEMENTS`の具体化規定を探す場合は"
-        "`direction=from_subject`"
-    ) in rendered.instructions
     assert "下位規範を探す目的なら`incoming`" not in rendered.instructions
     graph_tool = next(
         item
@@ -6822,7 +6880,7 @@ def test_lower_norm_prompt_distinguishes_explicit_delegation_from_guess() -> Non
         assert "WorkItemで問う行為、条件、範囲又は方法を修飾する" in prompt
         assert "上位本文が選択肢又は義務を示" in prompt
         assert "特則" in prompt
-    assert "既存の未確認事項の残り" in evidence_prompt
+    assert "既存の`hypotheses[].gaps`はProgramが保持" in evidence_prompt
     assert "行為者の属性だけから" in evidence_prompt
 
 
@@ -7201,9 +7259,17 @@ def test_anthropic_observation_uses_small_json_transport_schema() -> None:
         },
         context=context,
     )
-    assert preserved_gap["update_hypotheses"][0]["gaps"] == list(
-        hypothesis_with_gap.gaps
+    expected_gap_ids = [
+        item.gap_id
+        for item in structured_hypothesis_gaps(
+            hypothesis_with_gap.hypothesis_id,
+            hypothesis_with_gap.gaps,
+        )
+    ]
+    assert preserved_gap["update_hypotheses"][0]["resolve_gap_ids"] == (
+        expected_gap_ids
     )
+    assert preserved_gap["update_hypotheses"][0]["add_gaps"] == []
 
 
 def test_action_feedback_removes_the_rejected_tool_kind_from_repair() -> None:
@@ -8143,6 +8209,73 @@ def test_cycle_close_mechanically_closes_deferred_frontier_for_resolved_work(
     )
 
 
+def test_finalization_mechanically_closes_deferred_frontier_for_resolved_work(
+) -> None:
+    state = CaseState(
+        case_id="finalization-resolved-deferred",
+        question="確認済み事項へ回答する。",
+        research_cycle_count=1,
+        work_items=(
+            WorkItem(
+                work_item_id="wi-1",
+                question="確認済み事項",
+                state="resolved",
+                resolution="取得本文で確認済み。",
+            ),
+        ),
+    )
+    context = build_solver_context(
+        state,
+        AgentLimits(),
+        remaining_wall_time_sec=120,
+        finalize_only=True,
+    ).model_copy(
+        update={
+            "graph_review_ledger": (
+                GraphReviewLedgerItem(
+                    frontier_item_id="frontier-closed-work",
+                    article_id="article-2",
+                    title="検証規則",
+                    heading="第二条",
+                    work_item_id="wi-1",
+                    hypothesis_id=None,
+                    review_status="relevant_deferred",
+                    reason="確認済み事項の保留候補。",
+                    content_status="not_requested",
+                    last_reviewed_cycle=1,
+                ),
+            )
+        }
+    )
+    profile = legal_profiles.legal_agent_profile().solver_finalization
+    assert profile is not None
+    rendered = render_solver_model_call(
+        context,
+        profile,
+        provider="openai",
+        stage="finalization",
+    )
+    normalized = {
+        "next": "finalize",
+        "deferred_frontier_resolutions": [],
+    }
+    _normalize_absent_context_branches(normalized, context)
+
+    assert "deferred_frontier_resolutions" not in rendered.output_schema[
+        "properties"
+    ]
+    assert normalized["deferred_frontier_resolutions"] == [
+        {
+            "frontier_item_id": "frontier-closed-work",
+            "article_id": "article-2",
+            "work_item_id": "wi-1",
+            "hypothesis_id": None,
+            "action": "no_longer_needed",
+            "reason": "所属WorkItemが終了済みのため、最終回答後へ保持しない。",
+        }
+    ]
+
+
 def test_tob_announcement_repair_schema_limits_the_aggregate_fetch_request() -> None:
     fixture_path = (
         Path(__file__).parent
@@ -8775,6 +8908,16 @@ def test_cycle_close_fixture_projects_three_small_single_task_calls() -> None:
             "remaining_fetch_capacity_by_work_item": {
                 item.work_item_id: 3 for item in context.work_tree
             },
+            "search_candidates": tuple(
+                candidate.model_copy(
+                    update={
+                        "matched_hypothesis_ids": (
+                            candidate.discovery_hypothesis_ids
+                        )
+                    }
+                )
+                for candidate in context.search_candidates
+            ),
         }
     )
     allocated = _allocate_observation_fetch_capacity(
@@ -9655,6 +9798,20 @@ def test_observation_step_can_choose_the_immediate_next_tool() -> None:
     )
     fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
     full_context = SolverContext.model_validate(fixture["solverContext"])
+    full_context = full_context.model_copy(
+        update={
+            "search_candidates": tuple(
+                candidate.model_copy(
+                    update={
+                        "matched_hypothesis_ids": (
+                            candidate.discovery_hypothesis_ids
+                        )
+                    }
+                )
+                for candidate in full_context.search_candidates
+            )
+        }
+    )
     context = _observation_work_item_contexts(full_context)[0]
     context = context.model_copy(update={"cycle_close_required": False})
     work_item_id = context.required_dependency_work_item_ids[0]
@@ -10088,8 +10245,10 @@ def test_missing_dependency_fixture_allows_no_unrelated_basis_evidence() -> None
                     "update_hypotheses": tuple(
                         item.model_copy(
                             update={
-                                "gaps": item.gaps
-                                or ("未確認の下位規範の具体的内容",)
+                                "legacy_replacement_gaps": (
+                                    item.legacy_replacement_gaps
+                                    or ("未確認の下位規範の具体的内容",)
+                                )
                             }
                         )
                         for item in observed.update.update_hypotheses
@@ -11138,7 +11297,11 @@ def test_dependency_action_uses_dedicated_contract_and_preserves_prior_decision(
     expected_candidate_ids = {
         candidate.article_id
         for candidate in context.search_candidates
-        if hypothesis_id in candidate.matched_hypothesis_ids
+        if (
+            hypothesis_id in candidate.matched_hypothesis_ids
+            or hypothesis_id in candidate.discovery_hypothesis_ids
+            or work_item_id in candidate.discovery_work_item_ids
+        )
         and candidate.article_id in context.fetchable_article_ids
     }
     fetch_schema = anthropic_rendered.output_schema["properties"][

@@ -19,6 +19,7 @@ from .state import (
     FrameworkModel,
     FrontierReviewStatus,
     Hypothesis,
+    HypothesisGap,
     ReviewFinding,
     ToolRequest,
     ToolResult,
@@ -326,9 +327,9 @@ class SearchAssessmentExcerpt(FrameworkModel):
 
     content: str = Field(
         description=(
-            "この本文取得候補を発見した検索結果の抜粋。"
-            "Article本文の全部または一部で、長いArticleでは検索に一致した"
-            "Paragraph・Item等だけの場合がある。"
+            "このArticleを発見した検索一致箇所と、候補判断のためProgramが同じ"
+            "Articleから付加した限定的な構造文脈。Article全文とは限らず、"
+            "回答根拠には使わない。"
         )
     )
 
@@ -821,7 +822,9 @@ class HypothesisRevisionHypothesis(FrameworkModel):
     work_item_id: str = Field(description="所属する既存WorkItem ID。")
     statement: str = Field(description="見直し前の現在版statement。")
     judgment: str = Field(description="既存Hypothesisの現在の判定。")
-    gaps: tuple[str, ...] = Field(description="既存Hypothesisの未確認事項。")
+    gaps: tuple[HypothesisGap, ...] = Field(
+        description="既存HypothesisのID付き未確認事項。"
+    )
 
 
 class HypothesisRevisionEvidence(FrameworkModel):

@@ -22,6 +22,7 @@ from .state import (
     HypothesisHistoryRecord,
     ToolRequest,
     WorkItem,
+    apply_hypothesis_gap_diff,
     fetched_article_ids_by_work_item,
     merge_hypothesis_evidence_ids,
     tool_request_matches_current_hypotheses,
@@ -101,11 +102,23 @@ def apply_hypothesis_revision(
             material_ids=material_ids,
             evidence_by_id=evidence_by_id,
         )
+        if update.legacy_replacement_gaps is not None:
+            updated_gaps = tuple(dict.fromkeys(update.legacy_replacement_gaps))
+        else:
+            try:
+                updated_gaps = apply_hypothesis_gap_diff(
+                    current.hypothesis_id,
+                    current.gaps,
+                    tuple(item.description for item in update.add_gaps),
+                    update.resolve_gap_ids,
+                )
+            except ValueError as exc:
+                raise ContractViolation(str(exc)) from exc
         if (
             update.statement == current.statement
             and update.judgment == current.judgment
             and update.evidence_ids == current.evidence_ids
-            and update.gaps == current.gaps
+            and updated_gaps == current.gaps
         ):
             continue
         version = 1 + sum(
@@ -126,7 +139,7 @@ def apply_hypothesis_revision(
             statement=update.statement,
             judgment=update.judgment,
             evidence_ids=update.evidence_ids,
-            gaps=update.gaps,
+            gaps=updated_gaps,
         )
         revised_hypothesis_ids.add(current.hypothesis_id)
         revised_work_item_ids.add(current.work_item_id)
@@ -505,6 +518,22 @@ def apply_solver_decision(
             raise ContractViolation(
                 f"unknown hypothesis update: {hypothesis_update.hypothesis_id}"
             )
+        if hypothesis_update.legacy_replacement_gaps is not None:
+            updated_gaps = tuple(
+                dict.fromkeys(hypothesis_update.legacy_replacement_gaps)
+            )
+        else:
+            try:
+                updated_gaps = apply_hypothesis_gap_diff(
+                    current_hypothesis.hypothesis_id,
+                    current_hypothesis.gaps,
+                    tuple(
+                        item.description for item in hypothesis_update.add_gaps
+                    ),
+                    hypothesis_update.resolve_gap_ids,
+                )
+            except ValueError as exc:
+                raise ContractViolation(str(exc)) from exc
         hypotheses[hypothesis_update.hypothesis_id] = _validated_copy(
             current_hypothesis,
             judgment=hypothesis_update.judgment,
@@ -512,7 +541,7 @@ def apply_solver_decision(
                 current_hypothesis.evidence_ids,
                 hypothesis_update.evidence_ids,
             ),
-            gaps=hypothesis_update.gaps,
+            gaps=updated_gaps,
         )
         changed_hypothesis_ids.add(hypothesis_update.hypothesis_id)
         evidence_ids_requiring_material[hypothesis_update.hypothesis_id] = set(

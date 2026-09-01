@@ -139,6 +139,7 @@ def build_cycle_audit_report(
     model_calls = _model_call_records(record_list)
     purpose_metrics = _purpose_metrics(model_calls)
     hypothesis_activity = _hypothesis_activity(model_calls)
+    hypothesis_gap_activity = _hypothesis_gap_activity(record_list)
     work_item_session_activity = _work_item_session_activity(record_list)
     work_item_tool_activity = _work_item_tool_activity(record_list)
     execution_findings = [
@@ -215,6 +216,7 @@ def build_cycle_audit_report(
         "runMetrics": run_metrics,
         "purposeMetrics": purpose_metrics,
         "hypothesisActivity": hypothesis_activity,
+        "hypothesisGapActivity": hypothesis_gap_activity,
         "workItemSessionActivity": work_item_session_activity,
         "workItemToolActivity": work_item_tool_activity,
     }
@@ -436,6 +438,29 @@ def render_cycle_audit_markdown(report: dict[str, Any]) -> str:
                     hypothesis=_md(item.get("hypothesisId")),
                     calls=item.get("callCount", 0),
                     purposes=_md(purposes),
+                )
+            )
+    gap_activity = report.get("hypothesisGapActivity", [])
+    if gap_activity:
+        lines.extend(
+            [
+                "",
+                "## Hypothesis gap activity",
+                "",
+                "| Seq | Cycle | Hypothesis | Added gaps | Resolved gap IDs |",
+                "|---:|---:|---|---|---|",
+            ]
+        )
+        for item in gap_activity:
+            lines.append(
+                "| {sequence} | {cycle} | `{hypothesis}` | {added} | {resolved} |".format(
+                    sequence=_md(item.get("sequence")),
+                    cycle=_md(item.get("cycleNo")),
+                    hypothesis=_md(item.get("hypothesisId")),
+                    added=_md(" / ".join(item.get("addedGaps", [])) or "-"),
+                    resolved=_md(
+                        ", ".join(item.get("resolvedGapIds", [])) or "-"
+                    ),
                 )
             )
     for cycle in report.get("cycles", []):
@@ -683,6 +708,50 @@ def _hypothesis_activity(
             if isinstance(call.get("sequence"), int):
                 activity["sequences"].append(call["sequence"])
     return [grouped[key] for key in sorted(grouped)]
+
+
+def _hypothesis_gap_activity(
+    records: tuple[dict[str, Any], ...],
+) -> list[dict[str, Any]]:
+    """Cycle未完了時も、LLMが返したgap差分を時系列で表示する。"""
+
+    activity: list[dict[str, Any]] = []
+    for record in records:
+        if record.get("event") != "transport_output":
+            continue
+        payload = record.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        updates = payload.get("update_hypotheses")
+        if not isinstance(updates, list):
+            updates = payload.get("revise_hypotheses")
+        if not isinstance(updates, list):
+            continue
+        for update in updates:
+            if not isinstance(update, dict):
+                continue
+            additions = update.get("add_gaps") or []
+            resolved = update.get("resolve_gap_ids") or []
+            if not additions and not resolved:
+                continue
+            activity.append(
+                {
+                    "sequence": record.get("sequence"),
+                    "cycleNo": record.get("cycleNo"),
+                    "stage": record.get("transportStage"),
+                    "workItemSessionId": record.get("workItemSessionId"),
+                    "workItemSessionTurn": record.get("workItemSessionTurn"),
+                    "hypothesisId": update.get("hypothesis_id"),
+                    "addedGaps": [
+                        item.get("description")
+                        if isinstance(item, dict)
+                        else item
+                        for item in additions
+                    ],
+                    "resolvedGapIds": list(resolved),
+                }
+            )
+    return activity
 
 
 def _work_item_session_activity(
