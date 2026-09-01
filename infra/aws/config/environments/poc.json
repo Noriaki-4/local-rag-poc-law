@@ -62,7 +62,7 @@
     "enabled": true,
     "runtimeName": "LocalRagLawPoc",
     "imageRepositoryName": "agent-api",
-    "imageTag": "agentcore-bootstrap-v5-68aa15c",
+    "imageTag": "agentcore-bootstrap-v6-f7fda88",
     "networkMode": "VPC"
   },
   "configurationTracking": {
