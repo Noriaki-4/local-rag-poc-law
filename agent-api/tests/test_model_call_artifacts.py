@@ -95,6 +95,11 @@ def test_question_decomposition_uses_only_question_and_small_contract() -> None:
     assert "質問にない構成要素、段階又は例へ展開していないか" in (
         rendered.instructions
     )
+    assert "各WorkItemは単独で後続処理へ渡されます" in rendered.instructions
+    assert "この項目だけを後続処理へ渡しても判断できるよう" in (
+        rendered.output_schema["properties"]["work_items"]["items"]
+        ["properties"]["question"]["description"]
+    )
     assert "<input_contract>" in rendered.instructions
     assert "`question`: 利用者が回答を求めている元の質問。" in (
         rendered.instructions

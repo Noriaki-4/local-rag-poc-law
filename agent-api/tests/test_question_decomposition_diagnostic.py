@@ -47,6 +47,8 @@ def test_render_uses_only_production_question_decomposition_stage() -> None:
     assert "## 出力" in rendered.instructions
     assert "法令本文を調べる必要がある要求" in rendered.instructions
     assert "複数の法的論点がある場合は、WorkItemを分けます" in rendered.instructions
+    assert "各WorkItemは単独で後続処理へ渡されます" in rendered.instructions
+    assert "結論を変え得る質問中の事実や限定が分かるか" in rendered.instructions
     assert "日常語の人数・数量表現" in rendered.instructions
     assert "明確でなければ`不明`" in rendered.instructions
     assert "法的根拠の有無又は内容自体について結論を求める問い" in rendered.instructions

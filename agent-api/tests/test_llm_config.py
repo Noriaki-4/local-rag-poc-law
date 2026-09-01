@@ -19,6 +19,7 @@ def _load_models(**environment: str) -> dict[str, str]:
         "AGENT_FRAMEWORK_RESEARCH_MODEL",
         "AGENT_FRAMEWORK_INTEGRATION_MODEL",
         "AGENT_FRAMEWORK_EVIDENCE_INTEGRATION_MODEL",
+        "AGENT_FRAMEWORK_DEPENDENCY_ASSESSMENT_MODEL",
         "AGENT_FRAMEWORK_REVIEWER_MODEL",
     ):
         env.pop(name, None)
@@ -34,6 +35,7 @@ print(json.dumps({
     "research": Settings.agent_framework_research_model,
     "integration": Settings.agent_framework_integration_model,
     "evidenceIntegration": Settings.agent_framework_evidence_integration_model,
+    "dependencyAssessment": Settings.agent_framework_dependency_assessment_model,
     "frameworkReviewer": Settings.agent_framework_reviewer_model,
 }))
 """
@@ -73,8 +75,24 @@ def test_evidence_integration_model_can_override_global_framework_model() -> Non
     )
 
     assert models["evidenceIntegration"] == "gpt-5.6-terra"
+    assert models["dependencyAssessment"] == "gpt-5.6-terra"
     assert {
         model
         for role, model in models.items()
-        if role != "evidenceIntegration"
+        if role not in {"evidenceIntegration", "dependencyAssessment"}
     } == {"gpt-5.6-luna"}
+
+
+def test_dependency_assessment_model_can_override_evidence_model() -> None:
+    models = _load_models(
+        LLM_PROVIDER="anthropic",
+        LLM_MODEL="claude-haiku-4-5-20251001",
+        AGENT_FRAMEWORK_DEPENDENCY_ASSESSMENT_MODEL="claude-sonnet-5",
+    )
+
+    assert models["dependencyAssessment"] == "claude-sonnet-5"
+    assert {
+        model
+        for role, model in models.items()
+        if role != "dependencyAssessment"
+    } == {"claude-haiku-4-5-20251001"}

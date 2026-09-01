@@ -1464,6 +1464,17 @@ Profile v452でこの順序を実装した。取得直後の本文が未統合�
 候補の採否と次の探索内容はLLMへ残す。Luna `high`の公開買付け総合問題では、公開買付府令2条の5を含む
 必要資料・Article・回答要点11/11に合格した。
 
+Profile v493のHaiku再検証では、本文取得済みArticleが同じWorkItemのDependency Actionへ再び現れ、
+新しいGraph探索より再取得が優先される経路が残っていた。本文取得履歴をWorkItem単位で投影し、取得済み又は
+`defer`済みの候補を次Actionから除外した。次Actionで使えるToolも、評価済み本文候補があれば本文取得、
+なければ未探索Graph、Graph起点もなければOpenSearchのいずれかへ機械的に絞る。
+
+完了監査がWorkItemを再開した場合は単一タスクのDependency Actionへ戻す。この差分を元の判断へ単純追記すると、
+同じWorkItemの`dependency_decisions`が重複して契約修復に入り、正しいGraph要求が一般検索へ置換された。
+差分結合は同じ`dependency_kind + work_item_id`を後の判断で置換するよう修正した。また、本文取得後の統合が
+時間切れとなった場合は、Hypothesisへ対応付けて取得した直近本文だけをFinalizationへ残し、最終回答が本文を
+直接評価・引用できるようにした。無関係な未統合本文は追加しない。
+
 ### LR-046 最終引用の過剰選択と件数表示
 
 有価証券報告書の例題（case `legal-ebe07930431d40cfa33bd3bb391f0aae`）は、想定資料2/2、
@@ -1802,6 +1813,7 @@ LR-010  必要性と費用を再評価して全件分類を再開
 | 2026-09-01 | Profile v488・LR-047・レベル3長時間設問・Luna `high` | 裁量選択は必要条文4/4・回答要素4/4、498.0秒。総合は必要条文6/6・回答要素5/5、567.7秒。正答を維持した一方、未確認事項を付随規定へ広げ、本文統合はそれぞれ11回・7回となった。総合はモデル557.3秒、Tool 2.1秒で、同一検索の重複とWorkItem timeoutも各1件あった。速度問題の中心を検索基盤ではなく、`gaps`拡張と本文評価反復として記録する | `eval-results/e2e-v488-luna-level3-remaining/tob-permitted-choice/response.json`、`eval-results/e2e-v488-luna-level3-remaining/tob-overview/response.json`、`eval-results/cycle-audits/legal-30de42b1650c4e92aa6d025f39b83002/cycle-audit.md`、`eval-results/cycle-audits/legal-7ef33d551e1b4dafba2ef0e12a9f597d/cycle-audit.md` |
 | 2026-09-01 | Profile v489・LR-022・少人数私募・Luna `high` | 現在版Hypothesisの更新後に、完了済みWorkItemだけを無条件に`open`へ戻す状態遷移を修正した。更新後に未確認判定、gap又はopen子WorkItemが生じた場合だけ再開し、判定済み・根拠あり・gapなしなら`resolved`と現在版basisを維持する。全1181テストに合格。実モデルは2 Cycle・528.3秒・契約違反0回・最終化1回で正常完了し、停止前の0/12から11/12へ回復した。必要Articleは施行令1条の5だけ引用から外れ、回答4観点は全件含んだ。この引用漏れと過剰探索はLR-047 / LR-051と分けて扱う | `eval-results/e2e-v489-luna-small-private-state-fix/response.json`、`eval-results/agent-framework-diagnostics/legal-2411d367543842ab8081d9c44f200ffb.jsonl` |
 | 2026-09-01 | Profile v489・LR-047 / LR-050・公告・例外・Luna `high` | Evidence IntegrationとSearch Review自動取得の双方で、同じWorkItemがCase内で取得済みのArticleを再取得しないよう共通状態を適用した。通常stepに混入したCycle境界専用の保留候補処理は境界まで保留し、Cycle Closeでopen WorkItemの候補列挙が漏れた場合は`carry_forward`へ補完する。既存Evidenceを保持するHypothesis差分では、同じEvidence IDの再出力を要求しない。全1187テスト合格。例外10/10（1 Cycle・268.6秒）、公告11/11（2 Cycle・476.5秒）で、同一WorkItem・Articleの重複本文取得は両方0件。例外は最終回答の引用候補過多を1回修復して完了し、公告は契約違反0件だった | `eval-results/e2e-v489-luna-announcement-exception-fixed/exception.jsonl`、`eval-results/e2e-v489-luna-announcement-exception-fixed/announcement.jsonl`、`eval-results/agent-framework-diagnostics/legal-0cfee5bd1a69403c93873cc3c30eab1f.jsonl`、`eval-results/agent-framework-diagnostics/legal-d088a54bac434087b2e880e7cb39ba9a.jsonl` |
+| 2026-09-02 | Profile v493・LR-023 / LR-045・公開買付け総合・Haiku 4.5 + Sonnet完了監査 | 完了扱い候補だけをSonnetで監査し、再開後の次行動を単一タスクへ分離した。同一WorkItemの取得済み・defer済み候補をDependency Actionから除外し、本文候補取得、Graph探索、OpenSearchの優先境界を機械化した。監査前後のDependency判断は追記せず同じキーを置換する。本文取得直後に統合時間切れとなった場合も、Hypothesisへ対応付け済みの直近本文だけをFinalizationで直接評価できる。全1200テスト合格。実モデルは1 Cycle・562.4秒、契約違反0、Provider timeout 0で、施行令7条から`IMPLEMENTS / from_subject`により府令2条の5を取得・引用し11/11に合格した | `eval-results/example-questions-haiku-overview-v493-sonnet-audit-r9.jsonl`、`eval-results/agent-framework-diagnostics/legal-91d6c9258c5c41a0af76e5d2b980bcd8.jsonl` |
 ### 2026-08-25: 質問分解と仮説立案の主体表現を分離
 
 - WorkItemの主体情報を`action_actor`、`target_actor`、`actor_relation`へ分離し、Hypothesisには重複保存しない。
