@@ -24,6 +24,7 @@ from .state import (
     WorkItem,
     fetched_article_ids_by_work_item,
     merge_hypothesis_evidence_ids,
+    tool_result_matches_current_hypotheses,
     utc_now,
 )
 
@@ -80,6 +81,7 @@ def apply_hypothesis_revision(
 
     history = list(state.hypothesis_history)
     revised_work_item_ids: set[str] = set()
+    revised_hypothesis_ids: set[str] = set()
     for update in revision.revise_hypotheses:
         current = hypotheses.get(update.hypothesis_id)
         if current is None:
@@ -126,6 +128,7 @@ def apply_hypothesis_revision(
             evidence_ids=update.evidence_ids,
             gaps=update.gaps,
         )
+        revised_hypothesis_ids.add(current.hypothesis_id)
         revised_work_item_ids.add(current.work_item_id)
 
     for proposal in revision.add_hypotheses:
@@ -160,11 +163,81 @@ def apply_hypothesis_revision(
                 resolution=None,
             )
 
+    stale_request_ids = {
+        request.request_id
+        for request in state.tool_requests
+        if revised_hypothesis_ids.intersection(request.hypothesis_ids)
+        or (
+            not request.hypothesis_ids
+            and request.work_item_id in revised_work_item_ids
+        )
+    }
+    stale_graph_request_ids = {
+        request.request_id
+        for request in state.tool_requests
+        if request.request_id in stale_request_ids
+        and request.tool_name == "legal_graph_neighbors"
+    }
+
     candidate = _validated_copy(
         state,
         work_items=tuple(work_items.values()),
         hypotheses=tuple(hypotheses.values()),
         hypothesis_history=tuple(history),
+        dependency_decisions=tuple(
+            item
+            for item in state.dependency_decisions
+            if item.work_item_id not in revised_work_item_ids
+        ),
+        graph_candidate_reviews=tuple(
+            review
+            for review in state.graph_candidate_reviews
+            if not stale_request_ids.intersection(review.graph_request_ids)
+            and not any(
+                decision.hypothesis_id in revised_hypothesis_ids
+                or (
+                    decision.hypothesis_id is None
+                    and decision.work_item_id in revised_work_item_ids
+                )
+                for decision in review.frontier_decisions
+            )
+        ),
+        search_candidate_reviews=tuple(
+            review
+            for review in state.search_candidate_reviews
+            if not stale_request_ids.intersection(review.search_request_ids)
+            and not any(
+                revised_hypothesis_ids.intersection(
+                    (*selection.matched_hypothesis_ids,)
+                )
+                for selection in review.selections
+            )
+            and not any(
+                revised_hypothesis_ids.intersection(
+                    (*assessment.matched_hypothesis_ids,)
+                )
+                for assessment in review.assessments
+            )
+        ),
+        frontier_re_adoptions=tuple(
+            item
+            for item in state.frontier_re_adoptions
+            if item.hypothesis_id not in revised_hypothesis_ids
+        ),
+        deferred_frontier_resolutions=tuple(
+            item
+            for item in state.deferred_frontier_resolutions
+            if item.hypothesis_id not in revised_hypothesis_ids
+            and not (
+                item.hypothesis_id is None
+                and item.work_item_id in revised_work_item_ids
+            )
+        ),
+        unreviewed_graph_resolutions=(
+            ()
+            if stale_graph_request_ids
+            else state.unreviewed_graph_resolutions
+        ),
         updated_at=utc_now(),
     )
     _validate_work_tree(
@@ -493,24 +566,37 @@ def apply_solver_decision(
         )
 
     request_ids = {item.request_id for item in state.tool_requests}
+    successful_results_by_request = {
+        result.request_id: result
+        for result in state.tool_results
+        if result.status == "succeeded"
+    }
     completed_search_scopes = {
         _tool_request_scope(request)
         for request in state.tool_requests
         if request.tool_name == "legal_search"
-        and any(
-            result.request_id == request.request_id
-            and result.status == "succeeded"
-            for result in state.tool_results
+        and (
+            result := successful_results_by_request.get(request.request_id)
+        )
+        is not None
+        and tool_result_matches_current_hypotheses(
+            state,
+            request,
+            result,
         )
     }
     completed_graph_scopes = {
         _tool_request_scope(request)
         for request in state.tool_requests
         if request.tool_name == "legal_graph_neighbors"
-        and any(
-            result.request_id == request.request_id
-            and result.status == "succeeded"
-            for result in state.tool_results
+        and (
+            result := successful_results_by_request.get(request.request_id)
+        )
+        is not None
+        and tool_result_matches_current_hypotheses(
+            state,
+            request,
+            result,
         )
     }
     completed_load_scopes = {

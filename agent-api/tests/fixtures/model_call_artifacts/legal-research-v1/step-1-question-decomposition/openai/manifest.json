@@ -1,13 +1,13 @@
 {
   "inputHash": "ac07718e1bdf15a5b16ee9a9f5870b844fb5efc54019546e80f1226daaebaa5b",
-  "instructionsHash": "94c9a33f50fc90058d3a2cc4177ac86f3e783c2f6aba8bc5850674b65f7158df",
+  "instructionsHash": "3c82d15f147aa1f4141411f3c169117414e82ec821785f8f9a1d26c08e9f3a0e",
   "model": "gpt-4o-mini",
   "normalizedSchemaHash": "af8fbae3d3bfa28f891a581c0ef9eb5815dbb69823b0dd7b04afbc36df45761b",
   "outputSchemaHash": "6bc189e78bd54197d56c66fec62fd70831b3be1930f4bde0196cad3f4c9e98e8",
   "profileName": "legal-default",
-  "profileVersion": "454",
+  "profileVersion": "476",
   "promptAssets": [],
   "provider": "openai",
-  "requestHash": "5563556630da755ac05f02c365a6e3c9406d1591e53ee0c543358914c70d5bdc",
+  "requestHash": "61bcfabe4ed5ff34837beb8b3437a2cfe243edfe296391edd12404c63cd344b7",
   "stage": "research_research_decomposition"
 }

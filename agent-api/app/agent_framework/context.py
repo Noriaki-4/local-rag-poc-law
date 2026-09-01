@@ -25,6 +25,7 @@ from .state import (
     ToolStatus,
     WorkItem,
     fetched_article_ids_by_work_item,
+    tool_result_matches_current_hypotheses,
 )
 from .tool_contracts import ToolDefinition
 
@@ -375,10 +376,9 @@ class SearchAssessmentHypothesis(FrameworkModel):
     )
 
 
-class SearchAssessmentInput(FrameworkModel):
-    """検索結果の内容評価に必要な項目だけを持つread model。"""
+class SearchCandidateInput(FrameworkModel):
+    """検索候補と確認対象の対応付けに必要な共通read model。"""
 
-    question: str = Field(description="利用者が回答を求めている元の質問。")
     work_tree: tuple[SearchAssessmentWorkItem, ...] = Field(
         description="本文取得候補と対応付けるWorkItemのIDと確認事項。"
     )
@@ -393,7 +393,13 @@ class SearchAssessmentInput(FrameworkModel):
     )
 
 
-class SearchSelectionInput(SearchAssessmentInput):
+class SearchAssessmentInput(SearchCandidateInput):
+    """元質問を含めて検索結果の内容を評価するread model。"""
+
+    question: str = Field(description="利用者が回答を求めている元の質問。")
+
+
+class SearchSelectionInput(SearchCandidateInput):
     """検索候補の理解と本文取得対象の選択を一度に行うread model。"""
 
     non_work_item_requirements: tuple[str, ...] = Field(
@@ -1235,9 +1241,12 @@ def build_solver_context(
         )
         for item in recent_results
     )
-    succeeded_request_ids = {
-        item.request_id for item in state.tool_results if item.status == "succeeded"
+    succeeded_results_by_request = {
+        item.request_id: item
+        for item in state.tool_results
+        if item.status == "succeeded"
     }
+    succeeded_request_ids = set(succeeded_results_by_request)
     completed_legal_searches = tuple(
         CompletedLegalSearch(
             work_item_id=request.work_item_id,
@@ -1246,7 +1255,15 @@ def build_solver_context(
         )
         for request in state.tool_requests
         if request.tool_name == "legal_search"
-        and request.request_id in succeeded_request_ids
+        and (
+            result := succeeded_results_by_request.get(request.request_id)
+        )
+        is not None
+        and tool_result_matches_current_hypotheses(
+            state,
+            request,
+            result,
+        )
     )
     completed_load_ids_by_work_item: dict[str, list[str]] = {}
     integrated_request_ids = set(state.integrated_tool_result_request_ids)
@@ -1367,7 +1384,15 @@ def build_solver_context(
         )
         for request in state.tool_requests
         if request.tool_name == "legal_graph_neighbors"
-        and request.request_id in succeeded_request_ids
+        and (
+            result := succeeded_results_by_request.get(request.request_id)
+        )
+        is not None
+        and tool_result_matches_current_hypotheses(
+            state,
+            request,
+            result,
+        )
     )
     evidence_hypothesis_candidates = _evidence_hypothesis_candidates(
         state,

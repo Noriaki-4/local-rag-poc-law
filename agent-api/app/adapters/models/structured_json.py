@@ -150,6 +150,8 @@ class StructuredJSONModelAdapter:
         if profile.context_projection == "cycle_close":
             return self._solve_cycle_close(context, profile)
         dependency_action_call = _is_dependency_action_call(context, profile)
+        if dependency_action_call:
+            context = _project_dependency_action_context(context)
         rendered = render_solver_model_call(context, profile, provider=provider)
         transport_schema = rendered.output_schema
         prompt = rendered.request
@@ -1276,6 +1278,11 @@ def render_solver_model_call(
             profile,
             stage=stage,
         )
+    dependency_action = _is_dependency_action_call(projected_context, profile)
+    if dependency_action:
+        projected_context = _project_dependency_action_context(
+            projected_context
+        )
     initial_research = profile.context_projection == "initial_research"
     output_schema = (
         _strip_runtime_id_enums(
@@ -1288,7 +1295,6 @@ def render_solver_model_call(
         if provider == "anthropic"
         else _solver_common_transport_schema(projected_context)
     )
-    dependency_action = _is_dependency_action_call(projected_context, profile)
     return _render_solver_model_call(
         context,
         (
@@ -1609,14 +1615,39 @@ def _dependency_action_has_scoped_fetch_candidate(
             required_hypothesis_ids.intersection(
                 candidate.matched_hypothesis_ids
             )
-            or required_hypothesis_ids.intersection(
-                candidate.discovery_hypothesis_ids
-            )
-            or required_ids.intersection(
-                candidate.discovery_work_item_ids
-            )
         )
         for candidate in context.search_candidates
+    )
+
+
+def _project_dependency_action_context(
+    context: SolverContext,
+) -> SolverContext:
+    """候補評価で対象Hypothesisに対応した未取得Articleだけを提示する。"""
+
+    required_work_item_ids = set(context.required_dependency_work_item_ids)
+    required_hypothesis_ids = {
+        item.hypothesis_id
+        for item in context.hypotheses
+        if item.work_item_id in required_work_item_ids
+    }
+    candidates = tuple(
+        candidate
+        for candidate in context.search_candidates
+        if required_hypothesis_ids.intersection(
+            candidate.matched_hypothesis_ids
+        )
+    )
+    candidate_ids = {candidate.article_id for candidate in candidates}
+    return context.model_copy(
+        update={
+            "search_candidates": candidates,
+            "fetchable_article_ids": tuple(
+                article_id
+                for article_id in context.fetchable_article_ids
+                if article_id in candidate_ids
+            ),
+        }
     )
 
 
@@ -2891,12 +2922,8 @@ def _observation_work_item_contexts(
             item
             for item in context.search_candidates
             if hypothesis_ids.intersection(
-                (
-                    *item.matched_hypothesis_ids,
-                    *item.discovery_hypothesis_ids,
-                )
+                item.matched_hypothesis_ids
             )
-            or work_item.work_item_id in item.discovery_work_item_ids
         )
         search_candidate_article_ids = {
             item.article_id for item in search_candidates
@@ -3759,6 +3786,12 @@ def _normalize_observation_integration_payload(
     has_fetch_sidecar = "fetch_articles" in normalized
     fetch_articles = normalized.pop("fetch_articles", None)
     if has_fetch_sidecar:
+        generic_fetch_requests = [
+            request
+            for request in normalized.get("tool_requests") or []
+            if isinstance(request, dict)
+            and request.get("tool_name") == "fetch_articles"
+        ]
         normalized["tool_requests"] = [
             request
             for request in normalized.get("tool_requests") or []
@@ -3773,25 +3806,65 @@ def _normalize_observation_integration_payload(
                     "fetch_articles transport requires SolverContext"
                 )
             aliases = _article_fetch_alias_map(context)
-            article_ids = [
-                aliases[article_ref]
+            article_refs = [
+                article_ref
                 for key in sorted(fetch_articles)
                 if key.startswith("article_ref_")
                 and isinstance(
                     article_ref := fetch_articles.get(key),
                     str,
                 )
-                and article_ref in aliases
             ]
-            normalized.setdefault("tool_requests", []).append(
-                {
-                    "request_id": fetch_articles.get("request_id"),
-                    "work_item_id": fetch_articles.get("work_item_id"),
-                    "tool_name": "fetch_articles",
-                    "arguments": {"article_ids": article_ids},
-                    "purpose": fetch_articles.get("purpose"),
-                    "hypothesis_ids": fetch_articles.get("hypothesis_ids") or [],
-                }
+            direct_article_ids = fetch_articles.get("article_ids")
+            if isinstance(direct_article_ids, list):
+                article_refs.extend(
+                    article_id
+                    for article_id in direct_article_ids
+                    if isinstance(article_id, str)
+                )
+            fetchable_article_ids = set(context.fetchable_article_ids)
+            article_ids = list(
+                dict.fromkeys(
+                    resolved_id
+                    for article_ref in article_refs
+                    if (
+                        resolved_id := aliases.get(
+                            article_ref,
+                            article_ref
+                            if article_ref in fetchable_article_ids
+                            else None,
+                        )
+                    )
+                )
+            )
+            if article_ids:
+                normalized.setdefault("tool_requests", []).append(
+                    {
+                        "request_id": fetch_articles.get("request_id"),
+                        "work_item_id": fetch_articles.get("work_item_id"),
+                        "tool_name": "fetch_articles",
+                        "arguments": {"article_ids": article_ids},
+                        "purpose": fetch_articles.get("purpose"),
+                        "hypothesis_ids": fetch_articles.get("hypothesis_ids")
+                        or [],
+                    }
+                )
+        elif fetch_articles is None and context is not None:
+            fetchable_article_ids = set(context.fetchable_article_ids)
+            normalized.setdefault("tool_requests", []).extend(
+                request
+                for request in generic_fetch_requests
+                if isinstance(request.get("arguments"), dict)
+                and isinstance(
+                    request["arguments"].get("article_ids"),
+                    list,
+                )
+                and request["arguments"]["article_ids"]
+                and all(
+                    isinstance(article_id, str)
+                    and article_id in fetchable_article_ids
+                    for article_id in request["arguments"]["article_ids"]
+                )
             )
     has_load_sidecar = "load_evidence" in normalized
     load_evidence = normalized.pop("load_evidence", None)
@@ -4514,17 +4587,25 @@ def _search_selection_context_payload(context: SolverContext) -> dict[str, Any]:
     open_work_item_ids = {
         item.work_item_id for item in context.work_tree if item.state == "open"
     }
+    selectable_work_item_ids = {
+        work_item_id
+        for work_item_id in open_work_item_ids
+        if context.remaining_fetch_capacity_by_work_item.get(
+            work_item_id,
+            context.remaining_fetch_capacity,
+        )
+        > 0
+    }
     active_hypotheses = tuple(
         item
         for item in context.hypotheses
         if item.requires_follow_up
-        and item.work_item_id in open_work_item_ids
+        and item.work_item_id in selectable_work_item_ids
     )
     active_work_item_ids = {
         item.work_item_id for item in active_hypotheses
     }
     input_model = SearchSelectionInput(
-        question=context.question,
         non_work_item_requirements=context.non_work_item_requirements,
         work_tree=tuple(
             {
@@ -5619,6 +5700,11 @@ def _search_selection_transport_schema(context: SolverContext) -> dict[str, Any]
         for item in context.hypotheses
         if item.requires_follow_up
         and item.work_item_id in open_work_item_ids
+        and context.remaining_fetch_capacity_by_work_item.get(
+            item.work_item_id,
+            context.remaining_fetch_capacity,
+        )
+        > 0
     )
     selection_limit = _search_selection_capacity(context)
     selection = _strict_object(
@@ -5798,6 +5884,22 @@ def _dependency_action_transport_schema(
     available_action_tools = _dependency_action_available_tools(context)
     force_graph = _dependency_action_requires_graph(context)
     force_next_cycle = _dependency_action_must_start_next_cycle(context)
+    required_ids = set(context.required_dependency_work_item_ids)
+    action_context = context.model_copy(
+        update={
+            "available_tools": available_action_tools,
+            "work_tree": tuple(
+                item
+                for item in context.work_tree
+                if item.work_item_id in required_ids
+            ),
+            "hypotheses": tuple(
+                item
+                for item in context.hypotheses
+                if item.work_item_id in required_ids
+            ),
+        }
+    )
 
     if json_transport:
         return _strict_object(
@@ -5826,30 +5928,25 @@ def _dependency_action_transport_schema(
                 "tool_requests_json": {
                     "type": "string",
                     "description": (
-                        "ToolRequest array encoded as one JSON array string. Fields: "
-                        "request_id, work_item_id, tool_name, arguments, purpose, "
-                        "hypothesis_ids."
+                        "ToolRequest array encoded as one JSON array string; "
+                        "exclude fetch_articles and use its dedicated field. "
+                        "Fields: request_id, work_item_id, tool_name, arguments, "
+                        "purpose, hypothesis_ids."
                     ),
                     **({"enum": ["[]"]} if force_next_cycle else {}),
                 },
+                "fetch_articles": {
+                    **(
+                        {"type": "null"}
+                        if force_next_cycle or force_graph
+                        else _anthropic_dependency_fetch_articles_schema(
+                            action_context
+                        )
+                    ),
+                    "description": "Known Article fetch or null.",
+                },
             }
         )
-    required_ids = set(context.required_dependency_work_item_ids)
-    action_context = context.model_copy(
-        update={
-            "available_tools": available_action_tools,
-            "work_tree": tuple(
-                item
-                for item in context.work_tree
-                if item.work_item_id in required_ids
-            ),
-            "hypotheses": tuple(
-                item
-                for item in context.hypotheses
-                if item.work_item_id in required_ids
-            ),
-        }
-    )
     tool_requests = (
         _empty_array_schema()
         if force_next_cycle
@@ -6600,7 +6697,7 @@ def _solver_anthropic_transport_schema(context: SolverContext) -> dict:
 def _solver_anthropic_json_transport_schema(
     context: SolverContext,
 ) -> dict[str, Any]:
-    """Keep Anthropic grammar small; validate the decoded common contract."""
+    """Keep Anthropic grammar small while constraining Article fetch IDs."""
 
     common_schema = _solver_common_transport_schema(context)
     expected_fields = tuple(common_schema["properties"])
@@ -6634,8 +6731,17 @@ def _solver_anthropic_json_transport_schema(
                     + ", ".join(expected_fields)
                     + "."
                     + "".join(nested_contracts)
+                    + " Do not put fetch_articles in tool_requests; use the "
+                    "dedicated fetch_articles field."
                 ),
-            }
+            },
+            "fetch_articles": {
+                **_anthropic_fetch_articles_schema(context),
+                "description": (
+                    "Anthropic輸送専用のfetch_articles ToolRequest。"
+                    "既知候補を取得しない場合はnull。"
+                ),
+            },
         }
     )
 
@@ -6707,28 +6813,53 @@ def _anthropic_fetch_articles_schema(context: SolverContext) -> dict[str, Any]:
             ToolRequest,
             "hypothesis_ids",
         ),
+        "article_ids": {
+            "type": "array",
+            "items": _enum_string(tuple(context.fetchable_article_ids)),
+            "minItems": 1,
+            "maxItems": capacity,
+            "description": "fetchable_article_idsにある既知Article ID。",
+        },
     }
-    aliases = tuple(_article_fetch_alias_map(context))
-    for index in range(1, capacity + 1):
-        article_schema = _enum_string(aliases)
-        article_properties[f"article_ref_{index}"] = (
-            {
-                **article_schema,
-                "description": (
-                    "fetchable_article_idsに対応する既知Article別名。"
-                ),
-            }
-            if index == 1
-            else {
-                "anyOf": [article_schema, {"type": "null"}],
-                "description": (
-                    "追加取得する既知Article別名。使わない場合はnull。"
-                ),
-            }
-        )
     return {
         "anyOf": [
             _strict_object(article_properties),
+            {"type": "null"},
+        ]
+    }
+
+
+def _anthropic_dependency_fetch_articles_schema(
+    context: SolverContext,
+) -> dict[str, Any]:
+    """Dependency Action用の小さい既知Article取得schema。"""
+
+    article_ids = tuple(context.fetchable_article_ids)
+    capacity = min(4, context.remaining_fetch_capacity, len(article_ids))
+    work_item_ids = tuple(context.required_dependency_work_item_ids)
+    if capacity < 1 or not work_item_ids:
+        return {"type": "null"}
+    return {
+        "anyOf": [
+            {
+                "type": "array",
+                "items": _strict_object(
+                    {
+                        "work_item_id": _enum_string(work_item_ids),
+                        "article_ids": {
+                            "type": "array",
+                            "items": _enum_string(article_ids),
+                            "minItems": 1,
+                            "maxItems": capacity,
+                        },
+                    }
+                ),
+                "minItems": 1,
+                "maxItems": min(
+                    len(work_item_ids),
+                    context.max_tool_requests_per_step,
+                ),
+            },
             {"type": "null"},
         ]
     }
@@ -7308,6 +7439,141 @@ def _enum_string(values: tuple[str, ...]) -> dict[str, Any]:
     return schema
 
 
+def _normalize_fetch_articles_transport(
+    payload: dict[str, Any],
+    context: SolverContext | None = None,
+) -> None:
+    """専用欄だけを本文取得要求として採用する。"""
+
+    has_fetch_sidecar = (
+        "fetch_articles" in payload or "article_fetch" in payload
+    )
+    fetch_articles = payload.pop(
+        "fetch_articles",
+        payload.pop("article_fetch", None),
+    )
+    if not has_fetch_sidecar:
+        return
+    generic_fetch_requests = [
+        request
+        for request in payload.get("tool_requests") or []
+        if isinstance(request, dict)
+        and request.get("tool_name") in {"fetch_articles", "article_fetch"}
+    ]
+    payload["tool_requests"] = [
+        request
+        for request in payload.get("tool_requests") or []
+        if not (
+            isinstance(request, dict)
+            and request.get("tool_name")
+            in {"fetch_articles", "article_fetch"}
+        )
+    ]
+    if fetch_articles is None and context is not None:
+        fetchable_article_ids = set(context.fetchable_article_ids)
+        payload["tool_requests"].extend(
+            request
+            for request in generic_fetch_requests
+            if isinstance(request.get("arguments"), dict)
+            and isinstance(request["arguments"].get("article_ids"), list)
+            and request["arguments"]["article_ids"]
+            and all(
+                isinstance(article_id, str)
+                and article_id in fetchable_article_ids
+                for article_id in request["arguments"]["article_ids"]
+            )
+        )
+        return
+    fetch_requests = (
+        fetch_articles
+        if isinstance(fetch_articles, list)
+        else [fetch_articles]
+        if isinstance(fetch_articles, dict)
+        else []
+    )
+    if not fetch_requests:
+        return
+    for index, fetch_request in enumerate(fetch_requests, start=1):
+        if not isinstance(fetch_request, dict):
+            continue
+        article_ids = [
+            fetch_request[key]
+            for key in sorted(fetch_request)
+            if key.startswith(("article_id_", "article_ref_"))
+            and isinstance(fetch_request[key], str)
+            and fetch_request[key]
+        ]
+        for field_name in ("article_refs", "article_ids"):
+            values = fetch_request.get(field_name)
+            if isinstance(values, list):
+                article_ids.extend(
+                    item for item in values if isinstance(item, str) and item
+                )
+        article_ids = list(dict.fromkeys(article_ids))
+        work_item_id = fetch_request.get("work_item_id")
+        hypothesis_ids = fetch_request.get("hypothesis_ids") or []
+        if (
+            not hypothesis_ids
+            and context is not None
+            and isinstance(work_item_id, str)
+        ):
+            hypothesis_ids = [
+                item.hypothesis_id
+                for item in context.hypotheses
+                if item.work_item_id == work_item_id and item.requires_follow_up
+            ]
+        request = {
+            "request_id": (
+                fetch_request.get("request_id") or f"fetch-articles-{index}"
+            ),
+            "work_item_id": work_item_id,
+            "tool_name": "fetch_articles",
+            "arguments": {"article_ids": article_ids},
+            "purpose": (
+                fetch_request.get("purpose")
+                or payload.get("decision_reason")
+                or "既知Article本文を取得する。"
+            ),
+            "hypothesis_ids": hypothesis_ids,
+        }
+        payload.setdefault("tool_requests", []).append(request)
+
+
+def _normalize_flattened_tool_request_transport(
+    request: dict[str, Any],
+) -> dict[str, Any]:
+    """Providerが平坦化したToolRequestを共通契約へ戻す。"""
+
+    normalized = dict(request)
+    tool_name = normalized.get("tool_name")
+    if not isinstance(tool_name, str):
+        legacy_type = normalized.get("type")
+        if isinstance(legacy_type, str):
+            tool_name = legacy_type
+            normalized["tool_name"] = legacy_type
+            normalized.pop("type", None)
+    if not isinstance(tool_name, str) or "arguments" in normalized:
+        return normalized
+
+    request_fields = {
+        "request_id",
+        "work_item_id",
+        "tool_name",
+        "purpose",
+        "hypothesis_ids",
+    }
+    arguments = {
+        key: value
+        for key, value in normalized.items()
+        if key not in request_fields
+    }
+    if arguments:
+        for key in arguments:
+            normalized.pop(key, None)
+        normalized["arguments"] = arguments
+    return normalized
+
+
 def _normalize_solver_payload(payload: dict) -> dict:
     decision_payload = payload.get("decision_json")
     if isinstance(decision_payload, str):
@@ -7323,6 +7589,8 @@ def _normalize_solver_payload(payload: dict) -> dict:
         decoded = payload
 
     normalized = dict(decoded)
+    if isinstance(decision_payload, str) and "fetch_articles" in payload:
+        normalized["fetch_articles"] = payload.get("fetch_articles")
     if "update_json" in normalized:
         normalized["update"] = _decode_transport_json(
             normalized.pop("update_json"),
@@ -7378,20 +7646,7 @@ def _normalize_solver_payload(payload: dict) -> dict:
                     )
                 )
         normalized["tool_requests"] = normalized_requests
-    has_fetch_sidecar = (
-        "fetch_articles" in normalized or "article_fetch" in normalized
-    )
-    fetch_articles = normalized.pop(
-        "fetch_articles",
-        normalized.pop("article_fetch", None),
-    )
-    if has_fetch_sidecar:
-        for request in normalized.get("tool_requests") or []:
-            if (
-                isinstance(request, dict)
-                and request.get("tool_name") == "article_fetch"
-            ):
-                request["tool_name"] = "fetch_articles"
+    _normalize_fetch_articles_transport(normalized)
     # `next` is the LLM's control decision. The unused answer branch is only
     # transport noise, so remove it without changing that control decision.
     if normalized.get("next") == "continue":
@@ -7406,32 +7661,6 @@ def _normalize_solver_payload(payload: dict) -> dict:
             if answer.get("limitations") is None or answer.get("limitations") == "":
                 answer["limitations"] = []
             normalized["answer"] = answer
-    if normalized.get("next") == "continue" and isinstance(fetch_articles, dict):
-        if any(
-            isinstance(request, dict)
-            and request.get("tool_name") == "fetch_articles"
-            for request in normalized.get("tool_requests", ())
-        ):
-            raise ModelProtocolError(
-                "article body fetch is duplicated across generic and dedicated slots"
-            )
-        article_ids = [
-            fetch_articles[key]
-            for key in sorted(fetch_articles)
-            if key.startswith(("article_id_", "article_ref_"))
-            and isinstance(fetch_articles[key], str)
-            and fetch_articles[key]
-        ]
-        normalized.setdefault("tool_requests", []).append(
-            {
-                "request_id": fetch_articles.get("request_id"),
-                "work_item_id": fetch_articles.get("work_item_id"),
-                "tool_name": "fetch_articles",
-                "arguments": {"article_ids": article_ids},
-                "purpose": fetch_articles.get("purpose"),
-                "hypothesis_ids": fetch_articles.get("hypothesis_ids") or [],
-            }
-        )
     raw_dependencies = normalized.get("dependency_decisions") or []
     if isinstance(raw_dependencies, dict):
         raw_dependencies = [
@@ -7462,7 +7691,7 @@ def _normalize_solver_payload(payload: dict) -> dict:
         if not isinstance(raw_request, dict):
             requests.append(raw_request)
             continue
-        request = dict(raw_request)
+        request = _normalize_flattened_tool_request_transport(raw_request)
         arguments = request.get("arguments")
         if "arguments_json" in request:
             if arguments is not None:
@@ -7815,6 +8044,8 @@ def normalize_dependency_action_decision(
             expected_type=list,
             label="tool_requests_json",
         )
+    _normalize_fetch_articles_transport(decoded_payload, context)
+    _assign_tool_request_ids(decoded_payload, context)
     if (
         _dependency_action_must_start_next_cycle(context)
         and not decoded_payload.get("tool_requests")

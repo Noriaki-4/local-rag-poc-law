@@ -217,6 +217,52 @@ class TestAuthorityTypeFilter:
             "law-b-article-2",
         }
 
+    def test_hybrid_top_result_does_not_drop_the_best_lexical_match(
+        self,
+        client: tuple[OpenSearchClient, dict[str, Any]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        os_client, recorder = client
+        monkeypatch.setattr(opensearch_module.settings, "agent_use_vector", True)
+        monkeypatch.setattr(
+            opensearch_module,
+            "embed_texts",
+            lambda texts, dimension, timeout_sec=None: [
+                [0.1] * dimension for _ in texts
+            ],
+        )
+        recorder["payload"] = {
+            "responses": [
+                {
+                    "hits": {
+                        "hits": [
+                            _hit("lexical", "law-lexical-article-1", 10.0, "act")
+                        ]
+                    }
+                },
+                {
+                    "hits": {
+                        "hits": [
+                            _hit("vector", "law-vector-article-1", 0.9, "act")
+                        ]
+                    }
+                },
+            ]
+        }
+
+        results = os_client.search_requirement_specs(
+            [
+                RequirementSearchSpec(
+                    requirement_id="req-1",
+                    query="非居住者 代理人",
+                    top_k=1,
+                )
+            ],
+            user_clearance_level=2,
+        )
+
+        assert results["req-1"][0]["articleId"] == "law-lexical-article-1"
+
     def test_explicit_legal_reference_gets_phrase_boost(
         self,
         client: tuple[OpenSearchClient, dict[str, Any]],

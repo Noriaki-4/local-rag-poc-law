@@ -131,7 +131,10 @@ def test_provider_transport_is_explicit_in_artifacts(tmp_path) -> None:
     )
 
     assert "decision_json" not in openai.output_schema["properties"]
-    assert set(anthropic.output_schema["properties"]) == {"decision_json"}
+    assert set(anthropic.output_schema["properties"]) == {
+        "decision_json",
+        "fetch_articles",
+    }
     assert "transport_values" not in openai.input_payload
     assert "transport_values" not in anthropic.input_payload
     assert openai.normalized_schema == anthropic.normalized_schema

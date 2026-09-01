@@ -179,7 +179,8 @@ def _merge_requirement_hits(
     source_kind: str,
 ) -> None:
     """BM25・vector・直接取得をchunk単位でRRF融合する。"""
-    weights = {"bm25": 0.4, "vector": 0.6}
+    # 一方の検索方式だけで上位枠を占有しないよう、両レーンを同じ重みで融合する。
+    weights = {"bm25": 0.5, "vector": 0.5}
     for rank, hit in enumerate(hits, start=1):
         source = hit.get("_source") or {}
         content_unit_id = str(source.get("contentUnitId") or "")

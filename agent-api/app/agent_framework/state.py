@@ -906,6 +906,33 @@ class CaseState(FrameworkModel):
         return self
 
 
+def tool_result_matches_current_hypotheses(
+    state: CaseState,
+    request: ToolRequest,
+    result: ToolResult,
+) -> bool:
+    """Tool結果が参照Hypothesisの現在版以後に得られたかを返す。"""
+
+    hypothesis_work_items = {
+        item.hypothesis_id: item.work_item_id for item in state.hypotheses
+    }
+    relevant_revision_cycles = [
+        item.revised_cycle
+        for item in state.hypothesis_history
+        if (
+            item.hypothesis.hypothesis_id in request.hypothesis_ids
+            or (
+                not request.hypothesis_ids
+                and hypothesis_work_items.get(item.hypothesis.hypothesis_id)
+                == request.work_item_id
+            )
+        )
+    ]
+    return not relevant_revision_cycles or result.cycle_no > max(
+        relevant_revision_cycles
+    )
+
+
 def fetched_article_ids_by_work_item(
     state: CaseState,
     *,
