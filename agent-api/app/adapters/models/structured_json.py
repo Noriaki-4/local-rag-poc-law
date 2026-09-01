@@ -555,6 +555,37 @@ class StructuredJSONModelAdapter:
                 started_at=started_at,
             )
         )
+        completion_work_item_ids = tuple(
+            dict.fromkeys(
+                item.work_item_id
+                for item in observation.dependency_decisions
+                if item.status in {"not_required", "resolved"}
+            )
+        )
+        if (
+            completion_work_item_ids
+            and profile.dependency_system_prompt is not None
+        ):
+            observation, audit_input, audit_output, audit_attempts, _ = (
+                self._solve_dependency_assessment(
+                    context.model_copy(
+                        update={
+                            "required_dependency_work_item_ids": (
+                                completion_work_item_ids
+                            )
+                        }
+                    ),
+                    observation,
+                    profile,
+                    started_at=started_at,
+                    prior_input_tokens=input_tokens,
+                    prior_output_tokens=output_tokens,
+                    completion_audit=True,
+                )
+            )
+            input_tokens = _sum_optional_tokens(input_tokens, audit_input)
+            output_tokens = _sum_optional_tokens(output_tokens, audit_output)
+            attempt_count += audit_attempts
         observation = _derive_observation_work_item_updates(context, observation)
         closed_work_item_ids = {
             item.work_item_id
@@ -608,6 +639,7 @@ class StructuredJSONModelAdapter:
         started_at: float,
         prior_input_tokens: int | None,
         prior_output_tokens: int | None,
+        completion_audit: bool = False,
     ) -> tuple[
         ObservationIntegrationDecision,
         int | None,
@@ -623,16 +655,15 @@ class StructuredJSONModelAdapter:
         ):
             return observation, 0, 0, 0, False
 
-        decisions: list[DependencyDecision] = []
-        input_tokens: list[int | None] = []
-        output_tokens: list[int | None] = []
-        attempt_count = 0
         projected_contexts = _dependency_work_item_contexts(context)
         if not projected_contexts:
             raise ModelProtocolError(
                 "dependency assessment has no matching WorkItem context"
             )
-        for projected_context in projected_contexts:
+
+        def solve_one(
+            projected_context: SolverContext,
+        ) -> tuple[DependencyAssessmentDecision, int | None, int | None, int]:
             projected_observation = _project_observation_decision(
                 observation,
                 context=projected_context,
@@ -698,7 +729,7 @@ class StructuredJSONModelAdapter:
                 )
             try:
                 dependency = DependencyAssessmentDecision.model_validate(
-                    _normalize_observation_integration_payload(
+                    _normalize_dependency_assessment_payload(
                         dependency_result.payload,
                         context=projected_context,
                     )
@@ -722,18 +753,75 @@ class StructuredJSONModelAdapter:
                     "dependency assessment contract invalid: "
                     f"{detail['msg']}"
                 ) from exc
-            decisions.extend(dependency.dependency_decisions)
-            input_tokens.append(dependency_result.inputTokens)
-            output_tokens.append(dependency_result.outputTokens)
-            attempt_count += 1 + dependency_result.retryCount
+            return (
+                dependency,
+                dependency_result.inputTokens,
+                dependency_result.outputTokens,
+                1 + dependency_result.retryCount,
+            )
+
+        executor = ThreadPoolExecutor(
+            max_workers=min(context.max_parallel_work_items, len(projected_contexts))
+        )
+        futures = {
+            executor.submit(solve_one, projected_context): index
+            for index, projected_context in enumerate(projected_contexts)
+        }
+        remaining_timeout = max(
+            0.0,
+            profile.timeout_sec - (monotonic() - started_at),
+        )
+        completed, pending = wait(futures, timeout=remaining_timeout)
+        for future in pending:
+            future.cancel()
+        executor.shutdown(wait=not pending, cancel_futures=True)
+        if pending:
+            raise _cycle_close_checkpoint_timeout(
+                "dependency assessment batch timed out",
+                observation=observation,
+                completed_stage="observation_integration",
+                input_tokens=prior_input_tokens,
+                output_tokens=prior_output_tokens,
+            )
+        indexed_results = sorted(
+            ((index, future.result()) for future, index in futures.items()),
+            key=lambda item: item[0],
+        )
+        decisions = tuple(
+            decision
+            for _, result in indexed_results
+            for decision in result[0].dependency_decisions
+        )
+        observation = _retain_gaps_when_completion_audit_reopens_dependency(
+            context,
+            observation,
+            decisions,
+        )
+        effective_decisions = (
+            _completion_audit_dependency_decisions(
+                observation.dependency_decisions,
+                decisions,
+            )
+            if completion_audit
+            else decisions
+        )
         observation = observation.model_copy(
-            update={"dependency_decisions": tuple(decisions)}
+            update={
+                "dependency_decisions": _merged_dependency_decisions(
+                    observation.dependency_decisions,
+                    effective_decisions,
+                )
+            }
         )
         return (
             observation,
-            _sum_optional_tokens(*input_tokens),
-            _sum_optional_tokens(*output_tokens),
-            attempt_count,
+            _sum_optional_tokens(
+                *(result[1] for _, result in indexed_results)
+            ),
+            _sum_optional_tokens(
+                *(result[2] for _, result in indexed_results)
+            ),
+            sum(result[3] for _, result in indexed_results),
             True,
         )
 
@@ -4065,6 +4153,25 @@ def _normalize_legacy_hypothesis_gap_replacements(
         ]
 
 
+def _normalize_dependency_assessment_payload(
+    payload: dict[str, Any],
+    *,
+    context: SolverContext,
+) -> dict[str, Any]:
+    """下位規範確認の輸送表現だけを正規契約へ戻す。"""
+
+    normalized = deepcopy(payload)
+    _normalize_grounding_evidence_aliases(normalized, context)
+    for decision in normalized.get("dependency_decisions") or []:
+        if not isinstance(decision, dict):
+            continue
+        decision["status"] = {
+            "terminal_text_missing": "needs_action",
+            "terminal_text_confirmed": "resolved",
+        }.get(decision.get("status"), decision.get("status"))
+    return normalized
+
+
 def _normalize_grounding_evidence_aliases(
     payload: dict[str, Any],
     context: SolverContext,
@@ -4153,6 +4260,73 @@ def _downgrade_unproven_dependency_confirmations(
         )
     return assessment.model_copy(
         update={"dependency_decisions": tuple(decisions)}
+    )
+
+
+def _retain_gaps_when_completion_audit_reopens_dependency(
+    context: SolverContext,
+    observation: ObservationIntegrationDecision,
+    audited_decisions: tuple[DependencyDecision, ...],
+) -> ObservationIntegrationDecision:
+    """完了監査で再確認になったWorkItemの全gap解消だけを保留する。"""
+
+    reopened_work_item_ids = {
+        item.work_item_id
+        for item in audited_decisions
+        if item.status == "needs_action"
+    }
+    if not reopened_work_item_ids:
+        return observation
+    hypothesis_by_id = {
+        item.hypothesis_id: item for item in context.hypotheses
+    }
+    updates: list[HypothesisUpdate] = []
+    for update in observation.update_hypotheses:
+        hypothesis = hypothesis_by_id.get(update.hypothesis_id)
+        if (
+            hypothesis is None
+            or hypothesis.work_item_id not in reopened_work_item_ids
+            or update.add_gaps
+        ):
+            updates.append(update)
+            continue
+        current_gap_ids = {
+            item.gap_id
+            for item in structured_hypothesis_gaps(
+                hypothesis.hypothesis_id,
+                hypothesis.gaps,
+            )
+        }
+        if current_gap_ids and current_gap_ids.issubset(
+            set(update.resolve_gap_ids)
+        ):
+            updates.append(
+                update.model_copy(update={"resolve_gap_ids": ()})
+            )
+            continue
+        updates.append(update)
+    return observation.model_copy(
+        update={"update_hypotheses": tuple(updates)}
+    )
+
+
+def _completion_audit_dependency_decisions(
+    current: tuple[DependencyDecision, ...],
+    audited: tuple[DependencyDecision, ...],
+) -> tuple[DependencyDecision, ...]:
+    """完了監査は再開判断だけを反映し、既存の根拠対応を上書きしない。"""
+
+    current_by_key = {
+        (item.dependency_kind, item.work_item_id): item for item in current
+    }
+    return tuple(
+        item
+        if item.status == "needs_action"
+        else current_by_key.get(
+            (item.dependency_kind, item.work_item_id),
+            item,
+        )
+        for item in audited
     )
 
 
@@ -8416,12 +8590,17 @@ def _assign_tool_request_ids(
     requests = normalized.get("tool_requests") or []
     if not requests:
         return
-    local_ids = [
-        request.get("request_id") if isinstance(request, dict) else None
-        for request in requests
-    ]
-    if any(not isinstance(request_id, str) or not request_id for request_id in local_ids):
+    if any(not isinstance(request, dict) for request in requests):
         return
+    local_ids: list[str] = []
+    for index, request in enumerate(requests, start=1):
+        assert isinstance(request, dict)
+        request_id = request.get("request_id")
+        local_ids.append(
+            request_id
+            if isinstance(request_id, str) and request_id
+            else f"local-tool-{index}"
+        )
     local_id_counts = {
         local_id: local_ids.count(local_id) for local_id in set(local_ids)
     }

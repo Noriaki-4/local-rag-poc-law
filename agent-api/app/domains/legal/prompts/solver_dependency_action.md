@@ -40,9 +40,8 @@
 - `completed_graph_searches`の候補IDと新規候補IDを確認し、進展のなかった探索を引数だけ変えて反復しません。
 - `action_feedback`にあるTool種類は、今回の修復では使いません。別種のToolが適切でなければ`start_next_cycle=true`にします。
 - 未確認Hypothesisに対応する本文未取得の既知候補がある間は、その候補を確認してから再検索します。
-- 下位規範への委任が本文で確認できる場合は、同じ階層の周辺規定を広げる前に、その委任元Articleから委任内容に合う関係をGraphで確認します。
-- 委任文が下位規範のArticle番号を示していない場合、`reference_edges`では具体化規定を発見できません。
-  親規定を起点に`semantic_assertion`の`IMPLEMENTS`、`direction=from_subject`で探します。
+- 下位規範への委任が本文で確認できる場合は、同じ階層の周辺規定を広げる前に、その委任元Articleから
+  Tool定義の端点役割に合う意味関係をGraphで確認します。
 - Graphで下位規範が見つからず`legal_search`へ切り替える場合は、委任元の条・項・号を、下位規範に現れる引用表現へ直して検索語に含めます。
 - `fetch_articles`の取得枠は`remaining_fetch_capacity_by_work_item`に示すWorkItemごとの値です。1つの要求には、そのWorkItemに属するHypothesisだけを指定します。
 - WorkItemが既知規定に関係する規定又は改正影響先の列挙を求める場合は、語句検索だけで範囲を

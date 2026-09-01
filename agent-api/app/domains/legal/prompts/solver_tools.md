@@ -31,6 +31,8 @@ Article IDまたは探索すべき関係がまだ分からない場合に、Open
 
 起点Articleと、Hypothesisに必要な関係・探索目的を説明できる場合に1ホップ先を発見します。
 
+- 取得本文に別規範への明示的な委任があり、起点Articleと必要な関係の端点役割を説明できる場合は、
+  法令名を推測した検索より、その役割に合う意味関係のGraph探索を優先します。
 - Hypothesisに必要な意味関係を説明できる場合は、まず`semantic_assertion`を使います。
 - `semantic_assertion`では、Hypothesisに対応する1 predicateと、起点Articleから見た1 directionを指定します。
 - 明示された参照先そのものを確認する場合、または意味関係の探索で新規候補が得られず参照関係を確認する場合は、`reference_edges`を使います。

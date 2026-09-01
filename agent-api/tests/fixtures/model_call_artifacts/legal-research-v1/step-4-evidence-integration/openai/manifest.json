@@ -1,13 +1,13 @@
 {
   "inputHash": "ef5ccdfeeeade927e616fe3ce03bf16d1320d51a487d0e21716c1ce177a8a825",
-  "instructionsHash": "f6f048e9e6ee24dff9d4361ad6d142bc2c2a46da2e731564301bf3eebfef6311",
+  "instructionsHash": "c8a4dac251d6f1da7ce6bc7ba76d419945596064e00bffa5ffb19d34ddd8c513",
   "model": "gpt-4o-mini-2024-07-18",
   "normalizedSchemaHash": "4f751505b8e29d2b27e8417ec4c4fd1c55bcabf05e7e060bdc62a130717da830",
   "outputSchemaHash": "1ee9f9ff55d945883e2140588530aa041384ca91662320d3627c0039ddc611f7",
   "profileName": "legal-default",
-  "profileVersion": "489",
+  "profileVersion": "490",
   "promptAssets": [],
   "provider": "openai",
-  "requestHash": "c9f0c5ec419796082c5efadf98d45664344cefcb2093a6195e5e9f5876b37f2a",
+  "requestHash": "b69f2a23409e26cb332c848fbbffc8476e620d221766fc7649c86e39a5f14c00",
   "stage": "observation_integration"
 }
