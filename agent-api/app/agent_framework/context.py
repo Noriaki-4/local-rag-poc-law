@@ -25,7 +25,7 @@ from .state import (
     ToolStatus,
     WorkItem,
     fetched_article_ids_by_work_item,
-    tool_result_matches_current_hypotheses,
+    tool_request_matches_current_hypotheses,
 )
 from .tool_contracts import ToolDefinition
 
@@ -1259,10 +1259,9 @@ def build_solver_context(
             result := succeeded_results_by_request.get(request.request_id)
         )
         is not None
-        and tool_result_matches_current_hypotheses(
+        and tool_request_matches_current_hypotheses(
             state,
             request,
-            result,
         )
     )
     completed_load_ids_by_work_item: dict[str, list[str]] = {}
@@ -1388,10 +1387,9 @@ def build_solver_context(
             result := succeeded_results_by_request.get(request.request_id)
         )
         is not None
-        and tool_result_matches_current_hypotheses(
+        and tool_request_matches_current_hypotheses(
             state,
             request,
-            result,
         )
     )
     evidence_hypothesis_candidates = _evidence_hypothesis_candidates(

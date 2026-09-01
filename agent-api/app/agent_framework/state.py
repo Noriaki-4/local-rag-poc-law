@@ -843,6 +843,13 @@ class CaseState(FrameworkModel):
         ),
     )
     tool_requests: tuple[ToolRequest, ...] = ()
+    invalidated_tool_request_ids: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Hypothesisの旧版に依存するため、現在版の探索済み実績には使わない"
+            "既存ToolRequest ID。要求・結果自体は監査用に保持する。"
+        ),
+    )
     evidence: tuple[Evidence, ...] = ()
     dependency_decisions: tuple[DependencyDecision, ...] = ()
     graph_candidate_reviews: tuple[GraphCandidateReview, ...] = ()
@@ -886,6 +893,18 @@ class CaseState(FrameworkModel):
             raise ValueError(
                 "hypothesis revision cycle cannot exceed research cycle count"
             )
+        if len(self.invalidated_tool_request_ids) != len(
+            set(self.invalidated_tool_request_ids)
+        ):
+            raise ValueError("invalidated tool request IDs must be unique")
+        known_request_ids = {item.request_id for item in self.tool_requests}
+        unknown_invalidated_ids = (
+            set(self.invalidated_tool_request_ids) - known_request_ids
+        )
+        if unknown_invalidated_ids:
+            raise ValueError(
+                "invalidated tool request IDs must reference existing requests"
+            )
         history_keys = [
             (item.hypothesis.hypothesis_id, item.version)
             for item in self.hypothesis_history
@@ -906,31 +925,13 @@ class CaseState(FrameworkModel):
         return self
 
 
-def tool_result_matches_current_hypotheses(
+def tool_request_matches_current_hypotheses(
     state: CaseState,
     request: ToolRequest,
-    result: ToolResult,
 ) -> bool:
-    """Tool結果が参照Hypothesisの現在版以後に得られたかを返す。"""
+    """Tool要求が参照Hypothesisの現在版に対するものかを返す。"""
 
-    hypothesis_work_items = {
-        item.hypothesis_id: item.work_item_id for item in state.hypotheses
-    }
-    relevant_revision_cycles = [
-        item.revised_cycle
-        for item in state.hypothesis_history
-        if (
-            item.hypothesis.hypothesis_id in request.hypothesis_ids
-            or (
-                not request.hypothesis_ids
-                and hypothesis_work_items.get(item.hypothesis.hypothesis_id)
-                == request.work_item_id
-            )
-        )
-    ]
-    return not relevant_revision_cycles or result.cycle_no > max(
-        relevant_revision_cycles
-    )
+    return request.request_id not in state.invalidated_tool_request_ids
 
 
 def fetched_article_ids_by_work_item(

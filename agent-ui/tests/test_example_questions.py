@@ -319,6 +319,26 @@ class ExampleEvaluationTest(unittest.TestCase):
                     if item.name == "過去3か月の勧誘人数との合算"
                 ).reached
 
+    def test_announcement_answer_accepts_counted_newspaper_wording(self):
+        from example_questions import evaluate_example
+
+        example = next(
+            item
+            for item in EXAMPLE_QUESTIONS
+            if item.title == "公開買付開始公告で選択できる公告方法"
+        )
+        evaluation = evaluate_example(
+            example,
+            [],
+            "二つ以上の日刊新聞紙を用います。全国紙なら一つ以上です。",
+        )
+
+        assert next(
+            item
+            for item in evaluation.answer_point_statuses
+            if item.name == "新聞公告に使用する日刊新聞紙の条件"
+        ).reached
+
     def test_answer_point_accepts_plain_language_for_normal_wear(self):
         from example_questions import evaluate_example
 

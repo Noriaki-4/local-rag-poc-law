@@ -2778,6 +2778,9 @@ def _observation_integration_context_payload(
         item.hypothesis_id for item in active_hypotheses
     }
     payload: dict[str, Any] = {
+        "non_work_item_requirements": list(
+            context.non_work_item_requirements
+        ),
         "work_items": [
             {
                 "work_item_id": item.work_item_id,

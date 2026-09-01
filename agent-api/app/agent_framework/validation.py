@@ -24,7 +24,7 @@ from .state import (
     WorkItem,
     fetched_article_ids_by_work_item,
     merge_hypothesis_evidence_ids,
-    tool_result_matches_current_hypotheses,
+    tool_request_matches_current_hypotheses,
     utc_now,
 )
 
@@ -163,7 +163,7 @@ def apply_hypothesis_revision(
                 resolution=None,
             )
 
-    stale_request_ids = {
+    stale_request_ids = tuple(
         request.request_id
         for request in state.tool_requests
         if revised_hypothesis_ids.intersection(request.hypothesis_ids)
@@ -171,11 +171,12 @@ def apply_hypothesis_revision(
             not request.hypothesis_ids
             and request.work_item_id in revised_work_item_ids
         )
-    }
+    )
+    stale_request_id_set = set(stale_request_ids)
     stale_graph_request_ids = {
         request.request_id
         for request in state.tool_requests
-        if request.request_id in stale_request_ids
+        if request.request_id in stale_request_id_set
         and request.tool_name == "legal_graph_neighbors"
     }
 
@@ -184,6 +185,14 @@ def apply_hypothesis_revision(
         work_items=tuple(work_items.values()),
         hypotheses=tuple(hypotheses.values()),
         hypothesis_history=tuple(history),
+        invalidated_tool_request_ids=tuple(
+            dict.fromkeys(
+                (
+                    *state.invalidated_tool_request_ids,
+                    *stale_request_ids,
+                )
+            )
+        ),
         dependency_decisions=tuple(
             item
             for item in state.dependency_decisions
@@ -192,7 +201,7 @@ def apply_hypothesis_revision(
         graph_candidate_reviews=tuple(
             review
             for review in state.graph_candidate_reviews
-            if not stale_request_ids.intersection(review.graph_request_ids)
+            if not stale_request_id_set.intersection(review.graph_request_ids)
             and not any(
                 decision.hypothesis_id in revised_hypothesis_ids
                 or (
@@ -205,16 +214,16 @@ def apply_hypothesis_revision(
         search_candidate_reviews=tuple(
             review
             for review in state.search_candidate_reviews
-            if not stale_request_ids.intersection(review.search_request_ids)
+            if not stale_request_id_set.intersection(review.search_request_ids)
             and not any(
                 revised_hypothesis_ids.intersection(
-                    (*selection.matched_hypothesis_ids,)
+                    selection.matched_hypothesis_ids
                 )
                 for selection in review.selections
             )
             and not any(
                 revised_hypothesis_ids.intersection(
-                    (*assessment.matched_hypothesis_ids,)
+                    assessment.matched_hypothesis_ids
                 )
                 for assessment in review.assessments
             )
@@ -579,10 +588,9 @@ def apply_solver_decision(
             result := successful_results_by_request.get(request.request_id)
         )
         is not None
-        and tool_result_matches_current_hypotheses(
+        and tool_request_matches_current_hypotheses(
             state,
             request,
-            result,
         )
     }
     completed_graph_scopes = {
@@ -593,10 +601,9 @@ def apply_solver_decision(
             result := successful_results_by_request.get(request.request_id)
         )
         is not None
-        and tool_result_matches_current_hypotheses(
+        and tool_request_matches_current_hypotheses(
             state,
             request,
-            result,
         )
     }
     completed_load_scopes = {

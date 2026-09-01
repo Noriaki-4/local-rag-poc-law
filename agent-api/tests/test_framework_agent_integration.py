@@ -829,7 +829,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert diagnostic_records[0]["event"] == "solver_input"
     assert "caseState" not in diagnostic_records[0]
     assert diagnostic_records[0]["profileName"] == "legal-default"
-    assert diagnostic_records[0]["profileVersion"] == "476"
+    assert diagnostic_records[0]["profileVersion"] == "480"
     assert diagnostic_records[0]["runElapsedMs"] >= 0
     assert diagnostic_records[0]["recordedAt"].endswith("+00:00")
     assert len(diagnostic_records[0]["questionHash"]) == 64
@@ -840,7 +840,7 @@ def test_new_framework_uses_legal_tool_and_skips_reviewer_by_default(
     assert len(transport_input["schemaHash"]) == 64
     assert len(transport_input["systemPromptHash"]) == 64
     assert transport_input["profileName"] == "legal-default"
-    assert transport_input["profileVersion"] == "476"
+    assert transport_input["profileVersion"] == "480"
     assert transport_input["promptBuilder"].endswith(":_solver_prompt")
     assert transport_input["promptAssets"] == []
     assert len(transport_input["instructionsHash"]) == 64
@@ -1714,7 +1714,7 @@ def test_graph_review_moves_to_another_hypothesis_after_integrated_fetch() -> No
 def test_legal_solver_prompts_are_projected_by_structural_mode() -> None:
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.version == "476"
+    assert profile.version == "480"
     assert "要件、制限、例外又は追加手続も求めていると広げません" in (
         profile.solver_research.system_prompt
     )
@@ -2011,7 +2011,7 @@ def test_research_single_completion_unit_fixture_applies_without_grouping() -> N
 
     expected = fixture["expectedCompletionUnits"]
     assert fixture["profileVersion"] == "154"
-    assert profile.version == "476"
+    assert profile.version == "480"
     assert prompt.rindex("## 出力") > prompt.rindex(
         "</solver_context>"
     )
@@ -2062,7 +2062,7 @@ def test_overtime_hypothesis_gap_failure_fixture_tracks_the_contract_fix() -> No
     }
 
     assert fixture["source"]["profileVersion"] == "149"
-    assert profile.version == "476"
+    assert profile.version == "480"
     assert assessment["workItems"] == "pass"
     assert assessment["hypotheses"] == "fail"
     assert assessment["gaps"] == "fail"
@@ -4633,6 +4633,7 @@ def test_observation_projects_article_to_hypothesis_candidate_links() -> None:
     state = CaseState(
         case_id="case-observation-hypothesis-links",
         question="質問",
+        non_work_item_requirements=("根拠条文を示す",),
         research_cycle_count=1,
         work_items=(WorkItem(work_item_id="wi-1", question="確認事項"),),
         hypotheses=(
@@ -4707,6 +4708,9 @@ def test_observation_projects_article_to_hypothesis_candidate_links() -> None:
 
     rendered = render_observation_integration_model_call(context, profile)
 
+    assert rendered.input_payload["non_work_item_requirements"] == [
+        "根拠条文を示す"
+    ]
     assert rendered.input_payload["evidence_hypothesis_candidates"] == [
         {
             "article_id": "article-1",
@@ -6510,8 +6514,11 @@ def test_observation_prompt_limits_follow_up_to_work_item_scope() -> None:
     )
 
     assert "質問への回答に関係しない参照先" in rendered.instructions
-    assert "条件、範囲又は手続を参照先へ委ねている場合" in rendered.instructions
-    assert "対応する内容を本文で確認した場合だけ削除" in rendered.instructions
+    assert "Hypothesisの判断に必要な未確認事項" in rendered.instructions
+    assert "今回の本文で確認できた項目だけを除き" in rendered.instructions
+    assert "別の未確認事項が判明した場合は、残した項目に追加" in (
+        rendered.instructions
+    )
     assert "親規定から具体化規定を探す場合は`from_subject`" in (
         rendered.instructions
     )
@@ -6644,10 +6651,8 @@ def test_observation_prompt_keeps_question_scoped_delegation_open() -> None:
         profile,
     )
 
-    assert "質問された\n  条件、範囲又は手続を参照先へ委ねている場合" in (
-        rendered.instructions
-    )
-    assert "本文で確認した場合だけ削除" in rendered.instructions
+    assert "Hypothesisの判断に必要な未確認事項" in rendered.instructions
+    assert "今回の本文で確認できた項目だけを除き" in rendered.instructions
     assert "親規定から具体化規定を探す場合は`from_subject`" in (
         rendered.instructions
     )
@@ -6683,12 +6688,12 @@ def test_observation_prompt_rejects_confirmed_dependency_with_lower_norm_gap(
     assert profile is not None
     rendered = render_observation_integration_model_call(projected, profile)
 
-    assert "更新後の`gaps`と取得本文を使い" in rendered.instructions
+    assert "更新後の`gaps`と取得本文から" in rendered.instructions
     assert "`terminal_text_confirmed`と併存させません" in (
         rendered.instructions
     )
-    assert rendered.instructions.index("残る未確認内容だけを`gaps`へ残します") < (
-        rendered.instructions.index("更新後の`gaps`と取得本文を使い")
+    assert rendered.instructions.index("既存の`gaps`を1件ずつ本文と照合します") < (
+        rendered.instructions.index("更新後の`gaps`と取得本文から")
     )
     assert "gapsとして残す場合" in rendered.output_schema["properties"][
         "dependency_decisions"
@@ -8729,6 +8734,7 @@ def test_cycle_close_fixture_projects_three_small_single_task_calls() -> None:
         profile,
     )
     assert set(observation_call.input_payload) == {
+        "non_work_item_requirements",
         "work_items",
         "hypotheses",
         "evidence_hypothesis_candidates",

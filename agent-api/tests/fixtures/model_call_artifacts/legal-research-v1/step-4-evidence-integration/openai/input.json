@@ -351,6 +351,9 @@
       "work_item_id": "wi-1"
     }
   ],
+  "non_work_item_requirements": [
+    "公開買付けの手続について説明すること。"
+  ],
   "omitted_evidence_ids": [],
   "remaining_fetch_capacity": 0,
   "required_dependency_kind": "lower_norm",
