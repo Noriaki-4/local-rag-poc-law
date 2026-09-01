@@ -23,3 +23,14 @@ def test_explicit_article_ids_ignore_article_without_named_law() -> None:
         "第二条の十二を確認する",
         {"law-order": "金融商品取引法施行令"},
     ) == ()
+
+
+def test_explicit_article_ids_resolve_known_law_alias() -> None:
+    assert _explicit_article_ids(
+        "公開買付府令第2条の5第2項を確認する",
+        {
+            "law-rule": (
+                "発行者以外の者による株券等の公開買付けの開示に関する内閣府令"
+            )
+        },
+    ) == ("law-rule-article-2_5",)

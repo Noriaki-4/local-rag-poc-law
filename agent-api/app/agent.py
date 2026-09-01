@@ -20,6 +20,7 @@ from .evidence_selector import (
 )
 from .graph_client import GraphClient
 from .layered_shadow import run_layered_retrieval
+from .legal_titles import LAW_TITLE_ALIASES
 from .llm import LLMClient, citation_context_stats
 from .llm_directed_research import (
     TOOL_SEARCH_CORPUS,
@@ -102,21 +103,6 @@ FINAL_RERANK_MAX_ADDITIONS = 2
 # Reviewerが選んだ修正・追加調査を実行できる上限。意味上の終了判断は
 # Reviewerが行い、プログラムはこの回数・時間境界だけを強制する。
 GROUNDING_REMEDIATION_MAX_ROUNDS = 2
-
-# 利用者やプランナーが使いやすい略称を、seed済みの正式名称へ対応付ける。
-# 検索結果の固定には使わず、法令内の補助検索を追加するためだけに使う。
-LAW_TITLE_ALIASES: dict[str, tuple[str, ...]] = {
-    "金融商品取引法": ("金商法",),
-    "金融商品取引法施行令": ("金商法施行令",),
-    "企業内容等の開示に関する内閣府令": ("開示府令",),
-    "発行者以外の者による株券等の公開買付けの開示に関する内閣府令": ("公開買付府令",),
-    "金融商品取引法第二条に規定する定義に関する内閣府令": ("定義府令",),
-    "医薬品、医療機器等の品質、有効性及び安全性の確保等に関する法律": ("薬機法",),
-    "医薬品、医療機器等の品質、有効性及び安全性の確保等に関する法律施行規則": (
-        "薬機法施行規則",
-    ),
-}
-
 
 class AgentService:
     def __init__(

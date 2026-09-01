@@ -8,6 +8,7 @@ import requests
 
 from .config import settings
 from .embeddings import embed_text, embed_texts
+from .legal_titles import law_title_names
 from .legal_ontology import authority_type_rank, search_authority_types
 
 # 附則(施行期日・経過措置・改正沿革)が根拠になりうる質問の手がかり。
@@ -885,10 +886,11 @@ def _explicit_article_ids(query: str, titles: dict[str, str]) -> tuple[str, ...]
     for document_id, title in titles.items():
         if not title:
             continue
-        start = 0
-        while (index := normalized.find(title, start)) >= 0:
-            mentions.append((index, index + len(title), document_id))
-            start = index + 1
+        for name in law_title_names(title):
+            start = 0
+            while (index := normalized.find(name, start)) >= 0:
+                mentions.append((index, index + len(name), document_id))
+                start = index + 1
 
     # 正式名称が別の正式名称の部分文字列なら、同じ位置では長い名称だけを採用する。
     selected: list[tuple[int, int, str]] = []
