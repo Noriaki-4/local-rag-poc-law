@@ -2926,6 +2926,22 @@ def _observation_work_item_contexts(
     """直近取得本文を、前段LLMの対応付けに従ってWorkItem別へ投影する。"""
 
     active_work_items, active_hypotheses = _active_observation_items(context)
+    repair_work_item_ids = (
+        set(context.contract_feedback.repair_work_item_ids)
+        if context.contract_feedback is not None
+        else set()
+    )
+    if repair_work_item_ids:
+        active_work_items = tuple(
+            item
+            for item in active_work_items
+            if item.work_item_id in repair_work_item_ids
+        )
+        active_hypotheses = tuple(
+            item
+            for item in active_hypotheses
+            if item.work_item_id in repair_work_item_ids
+        )
     if not active_work_items:
         return ()
     grounding_ids = set(context.grounding_evidence_ids)

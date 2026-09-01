@@ -497,6 +497,14 @@ class SolverContractFeedback(FrameworkModel):
     previous_decision: SolverDecision = Field(
         description="修正対象となる、CaseStateへ未適用の直前SolverDecision。"
     )
+    repair_work_item_ids: tuple[str, ...] = Field(
+        default=(),
+        exclude=True,
+        description=(
+            "WorkItem別処理で契約違反になり、再実行するWorkItem ID。"
+            "空配列ならDecision全体を再実行する。"
+        ),
+    )
 
 
 class SolverActionFeedback(FrameworkModel):

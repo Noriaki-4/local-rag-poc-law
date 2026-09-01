@@ -80,6 +80,7 @@ Hypothesisの対応はLLMが判断します。別のWorkItemは、この順序�
 
 - 意味評価の入力は1つのWorkItemに限定し、別のWorkItemのHypothesisや本文を混ぜません。
 - 異なるWorkItemは並列処理できますが、複数WorkItemのTool要求や意味評価を1つのLLM処理へまとめません。各結果は所属WorkItemを保ってCaseStoreへ適用します。
+- WorkItem別結果は結合前に個別検証し、正常な結果を保持したまま、契約違反になったWorkItemだけを再実行します。
 - 既知本文を再提示する場合も、必要とするWorkItemだけへ渡します。
 - 新しいTool結果がない同一Hypothesisと本文の組合せを、通常の探索中に繰り返し評価しません。
 

@@ -22,7 +22,7 @@ from .context import (
     build_solver_context,
     pending_candidate_review_work_item_ids,
 )
-from .contracts import SolverDecision
+from .contracts import CaseUpdate, SolverDecision
 from .diagnostics import AgentDiagnostics
 from .observability import (
     AgentRunResult,
@@ -89,6 +89,139 @@ MAX_SOLVER_DECISION_ATTEMPTS = 3
 logger = logging.getLogger(__name__)
 
 
+def _observation_decisions_by_work_item(
+    decision: SolverDecision,
+    context: SolverContext,
+) -> dict[str, SolverDecision]:
+    """WorkItem別に生成されたObservation差分を再び独立Decisionへ分ける。"""
+
+    if (
+        decision.next != "continue"
+        or decision.start_next_cycle
+        or decision.answer is not None
+        or decision.update.set_non_work_item_requirements is not None
+        or decision.update.add_work_items
+        or decision.update.add_hypotheses
+        or decision.update.impact_decisions
+        or decision.review_finding_resolutions
+        or decision.graph_candidate_review is not None
+        or decision.search_candidate_review is not None
+        or decision.frontier_re_adoptions
+        or decision.deferred_frontier_resolutions
+        or decision.unreviewed_graph_resolution is not None
+    ):
+        return {}
+
+    hypothesis_work_item_ids = {
+        item.hypothesis_id: item.work_item_id for item in context.hypotheses
+    }
+    work_item_ids = set(decision.next_focus_work_item_ids)
+    work_item_ids.update(
+        item.work_item_id for item in decision.update.update_work_items
+    )
+    work_item_ids.update(
+        hypothesis_work_item_ids[item.hypothesis_id]
+        for item in decision.update.update_hypotheses
+        if item.hypothesis_id in hypothesis_work_item_ids
+    )
+    work_item_ids.update(
+        item.work_item_id for item in decision.dependency_decisions
+    )
+    work_item_ids.update(item.work_item_id for item in decision.tool_requests)
+    if not work_item_ids:
+        return {}
+
+    ordered_ids = tuple(
+        item.work_item_id
+        for item in context.work_tree
+        if item.work_item_id in work_item_ids
+    )
+    if set(ordered_ids) != work_item_ids:
+        return {}
+
+    result: dict[str, SolverDecision] = {}
+    for work_item_id in ordered_ids:
+        work_item_updates = tuple(
+            item
+            for item in decision.update.update_work_items
+            if item.work_item_id == work_item_id
+        )
+        hypothesis_updates = tuple(
+            item
+            for item in decision.update.update_hypotheses
+            if hypothesis_work_item_ids.get(item.hypothesis_id) == work_item_id
+        )
+        dependencies = tuple(
+            item
+            for item in decision.dependency_decisions
+            if item.work_item_id == work_item_id
+        )
+        tool_requests = tuple(
+            item
+            for item in decision.tool_requests
+            if item.work_item_id == work_item_id
+        )
+        focus_ids = tuple(
+            item
+            for item in decision.next_focus_work_item_ids
+            if item == work_item_id
+        )
+        result[work_item_id] = SolverDecision(
+            next="continue",
+            decision_reason=decision.decision_reason,
+            update=CaseUpdate(
+                update_work_items=work_item_updates,
+                update_hypotheses=hypothesis_updates,
+            ),
+            next_focus_work_item_ids=focus_ids,
+            dependency_decisions=dependencies,
+            tool_requests=tool_requests,
+        )
+    return result
+
+
+def _merge_observation_work_item_decisions(
+    decisions: tuple[SolverDecision, ...],
+) -> SolverDecision:
+    """検証済みの独立したWorkItem差分を、意味を変えず連結する。"""
+
+    if len(decisions) == 1:
+        return decisions[0]
+    return SolverDecision(
+        next="continue",
+        decision_reason=(
+            f"{len(decisions)}件のWorkItemについて、個別に検証した差分を統合した。"
+        ),
+        update=CaseUpdate(
+            update_work_items=tuple(
+                item
+                for decision in decisions
+                for item in decision.update.update_work_items
+            ),
+            update_hypotheses=tuple(
+                item
+                for decision in decisions
+                for item in decision.update.update_hypotheses
+            ),
+        ),
+        next_focus_work_item_ids=tuple(
+            dict.fromkeys(
+                item
+                for decision in decisions
+                for item in decision.next_focus_work_item_ids
+            )
+        ),
+        dependency_decisions=tuple(
+            item
+            for decision in decisions
+            for item in decision.dependency_decisions
+        ),
+        tool_requests=tuple(
+            item for decision in decisions for item in decision.tool_requests
+        ),
+    )
+
+
 class AgentLoop:
     def __init__(
         self,
@@ -106,6 +239,57 @@ class AgentLoop:
         self._profile = profile
         self._diagnostics = diagnostics
         self._clock = clock
+
+    def _validate_observation_work_item_decision(
+        self,
+        state: CaseState,
+        decision: SolverDecision,
+        context: SolverContext,
+    ) -> None:
+        """Observation差分を保存せず、単一WorkItemの契約として検証する。"""
+
+        apply_solver_decision(
+            state,
+            decision,
+            limits=self._profile.limits,
+            known_tool_names=self._read_only_tool_names,
+            material_evidence_ids=context.material_evidence_ids,
+            fetchable_article_ids=context.fetchable_article_ids,
+            required_dependency_kind=context.required_dependency_kind,
+            required_dependency_work_item_ids=(
+                context.required_dependency_work_item_ids
+            ),
+            require_dependency_decisions=False,
+            tool_list_argument_limits={
+                (item.tool_name, item.argument_name): item.max_items
+                for item in self._profile.tool_list_argument_limits
+            },
+            search_candidate_article_ids=tuple(
+                item.article_id for item in context.search_candidates
+            ),
+            graph_candidate_article_ids=tuple(
+                item.article_id
+                for item in context.graph_review_batch.candidates
+                if item.content_status in {"not_requested", "failed", "timeout"}
+            ),
+            graph_known_article_ids=tuple(
+                dict.fromkeys(
+                    [
+                        *(item.article_id for item in context.graph_review_batch.candidates),
+                        *(item.article_id for item in context.graph_review_ledger),
+                    ]
+                )
+            ),
+            graph_review_fetch_tool_name=(
+                self._profile.graph_review_fetch_tool_name
+            ),
+            remaining_fetch_capacity=context.remaining_fetch_capacity,
+            cycle_close_required=False,
+            can_start_next_cycle=context.can_start_next_cycle,
+            finalize_only=False,
+            allow_dependency_action_without_tool=True,
+            allow_parallel_work_item_actions=True,
+        )
 
     def run(self, case_id: str) -> AgentRunResult:
         state = self._store.load(case_id)
@@ -327,6 +511,7 @@ class AgentLoop:
             dependency_audit_required = bool(dependency_audit_work_item_ids)
             contract_feedback: SolverContractFeedback | None = None
             action_feedback: SolverActionFeedback | None = None
+            retained_observation_decisions: dict[str, SolverDecision] = {}
             cycle_step_timed_out = False
             for decision_attempt in range(MAX_SOLVER_DECISION_ATTEMPTS):
                 attempt_remaining = self._remaining_wall_time(started_at)
@@ -636,6 +821,28 @@ class AgentLoop:
                                 work_item_ids=pending_candidate_work_item_ids,
                             )
                         )
+                        if retained_observation_decisions:
+                            repaired_by_work_item = (
+                                _observation_decisions_by_work_item(
+                                    applied_decision,
+                                    context,
+                                )
+                            )
+                            if repaired_by_work_item:
+                                combined_by_work_item = {
+                                    **repaired_by_work_item,
+                                    **retained_observation_decisions,
+                                }
+                                applied_decision = (
+                                    _merge_observation_work_item_decisions(
+                                        tuple(
+                                            combined_by_work_item[item.work_item_id]
+                                            for item in context.work_tree
+                                            if item.work_item_id
+                                            in combined_by_work_item
+                                        )
+                                    )
+                                )
                     if purpose == "hypothesis_revision":
                         revision = solver_call.hypothesis_revision
                         if revision is None:
@@ -865,6 +1072,45 @@ class AgentLoop:
                     if decision_attempt == MAX_SOLVER_DECISION_ATTEMPTS - 1:
                         raise
                     action_feedback = None
+                    if purpose == "observation_integration":
+                        decisions_by_work_item = (
+                            _observation_decisions_by_work_item(
+                                applied_decision,
+                                context,
+                            )
+                        )
+                        valid_decisions: dict[str, SolverDecision] = {}
+                        invalid_decisions: dict[str, SolverDecision] = {}
+                        invalid_violations: dict[str, str] = {}
+                        for work_item_id, item_decision in (
+                            decisions_by_work_item.items()
+                        ):
+                            try:
+                                self._validate_observation_work_item_decision(
+                                    state,
+                                    item_decision,
+                                    context,
+                                )
+                            except ContractViolation as item_error:
+                                invalid_decisions[work_item_id] = item_decision
+                                invalid_violations[work_item_id] = str(item_error)
+                            else:
+                                valid_decisions[work_item_id] = item_decision
+                        if valid_decisions and invalid_decisions:
+                            retained_observation_decisions = valid_decisions
+                            contract_feedback = SolverContractFeedback(
+                                violation="; ".join(
+                                    f"{work_item_id}: {invalid_violations[work_item_id]}"
+                                    for work_item_id in invalid_decisions
+                                ),
+                                previous_decision=(
+                                    _merge_observation_work_item_decisions(
+                                        tuple(invalid_decisions.values())
+                                    )
+                                ),
+                                repair_work_item_ids=tuple(invalid_decisions),
+                            )
+                            continue
                     contract_feedback = SolverContractFeedback(
                         violation=_merge_contract_violations(
                             contract_feedback.violation

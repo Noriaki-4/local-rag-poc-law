@@ -12,6 +12,7 @@ import pytest
 from app.adapters.models.structured_json import _observation_work_item_contexts
 from app.adapters.persistence.simple_in_memory import InMemoryCaseStore
 from app.agent_framework.context import (
+    SolverContractFeedback,
     SolverContext,
     build_solver_context,
     pending_candidate_review_work_item_ids,
@@ -2609,6 +2610,192 @@ def test_solver_can_repair_structural_contract() -> None:
         "research_contract_repair",
         "integration",
     ]
+
+
+def test_observation_contract_repair_retries_only_invalid_work_item() -> None:
+    initial = SolverDecision(
+        next="continue",
+        update=CaseUpdate(
+            add_work_items=(
+                WorkItem(work_item_id="w1", question="第一の根拠を確認する"),
+                WorkItem(work_item_id="w2", question="第二の根拠を確認する"),
+            ),
+            add_hypotheses=(
+                Hypothesis(
+                    hypothesis_id="h1",
+                    work_item_id="w1",
+                    statement="第一の根拠がある",
+                ),
+                Hypothesis(
+                    hypothesis_id="h2",
+                    work_item_id="w2",
+                    statement="第二の根拠がある",
+                ),
+            ),
+        ),
+        next_focus_work_item_ids=("w1", "w2"),
+        tool_requests=(
+            ToolRequest(
+                request_id="r1",
+                work_item_id="w1",
+                tool_name="search",
+                purpose="第一の本文を取得する",
+                hypothesis_ids=("h1",),
+            ),
+            ToolRequest(
+                request_id="r2",
+                work_item_id="w2",
+                tool_name="search",
+                purpose="第二の本文を取得する",
+                hypothesis_ids=("h2",),
+            ),
+        ),
+    )
+    first_observation = SolverDecision(
+        next="continue",
+        update=CaseUpdate(
+            update_work_items=(
+                WorkItemUpdate(
+                    work_item_id="w1",
+                    state="resolved",
+                    resolution="第一の本文で確認した",
+                    basis_hypothesis_ids=("h1",),
+                ),
+                WorkItemUpdate(
+                    work_item_id="w2",
+                    state="resolved",
+                    resolution="第二の本文で確認した",
+                    basis_hypothesis_ids=("h2",),
+                ),
+            ),
+            update_hypotheses=(
+                HypothesisUpdate(
+                    hypothesis_id="h1",
+                    judgment="supported",
+                    evidence_ids=("e_r1",),
+                ),
+                HypothesisUpdate(
+                    hypothesis_id="h2",
+                    judgment="supported",
+                    evidence_ids=(),
+                ),
+            ),
+        ),
+    )
+    repaired_second_work_item = SolverDecision(
+        next="continue",
+        update=CaseUpdate(
+            update_work_items=(
+                WorkItemUpdate(
+                    work_item_id="w2",
+                    state="resolved",
+                    resolution="第二の本文で確認した",
+                    basis_hypothesis_ids=("h2",),
+                ),
+            ),
+            update_hypotheses=(
+                HypothesisUpdate(
+                    hypothesis_id="h2",
+                    judgment="supported",
+                    evidence_ids=("e_r2",),
+                ),
+            ),
+        ),
+    )
+    final = SolverDecision(
+        next="finalize",
+        answer=FinalAnswer(
+            text="二つの根拠を確認した。",
+            citation_ids=("e_r1", "e_r2"),
+        ),
+    )
+    model = FakeModel(
+        [initial, first_observation, repaired_second_work_item, final]
+    )
+    profile = _profile().model_copy(
+        update={
+            "solver_observation_integration": ModelCallProfile(
+                model="observation-model",
+                system_prompt="observation",
+            )
+        }
+    )
+
+    state, trace = _run(
+        model,
+        tools=(FakeReadTool(),),
+        profile=profile,
+    )
+
+    assert state.run_status == "completed"
+    assert [item.judgment for item in state.hypotheses] == [
+        "supported",
+        "supported",
+    ]
+    assert [item.evidence_ids for item in state.hypotheses] == [
+        ("e_r1",),
+        ("e_r2",),
+    ]
+    repair_feedback = model.solver_contexts[2].contract_feedback
+    assert repair_feedback is not None
+    assert repair_feedback.repair_work_item_ids == ("w2",)
+    assert [item.hypothesis_id for item in (
+        repair_feedback.previous_decision.update.update_hypotheses
+    )] == ["h2"]
+    assert [item.purpose for item in trace.model_calls] == [
+        "research",
+        "observation_integration",
+        "observation_integration_contract_repair",
+        "integration",
+    ]
+
+
+def test_observation_projection_limits_contract_repair_to_failed_work_item() -> None:
+    context = build_solver_context(
+        CaseState(
+            case_id="case-observation-repair-scope",
+            question="質問",
+            work_items=(
+                WorkItem(work_item_id="w1", question="第一の確認"),
+                WorkItem(work_item_id="w2", question="第二の確認"),
+            ),
+            hypotheses=(
+                Hypothesis(
+                    hypothesis_id="h1",
+                    work_item_id="w1",
+                    statement="第一の命題",
+                ),
+                Hypothesis(
+                    hypothesis_id="h2",
+                    work_item_id="w2",
+                    statement="第二の命題",
+                ),
+            ),
+        ),
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+        contract_feedback=SolverContractFeedback(
+            violation="w2の根拠が不足している",
+            previous_decision=SolverDecision(
+                next="continue",
+                update=CaseUpdate(
+                    update_hypotheses=(
+                        HypothesisUpdate(
+                            hypothesis_id="h2",
+                            judgment="supported",
+                        ),
+                    ),
+                ),
+            ),
+            repair_work_item_ids=("w2",),
+        ),
+    )
+
+    projected = _observation_work_item_contexts(context)
+
+    assert [item.work_tree[0].work_item_id for item in projected] == ["w2"]
+    assert [item.hypothesis_id for item in projected[0].hypotheses] == ["h2"]
 
 
 def test_repeated_successful_action_returns_normal_feedback() -> None:
