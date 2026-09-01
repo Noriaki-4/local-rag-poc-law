@@ -11,6 +11,11 @@ class AgentCoreContractError(ValueError):
     """GenUからのinvoke payloadをLegal Agentへ変換できない。"""
 
 
+ANSWER_OPERATION = "answer"
+QUESTION_READINESS_OPERATION = "question_readiness"
+_SUPPORTED_OPERATIONS = {ANSWER_OPERATION, QUESTION_READINESS_OPERATION}
+
+
 def unwrap_payload(payload: Any) -> Mapping[str, Any]:
     if not isinstance(payload, Mapping):
         raise AgentCoreContractError("request body must be a JSON object")
@@ -18,6 +23,15 @@ def unwrap_payload(payload: Any) -> Mapping[str, Any]:
     if isinstance(wrapped, Mapping):
         return wrapped
     return payload
+
+
+def extract_operation(payload: Mapping[str, Any]) -> str:
+    """呼出し種別を得る。従来payloadは回答生成として扱う。"""
+
+    operation = payload.get("operation", ANSWER_OPERATION)
+    if operation not in _SUPPORTED_OPERATIONS:
+        raise AgentCoreContractError(f"unsupported operation: {operation}")
+    return operation
 
 
 def extract_question(payload: Mapping[str, Any]) -> str:

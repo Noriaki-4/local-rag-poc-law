@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import Mapping
 from typing import Any
@@ -11,8 +12,10 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from contract import (
+    QUESTION_READINESS_OPERATION,
     AgentCoreContractError,
     encode_stream_event,
+    extract_operation,
     extract_question,
     render_answer,
     unwrap_payload,
@@ -32,6 +35,7 @@ async def ping() -> dict[str, str]:
 async def invocations(request: Request):
     try:
         payload = unwrap_payload(await request.json())
+        operation = extract_operation(payload)
         question = extract_question(payload)
     except (AgentCoreContractError, ValueError) as exc:
         return JSONResponse(
@@ -44,13 +48,19 @@ async def invocations(request: Request):
     )
     requested_model = payload.get("model")
     logger.info(
-        "Starting legal AgentCore invocation session=%s requested_model=%s",
+        "Starting legal AgentCore invocation operation=%s session=%s requested_model=%s",
+        operation,
         runtime_session_id,
         requested_model,
     )
 
+    if operation == QUESTION_READINESS_OPERATION:
+        stream = _stream_question_readiness(question, runtime_session_id)
+    else:
+        stream = _stream_legal_answer(question, runtime_session_id)
+
     return StreamingResponse(
-        _stream_legal_answer(question, runtime_session_id),
+        stream,
         media_type="text/event-stream",
     )
 
@@ -110,4 +120,60 @@ def _invoke_legal_agent(question: str) -> Mapping[str, Any]:
     from app.models import AnswerRequest
 
     response = framework_agent_service.answer(AnswerRequest(question=question))
+    return response.model_dump(mode="json")
+
+
+async def _stream_question_readiness(
+    question: str, runtime_session_id: str | None
+):
+    yield encode_stream_event({"messageStart": {"role": "assistant"}})
+    try:
+        response = await asyncio.to_thread(_invoke_question_readiness, question)
+        rendered = json.dumps(response, ensure_ascii=False, separators=(",", ":"))
+    except Exception:
+        logger.exception(
+            "Question readiness invocation failed session=%s", runtime_session_id
+        )
+        yield encode_stream_event(
+            {
+                "internalServerException": {
+                    "message": "質問の整理を実行できませんでした。"
+                }
+            }
+        )
+        yield encode_stream_event({"messageStop": {"stopReason": "end_turn"}})
+        return
+
+    yield encode_stream_event(
+        {
+            "contentBlockStart": {
+                "contentBlockIndex": 0,
+                "start": {"text": ""},
+            }
+        }
+    )
+    yield encode_stream_event(
+        {
+            "contentBlockDelta": {
+                "contentBlockIndex": 0,
+                "delta": {"text": rendered},
+            }
+        }
+    )
+    yield encode_stream_event({"contentBlockStop": {"contentBlockIndex": 0}})
+    yield encode_stream_event({"messageStop": {"stopReason": "end_turn"}})
+
+
+def _invoke_question_readiness(question: str) -> Mapping[str, Any]:
+    """既存の質問確認Domain ServiceをAgentCore境界から呼び出す。"""
+
+    from aws_adapters import install
+
+    install()
+    from app.main import question_readiness_service
+    from app.models import QuestionReadinessRequest
+
+    response = question_readiness_service.check(
+        QuestionReadinessRequest(question=question)
+    )
     return response.model_dump(mode="json")

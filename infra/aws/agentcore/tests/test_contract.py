@@ -3,8 +3,11 @@ import json
 import pytest
 
 from contract import (
+    ANSWER_OPERATION,
+    QUESTION_READINESS_OPERATION,
     AgentCoreContractError,
     encode_stream_event,
+    extract_operation,
     extract_question,
     render_answer,
     unwrap_payload,
@@ -15,6 +18,19 @@ def test_unwraps_agentcore_input_wrapper():
     assert unwrap_payload({"input": {"prompt": [{"text": "質問"}]}}) == {
         "prompt": [{"text": "質問"}]
     }
+
+
+def test_operation_defaults_to_answer_and_accepts_question_readiness():
+    assert extract_operation({}) == ANSWER_OPERATION
+    assert (
+        extract_operation({"operation": "question_readiness"})
+        == QUESTION_READINESS_OPERATION
+    )
+
+
+def test_rejects_unknown_operation():
+    with pytest.raises(AgentCoreContractError, match="unsupported operation"):
+        extract_operation({"operation": "seed"})
 
 
 def test_extracts_all_text_blocks_from_prompt():

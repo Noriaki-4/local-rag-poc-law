@@ -4,14 +4,16 @@ GenUからBedrock AgentCore Runtimeとして既存Legal Agentを呼び出すた�
 検索ロジックの正本は`agent-api/app`に残し、このディレクトリには次だけを置く。
 
 - AgentCore必須endpointの`GET /ping`（`{"status":"Healthy"}`）と`POST /invocations`
-- GenUのStrands requestから現行`AnswerRequest`への変換
+- GenUのStrands requestを`operation`により現行`AnswerRequest`または
+  `QuestionReadinessRequest`へ変換（省略時は後方互換のため回答生成）
 - 同期回答をGenUが読めるStrands event streamへ変換する処理
 - OpenSearch SigV4、Titan、Neptune Analytics、Bedrock ClaudeのAWS接続adapter
 - AgentCore用ARM64 container定義
 
 `runtime_app.py`はLegal Agentのimportをinvoke時まで遅延する。これにより`/ping`はOpenSearch、Graph、
 LLM clientを初期化せずに応答する。検索中は先に開始eventを返し、既存Agentの同期処理を別threadで
-実行した後、回答と引用一覧をstreamへ投影する。
+実行した後、回答と引用一覧をstreamへ投影する。`operation=question_readiness`では既存の質問確認Domain
+Serviceを呼び、確認質問、選択肢、修正版をJSONのtext eventとして返す。検索・回答処理は開始しない。
 
 GenUから渡されるmodelは診断ログにだけ残し、Legal Agentのmodel設定には使用しない。Runtimeは環境設定の
 Japan geo inference profileへ固定する。`aws_adapters.py`は`app.main`より先にprovider境界を差し込み、
