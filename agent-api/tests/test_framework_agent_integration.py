@@ -50,6 +50,7 @@ from app.adapters.models.structured_json import (
     _validate_search_assessment_payload,
     _validate_search_reselection_payload,
     _validate_selected_search_assessments,
+    _validate_hypothesis_update_evidence,
     render_cycle_close_model_call,
     render_dependency_assessment_model_call,
     render_observation_integration_model_call,
@@ -4691,6 +4692,84 @@ def test_search_review_persists_assessed_hypothesis_matches() -> None:
     assert selection["matched_hypothesis_ids"] == ["h-1"]
 
 
+def test_search_review_does_not_refetch_article_for_same_work_item() -> None:
+    profile = legal_profiles.legal_agent_profile()
+    loop = AgentLoop(
+        store=InMemoryCaseStore(),
+        model=StructuredJSONModelAdapter(FakeStructuredLLM()),
+        tools=ToolRegistry(()),
+        profile=profile,
+    )
+    state = CaseState(
+        case_id="case-search-review-refetch",
+        question="確認する。",
+        research_cycle_count=1,
+        work_items=(WorkItem(work_item_id="wi-1", question="確認事項"),),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h-1",
+                work_item_id="wi-1",
+                statement="本文で確認する命題",
+            ),
+        ),
+        evidence=(
+            Evidence(
+                evidence_id="article-1",
+                source_ref="fixture:article-1",
+                content="取得済み本文",
+                created_cycle=1,
+                metadata={"articleId": "article-1"},
+            ),
+        ),
+        tool_requests=(
+            ToolRequest(
+                request_id="fetch-1",
+                work_item_id="wi-1",
+                tool_name="fetch_articles",
+                arguments={"article_ids": ["article-1"]},
+                purpose="本文を取得する。",
+                hypothesis_ids=("h-1",),
+            ),
+        ),
+        tool_results=(
+            ToolResult(
+                request_id="fetch-1",
+                status="succeeded",
+                evidence_ids=("article-1",),
+                cycle_no=1,
+            ),
+        ),
+    )
+    review = SearchCandidateReview(
+        search_request_ids=("search-2",),
+        selections=(
+            SearchCandidateSelection(
+                article_id="article-1",
+                reason="確認対象に関連する。",
+                matched_hypothesis_ids=("h-1",),
+            ),
+        ),
+        deferred_article_ids=(),
+        reason="候補を評価した。",
+    )
+    candidates = (
+        SearchCandidateArticle(
+            article_id="article-1",
+            document_id="document-1",
+            title="検証法",
+            headings=("第一条",),
+            discovery_work_item_ids=("wi-1",),
+            discovery_hypothesis_ids=("h-1",),
+            search_request_ids=("search-2",),
+            navigation_evidence_ids=(),
+        ),
+    )
+
+    requests = loop._search_review_fetch_requests(state, review, candidates)
+
+    assert requests == ()
+
+
 def test_observation_projects_article_to_hypothesis_candidate_links() -> None:
     state = CaseState(
         case_id="case-observation-hypothesis-links",
@@ -7074,6 +7153,77 @@ def test_anthropic_observation_uses_small_json_transport_schema() -> None:
         "article_ids": [fetchable_article_id]
     }
 
+    other_article_id = "law-test-article-not-yet-fetched"
+    already_fetched_context = context.model_copy(
+        update={
+            "fetchable_article_ids": (
+                fetchable_article_id,
+                other_article_id,
+            ),
+            "fetched_resource_ids_by_work_item_this_cycle": {
+                context.work_tree[0].work_item_id: (fetchable_article_id,)
+            },
+        }
+    )
+    normalized_partial_refetch = _normalize_observation_integration_payload(
+        {
+            "decision_reason": "未取得の候補だけ本文を取得する。",
+            "update_hypotheses": [],
+            "dependency_decisions": [],
+            "tool_requests_json": "[]",
+            "fetch_articles": {
+                "request_id": "fetch-partial-1",
+                "work_item_id": context.work_tree[0].work_item_id,
+                "purpose": "本文を確認する。",
+                "hypothesis_ids": [context.hypotheses[0].hypothesis_id],
+                "article_ids": [fetchable_article_id, other_article_id],
+            },
+            "load_evidence": None,
+        },
+        context=already_fetched_context,
+    )
+    assert normalized_partial_refetch["tool_requests"][0]["arguments"] == {
+        "article_ids": [other_article_id]
+    }
+
+    already_fetched_in_prior_cycle_context = context.model_copy(
+        update={
+            "fetched_resource_ids_by_work_item": {
+                context.work_tree[0].work_item_id: (fetchable_article_id,)
+            },
+        }
+    )
+    normalized_full_refetch = _normalize_observation_integration_payload(
+        {
+            "decision_reason": "取得済み本文を再利用する。",
+            "update_hypotheses": [],
+            "dependency_decisions": [
+                {
+                    "dependency_kind": "lower_norm",
+                    "work_item_id": context.work_tree[0].work_item_id,
+                    "status": "needs_action",
+                    "reason": "取得済み本文を確認する。",
+                    "basis_evidence_ids": [],
+                    "action_request_id": "fetch-full-duplicate",
+                }
+            ],
+            "tool_requests_json": "[]",
+            "fetch_articles": {
+                "request_id": "fetch-full-duplicate",
+                "work_item_id": context.work_tree[0].work_item_id,
+                "purpose": "本文を確認する。",
+                "hypothesis_ids": [context.hypotheses[0].hypothesis_id],
+                "article_ids": [fetchable_article_id],
+            },
+            "load_evidence": None,
+        },
+        context=already_fetched_in_prior_cycle_context,
+    )
+    assert normalized_full_refetch["tool_requests"] == []
+    assert normalized_full_refetch["dependency_decisions"][0][
+        "action_request_id"
+    ] is None
+
     normalized_unknown_fetch = _normalize_observation_integration_payload(
         {
             "decision_reason": "未知候補は実行しない。",
@@ -8294,6 +8444,145 @@ def test_cycle_close_mechanically_closes_deferred_frontier_for_resolved_work(
     assert decision.deferred_frontier_resolutions[0].action == (
         "no_longer_needed"
     )
+
+
+def test_cycle_close_mechanically_carries_omitted_active_deferred_frontier(
+) -> None:
+    state = CaseState(
+        case_id="cycle-close-carry-omitted-deferred",
+        question="未確認事項を次Cycleで確認する。",
+        research_cycle_count=1,
+        work_items=(WorkItem(work_item_id="wi-1", question="未確認事項"),),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h-1",
+                work_item_id="wi-1",
+                statement="確認対象の命題",
+            ),
+        ),
+    )
+    context = build_solver_context(
+        state,
+        AgentLimits(),
+        remaining_wall_time_sec=300,
+        finalize_only=False,
+    ).model_copy(
+        update={
+            "graph_review_ledger": (
+                GraphReviewLedgerItem(
+                    frontier_item_id="frontier-active",
+                    article_id="article-2",
+                    title="検証規則",
+                    heading="第二条",
+                    work_item_id="wi-1",
+                    hypothesis_id="h-1",
+                    review_status="relevant_deferred",
+                    reason="取得枠がないため保留した候補。",
+                    content_status="not_requested",
+                    last_reviewed_cycle=1,
+                ),
+            ),
+        }
+    )
+    observation = ObservationIntegrationDecision(
+        decision_reason="現在Cycleの本文を統合した。",
+    )
+
+    decision = _normalize_cycle_close_decisions(
+        context,
+        observation,
+        CycleCloseDecision(
+            decision_reason="未確認事項を次Cycleへ引き継ぐ。",
+            next_focus_work_item_ids=("wi-1",),
+            deferred_frontier_resolutions=(),
+        ),
+    )
+
+    assert len(decision.deferred_frontier_resolutions) == 1
+    resolution = decision.deferred_frontier_resolutions[0]
+    assert resolution.frontier_item_id == "frontier-active"
+    assert resolution.action == "carry_forward"
+
+
+def test_non_boundary_step_drops_deferred_frontier_resolutions() -> None:
+    context = build_solver_context(
+        CaseState(case_id="case-non-boundary", question="確認する。"),
+        AgentLimits(),
+        remaining_wall_time_sec=300,
+        finalize_only=False,
+    )
+    normalized = {
+        "next": "continue",
+        "start_next_cycle": False,
+        "deferred_frontier_resolutions": [
+            {
+                "frontier_item_id": "frontier-1",
+                "article_id": "article-2",
+                "work_item_id": "wi-1",
+                "hypothesis_id": "h-1",
+                "action": "no_longer_needed",
+                "reason": "今回の確認には不要。",
+            }
+        ],
+        "unreviewed_graph_resolution": {
+            "action": "review_next_cycle",
+            "reason": "次Cycleで確認する。",
+        },
+        "tool_requests": [],
+    }
+
+    _normalize_absent_context_branches(normalized, context)
+
+    assert normalized["deferred_frontier_resolutions"] == []
+    assert normalized["unreviewed_graph_resolution"] is None
+
+
+def test_supported_hypothesis_delta_can_reuse_existing_evidence() -> None:
+    context = build_solver_context(
+        CaseState(
+            case_id="case-supported-delta",
+            question="確認する。",
+            work_items=(WorkItem(work_item_id="wi-1", question="確認事項"),),
+            hypotheses=(
+                Hypothesis(
+                    hypothesis_id="h-1",
+                    work_item_id="wi-1",
+                    statement="本文が命題を支持する。",
+                    judgment="supported",
+                    evidence_ids=("evidence-1",),
+                ),
+            ),
+            evidence=(
+                Evidence(
+                    evidence_id="evidence-1",
+                    source_ref="fixture:evidence-1",
+                    content="確認済み本文",
+                    created_cycle=1,
+                ),
+            ),
+        ),
+        AgentLimits(),
+        remaining_wall_time_sec=300,
+        finalize_only=False,
+    )
+    decision = SolverDecision(
+        next="continue",
+        decision_reason="既存の支持判断を維持し、未確認事項だけ追加する。",
+        update={
+            "update_hypotheses": [
+                {
+                    "hypothesis_id": "h-1",
+                    "judgment": "supported",
+                    "evidence_ids": [],
+                    "add_gaps": [{"description": "追加で確認する具体的条件"}],
+                    "resolve_gap_ids": [],
+                }
+            ]
+        },
+        next_focus_work_item_ids=("wi-1",),
+    )
+
+    _validate_hypothesis_update_evidence(decision, context)
 
 
 def test_finalization_mechanically_closes_deferred_frontier_for_resolved_work(

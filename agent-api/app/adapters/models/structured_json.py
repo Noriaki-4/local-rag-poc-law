@@ -253,7 +253,7 @@ class StructuredJSONModelAdapter:
                                 context.contract_feedback.previous_decision.answer
                             )
                         decision = SolverDecision.model_validate(normalized)
-                        _validate_hypothesis_update_evidence(decision)
+                        _validate_hypothesis_update_evidence(decision, context)
                     if self._diagnostics is not None:
                         self._diagnostics.record_transport_output(
                             context=context,
@@ -3996,6 +3996,7 @@ def _normalize_observation_integration_payload(
         if isinstance(values, list):
             arguments[list_argument] = list(dict.fromkeys(values))
     if context is not None:
+        _normalize_article_fetch_requests(normalized, context)
         _normalize_grounding_evidence_aliases(normalized, context)
         _normalize_legacy_hypothesis_gap_replacements(normalized, context)
     for decision in normalized.get("dependency_decisions") or []:
@@ -4441,7 +4442,7 @@ def _normalize_cycle_close_decisions(
 ) -> SolverDecision:
     if _required_cycle_close_transition(context, observation) != "start_next_cycle":
         raise ValueError("final answers require the finalization profile")
-    _, closed_work_item_frontiers = _cycle_close_deferred_frontiers(
+    active_deferred, closed_work_item_frontiers = _cycle_close_deferred_frontiers(
         context,
         observation,
     )
@@ -4458,6 +4459,25 @@ def _normalize_cycle_close_decisions(
         )
         for item in closed_work_item_frontiers
     )
+    transition_resolutions = transition.deferred_frontier_resolutions
+    resolved_frontier_ids = {
+        item.frontier_item_id for item in transition_resolutions
+    }
+    transition_resolutions = (
+        *transition_resolutions,
+        *(
+            DeferredFrontierResolution(
+                frontier_item_id=item.frontier_item_id,
+                article_id=item.article_id,
+                work_item_id=item.work_item_id,
+                hypothesis_id=item.hypothesis_id,
+                action="carry_forward",
+                reason="現在Cycleで本文取得せず、次Cycleへ引き継ぐ。",
+            )
+            for item in active_deferred
+            if item.frontier_item_id not in resolved_frontier_ids
+        ),
+    )
     return SolverDecision(
         next="continue",
         decision_reason=transition.decision_reason,
@@ -4470,7 +4490,7 @@ def _normalize_cycle_close_decisions(
         retain_evidence_ids=transition.retain_evidence_ids,
         dependency_decisions=observation.dependency_decisions,
         deferred_frontier_resolutions=(
-            *transition.deferred_frontier_resolutions,
+            *transition_resolutions,
             *automatic_resolutions,
         ),
         unreviewed_graph_resolution=transition.unreviewed_graph_resolution,
@@ -5041,11 +5061,19 @@ def _render_staged_research_repair_model_call(
     return rendered
 
 
-def _validate_hypothesis_update_evidence(decision: SolverDecision) -> None:
+def _validate_hypothesis_update_evidence(
+    decision: SolverDecision,
+    context: SolverContext,
+) -> None:
     """状態適用後に必ず失敗するHypothesis更新を輸送修復へ戻す。"""
 
+    existing_evidence_by_hypothesis = {
+        item.hypothesis_id: item.evidence_ids for item in context.hypotheses
+    }
     if any(
-        item.judgment in {"supported", "contradicted"} and not item.evidence_ids
+        item.judgment in {"supported", "contradicted"}
+        and not item.evidence_ids
+        and not existing_evidence_by_hypothesis.get(item.hypothesis_id)
         for item in decision.update.update_hypotheses
     ):
         raise ModelProtocolError(
@@ -8161,7 +8189,7 @@ def normalize_staged_research_decision(
     _assign_tool_request_ids(normalized, context)
     _normalize_absent_context_branches(normalized, context)
     decision = SolverDecision.model_validate(normalized)
-    _validate_hypothesis_update_evidence(decision)
+    _validate_hypothesis_update_evidence(decision, context)
     return decision
 
 
@@ -8313,7 +8341,7 @@ def normalize_dependency_action_decision(
     _assign_tool_request_ids(normalized, context)
     _normalize_absent_context_branches(normalized, context)
     decision = SolverDecision.model_validate(normalized)
-    _validate_hypothesis_update_evidence(decision)
+    _validate_hypothesis_update_evidence(decision, context)
     return decision
 
 
@@ -8819,6 +8847,89 @@ def _apply_dependency_article_bindings(
         )
 
 
+def _normalize_article_fetch_requests(
+    normalized: dict[str, Any],
+    context: SolverContext,
+) -> None:
+    """本文取得要求のIDを解決し、同じWorkItemの取得済みIDを除く。"""
+
+    article_aliases = _article_fetch_alias_map(context)
+    retained_requests = []
+    removed_request_ids: set[str] = set()
+    for request in normalized.get("tool_requests") or []:
+        if (
+            not isinstance(request, dict)
+            or request.get("tool_name") != "fetch_articles"
+        ):
+            retained_requests.append(request)
+            continue
+        arguments = request.get("arguments")
+        if not isinstance(arguments, dict):
+            retained_requests.append(request)
+            continue
+        article_ids = arguments.get("article_ids")
+        if not isinstance(article_ids, list):
+            retained_requests.append(request)
+            continue
+        request_work_item_id = request.get("work_item_id")
+        fetched_article_ids = set(
+            context.fetched_resource_ids_by_work_item.get(
+                request_work_item_id
+                if isinstance(request_work_item_id, str)
+                else "",
+                (),
+            )
+        )
+        if not context.fetched_resource_ids_by_work_item:
+            # Older replay artifacts do not have WorkItem-scoped acquisition
+            # state. Preserve their former case-wide fallback behavior.
+            fetched_article_ids.update(
+                context.fetched_resource_ids_by_work_item_this_cycle.get(
+                    request_work_item_id
+                    if isinstance(request_work_item_id, str)
+                    else "",
+                    (),
+                )
+            )
+            fetched_article_ids.update(context.fetched_resource_ids_this_cycle)
+            fetched_article_ids.update(
+                article_id
+                for evidence in context.material_evidence
+                if evidence.evidence_id in context.grounding_evidence_ids
+                if isinstance(
+                    article_id := evidence.metadata.get("articleId"),
+                    str,
+                )
+                and article_id
+            )
+        resolved_article_ids = [
+            article_aliases.get(article_id, article_id)
+            for article_id in article_ids
+        ]
+        remaining_article_ids = [
+            article_id
+            for article_id in resolved_article_ids
+            if article_id not in fetched_article_ids
+        ]
+        if not remaining_article_ids:
+            request_id = request.get("request_id")
+            if isinstance(request_id, str):
+                removed_request_ids.add(request_id)
+            continue
+        arguments["article_ids"] = remaining_article_ids
+        retained_requests.append(request)
+
+    normalized["tool_requests"] = retained_requests
+    if not removed_request_ids:
+        return
+    for dependency in normalized.get("dependency_decisions") or []:
+        if (
+            isinstance(dependency, dict)
+            and dependency.get("action_request_id") in removed_request_ids
+        ):
+            dependency["action_request_id"] = None
+
+
 def _normalize_absent_context_branches(
     normalized: dict[str, Any],
     context: SolverContext,
@@ -8831,6 +8942,13 @@ def _normalize_absent_context_branches(
         # Evidenceの引継ぎは次Cycle用であり、最終回答では保存対象を選ばない。
         normalized["retain_evidence_ids"] = []
 
+    if not (
+        normalized.get("next") == "finalize"
+        or normalized.get("start_next_cycle") is True
+    ):
+        normalized["deferred_frontier_resolutions"] = []
+        normalized["unreviewed_graph_resolution"] = None
+
     dependency_article_bindings = normalized.pop(
         "_dependency_article_bindings",
         None,
@@ -8842,7 +8960,7 @@ def _normalize_absent_context_branches(
             context,
         )
 
-    article_aliases = _article_fetch_alias_map(context)
+    _normalize_article_fetch_requests(normalized, context)
     for request in normalized.get("tool_requests") or []:
         if not isinstance(request, dict):
             continue
@@ -8870,49 +8988,6 @@ def _normalize_absent_context_branches(
                         if resolved_id not in normalized_evidence_ids:
                             normalized_evidence_ids.append(resolved_id)
                 arguments["evidence_ids"] = normalized_evidence_ids
-            continue
-        if request.get("tool_name") != "fetch_articles":
-            continue
-        request_work_item_id = request.get("work_item_id")
-        fetched_article_ids = set(
-            context.fetched_resource_ids_by_work_item_this_cycle.get(
-                request_work_item_id
-                if isinstance(request_work_item_id, str)
-                else "",
-                (),
-            )
-        )
-        if not context.fetched_resource_ids_by_work_item_this_cycle:
-            fetched_article_ids.update(context.fetched_resource_ids_this_cycle)
-            fetched_article_ids.update(
-                article_id
-                for evidence in context.material_evidence
-                if evidence.evidence_id in context.grounding_evidence_ids
-                if isinstance(
-                    article_id := evidence.metadata.get("articleId"),
-                    str,
-                )
-                and article_id
-            )
-        article_ids = arguments.get("article_ids")
-        if isinstance(article_ids, list):
-            resolved_article_ids = [
-                article_aliases.get(article_id, article_id)
-                for article_id in article_ids
-            ]
-            remaining_article_ids = [
-                article_id
-                for article_id in resolved_article_ids
-                if article_id not in fetched_article_ids
-            ]
-            # Removing an already fetched Article is deterministic deduplication,
-            # not legal relevance selection. Keep an all-redundant request intact
-            # so normal contract repair can ask the Solver for another action.
-            arguments["article_ids"] = (
-                remaining_article_ids
-                if remaining_article_ids
-                else resolved_article_ids
-            )
 
     fetch_requests = [
         request

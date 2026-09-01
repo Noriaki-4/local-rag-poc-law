@@ -601,6 +601,11 @@ class SolverContext(FrameworkModel):
         exclude=True,
         description="現在Cycleで本文取得したArticle IDを既知WorkItem ID別に集計した値。",
     )
+    fetched_resource_ids_by_work_item: dict[str, tuple[str, ...]] = Field(
+        default_factory=dict,
+        exclude=True,
+        description="現在Caseで本文取得したArticle IDを既知WorkItem ID別に集計した値。",
+    )
     remaining_fetch_capacity_by_work_item: dict[str, int] = Field(
         default_factory=dict,
         exclude=True,
@@ -930,9 +935,13 @@ def build_solver_context(
     recent_requests_by_id = {item.request_id: item for item in recent_requests}
     all_requests_by_id = {item.request_id: item for item in state.tool_requests}
     current_cycle_no = max(1, state.research_cycle_count)
-    fetched_by_work_item = fetched_article_ids_by_work_item(
+    fetched_by_work_item_this_cycle = fetched_article_ids_by_work_item(
         state,
         cycle_no=current_cycle_no,
+    )
+    fetched_by_work_item = fetched_article_ids_by_work_item(
+        state,
+        cycle_no=None,
     )
     carried_search_candidates = _carried_search_candidate_projection(
         state=state,
@@ -1038,7 +1047,7 @@ def build_solver_context(
         work_item_id: max(
             0,
             limits.max_fetched_resources_per_cycle
-            - len(fetched_by_work_item.get(work_item_id, ())),
+            - len(fetched_by_work_item_this_cycle.get(work_item_id, ())),
         )
         for work_item_id in open_work_item_ids
     }
@@ -1046,7 +1055,10 @@ def build_solver_context(
         dict.fromkeys(
             article_id
             for work_item_id in open_work_item_ids
-            for article_id in fetched_by_work_item.get(work_item_id, ())
+            for article_id in fetched_by_work_item_this_cycle.get(
+                work_item_id,
+                (),
+            )
         )
     )
     remaining_fetch_capacity = (
@@ -1460,7 +1472,10 @@ def build_solver_context(
         max_tool_requests_per_step=limits.max_tool_requests_per_step,
         max_fetched_resources_per_cycle=limits.max_fetched_resources_per_cycle,
         fetched_resource_ids_this_cycle=fetched_resource_ids_this_cycle,
-        fetched_resource_ids_by_work_item_this_cycle=fetched_by_work_item,
+        fetched_resource_ids_by_work_item_this_cycle=(
+            fetched_by_work_item_this_cycle
+        ),
+        fetched_resource_ids_by_work_item=fetched_by_work_item,
         remaining_fetch_capacity_by_work_item=remaining_by_work_item,
         remaining_fetch_capacity=remaining_fetch_capacity,
         max_parallel_work_items=limits.max_parallel_work_items,

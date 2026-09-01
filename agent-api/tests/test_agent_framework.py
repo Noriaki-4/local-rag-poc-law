@@ -4781,6 +4781,145 @@ def test_fetched_article_can_be_reused_as_a_graph_origin_but_not_refetched() -> 
         )
 
 
+def test_same_work_item_cannot_refetch_article_in_the_same_cycle() -> None:
+    prior_request = ToolRequest(
+        request_id="fetch-prior",
+        work_item_id="w1",
+        tool_name="fetch_articles",
+        arguments={"article_ids": ["law-a-article-1"]},
+        purpose="本文を取得する",
+        hypothesis_ids=("h1",),
+    )
+    state = CaseState(
+        case_id="case-refetch",
+        question="質問",
+        research_cycle_count=1,
+        work_items=(WorkItem(work_item_id="w1", question="確認する"),),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h1",
+                work_item_id="w1",
+                statement="規定内容を確認する",
+            ),
+        ),
+        tool_requests=(prior_request,),
+        tool_results=(
+            ToolResult(
+                request_id=prior_request.request_id,
+                status="succeeded",
+                evidence_ids=("e1",),
+                cycle_no=1,
+            ),
+        ),
+        evidence=(
+            Evidence(
+                evidence_id="e1",
+                source_ref="test:e1",
+                content="本文",
+                created_cycle=1,
+                metadata={"articleId": "law-a-article-1"},
+            ),
+        ),
+    )
+    duplicate = prior_request.model_copy(update={"request_id": "fetch-again"})
+
+    with pytest.raises(ActionRejected, match="already fetched.*same WorkItem"):
+        apply_solver_decision(
+            state,
+            SolverDecision(next="continue", tool_requests=(duplicate,)),
+            limits=AgentLimits(),
+            known_tool_names={"fetch_articles"},
+            material_evidence_ids=("e1",),
+            fetchable_article_ids=("law-a-article-1",),
+            finalize_only=False,
+        )
+
+
+def test_fetch_deduplication_is_work_item_scoped_across_cycles() -> None:
+    prior_request = ToolRequest(
+        request_id="fetch-w1-cycle-1",
+        work_item_id="w1",
+        tool_name="fetch_articles",
+        arguments={"article_ids": ["law-a-article-1"]},
+        purpose="本文を取得する",
+        hypothesis_ids=("h1",),
+    )
+    state = CaseState(
+        case_id="case-refetch-scope",
+        question="質問",
+        research_cycle_count=1,
+        work_items=(
+            WorkItem(work_item_id="w1", question="第一の確認"),
+            WorkItem(work_item_id="w2", question="第二の確認"),
+        ),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h1",
+                work_item_id="w1",
+                statement="第一の規定内容を確認する",
+            ),
+            Hypothesis(
+                hypothesis_id="h2",
+                work_item_id="w2",
+                statement="第二の規定内容を確認する",
+            ),
+        ),
+        tool_requests=(prior_request,),
+        tool_results=(
+            ToolResult(
+                request_id=prior_request.request_id,
+                status="succeeded",
+                evidence_ids=("e1",),
+                cycle_no=1,
+            ),
+        ),
+        evidence=(
+            Evidence(
+                evidence_id="e1",
+                source_ref="test:e1",
+                content="本文",
+                created_cycle=1,
+                metadata={"articleId": "law-a-article-1"},
+            ),
+        ),
+    )
+    other_work_item_request = prior_request.model_copy(
+        update={
+            "request_id": "fetch-w2-cycle-1",
+            "work_item_id": "w2",
+            "hypothesis_ids": ("h2",),
+        }
+    )
+
+    updated = apply_solver_decision(
+        state,
+        SolverDecision(next="continue", tool_requests=(other_work_item_request,)),
+        limits=AgentLimits(),
+        known_tool_names={"fetch_articles"},
+        material_evidence_ids=("e1",),
+        fetchable_article_ids=("law-a-article-1",),
+        graph_review_fetch_tool_name="fetch_articles",
+        finalize_only=False,
+    )
+    assert updated.tool_requests[-1] == other_work_item_request
+
+    next_cycle_state = state.model_copy(update={"research_cycle_count": 2})
+    next_cycle_request = prior_request.model_copy(
+        update={"request_id": "fetch-w1-cycle-2"}
+    )
+    with pytest.raises(ActionRejected, match="already fetched.*same WorkItem"):
+        apply_solver_decision(
+            next_cycle_state,
+            SolverDecision(next="continue", tool_requests=(next_cycle_request,)),
+            limits=AgentLimits(),
+            known_tool_names={"fetch_articles"},
+            material_evidence_ids=("e1",),
+            fetchable_article_ids=("law-a-article-1",),
+            graph_review_fetch_tool_name="fetch_articles",
+            finalize_only=False,
+        )
+
+
 def test_completed_dependency_cannot_reference_an_action_request() -> None:
     source_evidence = Evidence(
         evidence_id="source-1",

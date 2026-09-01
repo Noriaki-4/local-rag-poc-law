@@ -752,6 +752,52 @@ def apply_solver_decision(
             ),
             rejected_requests=tuple(duplicate_load_scopes),
         )
+    article_fetch_tool_name = graph_review_fetch_tool_name
+    if article_fetch_tool_name is None and "fetch_articles" in known_tool_names:
+        article_fetch_tool_name = "fetch_articles"
+    if article_fetch_tool_name is not None:
+        fetched_by_work_item = fetched_article_ids_by_work_item(
+            state,
+            cycle_no=None,
+        )
+        duplicate_fetches: list[tuple[ToolRequest, tuple[str, ...]]] = []
+        for request in decision.tool_requests:
+            if request.tool_name != article_fetch_tool_name:
+                continue
+            already_fetched = set(
+                fetched_by_work_item.get(request.work_item_id, ())
+            )
+            repeated_article_ids = tuple(
+                dict.fromkeys(
+                    article_id
+                    for article_id in request.arguments.get("article_ids", ())
+                    if isinstance(article_id, str)
+                    and article_id in already_fetched
+                )
+            )
+            if repeated_article_ids:
+                duplicate_fetches.append((request, repeated_article_ids))
+        if duplicate_fetches:
+            duplicate_details = [
+                {
+                    "work_item_id": request.work_item_id,
+                    "article_ids": list(article_ids),
+                }
+                for request, article_ids in duplicate_fetches
+            ]
+            raise ActionRejected(
+                "Article bodies were already fetched for the same WorkItem in "
+                "this case: "
+                + json.dumps(
+                    duplicate_details,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                rejected_requests=tuple(
+                    request for request, _ in duplicate_fetches
+                ),
+            )
     execution_scopes = [
         (
             request.work_item_id,

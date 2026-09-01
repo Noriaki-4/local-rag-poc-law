@@ -49,6 +49,7 @@ from .state import (
     SearchCandidateReview,
     ToolRequest,
     ToolResult,
+    fetched_article_ids_by_work_item,
     utc_now,
 )
 from .store import CaseStore
@@ -1248,6 +1249,10 @@ class AgentLoop:
         hypothesis_work_items = {
             item.hypothesis_id: item.work_item_id for item in state.hypotheses
         }
+        fetched_by_work_item = fetched_article_ids_by_work_item(
+            state,
+            cycle_no=None,
+        )
         grouped: dict[str, dict[str, list[str]]] = {}
         for selection in review.selections:
             candidate = candidates_by_id[selection.article_id]
@@ -1273,6 +1278,11 @@ class AgentLoop:
                     "Search review fetch requires discovery provenance"
                 )
             for work_item_id, hypothesis_ids in matched_by_work_item.items():
+                if selection.article_id in fetched_by_work_item.get(
+                    work_item_id,
+                    (),
+                ):
+                    continue
                 item = grouped.setdefault(
                     work_item_id,
                     {"article_ids": [], "hypothesis_ids": []},
