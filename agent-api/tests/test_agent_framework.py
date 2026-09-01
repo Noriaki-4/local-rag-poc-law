@@ -12,6 +12,7 @@ import pytest
 from app.adapters.models.structured_json import _observation_work_item_contexts
 from app.adapters.persistence.simple_in_memory import InMemoryCaseStore
 from app.agent_framework.context import (
+    SolverContractFeedback,
     SolverContext,
     build_solver_context,
     pending_candidate_review_work_item_ids,
@@ -661,11 +662,13 @@ def test_observation_defers_new_actions_until_pending_candidates_are_reviewed(
         work_item_ids=frozenset({"w1"}),
     )
 
-    assert deferred.tool_requests == ()
+    assert tuple(request.request_id for request in deferred.tool_requests) == (
+        "next-w2",
+    )
     assert {
         item.work_item_id: item.action_request_id
         for item in deferred.dependency_decisions
-    } == {"w1": None, "w2": None}
+    } == {"w1": None, "w2": "next-w2"}
 
 
 def test_load_evidence_grounding_result_is_integrated_before_other_results() -> None:
@@ -2607,6 +2610,192 @@ def test_solver_can_repair_structural_contract() -> None:
         "research_contract_repair",
         "integration",
     ]
+
+
+def test_observation_contract_repair_retries_only_invalid_work_item() -> None:
+    initial = SolverDecision(
+        next="continue",
+        update=CaseUpdate(
+            add_work_items=(
+                WorkItem(work_item_id="w1", question="第一の根拠を確認する"),
+                WorkItem(work_item_id="w2", question="第二の根拠を確認する"),
+            ),
+            add_hypotheses=(
+                Hypothesis(
+                    hypothesis_id="h1",
+                    work_item_id="w1",
+                    statement="第一の根拠がある",
+                ),
+                Hypothesis(
+                    hypothesis_id="h2",
+                    work_item_id="w2",
+                    statement="第二の根拠がある",
+                ),
+            ),
+        ),
+        next_focus_work_item_ids=("w1", "w2"),
+        tool_requests=(
+            ToolRequest(
+                request_id="r1",
+                work_item_id="w1",
+                tool_name="search",
+                purpose="第一の本文を取得する",
+                hypothesis_ids=("h1",),
+            ),
+            ToolRequest(
+                request_id="r2",
+                work_item_id="w2",
+                tool_name="search",
+                purpose="第二の本文を取得する",
+                hypothesis_ids=("h2",),
+            ),
+        ),
+    )
+    first_observation = SolverDecision(
+        next="continue",
+        update=CaseUpdate(
+            update_work_items=(
+                WorkItemUpdate(
+                    work_item_id="w1",
+                    state="resolved",
+                    resolution="第一の本文で確認した",
+                    basis_hypothesis_ids=("h1",),
+                ),
+                WorkItemUpdate(
+                    work_item_id="w2",
+                    state="resolved",
+                    resolution="第二の本文で確認した",
+                    basis_hypothesis_ids=("h2",),
+                ),
+            ),
+            update_hypotheses=(
+                HypothesisUpdate(
+                    hypothesis_id="h1",
+                    judgment="supported",
+                    evidence_ids=("e_r1",),
+                ),
+                HypothesisUpdate(
+                    hypothesis_id="h2",
+                    judgment="supported",
+                    evidence_ids=(),
+                ),
+            ),
+        ),
+    )
+    repaired_second_work_item = SolverDecision(
+        next="continue",
+        update=CaseUpdate(
+            update_work_items=(
+                WorkItemUpdate(
+                    work_item_id="w2",
+                    state="resolved",
+                    resolution="第二の本文で確認した",
+                    basis_hypothesis_ids=("h2",),
+                ),
+            ),
+            update_hypotheses=(
+                HypothesisUpdate(
+                    hypothesis_id="h2",
+                    judgment="supported",
+                    evidence_ids=("e_r2",),
+                ),
+            ),
+        ),
+    )
+    final = SolverDecision(
+        next="finalize",
+        answer=FinalAnswer(
+            text="二つの根拠を確認した。",
+            citation_ids=("e_r1", "e_r2"),
+        ),
+    )
+    model = FakeModel(
+        [initial, first_observation, repaired_second_work_item, final]
+    )
+    profile = _profile().model_copy(
+        update={
+            "solver_observation_integration": ModelCallProfile(
+                model="observation-model",
+                system_prompt="observation",
+            )
+        }
+    )
+
+    state, trace = _run(
+        model,
+        tools=(FakeReadTool(),),
+        profile=profile,
+    )
+
+    assert state.run_status == "completed"
+    assert [item.judgment for item in state.hypotheses] == [
+        "supported",
+        "supported",
+    ]
+    assert [item.evidence_ids for item in state.hypotheses] == [
+        ("e_r1",),
+        ("e_r2",),
+    ]
+    repair_feedback = model.solver_contexts[2].contract_feedback
+    assert repair_feedback is not None
+    assert repair_feedback.repair_work_item_ids == ("w2",)
+    assert [item.hypothesis_id for item in (
+        repair_feedback.previous_decision.update.update_hypotheses
+    )] == ["h2"]
+    assert [item.purpose for item in trace.model_calls] == [
+        "research",
+        "observation_integration",
+        "observation_integration_contract_repair",
+        "integration",
+    ]
+
+
+def test_observation_projection_limits_contract_repair_to_failed_work_item() -> None:
+    context = build_solver_context(
+        CaseState(
+            case_id="case-observation-repair-scope",
+            question="質問",
+            work_items=(
+                WorkItem(work_item_id="w1", question="第一の確認"),
+                WorkItem(work_item_id="w2", question="第二の確認"),
+            ),
+            hypotheses=(
+                Hypothesis(
+                    hypothesis_id="h1",
+                    work_item_id="w1",
+                    statement="第一の命題",
+                ),
+                Hypothesis(
+                    hypothesis_id="h2",
+                    work_item_id="w2",
+                    statement="第二の命題",
+                ),
+            ),
+        ),
+        AgentLimits(),
+        remaining_wall_time_sec=60,
+        finalize_only=False,
+        contract_feedback=SolverContractFeedback(
+            violation="w2の根拠が不足している",
+            previous_decision=SolverDecision(
+                next="continue",
+                update=CaseUpdate(
+                    update_hypotheses=(
+                        HypothesisUpdate(
+                            hypothesis_id="h2",
+                            judgment="supported",
+                        ),
+                    ),
+                ),
+            ),
+            repair_work_item_ids=("w2",),
+        ),
+    )
+
+    projected = _observation_work_item_contexts(context)
+
+    assert [item.work_tree[0].work_item_id for item in projected] == ["w2"]
+    assert [item.hypothesis_id for item in projected[0].hypotheses] == ["h2"]
 
 
 def test_repeated_successful_action_returns_normal_feedback() -> None:
@@ -4774,6 +4963,145 @@ def test_fetched_article_can_be_reused_as_a_graph_origin_but_not_refetched() -> 
             known_tool_names={"legal_graph_neighbors", "fetch_articles"},
             material_evidence_ids=(source.evidence_id,),
             fetchable_article_ids=(),
+            graph_review_fetch_tool_name="fetch_articles",
+            finalize_only=False,
+        )
+
+
+def test_same_work_item_cannot_refetch_article_in_the_same_cycle() -> None:
+    prior_request = ToolRequest(
+        request_id="fetch-prior",
+        work_item_id="w1",
+        tool_name="fetch_articles",
+        arguments={"article_ids": ["law-a-article-1"]},
+        purpose="本文を取得する",
+        hypothesis_ids=("h1",),
+    )
+    state = CaseState(
+        case_id="case-refetch",
+        question="質問",
+        research_cycle_count=1,
+        work_items=(WorkItem(work_item_id="w1", question="確認する"),),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h1",
+                work_item_id="w1",
+                statement="規定内容を確認する",
+            ),
+        ),
+        tool_requests=(prior_request,),
+        tool_results=(
+            ToolResult(
+                request_id=prior_request.request_id,
+                status="succeeded",
+                evidence_ids=("e1",),
+                cycle_no=1,
+            ),
+        ),
+        evidence=(
+            Evidence(
+                evidence_id="e1",
+                source_ref="test:e1",
+                content="本文",
+                created_cycle=1,
+                metadata={"articleId": "law-a-article-1"},
+            ),
+        ),
+    )
+    duplicate = prior_request.model_copy(update={"request_id": "fetch-again"})
+
+    with pytest.raises(ActionRejected, match="already fetched.*same WorkItem"):
+        apply_solver_decision(
+            state,
+            SolverDecision(next="continue", tool_requests=(duplicate,)),
+            limits=AgentLimits(),
+            known_tool_names={"fetch_articles"},
+            material_evidence_ids=("e1",),
+            fetchable_article_ids=("law-a-article-1",),
+            finalize_only=False,
+        )
+
+
+def test_fetch_deduplication_is_work_item_scoped_across_cycles() -> None:
+    prior_request = ToolRequest(
+        request_id="fetch-w1-cycle-1",
+        work_item_id="w1",
+        tool_name="fetch_articles",
+        arguments={"article_ids": ["law-a-article-1"]},
+        purpose="本文を取得する",
+        hypothesis_ids=("h1",),
+    )
+    state = CaseState(
+        case_id="case-refetch-scope",
+        question="質問",
+        research_cycle_count=1,
+        work_items=(
+            WorkItem(work_item_id="w1", question="第一の確認"),
+            WorkItem(work_item_id="w2", question="第二の確認"),
+        ),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h1",
+                work_item_id="w1",
+                statement="第一の規定内容を確認する",
+            ),
+            Hypothesis(
+                hypothesis_id="h2",
+                work_item_id="w2",
+                statement="第二の規定内容を確認する",
+            ),
+        ),
+        tool_requests=(prior_request,),
+        tool_results=(
+            ToolResult(
+                request_id=prior_request.request_id,
+                status="succeeded",
+                evidence_ids=("e1",),
+                cycle_no=1,
+            ),
+        ),
+        evidence=(
+            Evidence(
+                evidence_id="e1",
+                source_ref="test:e1",
+                content="本文",
+                created_cycle=1,
+                metadata={"articleId": "law-a-article-1"},
+            ),
+        ),
+    )
+    other_work_item_request = prior_request.model_copy(
+        update={
+            "request_id": "fetch-w2-cycle-1",
+            "work_item_id": "w2",
+            "hypothesis_ids": ("h2",),
+        }
+    )
+
+    updated = apply_solver_decision(
+        state,
+        SolverDecision(next="continue", tool_requests=(other_work_item_request,)),
+        limits=AgentLimits(),
+        known_tool_names={"fetch_articles"},
+        material_evidence_ids=("e1",),
+        fetchable_article_ids=("law-a-article-1",),
+        graph_review_fetch_tool_name="fetch_articles",
+        finalize_only=False,
+    )
+    assert updated.tool_requests[-1] == other_work_item_request
+
+    next_cycle_state = state.model_copy(update={"research_cycle_count": 2})
+    next_cycle_request = prior_request.model_copy(
+        update={"request_id": "fetch-w1-cycle-2"}
+    )
+    with pytest.raises(ActionRejected, match="already fetched.*same WorkItem"):
+        apply_solver_decision(
+            next_cycle_state,
+            SolverDecision(next="continue", tool_requests=(next_cycle_request,)),
+            limits=AgentLimits(),
+            known_tool_names={"fetch_articles"},
+            material_evidence_ids=("e1",),
+            fetchable_article_ids=("law-a-article-1",),
             graph_review_fetch_tool_name="fetch_articles",
             finalize_only=False,
         )

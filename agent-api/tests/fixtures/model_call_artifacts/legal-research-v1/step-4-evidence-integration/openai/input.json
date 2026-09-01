@@ -342,14 +342,23 @@
     {
       "evidence_ids": [],
       "gaps": [
-        "株主の数の具体的な基準",
-        "取得する株式の割合の具体的な基準"
+        {
+          "description": "株主の数の具体的な基準",
+          "gap_id": "gap-a6b6b031a41bca90"
+        },
+        {
+          "description": "取得する株式の割合の具体的な基準",
+          "gap_id": "gap-6dc9a8d9d978f400"
+        }
       ],
       "hypothesis_id": "h-1",
       "judgment": "unresolved",
       "statement": "上場会社の株式を市場を通さずに多数の株主から買い集める場合、公開買付けの手続が必要になる条件は、株主の数が一定以上であること、または取得する株式の割合が一定以上であることが含まれる。",
       "work_item_id": "wi-1"
     }
+  ],
+  "non_work_item_requirements": [
+    "公開買付けの手続について説明すること。"
   ],
   "omitted_evidence_ids": [],
   "remaining_fetch_capacity": 0,

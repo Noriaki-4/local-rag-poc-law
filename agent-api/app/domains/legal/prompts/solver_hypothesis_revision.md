@@ -6,7 +6,7 @@
 
 ## 出力
 
-- `revise_hypotheses[]`：同じ命題の見立てを直す既存Hypothesis。更新がなければ空配列
+- `revise_hypotheses[]`：同じ命題の見立てとgap差分を返す既存Hypothesis。更新がなければ空配列
 - `add_hypotheses[]`：既存命題とは独立して検証する新しい命題。なければ空配列
 - `decision_reason`：更新、追加又は維持した理由の要約
 
@@ -14,7 +14,10 @@
 
 - 入力の`hypotheses[]`は、現在のCycleの本文評価で`contradicted`になったものだけです。
 - 取得本文により既存Hypothesisの見立てを直す場合は、同じ`hypothesis_id`を`revise_hypotheses[]`へ返します。
-- 更新後の`statement`、`judgment`、`gaps[]`には現在版だけを書きます。旧版を併記しません。
+- 更新後の`statement`と`judgment`には現在版だけを書きます。旧版を併記しません。
+- 既存の`hypotheses[].gaps[]`はProgramが保持します。新しい未確認事項は`add_gaps[]`、
+  不要又は確認済みとなった既存項目は`resolve_gap_ids[]`で差分だけを返します。
+- 未確認事項の表現を直す場合は、旧`gap_id`を解消し、修正後の内容を追加します。
 - `judgment`は提示本文だけで判断します。本文で確認できない内容が残る場合は`unresolved`にします。
 - 既存Hypothesisと独立して検証する命題だけを`add_hypotheses[]`へ返します。
 - 内容が既存Hypothesisの`statement`又は`gaps[]`に含まれる場合は追加しません。

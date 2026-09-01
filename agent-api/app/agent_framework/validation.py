@@ -22,9 +22,10 @@ from .state import (
     HypothesisHistoryRecord,
     ToolRequest,
     WorkItem,
+    apply_hypothesis_gap_diff,
     fetched_article_ids_by_work_item,
     merge_hypothesis_evidence_ids,
-    tool_result_matches_current_hypotheses,
+    tool_request_matches_current_hypotheses,
     utc_now,
 )
 
@@ -101,11 +102,23 @@ def apply_hypothesis_revision(
             material_ids=material_ids,
             evidence_by_id=evidence_by_id,
         )
+        if update.legacy_replacement_gaps is not None:
+            updated_gaps = tuple(dict.fromkeys(update.legacy_replacement_gaps))
+        else:
+            try:
+                updated_gaps = apply_hypothesis_gap_diff(
+                    current.hypothesis_id,
+                    current.gaps,
+                    tuple(item.description for item in update.add_gaps),
+                    update.resolve_gap_ids,
+                )
+            except ValueError as exc:
+                raise ContractViolation(str(exc)) from exc
         if (
             update.statement == current.statement
             and update.judgment == current.judgment
             and update.evidence_ids == current.evidence_ids
-            and update.gaps == current.gaps
+            and updated_gaps == current.gaps
         ):
             continue
         version = 1 + sum(
@@ -126,7 +139,7 @@ def apply_hypothesis_revision(
             statement=update.statement,
             judgment=update.judgment,
             evidence_ids=update.evidence_ids,
-            gaps=update.gaps,
+            gaps=updated_gaps,
         )
         revised_hypothesis_ids.add(current.hypothesis_id)
         revised_work_item_ids.add(current.work_item_id)
@@ -156,14 +169,41 @@ def apply_hypothesis_revision(
 
     for work_item_id in revised_work_item_ids:
         current = work_items[work_item_id]
-        if current.state == "resolved":
+        if current.state != "resolved":
+            continue
+        current_hypotheses = tuple(
+            hypothesis
+            for hypothesis in hypotheses.values()
+            if hypothesis.work_item_id == work_item_id
+        )
+        has_open_child = any(
+            item.parent_work_item_id == work_item_id and item.state == "open"
+            for item in work_items.values()
+        )
+        if (
+            not current_hypotheses
+            or has_open_child
+            or any(
+                hypothesis.judgment == "unresolved"
+                or hypothesis.gaps
+                or not hypothesis.evidence_ids
+                for hypothesis in current_hypotheses
+            )
+        ):
             work_items[work_item_id] = _validated_copy(
                 current,
                 state="open",
                 resolution=None,
             )
+            continue
+        work_items[work_item_id] = _validated_copy(
+            current,
+            basis_hypothesis_ids=tuple(
+                hypothesis.hypothesis_id for hypothesis in current_hypotheses
+            ),
+        )
 
-    stale_request_ids = {
+    stale_request_ids = tuple(
         request.request_id
         for request in state.tool_requests
         if revised_hypothesis_ids.intersection(request.hypothesis_ids)
@@ -171,11 +211,12 @@ def apply_hypothesis_revision(
             not request.hypothesis_ids
             and request.work_item_id in revised_work_item_ids
         )
-    }
+    )
+    stale_request_id_set = set(stale_request_ids)
     stale_graph_request_ids = {
         request.request_id
         for request in state.tool_requests
-        if request.request_id in stale_request_ids
+        if request.request_id in stale_request_id_set
         and request.tool_name == "legal_graph_neighbors"
     }
 
@@ -184,6 +225,14 @@ def apply_hypothesis_revision(
         work_items=tuple(work_items.values()),
         hypotheses=tuple(hypotheses.values()),
         hypothesis_history=tuple(history),
+        invalidated_tool_request_ids=tuple(
+            dict.fromkeys(
+                (
+                    *state.invalidated_tool_request_ids,
+                    *stale_request_ids,
+                )
+            )
+        ),
         dependency_decisions=tuple(
             item
             for item in state.dependency_decisions
@@ -192,7 +241,7 @@ def apply_hypothesis_revision(
         graph_candidate_reviews=tuple(
             review
             for review in state.graph_candidate_reviews
-            if not stale_request_ids.intersection(review.graph_request_ids)
+            if not stale_request_id_set.intersection(review.graph_request_ids)
             and not any(
                 decision.hypothesis_id in revised_hypothesis_ids
                 or (
@@ -205,16 +254,16 @@ def apply_hypothesis_revision(
         search_candidate_reviews=tuple(
             review
             for review in state.search_candidate_reviews
-            if not stale_request_ids.intersection(review.search_request_ids)
+            if not stale_request_id_set.intersection(review.search_request_ids)
             and not any(
                 revised_hypothesis_ids.intersection(
-                    (*selection.matched_hypothesis_ids,)
+                    selection.matched_hypothesis_ids
                 )
                 for selection in review.selections
             )
             and not any(
                 revised_hypothesis_ids.intersection(
-                    (*assessment.matched_hypothesis_ids,)
+                    assessment.matched_hypothesis_ids
                 )
                 for assessment in review.assessments
             )
@@ -496,6 +545,22 @@ def apply_solver_decision(
             raise ContractViolation(
                 f"unknown hypothesis update: {hypothesis_update.hypothesis_id}"
             )
+        if hypothesis_update.legacy_replacement_gaps is not None:
+            updated_gaps = tuple(
+                dict.fromkeys(hypothesis_update.legacy_replacement_gaps)
+            )
+        else:
+            try:
+                updated_gaps = apply_hypothesis_gap_diff(
+                    current_hypothesis.hypothesis_id,
+                    current_hypothesis.gaps,
+                    tuple(
+                        item.description for item in hypothesis_update.add_gaps
+                    ),
+                    hypothesis_update.resolve_gap_ids,
+                )
+            except ValueError as exc:
+                raise ContractViolation(str(exc)) from exc
         hypotheses[hypothesis_update.hypothesis_id] = _validated_copy(
             current_hypothesis,
             judgment=hypothesis_update.judgment,
@@ -503,7 +568,7 @@ def apply_solver_decision(
                 current_hypothesis.evidence_ids,
                 hypothesis_update.evidence_ids,
             ),
-            gaps=hypothesis_update.gaps,
+            gaps=updated_gaps,
         )
         changed_hypothesis_ids.add(hypothesis_update.hypothesis_id)
         evidence_ids_requiring_material[hypothesis_update.hypothesis_id] = set(
@@ -579,10 +644,9 @@ def apply_solver_decision(
             result := successful_results_by_request.get(request.request_id)
         )
         is not None
-        and tool_result_matches_current_hypotheses(
+        and tool_request_matches_current_hypotheses(
             state,
             request,
-            result,
         )
     }
     completed_graph_scopes = {
@@ -593,10 +657,9 @@ def apply_solver_decision(
             result := successful_results_by_request.get(request.request_id)
         )
         is not None
-        and tool_result_matches_current_hypotheses(
+        and tool_request_matches_current_hypotheses(
             state,
             request,
-            result,
         )
     }
     completed_load_scopes = {
@@ -689,6 +752,52 @@ def apply_solver_decision(
             ),
             rejected_requests=tuple(duplicate_load_scopes),
         )
+    article_fetch_tool_name = graph_review_fetch_tool_name
+    if article_fetch_tool_name is None and "fetch_articles" in known_tool_names:
+        article_fetch_tool_name = "fetch_articles"
+    if article_fetch_tool_name is not None:
+        fetched_by_work_item = fetched_article_ids_by_work_item(
+            state,
+            cycle_no=None,
+        )
+        duplicate_fetches: list[tuple[ToolRequest, tuple[str, ...]]] = []
+        for request in decision.tool_requests:
+            if request.tool_name != article_fetch_tool_name:
+                continue
+            already_fetched = set(
+                fetched_by_work_item.get(request.work_item_id, ())
+            )
+            repeated_article_ids = tuple(
+                dict.fromkeys(
+                    article_id
+                    for article_id in request.arguments.get("article_ids", ())
+                    if isinstance(article_id, str)
+                    and article_id in already_fetched
+                )
+            )
+            if repeated_article_ids:
+                duplicate_fetches.append((request, repeated_article_ids))
+        if duplicate_fetches:
+            duplicate_details = [
+                {
+                    "work_item_id": request.work_item_id,
+                    "article_ids": list(article_ids),
+                }
+                for request, article_ids in duplicate_fetches
+            ]
+            raise ActionRejected(
+                "Article bodies were already fetched for the same WorkItem in "
+                "this case: "
+                + json.dumps(
+                    duplicate_details,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                rejected_requests=tuple(
+                    request for request, _ in duplicate_fetches
+                ),
+            )
     execution_scopes = [
         (
             request.work_item_id,

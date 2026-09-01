@@ -114,6 +114,26 @@
       "items": {
         "additionalProperties": false,
         "properties": {
+          "add_gaps": {
+            "description": "今回の本文から新たに判明した未確認事項の差分。既存のhypotheses[].gapsは再出力しない。追加がなければ空とする。",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "description": {
+                  "description": "取得本文から、このHypothesisの判断又は所属WorkItemへの回答に新たに必要だと判明した未確認の具体的な規律要素。gap_idはProgramが発行する。",
+                  "maxLength": 300,
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "description"
+              ],
+              "type": "object"
+            },
+            "maxItems": 12,
+            "type": "array"
+          },
           "evidence_ids": {
             "description": "今回の本文評価で、現在の判定とgapsの判断に新たに使用したgrounding_evidence[].evidence_idの最小集合。既にHypothesis.evidence_idsにあるIDは再出力しなくてよく、Programが既存IDを保持して追記する。metadata.articleIdやmetadata.sourceContentUnitIdは入れない。関連するだけのParagraph・Itemを全件入れない。unresolvedでも本文で確認できた部分があれば保持できる。",
             "items": {
@@ -154,15 +174,6 @@
             "maxItems": 30,
             "type": "array"
           },
-          "gaps": {
-            "description": "このHypothesisをWorkItemへの回答に使うため、本文でまだ確認すべき具体的情報。statementがsupportedでも、必要な下位規範本文が未確認なら保持する。該当する情報がなければ空とする。",
-            "items": {
-              "maxLength": 300,
-              "type": "string"
-            },
-            "maxItems": 12,
-            "type": "array"
-          },
           "hypothesis_id": {
             "description": "更新する既存Hypothesisの完全一致ID。",
             "enum": [
@@ -178,13 +189,26 @@
               "unresolved"
             ],
             "type": "string"
+          },
+          "resolve_gap_ids": {
+            "description": "今回の本文で確認できた既存hypotheses[].gaps[].gap_id。未確認の既存gap IDは含めず、解決がなければ空とする。",
+            "items": {
+              "enum": [
+                "gap-a6b6b031a41bca90",
+                "gap-6dc9a8d9d978f400"
+              ],
+              "type": "string"
+            },
+            "maxItems": 2,
+            "type": "array"
           }
         },
         "required": [
           "hypothesis_id",
           "judgment",
           "evidence_ids",
-          "gaps"
+          "add_gaps",
+          "resolve_gap_ids"
         ],
         "type": "object"
       },

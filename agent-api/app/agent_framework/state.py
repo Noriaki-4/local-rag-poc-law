@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from hashlib import sha256
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -55,12 +56,77 @@ def merge_hypothesis_evidence_ids(
     return tuple(dict.fromkeys((*existing, *additions)))
 
 
+def hypothesis_gap_id(hypothesis_id: str, description: str) -> str:
+    """Hypothesis内のgap本文から、順序に依存しない安定IDを作る。"""
+
+    digest = sha256(
+        f"{hypothesis_id}\0{description}".encode("utf-8")
+    ).hexdigest()[:16]
+    return f"gap-{digest}"
+
+
 class FrameworkModel(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         frozen=True,
         str_strip_whitespace=True,
     )
+
+
+class HypothesisGap(FrameworkModel):
+    gap_id: str = Field(
+        min_length=1,
+        max_length=160,
+        description=(
+            "未確認事項を更新時に参照する安定ID。ProgramがHypothesis IDと"
+            "descriptionから生成し、LLMは新規発行しない。"
+        ),
+    )
+    description: str = Field(
+        min_length=1,
+        max_length=300,
+        description="法令本文でまだ確認すべき具体的な規律要素。",
+    )
+
+
+def structured_hypothesis_gaps(
+    hypothesis_id: str,
+    gaps: tuple[str, ...],
+) -> tuple[HypothesisGap, ...]:
+    """保存済み文字列をLLM更新用のID付きread modelへ投影する。"""
+
+    return tuple(
+        HypothesisGap(
+            gap_id=hypothesis_gap_id(hypothesis_id, description),
+            description=description,
+        )
+        for description in gaps
+    )
+
+
+def apply_hypothesis_gap_diff(
+    hypothesis_id: str,
+    existing: tuple[str, ...],
+    additions: tuple[str, ...],
+    resolved_gap_ids: tuple[str, ...],
+) -> tuple[str, ...]:
+    """既知gapだけを解決し、新規gapを重複なく追記する。"""
+
+    known_by_id = {
+        hypothesis_gap_id(hypothesis_id, description): description
+        for description in existing
+    }
+    unknown_ids = set(resolved_gap_ids) - set(known_by_id)
+    if unknown_ids:
+        raise ValueError(
+            f"unknown hypothesis gap IDs: {sorted(unknown_ids)}"
+        )
+    remaining = tuple(
+        description
+        for gap_id, description in known_by_id.items()
+        if gap_id not in set(resolved_gap_ids)
+    )
+    return tuple(dict.fromkeys((*remaining, *additions)))
 
 
 class AnswerOption(FrameworkModel):
@@ -843,6 +909,13 @@ class CaseState(FrameworkModel):
         ),
     )
     tool_requests: tuple[ToolRequest, ...] = ()
+    invalidated_tool_request_ids: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Hypothesisの旧版に依存するため、現在版の探索済み実績には使わない"
+            "既存ToolRequest ID。要求・結果自体は監査用に保持する。"
+        ),
+    )
     evidence: tuple[Evidence, ...] = ()
     dependency_decisions: tuple[DependencyDecision, ...] = ()
     graph_candidate_reviews: tuple[GraphCandidateReview, ...] = ()
@@ -886,6 +959,18 @@ class CaseState(FrameworkModel):
             raise ValueError(
                 "hypothesis revision cycle cannot exceed research cycle count"
             )
+        if len(self.invalidated_tool_request_ids) != len(
+            set(self.invalidated_tool_request_ids)
+        ):
+            raise ValueError("invalidated tool request IDs must be unique")
+        known_request_ids = {item.request_id for item in self.tool_requests}
+        unknown_invalidated_ids = (
+            set(self.invalidated_tool_request_ids) - known_request_ids
+        )
+        if unknown_invalidated_ids:
+            raise ValueError(
+                "invalidated tool request IDs must reference existing requests"
+            )
         history_keys = [
             (item.hypothesis.hypothesis_id, item.version)
             for item in self.hypothesis_history
@@ -906,31 +991,13 @@ class CaseState(FrameworkModel):
         return self
 
 
-def tool_result_matches_current_hypotheses(
+def tool_request_matches_current_hypotheses(
     state: CaseState,
     request: ToolRequest,
-    result: ToolResult,
 ) -> bool:
-    """Tool結果が参照Hypothesisの現在版以後に得られたかを返す。"""
+    """Tool要求が参照Hypothesisの現在版に対するものかを返す。"""
 
-    hypothesis_work_items = {
-        item.hypothesis_id: item.work_item_id for item in state.hypotheses
-    }
-    relevant_revision_cycles = [
-        item.revised_cycle
-        for item in state.hypothesis_history
-        if (
-            item.hypothesis.hypothesis_id in request.hypothesis_ids
-            or (
-                not request.hypothesis_ids
-                and hypothesis_work_items.get(item.hypothesis.hypothesis_id)
-                == request.work_item_id
-            )
-        )
-    ]
-    return not relevant_revision_cycles or result.cycle_no > max(
-        relevant_revision_cycles
-    )
+    return request.request_id not in state.invalidated_tool_request_ids
 
 
 def fetched_article_ids_by_work_item(

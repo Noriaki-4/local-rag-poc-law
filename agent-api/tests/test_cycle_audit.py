@@ -434,6 +434,57 @@ def test_report_flags_repeated_integration_structure() -> None:
     }
 
 
+def test_cycle_audit_reports_gap_diffs_before_cycle_checkpoint() -> None:
+    records = (
+        {
+            "sequence": 1,
+            "event": "transport_output",
+            "caseId": "case-gap-audit",
+            "transportStage": "observation_integration",
+            "cycleNo": 1,
+            "workItemSessionId": "session-w1",
+            "workItemSessionTurn": 2,
+            "payload": {
+                "update_hypotheses": [
+                    {
+                        "hypothesis_id": "h1",
+                        "add_gaps": [{"description": "追加した未確認事項"}],
+                        "resolve_gap_ids": ["gap-old"],
+                    }
+                ]
+            },
+        },
+        {
+            "sequence": 2,
+            "event": "run_complete",
+            "caseId": "case-gap-audit",
+            "elapsedMs": 20,
+            "failureCode": "contract_violation:test",
+            "stateStatus": {"runStatus": "failed"},
+        },
+    )
+
+    report = build_cycle_audit_report(records)
+
+    assert report["cycleCount"] == 0
+    assert report["hypothesisGapActivity"] == [
+        {
+            "sequence": 1,
+            "cycleNo": 1,
+            "stage": "observation_integration",
+            "workItemSessionId": "session-w1",
+            "workItemSessionTurn": 2,
+            "hypothesisId": "h1",
+            "addedGaps": ["追加した未確認事項"],
+            "resolvedGapIds": ["gap-old"],
+        }
+    ]
+    markdown = render_cycle_audit_markdown(report)
+    assert "## Hypothesis gap activity" in markdown
+    assert "追加した未確認事項" in markdown
+    assert "gap-old" in markdown
+
+
 def test_cycle_audit_allows_observation_iteration_after_scoped_tool_result() -> None:
     scope = {"workItemIds": ["w1"], "hypothesisIds": ["h1"]}
     records = (

@@ -359,6 +359,77 @@ class OpenSearchClient:
         response.raise_for_status()
         return [hit["_source"] for hit in response.json()["hits"]["hits"]]
 
+    def get_article_navigation_contexts(
+        self,
+        article_content_unit_ids: list[str],
+        user_clearance_level: int,
+        *,
+        max_chunks_per_article: int = 3,
+        timeout_sec: float | None = None,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Article候補の先頭側chunkを、候補ごとに同じ上限で一括取得する。"""
+        article_ids = list(dict.fromkeys(article_content_unit_ids))
+        if not article_ids:
+            return {}
+
+        lines: list[str] = []
+        for article_id in article_ids:
+            lines.append(json.dumps({"index": self.index}))
+            lines.append(
+                json.dumps(
+                    {
+                        "size": max(1, max_chunks_per_article),
+                        "sort": [
+                            {
+                                "paragraphNumber": {
+                                    "order": "asc",
+                                    "missing": "_first",
+                                }
+                            },
+                            {"itemNumber": {"order": "asc", "missing": "_first"}},
+                            {"contentUnitId": {"order": "asc"}},
+                        ],
+                        "query": {
+                            "bool": {
+                                "filter": [
+                                    *self._filters("law", user_clearance_level),
+                                    {
+                                        "bool": {
+                                            "should": [
+                                                {"term": {"contentUnitId": article_id}},
+                                                {
+                                                    "term": {
+                                                        "articleContentUnitId": article_id
+                                                    }
+                                                },
+                                            ],
+                                            "minimum_should_match": 1,
+                                        }
+                                    },
+                                ]
+                            }
+                        },
+                    },
+                    ensure_ascii=False,
+                )
+            )
+
+        response = requests.post(
+            f"{self.base_url}/{self.index}/_msearch",
+            data=("\n".join(lines) + "\n").encode("utf-8"),
+            headers={"Content-Type": "application/x-ndjson"},
+            timeout=timeout_sec or 10,
+        )
+        response.raise_for_status()
+        responses = response.json().get("responses", [])
+        return {
+            article_id: [
+                hit["_source"]
+                for hit in ((single.get("hits") or {}).get("hits") or [])
+            ]
+            for article_id, single in zip(article_ids, responses, strict=False)
+        }
+
     def get_complete_articles_by_ids(
         self,
         article_content_unit_ids: list[str],

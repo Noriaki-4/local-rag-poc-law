@@ -159,6 +159,12 @@ class Settings:
     anthropic_max_tokens_ceiling = int(
         os.getenv("ANTHROPIC_MAX_TOKENS_CEILING", "32768")
     )
+    # Claude Haiku 4.5はeffortではなくmanual extended thinkingを使う。
+    # 0で無効化でき、各呼出しでは回答本文の余裕を残すようadapterが調整する。
+    anthropic_thinking_budget_tokens = max(
+        0,
+        int(os.getenv("ANTHROPIC_THINKING_BUDGET_TOKENS", "4096")),
+    )
     _default_answer_model = (
         "claude-sonnet-5"
         if llm_provider == "anthropic"

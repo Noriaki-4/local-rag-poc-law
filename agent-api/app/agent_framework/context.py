@@ -19,13 +19,14 @@ from .state import (
     FrameworkModel,
     FrontierReviewStatus,
     Hypothesis,
+    HypothesisGap,
     ReviewFinding,
     ToolRequest,
     ToolResult,
     ToolStatus,
     WorkItem,
     fetched_article_ids_by_work_item,
-    tool_result_matches_current_hypotheses,
+    tool_request_matches_current_hypotheses,
 )
 from .tool_contracts import ToolDefinition
 
@@ -326,9 +327,9 @@ class SearchAssessmentExcerpt(FrameworkModel):
 
     content: str = Field(
         description=(
-            "この本文取得候補を発見した検索結果の抜粋。"
-            "Article本文の全部または一部で、長いArticleでは検索に一致した"
-            "Paragraph・Item等だけの場合がある。"
+            "このArticleを発見した検索一致箇所と、候補判断のためProgramが同じ"
+            "Articleから付加した限定的な構造文脈。Article全文とは限らず、"
+            "回答根拠には使わない。"
         )
     )
 
@@ -496,6 +497,14 @@ class SolverContractFeedback(FrameworkModel):
     previous_decision: SolverDecision = Field(
         description="修正対象となる、CaseStateへ未適用の直前SolverDecision。"
     )
+    repair_work_item_ids: tuple[str, ...] = Field(
+        default=(),
+        exclude=True,
+        description=(
+            "WorkItem別処理で契約違反になり、再実行するWorkItem ID。"
+            "空配列ならDecision全体を再実行する。"
+        ),
+    )
 
 
 class SolverActionFeedback(FrameworkModel):
@@ -599,6 +608,11 @@ class SolverContext(FrameworkModel):
         default_factory=dict,
         exclude=True,
         description="現在Cycleで本文取得したArticle IDを既知WorkItem ID別に集計した値。",
+    )
+    fetched_resource_ids_by_work_item: dict[str, tuple[str, ...]] = Field(
+        default_factory=dict,
+        exclude=True,
+        description="現在Caseで本文取得したArticle IDを既知WorkItem ID別に集計した値。",
     )
     remaining_fetch_capacity_by_work_item: dict[str, int] = Field(
         default_factory=dict,
@@ -821,7 +835,9 @@ class HypothesisRevisionHypothesis(FrameworkModel):
     work_item_id: str = Field(description="所属する既存WorkItem ID。")
     statement: str = Field(description="見直し前の現在版statement。")
     judgment: str = Field(description="既存Hypothesisの現在の判定。")
-    gaps: tuple[str, ...] = Field(description="既存Hypothesisの未確認事項。")
+    gaps: tuple[HypothesisGap, ...] = Field(
+        description="既存HypothesisのID付き未確認事項。"
+    )
 
 
 class HypothesisRevisionEvidence(FrameworkModel):
@@ -927,9 +943,13 @@ def build_solver_context(
     recent_requests_by_id = {item.request_id: item for item in recent_requests}
     all_requests_by_id = {item.request_id: item for item in state.tool_requests}
     current_cycle_no = max(1, state.research_cycle_count)
-    fetched_by_work_item = fetched_article_ids_by_work_item(
+    fetched_by_work_item_this_cycle = fetched_article_ids_by_work_item(
         state,
         cycle_no=current_cycle_no,
+    )
+    fetched_by_work_item = fetched_article_ids_by_work_item(
+        state,
+        cycle_no=None,
     )
     carried_search_candidates = _carried_search_candidate_projection(
         state=state,
@@ -1035,7 +1055,7 @@ def build_solver_context(
         work_item_id: max(
             0,
             limits.max_fetched_resources_per_cycle
-            - len(fetched_by_work_item.get(work_item_id, ())),
+            - len(fetched_by_work_item_this_cycle.get(work_item_id, ())),
         )
         for work_item_id in open_work_item_ids
     }
@@ -1043,7 +1063,10 @@ def build_solver_context(
         dict.fromkeys(
             article_id
             for work_item_id in open_work_item_ids
-            for article_id in fetched_by_work_item.get(work_item_id, ())
+            for article_id in fetched_by_work_item_this_cycle.get(
+                work_item_id,
+                (),
+            )
         )
     )
     remaining_fetch_capacity = (
@@ -1165,7 +1188,7 @@ def build_solver_context(
             ]
         )
     )
-    fetchable_article_ids = tuple(
+    candidate_article_ids = tuple(
         dict.fromkeys(
             [
                 *(
@@ -1195,7 +1218,7 @@ def build_solver_context(
         recent_results=unreviewed_search_results,
         recent_requests_by_id=recent_requests_by_id,
         evidence_by_id=evidence_by_id,
-        fetchable_article_ids=fetchable_article_ids,
+        fetchable_article_ids=candidate_article_ids,
         fetched_article_ids_by_work_item=fetched_by_work_item,
     )
     fresh_search_request_ids = tuple(
@@ -1220,6 +1243,38 @@ def build_solver_context(
         fresh_search_candidates
         if fresh_search_request_ids
         else carried_search_candidates
+    )
+    passthrough_navigation_article_ids = tuple(
+        dict.fromkeys(
+            article_id
+            for result in recent_results
+            if (request := recent_requests_by_id.get(result.request_id)) is not None
+            and request.tool_name not in {"legal_search", "legal_graph_neighbors"}
+            for evidence_id in result.evidence_ids
+            if (evidence := evidence_by_id.get(evidence_id)) is not None
+            and evidence.metadata.get("citationEligible") is False
+            for article_id in _evidence_article_ids(evidence)
+            if article_id not in fetched_by_work_item.get(request.work_item_id, ())
+        )
+    )
+    allowed_fetchable_article_ids = {
+        *(item.article_id for item in search_candidates),
+        *graph_fetchable_article_ids,
+        *passthrough_navigation_article_ids,
+    }
+    fetchable_article_ids = tuple(
+        dict.fromkeys(
+            [
+                *(
+                    article_id
+                    for article_id in candidate_article_ids
+                    if article_id in allowed_fetchable_article_ids
+                ),
+                *(item.article_id for item in search_candidates),
+                *graph_fetchable_article_ids,
+                *passthrough_navigation_article_ids,
+            ]
+        )
     )
     manifest = tuple(
         EvidenceManifestItem(
@@ -1259,10 +1314,9 @@ def build_solver_context(
             result := succeeded_results_by_request.get(request.request_id)
         )
         is not None
-        and tool_result_matches_current_hypotheses(
+        and tool_request_matches_current_hypotheses(
             state,
             request,
-            result,
         )
     )
     completed_load_ids_by_work_item: dict[str, list[str]] = {}
@@ -1388,10 +1442,9 @@ def build_solver_context(
             result := succeeded_results_by_request.get(request.request_id)
         )
         is not None
-        and tool_result_matches_current_hypotheses(
+        and tool_request_matches_current_hypotheses(
             state,
             request,
-            result,
         )
     )
     evidence_hypothesis_candidates = _evidence_hypothesis_candidates(
@@ -1427,7 +1480,10 @@ def build_solver_context(
         max_tool_requests_per_step=limits.max_tool_requests_per_step,
         max_fetched_resources_per_cycle=limits.max_fetched_resources_per_cycle,
         fetched_resource_ids_this_cycle=fetched_resource_ids_this_cycle,
-        fetched_resource_ids_by_work_item_this_cycle=fetched_by_work_item,
+        fetched_resource_ids_by_work_item_this_cycle=(
+            fetched_by_work_item_this_cycle
+        ),
+        fetched_resource_ids_by_work_item=fetched_by_work_item,
         remaining_fetch_capacity_by_work_item=remaining_by_work_item,
         remaining_fetch_capacity=remaining_fetch_capacity,
         max_parallel_work_items=limits.max_parallel_work_items,
