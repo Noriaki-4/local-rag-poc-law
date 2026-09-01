@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 8,
+  "projectName": "local-rag-law",
+  "environmentName": "poc",
+  "account": "035351467732",
+  "region": "ap-northeast-1",
+  "network": {
+    "cidr": "10.42.0.0/16",
+    "availabilityZoneIds": ["apne1-az1", "apne1-az2"],
+    "natGateways": 1
+  },
+  "data": {
+    "bucketName": null,
+    "retainOnDelete": true,
+    "noncurrentVersionExpirationDays": 90
+  },
+  "openSearchServerless": {
+    "collectionName": "local-rag-law-poc",
+    "indexName": "legal-rag-content-ja-v2",
+    "standbyReplicas": "DISABLED",
+    "retainOnDelete": true,
+    "embeddingModelId": "amazon.titan-embed-text-v2:0",
+    "embeddingDimensions": 1024,
+    "embeddingNormalize": true,
+    "embeddingMaxChars": 1000
+  },
+  "neptuneAnalytics": {
+    "graphName": "local-rag-law-poc",
+    "provisionedMemory": 16,
+    "replicaCount": 0,
+    "retainOnDelete": true
+  },
+  "bedrock": {
+    "generationModelId": "jp.anthropic.claude-haiku-4-5-20251001-v1:0"
+  },
+  "bootstrapData": {
+    "mode": "EXISTING_SNAPSHOT",
+    "searchSnapshotId": "snapshot-1e9f9f5c1ac849f7ddffdd7480f80c9f771db7c00efea06a612fc286f8c3d27e",
+    "graphSnapshotId": "snapshot-020185f383d15088b066cfbea48ff5379db05c4e1b48d69d67f209df57f0da46",
+    "sourceOpenSearchIndex": "legal-rag-content-ja-v2",
+    "sourceCorpusManifest": "datasets/lawqa_jp/egov_law_corpus/manifest.json",
+    "sourceGuidanceManifest": "datasets/lawqa_jp/external-guidance/manifest.json",
+    "scenarioManifest": "datasets/scenarios/public_tender_offer_three_layer_v1/manifest.json",
+    "classificationRunId": "classification-run-public-tender-mini-v1-v23",
+    "graphSchemaVersion": 9,
+    "s3Prefix": "knowledge-root/bootstrap/current-search-validation",
+    "imageRepositoryName": "bootstrap-admin",
+    "imageTag": "snapshot-bootstrap-v1"
+  },
+  "compute": {
+    "repositoryNames": [
+      "agent-api",
+      "bootstrap-admin",
+      "preprocess-worker",
+      "eval-runner"
+    ],
+    "lifecycleMaxImageCount": 20,
+    "logRetentionDays": 30,
+    "retainRepositoriesOnDelete": true
+  },
+  "agentCore": {
+    "enabled": true,
+    "runtimeName": "LocalRagLawPoc",
+    "imageRepositoryName": "agent-api",
+    "imageTag": "agentcore-bootstrap",
+    "networkMode": "VPC"
+  },
+  "tags": {
+    "Project": "local-rag-poc-law",
+    "Environment": "poc",
+    "ManagedBy": "aws-cdk"
+  }
+}

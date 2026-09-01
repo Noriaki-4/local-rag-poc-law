@@ -1,0 +1,10 @@
+**
+!agent-api/
+!agent-api/requirements.txt
+!agent-api/app/
+!agent-api/app/**
+!infra/
+!infra/aws/
+!infra/aws/agentcore/
+!infra/aws/agentcore/contract.py
+!infra/aws/agentcore/runtime_app.py

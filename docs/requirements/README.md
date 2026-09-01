@@ -101,7 +101,11 @@ OpenSearch投入サンプルは非ゼロのダミーベクトルを含むが、�
 
 ## Step2 の実現イメージ
 
-Step2 では、Step1 のローカル構成を AWS 上の検証構成へ移す。MinIO は S3、Neo4j は Neptune Analytics、ローカル OpenSearch は Amazon OpenSearch Service / OpenSearch Serverless、Agent API は AgentCore Runtime または ECS / Lambda 上の独自 Agent API へ置換する想定である。
+Step2 では、Step1 のローカル構成を AWS 上の検証構成へ移す。MinIO は S3、Neo4j は Neptune Analytics、ローカル OpenSearch は Amazon OpenSearch Serverlessのprivate `VECTORSEARCH` collection、Agent API はBedrock AgentCore Runtimeへ置換する。
+
+AWS上の日本語全文検索ではJapanese（kuromoji）AnalysisとICU Analysisを必須とする。現在の日本語index mappingにあるkuromoji tokenizer、品詞除去、語幹化、読み変換、ICU normalizerを維持し、標準Analyzerへの暗黙のfallbackは許可しない。BM25、vector検索、metadata filterに加え、`_analyze`または同等の確認で日本語token分割を検証する。
+
+初期AWS検証では、時間制約のため正規seedと非同期Relation分類の再実行を必須にしない。OpenSearchの検索全件snapshotと、Neo4jの公開買付けmini Graph snapshot・公開済みClassificationRunを、別snapshotの固定成果物として再利用する。検索側とGraph側のsnapshot IDを同一とは仮定せず、各成果物を別々に検証する。正規seedと非同期処理の実行経路は削除せず、後から再実行可能な状態を維持する。ローカルのbge-m3 vectorはAWSへ移送せず、既存の本文・metadataからTitan V2で再生成する。
 
 詳細は `docs/step2_transition_plan.md` を参照。
 

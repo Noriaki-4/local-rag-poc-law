@@ -29,9 +29,11 @@
 - OpenSearchは`legal-rag-content-ja-v2`（Kuromoji、NFKC、bigram）を既定とする。
 - Graph seedは`HAS_CONTENT_UNIT / REFERENCES / EXPLAINS`だけを決定的に作る。
   5つの意味predicateはseed後に`RelationAssertion`として非同期登録する。
-- 保存済みe-Gov XMLからOpenSearchとNeo4jを再構築済みで、代表94件の構造監査は`94/94`である。
-  `改正前の`等で明示された旧版Articleを現行Articleへ接続しない修正も反映した。現在の実indexは
-  OpenSearch 16,459文書、Neo4j 17,254 node / 34,206 edge、うち`REFERENCES` 16,964件である。
+- 保存済みe-Gov XMLからOpenSearchとNeo4jを全件再構築した実績があり、代表94件の構造監査は`94/94`である。
+  `改正前の`等で明示された旧版Articleを現行Articleへ接続しない修正も反映した。全件再構築時の証跡は
+  OpenSearch 16,459 Content Unit、Neo4j 17,254 node / 34,206 edge、うち`REFERENCES` 16,964件である。
+  一方、2026-09-01にAWS bootstrap用としてread-only確認した稼働データは、OpenSearchが同じ16,459
+  Content Unit、Neo4jが公開買付けmini Graphの124 node / 172 edgeであり、両者のsnapshotは異なる。
 - 非同期意味分類の単位は、1本の物理edgeではなく同じ物理方向の有向Articleペアである。現行exportは
   14,454候補、16,964 basis edge、最大5候補の2,891 shardとなる。代表94件のうち構造的に分類可能な
   73 ArticleペアをLuna Worker / Reviewerでブラインド評価した初回結果は、status `73/73`、5 predicate
@@ -136,7 +138,9 @@
 │  └─ clearance_policy
 │
 └─ 将来
-   └─ step2_transition_plan
+   ├─ step2_transition_plan
+   ├─ ../infra/aws/BOOTSTRAP-DATA         AWS初期データの暫定運用
+   └─ ../infra/aws/ISSUES                 AWS移行の課題管理
 ```
 
 ## 7. 推奨読順
@@ -153,6 +157,8 @@
 10. 旧法令検索経路を調べる場合だけ:
    [layered_legal_evidence_retrieval_plan.md](layered_legal_evidence_retrieval_plan.md)
 11. QA・検索評価: [evaluation_design.md](evaluation_design.md)
+12. AWS移行課題: [infra/aws/ISSUES.md](../infra/aws/ISSUES.md)
+13. AWS初期データの暫定運用: [infra/aws/BOOTSTRAP-DATA.md](../infra/aws/BOOTSTRAP-DATA.md)
 
 ## 8. 文書を更新するときの注意
 
