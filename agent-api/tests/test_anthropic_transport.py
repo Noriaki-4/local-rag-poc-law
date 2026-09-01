@@ -87,7 +87,9 @@ def test_anthropic_529_is_retried_with_same_payload(monkeypatch) -> None:
     assert calls[1]["json"] == payload
 
 
-def test_haiku_json_transport_omits_unsupported_effort(monkeypatch) -> None:
+def test_haiku_json_transport_uses_manual_thinking_instead_of_effort(
+    monkeypatch,
+) -> None:
     captured: dict = {}
 
     def fake_post(*, payload, timeout_sec):
@@ -103,6 +105,10 @@ def test_haiku_json_transport_omits_unsupported_effort(monkeypatch) -> None:
         )
 
     monkeypatch.setattr("app.llm.settings.anthropic_api_key", "test-key")
+    monkeypatch.setattr(
+        "app.llm.settings.anthropic_thinking_budget_tokens",
+        4096,
+    )
     monkeypatch.setattr("app.llm._post_anthropic_with_overload_retry", fake_post)
 
     LLMClient()._anthropic_json(
@@ -114,7 +120,7 @@ def test_haiku_json_transport_omits_unsupported_effort(monkeypatch) -> None:
             "additionalProperties": False,
         },
         "claude-haiku-4-5-20251001",
-        128,
+        8192,
         10,
         effort="low",
     )
@@ -129,6 +135,52 @@ def test_haiku_json_transport_omits_unsupported_effort(monkeypatch) -> None:
                 "additionalProperties": False,
             },
         }
+    }
+    assert captured["payload"]["thinking"] == {
+        "type": "enabled",
+        "budget_tokens": 4096,
+    }
+
+
+def test_haiku_manual_thinking_keeps_room_for_structured_output(
+    monkeypatch,
+) -> None:
+    captured: dict = {}
+
+    def fake_post(*, payload, timeout_sec):
+        captured["payload"] = payload
+        return SimpleNamespace(
+            ok=True,
+            json=lambda: {
+                "content": [{"type": "text", "text": '{"ok":true}'}],
+                "usage": {},
+                "stop_reason": "end_turn",
+            },
+        )
+
+    monkeypatch.setattr("app.llm.settings.anthropic_api_key", "test-key")
+    monkeypatch.setattr(
+        "app.llm.settings.anthropic_thinking_budget_tokens",
+        4096,
+    )
+    monkeypatch.setattr("app.llm._post_anthropic_with_overload_retry", fake_post)
+
+    LLMClient()._anthropic_json(
+        "test",
+        {
+            "type": "object",
+            "properties": {"ok": {"type": "boolean"}},
+            "required": ["ok"],
+            "additionalProperties": False,
+        },
+        "claude-haiku-4-5-20251001",
+        3072,
+        10,
+    )
+
+    assert captured["payload"]["thinking"] == {
+        "type": "enabled",
+        "budget_tokens": 2048,
     }
 
 
@@ -147,6 +199,10 @@ def test_sonnet_json_transport_keeps_supported_effort(monkeypatch) -> None:
         )
 
     monkeypatch.setattr("app.llm.settings.anthropic_api_key", "test-key")
+    monkeypatch.setattr(
+        "app.llm.settings.anthropic_thinking_budget_tokens",
+        4096,
+    )
     monkeypatch.setattr("app.llm._post_anthropic_with_overload_retry", fake_post)
 
     LLMClient()._anthropic_json(
@@ -164,9 +220,10 @@ def test_sonnet_json_transport_keeps_supported_effort(monkeypatch) -> None:
     )
 
     assert captured["payload"]["output_config"]["effort"] == "medium"
+    assert "thinking" not in captured["payload"]
 
 
-def test_anthropic_health_checks_models_and_reports_haiku_effective_effort(
+def test_anthropic_health_reports_haiku_manual_thinking(
     monkeypatch,
 ) -> None:
     requested_urls: list[str] = []
@@ -178,39 +235,49 @@ def test_anthropic_health_checks_models_and_reports_haiku_effective_effort(
         return SimpleNamespace(ok=True)
 
     monkeypatch.setattr("app.llm.settings.anthropic_api_key", "test-key")
-    monkeypatch.setattr("app.llm.settings.answer_model", "claude-haiku-test")
-    monkeypatch.setattr("app.llm.settings.reviewer_model", "claude-haiku-test")
-    monkeypatch.setattr("app.llm.settings.planner_model", "claude-haiku-test")
-    monkeypatch.setattr("app.llm.settings.evaluator_model", "claude-haiku-test")
-    monkeypatch.setattr("app.llm.settings.llm_research_model", "claude-haiku-test")
     monkeypatch.setattr(
-        "app.llm.settings.llm_research_stage_model", "claude-haiku-test"
+        "app.llm.settings.anthropic_thinking_budget_tokens",
+        4096,
+    )
+    model = "claude-haiku-4-5-test"
+    monkeypatch.setattr("app.llm.settings.answer_model", model)
+    monkeypatch.setattr("app.llm.settings.reviewer_model", model)
+    monkeypatch.setattr("app.llm.settings.planner_model", model)
+    monkeypatch.setattr("app.llm.settings.evaluator_model", model)
+    monkeypatch.setattr("app.llm.settings.llm_research_model", model)
+    monkeypatch.setattr(
+        "app.llm.settings.llm_research_stage_model", model
     )
     monkeypatch.setattr(
-        "app.llm.settings.llm_research_integration_model", "claude-haiku-test"
+        "app.llm.settings.llm_research_integration_model", model
     )
     monkeypatch.setattr(
-        "app.llm.settings.relation_classifier_model", "claude-haiku-test"
+        "app.llm.settings.relation_classifier_model", model
     )
     monkeypatch.setattr(
         "app.llm.settings.relation_classifier_reviewer_model",
-        "claude-haiku-test",
+        model,
     )
     monkeypatch.setattr("app.llm.requests.get", fake_get)
 
     health = LLMClient()._anthropic_health()
 
     assert health["ok"] is True
-    assert requested_urls == ["https://api.anthropic.com/v1/models/claude-haiku-test"]
+    assert requested_urls == [f"https://api.anthropic.com/v1/models/{model}"]
     assert health["modelChecks"] == [
         {
-            "model": "claude-haiku-test",
+            "model": model,
             "available": True,
             "supportsEffort": False,
+            "supportsManualThinking": True,
         }
     ]
     assert health["researchEffort"]["stageEffective"] is None
     assert health["researchEffort"]["integrationEffective"] is None
+    assert health["manualThinking"] == {
+        "requestedBudgetTokens": 4096,
+        "enabledModels": [model],
+    }
 
 
 def test_anthropic_health_does_not_check_local_classifier_models(

@@ -467,6 +467,9 @@ class LLMClient:
                         "supportsEffort": _anthropic_model_supports_effort(
                             model
                         ),
+                        "supportsManualThinking": (
+                            _anthropic_model_supports_manual_thinking(model)
+                        ),
                     }
                 )
         except requests.RequestException:
@@ -518,6 +521,17 @@ class LLMClient:
                     )
                     else None
                 ),
+            },
+            "manualThinking": {
+                "requestedBudgetTokens": (
+                    settings.anthropic_thinking_budget_tokens
+                ),
+                "enabledModels": [
+                    model
+                    for model in models
+                    if _anthropic_model_supports_manual_thinking(model)
+                    and settings.anthropic_thinking_budget_tokens >= 1024
+                ],
             },
             **(
                 {"reasonCode": "anthropic_model_unavailable"}
@@ -1352,20 +1366,28 @@ class LLMClient:
 
         started = perf_counter()
         prompt_citations = _shown_citations_for_prompt(citations)
-        response = _post_anthropic_with_overload_retry(
-            payload={
-                "model": settings.answer_model,
-                "max_tokens": max_tokens or settings.anthropic_max_tokens,
-                "messages": [{"role": "user", "content": prompt}],
-                "output_config": {
-                    "format": {
-                        "type": "json_schema",
-                        "schema": _to_anthropic_schema(
-                            _answer_json_schema(request, prompt_citations)
-                        ),
-                    }
-                },
+        effective_max_tokens = max_tokens or settings.anthropic_max_tokens
+        payload: dict[str, Any] = {
+            "model": settings.answer_model,
+            "max_tokens": effective_max_tokens,
+            "messages": [{"role": "user", "content": prompt}],
+            "output_config": {
+                "format": {
+                    "type": "json_schema",
+                    "schema": _to_anthropic_schema(
+                        _answer_json_schema(request, prompt_citations)
+                    ),
+                }
             },
+        }
+        thinking = _anthropic_manual_thinking(
+            settings.answer_model,
+            effective_max_tokens,
+        )
+        if thinking is not None:
+            payload["thinking"] = thinking
+        response = _post_anthropic_with_overload_retry(
+            payload=payload,
             timeout_sec=timeout_sec or settings.llm_timeout_sec,
         )
         if not response.ok:
@@ -1572,13 +1594,17 @@ class LLMClient:
         }
         if effort and _anthropic_model_supports_effort(model):
             output_config["effort"] = effort
+        payload: dict[str, Any] = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "messages": [{"role": "user", "content": prompt}],
+            "output_config": output_config,
+        }
+        thinking = _anthropic_manual_thinking(model, max_tokens)
+        if thinking is not None:
+            payload["thinking"] = thinking
         response = _post_anthropic_with_overload_retry(
-            payload={
-                "model": model,
-                "max_tokens": max_tokens,
-                "messages": [{"role": "user", "content": prompt}],
-                "output_config": output_config,
-            },
+            payload=payload,
             timeout_sec=timeout_sec,
         )
         if not response.ok:
@@ -2466,6 +2492,31 @@ def _anthropic_model_supports_effort(model: str) -> bool:
     """
 
     return "haiku" not in model.lower()
+
+
+def _anthropic_model_supports_manual_thinking(model: str) -> bool:
+    """Claude Haiku 4.5はadaptive thinkingではなく手動予算を使う。"""
+
+    normalized = model.lower().replace("_", "-")
+    return "haiku-4-5" in normalized
+
+
+def _anthropic_manual_thinking(
+    model: str,
+    max_tokens: int,
+) -> dict[str, int | str] | None:
+    """本文用tokenを残せる呼出しだけmanual extended thinkingを有効にする。"""
+
+    configured_budget = settings.anthropic_thinking_budget_tokens
+    if (
+        configured_budget < 1024
+        or not _anthropic_model_supports_manual_thinking(model)
+    ):
+        return None
+    budget_tokens = min(configured_budget, max_tokens - 1024)
+    if budget_tokens < 1024:
+        return None
+    return {"type": "enabled", "budget_tokens": budget_tokens}
 
 
 def _to_anthropic_schema(schema: Any) -> Any:

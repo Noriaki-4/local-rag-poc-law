@@ -6920,15 +6920,37 @@ def _anthropic_fetch_articles_schema(context: SolverContext) -> dict[str, Any]:
     graph_review_mode = bool(
         context.graph_review_batch.candidates and not context.finalize_only
     )
+    available_work_item_ids = tuple(
+        work_item_id
+        for work_item_id in _repair_open_work_item_ids(context)
+        if not context.remaining_fetch_capacity_by_work_item
+        or context.remaining_fetch_capacity_by_work_item.get(work_item_id, 0) > 0
+    )
+    remaining_capacity = (
+        max(
+            (
+                context.remaining_fetch_capacity_by_work_item[work_item_id]
+                for work_item_id in available_work_item_ids
+            ),
+            default=0,
+        )
+        if context.remaining_fetch_capacity_by_work_item
+        else context.remaining_fetch_capacity
+    )
     capacity = min(
-        4,
-        context.remaining_fetch_capacity,
+        _tool_array_argument_capacity(
+            context,
+            tool_name="fetch_articles",
+            argument_name="article_ids",
+            fallback=remaining_capacity,
+        ),
         len(context.fetchable_article_ids),
     )
     if (
         context.finalize_only
         or context.cycle_close_required
         or graph_review_mode
+        or not available_work_item_ids
         or capacity < 1
     ):
         return {"type": "null"}
@@ -6940,7 +6962,7 @@ def _anthropic_fetch_articles_schema(context: SolverContext) -> dict[str, Any]:
             "request_id",
         ),
         "work_item_id": _described(
-            _enum_string(_repair_open_work_item_ids(context)),
+            _enum_string(available_work_item_ids),
             ToolRequest,
             "work_item_id",
         ),
@@ -6976,8 +6998,32 @@ def _anthropic_dependency_fetch_articles_schema(
     """Dependency Action用の小さい既知Article取得schema。"""
 
     article_ids = tuple(context.fetchable_article_ids)
-    capacity = min(4, context.remaining_fetch_capacity, len(article_ids))
-    work_item_ids = tuple(context.required_dependency_work_item_ids)
+    work_item_ids = tuple(
+        work_item_id
+        for work_item_id in context.required_dependency_work_item_ids
+        if not context.remaining_fetch_capacity_by_work_item
+        or context.remaining_fetch_capacity_by_work_item.get(work_item_id, 0) > 0
+    )
+    remaining_capacity = (
+        max(
+            (
+                context.remaining_fetch_capacity_by_work_item[work_item_id]
+                for work_item_id in work_item_ids
+            ),
+            default=0,
+        )
+        if context.remaining_fetch_capacity_by_work_item
+        else context.remaining_fetch_capacity
+    )
+    capacity = min(
+        _tool_array_argument_capacity(
+            context,
+            tool_name="fetch_articles",
+            argument_name="article_ids",
+            fallback=remaining_capacity,
+        ),
+        len(article_ids),
+    )
     if capacity < 1 or not work_item_ids:
         return {"type": "null"}
     return {

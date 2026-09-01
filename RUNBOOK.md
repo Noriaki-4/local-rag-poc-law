@@ -104,6 +104,22 @@ curl -s https://api.anthropic.com/v1/messages \
 
 `404 model not found` の場合は、そのキーではモデルIDが使えない。契約プランで利用可能な別のモデルIDに変える。
 
+Haiku 4.5で新Frameworkを検証する場合は、manual extended thinkingを使う。Haiku 4.5は
+`output_config.effort`に対応しないため、Lunaの`OPENAI_REASONING_EFFORT`をそのまま移植しない。
+`ANTHROPIC_THINKING_BUDGET_TOKENS`は思考用token数で、0なら無効になる。各呼出しではProgramが
+`max_tokens`から回答本文用に1,024 token以上を残す範囲へ調整する。
+
+```bash
+LLM_PROVIDER=anthropic
+LLM_MODEL=claude-haiku-4-5-20251001
+ANTHROPIC_THINKING_BUDGET_TOKENS=4096
+ANTHROPIC_MAX_TOKENS=16384
+ANTHROPIC_MAX_TOKENS_CEILING=32768
+```
+
+`/health`の`llm.manualThinking`で設定値と対象モデルを確認する。Haikuへ切り替えるときも、
+ローカル変更を含めて`--build --force-recreate`し、実行中コンテナのProviderとmodelを確認する。
+
 OpenAI APIでは、統合処理の検証中は`gpt-5.6-luna`、reasoning effort `high`を基準設定とする。
 全役割を一括で切り替える`.env`例:
 

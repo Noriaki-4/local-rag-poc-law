@@ -13754,6 +13754,59 @@ def test_anthropic_json_transport_uses_known_article_fetch_sidecar() -> None:
     ]
 
 
+def test_anthropic_fetch_sidecar_uses_current_work_item_capacity() -> None:
+    state = CaseState(
+        case_id="case-anthropic-work-item-capacity",
+        question="確認する。",
+        research_cycle_count=1,
+        work_items=(
+            WorkItem(work_item_id="wi-full", question="取得枠を使い切った。"),
+            WorkItem(work_item_id="wi-open", question="本文を確認する。"),
+        ),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h-full",
+                work_item_id="wi-full",
+                statement="取得済みである。",
+            ),
+            Hypothesis(
+                hypothesis_id="h-open",
+                work_item_id="wi-open",
+                statement="本文を確認する。",
+            ),
+        ),
+    )
+    article_ids = tuple(f"article-{index}" for index in range(1, 6))
+    context = build_solver_context(
+        state,
+        AgentLimits(max_fetched_resources_per_cycle=5),
+        remaining_wall_time_sec=100,
+        finalize_only=False,
+    ).model_copy(
+        update={
+            "fetchable_article_ids": article_ids,
+            "remaining_fetch_capacity": 5,
+            "remaining_fetch_capacity_by_work_item": {
+                "wi-full": 0,
+                "wi-open": 5,
+            },
+        }
+    )
+
+    rendered = render_solver_model_call(
+        context,
+        legal_profiles.legal_agent_profile().solver_integration,
+        provider="anthropic",
+        stage="integration",
+    )
+    fetch_schema = rendered.output_schema["properties"]["fetch_articles"][
+        "anyOf"
+    ][0]["properties"]
+
+    assert fetch_schema["work_item_id"]["enum"] == ["wi-open"]
+    assert fetch_schema["article_ids"]["maxItems"] == 5
+
+
 def test_finalization_excludes_unverified_work_item_evidence() -> None:
     fixture_path = (
         Path(__file__).parent
