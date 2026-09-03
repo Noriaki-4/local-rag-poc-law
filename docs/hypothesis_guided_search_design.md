@@ -5,8 +5,8 @@
 本書は、新しい法令検索方式について合意した設計判断をまとめる。対象は、Hypothesisを起点に
 OpenSearchとLegal Graphを使い、回答根拠となるArticle本文を集める処理である。
 
-本書の内容は設計決定であり、未実装の項目を含む。現行実装との差は、実装と回帰テストが完了するまで
-明示して管理する。
+本書の内容は設計決定と現行仕様をまとめる。具体的な実装箇所と回帰確認は、
+後半の修正対象一覧とテスの修正入口に示す。
 
 ## 目的
 
@@ -46,6 +46,21 @@ Graphから開始でき、OpenSearchで起点を発見できなければGraphを
 
 探索セットを開始する前に、取得済み本文、未評価候補、選択済みArticleを処理する。新しい探索は、既知の
 情報だけでは未確認事項を解消できない場合に限る。
+
+## WorkItem単位の実行境界
+
+次の意味判断は、1回のLLM呼出しにつき1つのWorkItemだけを扱う。対象WorkItemが複数ある場合は、
+`max_parallel_work_items`の範囲で並列実行する。
+
+1. Hypothesis生成
+2. 検索計画
+3. OpenSearch候補選別
+4. 本文統合
+5. 依存関係判定
+
+Programは各呼出しの入力をWorkItem、所属Hypothesis、候補、Evidence及び上限値で投影する。各出力を
+個別に契約検証してから入力順に結合し、法的な対応関係や候補の優先度は補完しない。同じArticleが
+複数WorkItemで選ばれた場合は、Article IDを重複させず、各WorkItemに属するHypothesis IDとの対応を保持する。
 
 ## 候補探索から本文採用まで
 
@@ -258,7 +273,7 @@ OpenSearchと、その結果又は既知Articleを起点にするGraph 1ホッ�
 設定を2セットへ変更した場合も、2セット目を同じCycleへ追加しない。取得済み情報を統合してCycleを閉じ、
 次Cycleで検索条件又はGraph起点を見直して実行する。
 
-設定名は`max_exploration_sets_per_hypothesis`とし、既定値を`1`とする。OpenSearchとGraphの個別呼出し回数を
+設定名は`max_exploration_sets_per_hypothesis`とし、既定値を`2`とする。OpenSearchとGraphの個別呼出し回数を
 上限値として設定しない。
 
 探索セットは同じCycle内の複数stepにまたがることができるが、Cycleをまたがない。最初のOpenSearch又はGraphを
@@ -277,6 +292,10 @@ hypothesis_exploration_sets.remaining_new_sets_total = 0
 
 上限到達は、規定や根拠が存在しないことを意味しない。WorkItemは他のHypothesisで回答可能かを確認し、
 最終回答では確認できた範囲と未確認事項を区別する。
+
+未統合の本文、未評価の検索・Graph候補及び置換が必要なHypothesisを先に処理する。それらがなく、
+回答に未確認事項が残る全てのactive Hypothesisで探索枠を使い切った場合、Programは次Cycleを開始せず、
+`exploration_limit_reached`を理由として限定付きの最終回答へ移る。
 
 ### 上限の迂回を防ぐ
 
@@ -313,14 +332,11 @@ adapterで吸収する。
 | モデル | 共通で使うもの | Provider adapterだけで扱う差 |
 |---|---|---|
 | `gpt-5.6-luna` | 同じPrompt、`SolverContext`、正規出力契約、検証処理 | OpenAI Structured Outputsへschemaを変換し、対応する`reasoning_effort`を送る。 |
-| `claude-haiku-4-5-20251001` | 同上 | Anthropic Structured Outputs用の輸送schemaを使う。`effort`は送らず、設定時だけmanual extended thinkingの予算を送る。 |
-| `claude-sonnet-4-6` | 同上 | Haikuと同じAnthropic正規化経路を使う。manual thinking予算は送らず、`thinking.type=adaptive`と`output_config.effort`を使う。 |
+| `claude-haiku-4-5-20251001` | 同上 | Anthropic Structured Outputs用の輸送schemaを使う。既定ではthinkingを送らず、比較実験で明示的に有効化した場合だけmanual extended thinkingの予算を送る。 |
+| `claude-sonnet-4-6` | 同上 | Haikuと同じAnthropic正規化経路を使う。既定ではthinkingとeffortを送らず、比較実験で明示的に有効化した場合だけadaptive thinkingと`output_config.effort`を使う。 |
 
-現行実装では、Lunaのreasoning effortとHaikuのmanual thinkingは輸送層で適用される。一方、
-`StructuredJSONModelAdapter`から`LLMClient.generate_structured_json()`へ用途別のeffortを渡しておらず、
-Sonnet 4.6のadaptive thinkingも有効にしていない。Structured Outputs自体は利用できるが、Frameworkの
-設定としてthinkingとeffortを制御・記録できない。実装時は、
-`ModelCallProfile`で解決した任意のreasoning effortを共通JSON生成入口へ渡し、次のように変換する。
+現行実装では、`ModelCallProfile`で解決したreasoning effortを
+`LLMClient.generate_structured_json()`へ渡し、Provider adapterが次のように変換する。
 
 ```text
 ModelCallProfile.reasoning_effort
@@ -348,9 +364,8 @@ Anthropic輸送schemaと復元処理も同じ変更で更新する。
 要件にしない。Anthropic実行内でHaiku 4.5とSonnet 4.6を役割別に使い分ける場合も、状態、Prompt及び正規契約は
 共通のままとする。
 
-現行の`config.py`、`.env.example`及び一部のテストには`claude-sonnet-5`が残っている。実装時は、
-実行設定の既定値、設定例及び現行挙動を固定するテストを`claude-sonnet-4-6`へ変更する。
-過去の比較結果として記録されたモデル名は、実行時設定ではないため履歴のまま残す。
+実行設定の既定値、設定例及び現行挙動を固定するテストでは
+`claude-sonnet-4-6`を使う。過去の比較結果に記録されたモデル名は履歴のまま残す。
 
 参考:
 
@@ -389,15 +404,16 @@ Anthropic輸送schemaと復元処理も同じ変更で更新する。
 | `Hypothesis.statement` | 意味変更 | 同じIDのまま内容を変更できる | 作成後は同じ法的命題を維持する。意味が変わる場合は別IDを作る。 |
 | `Hypothesis.judgment` | 維持 | 本文評価により更新する | 変更なし。命題置換には使わない。 |
 | `Hypothesis.evidence_ids[]` | 維持 | judgmentとgapの判断に使った本文ID | 変更なし。新Hypothesisには本文を再評価してから追加する。 |
-| `Hypothesis.gaps[]` | 維持 | 未確認事項の追加・解消で更新する | 変更なし。命題自体が変わる場合は新Hypothesis側で作り直す。 |
+| `Hypothesis.gaps[]` | 変更 | 未確認事項の追加・解消で更新する | 追加・破棄・解消の差分で更新する。命題自体が変わる場合は新Hypothesis側で作り直す。 |
+| `HypothesisUpdate.discard_gap_ids[]` | 追加 | 項目なし | 確認済みではないが、重複、範囲外、過度に抽象的又は訂正対象となった既存gap IDを探索対象から外す。訂正は旧IDの破棄と新gapの追加で表す。 |
 | `CaseState.hypothesis_history[]`、`HypothesisHistoryRecord` | 削除 | 同一IDで上書きする前のsnapshotを保存する | 旧Hypothesis自体を別IDで保持するため廃止する。 |
 | `CaseState.invalidated_tool_request_ids[]` | 削除 | 同一IDの旧版に対するToolRequestを無効化する | ToolRequestは置換前Hypothesisの履歴として有効なまま保持するため廃止する。 |
 | `SolverContext.hypotheses[]` | 投影変更 | 保存中の現在版Hypothesisを渡す | 他のHypothesisから置換されていないHypothesisだけを通常のLLM処理へ渡す。 |
 | `SolverContext.material_evidence[]` | 投影変更 | 処理profileに応じて本文を渡す | 今回評価する本文又は置換されていないHypothesisに必要な採用済み本文だけを渡す。 |
 | `GraphReviewCandidate.links[].relations[]` | 入力形式変更 | Graphの関係辞書をほぼそのまま渡す | 保存値から起点、候補、predicate、方向、関係説明、確認状態、短い分類根拠を決定的に整形して渡す。 |
-| `AgentLimits.max_exploration_sets_per_hypothesis` | 追加 | 項目なし | Hypothesisごとの全Cycle通算セット上限。既定値は1とし、設定で2へ変更できる。 |
+| `AgentLimits.max_exploration_sets_per_hypothesis` | 追加 | 項目なし | Hypothesisごとの全Cycle通算セット上限。既定値は2とし、設定で1へ変更できる。 |
 | `SolverContext.hypothesis_exploration_sets[]` | 追加 | 項目なし | `hypothesis_id`、`legal_search_used_in_cycle`、`graph_used_in_cycle`、`remaining_new_sets_total`を持つ読み取り用配列を追加する。 |
-| `ModelCallProfile.reasoning_effort` | 追加 | 新Frameworkの用途別Profileには推論設定がない | 任意の共通設定として保持し、Provider adapterが対応モデルのAPI表現へ変換する。Haikuでは`null`として扱う。 |
+| `ModelCallProfile.reasoning_effort` | 追加 | 新Frameworkの用途別Profileには推論設定がない | 任意の共通設定として保持し、Provider adapterが対応モデルのAPI表現へ変換する。Anthropicの既定値は`none`とする。 |
 
 `hypothesis_exploration_sets[]`はCaseStoreの第二の正本として保存せず、ToolRequestとToolResultの履歴から作る。
 既定の1セットをOpenSearchで開始した後は`remaining_new_sets_total=0`になるが、同じセットのGraphは実行できる。
@@ -407,7 +423,7 @@ Anthropic輸送schemaと復元処理も同じ変更で更新する。
 
 | 処理 | 修正する項目 | 修正内容 | 主な修正ファイル |
 |---|---|---|---|
-| 設定の定義 | `AgentLimits.max_exploration_sets_per_hypothesis` | `1..2`の設定値を追加し、既定値を`1`にする。個別のOpenSearch回数とGraph回数には分けない。 | `agent_framework/profiles.py` |
+| 設定の定義 | `AgentLimits.max_exploration_sets_per_hypothesis` | `1..2`の設定値を追加し、既定値を`2`にする。個別のOpenSearch回数とGraph回数には分けない。 | `agent_framework/profiles.py` |
 | 環境設定の読込み | `AGENT_FRAMEWORK_MAX_EXPLORATION_SETS_PER_HYPOTHESIS` | 環境変数を読み、Legal Profileの`AgentLimits`へ渡す。サンプル値、Composeの受け渡し及び操作説明も追加する。 | `config.py`、`domains/legal/profiles.py`、`.env.example`、`docker-compose.yml`、`RUNBOOK.md` |
 | Hypothesis見直し契約 | `revise_hypotheses[]`、`HypothesisRevisionUpdate`、`HypothesisRevisionProposal` | 同一ID更新を廃止し、追加契約へ`replaces_hypothesis_id`を加える。追加契約から`evidence_ids[]`を外す。 | `agent_framework/contracts.py`、`adapters/models/structured_json.py`、`solver_hypothesis_revision.md`、`solver_hypothesis_revision_check.md` |
 | Hypothesis保存 | `Hypothesis.replaces_hypothesis_id` | 新IDのHypothesisを保存し、置換元の存在、同一WorkItem所属、循環参照がないことを検証する。同一IDの`statement`上書き、snapshot作成、ToolRequest無効化を削除する。 | `agent_framework/state.py`、`agent_framework/validation.py` |
@@ -426,12 +442,15 @@ Anthropic輸送schemaと復元処理も同じ変更で更新する。
 | 方針文書の整合 | Hypothesis更新の記述 | `IMPLEMENTATION-GUIDELINES.md`には個別の置換契約や上限値を書かず、状態を上書きせず監査可能に保つ原則だけを残す。詳細仕様は本書を参照させる。 | `IMPLEMENTATION-GUIDELINES.md` |
 | 共通推論設定 | `ModelCallProfile.reasoning_effort` | 用途別Profileで推論設定を解決し、共通JSON生成入口へ渡す。OpenAIとAnthropicのAPI項目名をProfileへ持ち込まない。 | `agent_framework/profiles.py`、`domains/legal/profiles.py`、`adapters/models/structured_json.py`、`llm.py` |
 | Anthropic輸送schema | Hypothesis見直し、探索及び統合の縮小schema | `replaces_hypothesis_id`の追加、`revise_hypotheses[]`と提案時`evidence_ids[]`の削除をAnthropic用schema及び復元処理にも反映する。 | `adapters/models/structured_json.py` |
-| Anthropic応答処理 | thinking block、`stop_reason` | Haiku 4.5のmanual thinkingとSonnet 4.6のadaptive thinkingを区別し、本文は`type=text`で抽出する。`refusal`を契約修復対象から外す。 | `llm.py`、`adapters/models/structured_json.py` |
+| Anthropic応答処理 | thinking block、`stop_reason` | 既定ではthinkingを送らない。明示的に有効化した場合はHaiku 4.5のmanual thinkingとSonnet 4.6のadaptive thinkingを区別し、本文は`type=text`で抽出する。`refusal`を契約修復対象から外す。 | `llm.py`、`adapters/models/structured_json.py` |
 | Provider設定・確認 | model、effort、thinking、token上限 | 許可モデルをLuna、Haiku 4.5、Sonnet 4.6とする。`config.py`のAnthropic既定値と`.env.example`の現行設定例を`claude-sonnet-4-6`へ変更し、切替方法を更新する。診断artifactへprovider、model、要求effort、実効方式を残す。 | `config.py`、`.env.example`、`docker-compose.yml`、`RUNBOOK.md`、`agent_framework/diagnostics.py`、`agent_framework/model_call_artifacts.py` |
 
 `hypothesis_exploration_sets[]`はLLMが返す出力項目ではない。ProgramがCaseStoreの履歴から組み立てる
 読み取り専用の入力である。このため、探索セット番号又は探索回数を`ToolRequest`へ追加せず、
 `ToolResult.cycle_no`で同一CycleのOpenSearchとGraphを一つのセットにまとめる。
+Programはこの投影から、現在Cycleで使用済みのOpenSearch又はGraphを`available_tools`と
+ToolRequestの出力schemaから除外する。複数Hypothesisを同じ入力へ含める場合は、Toolごとに指定可能な
+`hypothesis_ids`も未使用の対象へ限定する。LLMにCycle内上限と全Cycle通算上限の組合せ計算を委ねない。
 `failed`又は`timeout`は法的探索を完了したことにせず、既存のTool失敗・再試行上限で扱う。
 
 ### 現行項目の扱い
@@ -451,20 +470,20 @@ Anthropic輸送schemaと復元処理も同じ変更で更新する。
 | 確認対象 | 主なテスト | 確認内容 |
 |---|---|---|
 | Hypothesis置換 | `tests/test_hypothesis_revision.py` | 別ID追加、置換元ID、同一ID上書き拒否、Evidence非継承、処理対象の導出 |
-| gap差分 | `tests/test_hypothesis_gap_diffs.py` | 通常の`HypothesisUpdate`では既存の追加・解消が維持されること |
+| gap差分 | `tests/test_hypothesis_gap_diffs.py` | 追加・破棄・解消が区別され、訂正で旧gapを解消扱いにしないこと |
 | Context投影 | `tests/test_layered_context_assembler.py`、`tests/test_agent_framework.py` | 置換されていないHypothesisだけを渡し、不採用本文と置換済みHypothesisを通常入力へ含めないこと |
 | Graph表示 | `tests/test_agent_framework.py`、Graph Review関連テスト | 整形結果が保存済みpredicate、方向、端点、説明及び根拠と一致すること |
 | 探索セット集計 | `tests/test_agent_framework.py` | 同じHypothesis・同じCycleのOpenSearchとGraphが1セットになり、異なるCycleだけが通算セット数を増やすこと |
 | 探索結果status | `tests/test_agent_framework.py`、`tests/test_llm_research_loop.py` | 候補0件の成功はセットを消費し、`failed`又は`timeout`は探索完了として数えないこと |
 | Cycle内上限 | `tests/test_agent_framework.py`、`tests/test_llm_research_loop.py` | OpenSearch後のGraphは許可し、同じCycleの2回目のOpenSearch、2回目のGraph及びGraph連続2ホップを拒否すること |
-| 通算上限 | `tests/test_llm_research_loop.py` | 既定値`1`では次Cycleの新規セットを止め、設定値`2`では2セット目を次Cycleだけで実行すること |
+| 通算上限 | `tests/test_llm_research_loop.py` | 設定値`1`では次Cycleの新規セットを止め、既定値`2`では2セット目を次Cycleだけで実行すること |
 | 上限に数えない処理 | `tests/test_llm_research_loop.py` | 候補評価、本文取得、Evidence統合、Cycle終了が探索セット数を増やさないこと |
 | scope再利用 | `tests/test_agent_framework.py`、`tests/test_llm_research_loop.py` | Hypothesis IDを変えても同じTool、WorkItem、引数の成功済み探索を再実行せず、保存済み結果を参照できること |
 | 既知起点からの開始 | `tests/test_llm_research_loop.py` | 起点Articleが既知ならGraphだけで1セットを構成でき、OpenSearchを強制しないこと |
 | 起点未発見 | `tests/test_llm_research_loop.py` | OpenSearchで起点Articleを選べなかった場合にGraphを強制せず、1セットとして終了できること |
 | Cycle境界 | `tests/test_llm_research_loop.py`、`tests/test_cycle_audit.py` | 未使用Toolを次Cycleへ同じセットとして持ち越さず、各Cycleの使用状況と通算残数を監査できること |
 | Provider共通契約 | `tests/test_openai_transport.py`、`tests/test_anthropic_transport.py`、Structured JSON関連テスト | Luna、Haiku 4.5、Sonnet 4.6の輸送表現が同じ正規契約へ復元され、同じValidator結果になること |
-| 推論設定 | `tests/test_openai_transport.py`、`tests/test_anthropic_transport.py` | Lunaへreasoning effort、Sonnet 4.6へadaptive thinkingと`output_config.effort`、Haiku 4.5へmanual thinkingだけが送られること |
+| 推論設定 | `tests/test_openai_transport.py`、`tests/test_anthropic_transport.py` | Lunaのreasoning effortを維持し、Anthropicでは既定でthinkingを送らないこと。明示的に有効化した場合だけSonnet 4.6へadaptive thinkingと`output_config.effort`、Haiku 4.5へmanual thinkingが送られること |
 | 許可モデル設定 | `tests/test_llm_config.py`、`tests/test_anthropic_transport.py` | Anthropic既定値と役割別の上位モデル例が`claude-sonnet-4-6`であり、`claude-sonnet-5`を現行設定として使用しないこと |
 | Anthropic schema回帰 | `tests/test_llm_parse.py`、Structured JSON関連テスト | Anthropic用schemaがAPI対応形で、Hypothesis置換の追加・削除項目を欠落させないこと |
 | Anthropic応答block | `tests/test_anthropic_transport.py` | thinking blockが先頭でもtext JSONを取得でき、Sonnetの`refusal`を契約修復として再試行しないこと |

@@ -1,0 +1,17 @@
+{
+  "effectiveReasoningEffort": null,
+  "effectiveReasoningMode": null,
+  "inputHash": "20558b82600853dc8457690e1539a437c7f5cf010b173ea86d4cb99b591e6a71",
+  "instructionsHash": "1f6bd95f93b2a2440e65fc751dae9cc43aa440706721ca5cdc37839d50bcc0d3",
+  "model": "gpt-4o-mini",
+  "normalizedSchemaHash": "a865ddd20a00e972ce970eba6b155ba279e354ee90477893a65529e3a76f560c",
+  "outputSchemaHash": "a865ddd20a00e972ce970eba6b155ba279e354ee90477893a65529e3a76f560c",
+  "profileName": "legal-question-readiness",
+  "profileVersion": "11",
+  "promptAssets": [],
+  "provider": "openai",
+  "requestHash": "763d572089acef0812b42cf9c64957d99eefe5e85adb0bf0c3994e8a184a95a5",
+  "requestedReasoningEffort": null,
+  "stage": "question_readiness",
+  "thinkingBudgetTokens": null
+}

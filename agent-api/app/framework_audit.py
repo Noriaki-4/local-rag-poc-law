@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from app.agent_framework.diagnostics import load_diagnostic_records
 from app.config import settings
 from app.domains.legal import legal_agent_profile
+from app.domains.legal.model_routing import legal_model_for
 from app.llm import LLMClient
 from app.models import FrameworkAuditRequest, FrameworkAuditResponse
 
@@ -111,11 +112,12 @@ class FrameworkPostRunAuditService:
             )
 
         profile = legal_agent_profile().solver_integration
+        audit_model = legal_model_for("post_run_audit")
         schema = _audit_schema(sequences)
         result = self._llm_client.generate_structured_json(
             prompt=prompt,
             schema=schema,
-            model=profile.model,
+            model=audit_model,
             max_tokens=min(
                 profile.max_output_tokens,
                 settings.agent_framework_post_run_audit_max_tokens,
@@ -148,7 +150,7 @@ class FrameworkPostRunAuditService:
             inferences=output.inferences,
             sourceDecisionSequences=output.source_decision_sequences,
             limitations=output.limitations,
-            model=profile.model,
+            model=audit_model,
             inputTokens=result.inputTokens,
             outputTokens=result.outputTokens,
         )

@@ -308,6 +308,7 @@ class LLMClient:
         model: str,
         max_tokens: int,
         timeout_sec: int,
+        reasoning_effort: str | None = None,
     ) -> StructuredJSONResult:
         """用途固有の意味判断を持たないprovider共通structured-output入口。"""
 
@@ -334,6 +335,7 @@ class LLMClient:
             max_tokens,
             timeout_sec,
             parse,
+            effort=reasoning_effort,
         )
         return StructuredJSONResult(
             payload=payload,
@@ -837,6 +839,8 @@ class LLMClient:
         max_tokens: int,
         timeout: int,
         parse_fn: Callable[[str], tuple],
+        *,
+        effort: str | None = None,
     ) -> tuple[tuple, int, int | None, int | None, str | None, int]:
         """`_json_transport`を呼び出し、parse_fnの結果の最終要素(validation_error)が
         真の場合のみ残り時間内で1回だけ再試行してトークンを合算する。
@@ -845,7 +849,9 @@ class LLMClient:
         retry_count = 0
         try:
             raw_text, latency_ms, input_tokens, output_tokens, stop_reason = (
-                self._json_transport(prompt, schema, model, max_tokens, timeout)
+                self._json_transport(
+                    prompt, schema, model, max_tokens, timeout, effort=effort
+                )
             )
         except requests.ConnectionError:
             retry_timeout = _retry_timeout(timeout, started)
@@ -860,6 +866,7 @@ class LLMClient:
                     model,
                     max_tokens,
                     retry_timeout,
+                    effort=effort,
                 )
             )
             latency_ms = round((perf_counter() - started) * 1000)
@@ -879,7 +886,14 @@ class LLMClient:
                 retry_input_tokens,
                 retry_output_tokens,
                 stop_reason,
-            ) = self._json_transport(prompt, schema, model, max_tokens, retry_timeout)
+            ) = self._json_transport(
+                prompt,
+                schema,
+                model,
+                max_tokens,
+                retry_timeout,
+                effort=effort,
+            )
             latency_ms += retry_latency
             input_tokens = _sum_optional(first_input_tokens, retry_input_tokens)
             output_tokens = _sum_optional(first_output_tokens, retry_output_tokens)
@@ -1533,6 +1547,7 @@ class LLMClient:
                 model,
                 max_tokens,
                 timeout_sec,
+                effort=effort,
             )
         raise ValueError(f"Unsupported LLM_PROVIDER: {self.provider}")
 
@@ -1592,7 +1607,7 @@ class LLMClient:
                 "schema": _to_anthropic_schema(schema),
             }
         }
-        if effort and _anthropic_model_supports_effort(model):
+        if effort and effort != "none" and _anthropic_model_supports_effort(model):
             output_config["effort"] = effort
         payload: dict[str, Any] = {
             "model": model,
@@ -1600,9 +1615,12 @@ class LLMClient:
             "messages": [{"role": "user", "content": prompt}],
             "output_config": output_config,
         }
-        thinking = _anthropic_manual_thinking(model, max_tokens)
-        if thinking is not None:
-            payload["thinking"] = thinking
+        if effort != "none":
+            thinking = _anthropic_manual_thinking(model, max_tokens)
+            if thinking is not None:
+                payload["thinking"] = thinking
+            elif _anthropic_model_supports_adaptive_thinking(model):
+                payload["thinking"] = {"type": "adaptive"}
         response = _post_anthropic_with_overload_retry(
             payload=payload,
             timeout_sec=timeout_sec,
@@ -1610,6 +1628,8 @@ class LLMClient:
         if not response.ok:
             raise ValueError(f"{response.status_code}: {_anthropic_error(response)}")
         data = response.json()
+        if data.get("stop_reason") == "refusal":
+            raise ValueError("Anthropic model refused the request")
         usage = data.get("usage", {})
         return (
             _anthropic_text(data),
@@ -1626,6 +1646,8 @@ class LLMClient:
         model: str,
         max_tokens: int,
         timeout_sec: int,
+        *,
+        effort: str | None = None,
     ) -> tuple[str, int, int | None, int | None, str | None]:
         started = perf_counter()
         data = _post_openai_chat_completion(
@@ -1634,6 +1656,7 @@ class LLMClient:
             model=model,
             max_tokens=min(max_tokens, settings.openai_max_tokens_ceiling),
             timeout_sec=timeout_sec,
+            reasoning_effort=effort,
         )
         usage = data.get("usage", {})
         return (
@@ -1698,6 +1721,7 @@ def _post_openai_chat_completion(
     model: str,
     max_tokens: int,
     timeout_sec: int,
+    reasoning_effort: str | None = None,
 ) -> dict[str, Any]:
     """OpenAI Chat CompletionsのStructured Outputsを共通JSON契約へ接続する。"""
 
@@ -1718,8 +1742,9 @@ def _post_openai_chat_completion(
     # GPT-5系はtemperature=0を受け付けない。指定しなければProviderの
     # 対応値が使われるため、非対応パラメータを輸送層から除く。
     if model.lower().startswith("gpt-5"):
-        if settings.openai_reasoning_effort:
-            payload["reasoning_effort"] = settings.openai_reasoning_effort
+        effective_effort = reasoning_effort or settings.openai_reasoning_effort
+        if effective_effort:
+            payload["reasoning_effort"] = effective_effort
     else:
         payload["temperature"] = 0
 
@@ -2492,6 +2517,13 @@ def _anthropic_model_supports_effort(model: str) -> bool:
     """
 
     return "haiku" not in model.lower()
+
+
+def _anthropic_model_supports_adaptive_thinking(model: str) -> bool:
+    """Sonnet 4.6はmanual予算ではなくadaptive thinkingを使う。"""
+
+    normalized = model.lower().replace("_", "-")
+    return "sonnet-4-6" in normalized
 
 
 def _anthropic_model_supports_manual_thinking(model: str) -> bool:

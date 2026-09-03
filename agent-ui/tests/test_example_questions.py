@@ -28,6 +28,11 @@ class ExampleQuestionsTest(unittest.TestCase):
         titles = [example.title for example in EXAMPLE_QUESTIONS]
         self.assertEqual(len(titles), len(set(titles)))
 
+    def test_questions_do_not_repeat_the_always_on_citation_requirement(self):
+        for example in EXAMPLE_QUESTIONS:
+            with self.subTest(title=example.title):
+                self.assertNotIn("根拠", example.question)
+
     def test_every_example_crosses_at_least_two_sources(self):
         for example in EXAMPLE_QUESTIONS:
             with self.subTest(title=example.title):

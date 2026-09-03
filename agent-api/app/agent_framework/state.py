@@ -109,14 +109,20 @@ def apply_hypothesis_gap_diff(
     existing: tuple[str, ...],
     additions: tuple[str, ...],
     resolved_gap_ids: tuple[str, ...],
+    discarded_gap_ids: tuple[str, ...] = (),
 ) -> tuple[str, ...]:
-    """既知gapだけを解決し、新規gapを重複なく追記する。"""
+    """既知gapを解決又は破棄し、新規gapを重複なく追記する。"""
 
     known_by_id = {
         hypothesis_gap_id(hypothesis_id, description): description
         for description in existing
     }
-    unknown_ids = set(resolved_gap_ids) - set(known_by_id)
+    if set(resolved_gap_ids) & set(discarded_gap_ids):
+        raise ValueError(
+            "hypothesis gap IDs cannot be both resolved and discarded"
+        )
+    removed_ids = set(resolved_gap_ids) | set(discarded_gap_ids)
+    unknown_ids = removed_ids - set(known_by_id)
     if unknown_ids:
         raise ValueError(
             f"unknown hypothesis gap IDs: {sorted(unknown_ids)}"
@@ -124,7 +130,7 @@ def apply_hypothesis_gap_diff(
     remaining = tuple(
         description
         for gap_id, description in known_by_id.items()
-        if gap_id not in set(resolved_gap_ids)
+        if gap_id not in removed_ids
     )
     return tuple(dict.fromkeys((*remaining, *additions)))
 
@@ -240,6 +246,15 @@ class Hypothesis(FrameworkModel):
         max_length=160,
         description="このHypothesisが検証するWorkItem ID。",
     )
+    replaces_hypothesis_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=160,
+        description=(
+            "この命題が置き換える旧Hypothesis ID。独立した追加ではnull。"
+            "旧Hypothesisは監査用に保持し、通常の探索対象から外す。"
+        ),
+    )
     statement: str = Field(
         min_length=1,
         max_length=1200,
@@ -277,11 +292,9 @@ class Hypothesis(FrameworkModel):
 
     @property
     def requires_follow_up(self) -> bool:
-        """未判定、または支持済みでも未確認事項が残るかを返す。"""
+        """未判定、または判断後も未確認事項が残るかを返す。"""
 
-        return self.judgment == "unresolved" or (
-            self.judgment == "supported" and bool(self.gaps)
-        )
+        return self.judgment == "unresolved" or bool(self.gaps)
 
     @model_validator(mode="before")
     @classmethod
@@ -302,27 +315,6 @@ class Hypothesis(FrameworkModel):
         if self.judgment in {"supported", "contradicted"} and not self.evidence_ids:
             raise ValueError("supported or contradicted hypothesis requires evidence")
         return self
-
-
-class HypothesisHistoryRecord(FrameworkModel):
-    """Hypothesisの現在版を更新する前の監査用snapshot。"""
-
-    hypothesis: Hypothesis = Field(
-        description="更新前のHypothesis全体。通常のAgentViewには投影しない。",
-    )
-    version: int = Field(
-        ge=1,
-        description="同じHypothesis IDについて保存した旧版の連番。",
-    )
-    revised_cycle: int = Field(
-        ge=1,
-        description="この旧版が現在版へ置き換えられたResearch Cycle番号。",
-    )
-    reason: str = Field(
-        min_length=1,
-        max_length=1200,
-        description="LLMが現在版を更新した短い理由。",
-    )
 
 
 class Evidence(FrameworkModel):
@@ -901,21 +893,7 @@ class CaseState(FrameworkModel):
     )
     work_items: tuple[WorkItem, ...] = ()
     hypotheses: tuple[Hypothesis, ...] = ()
-    hypothesis_history: tuple[HypothesisHistoryRecord, ...] = Field(
-        default=(),
-        description=(
-            "更新前のHypothesis snapshot。永続化と監査にだけ使い、"
-            "通常のSolverContextには投影しない。"
-        ),
-    )
     tool_requests: tuple[ToolRequest, ...] = ()
-    invalidated_tool_request_ids: tuple[str, ...] = Field(
-        default=(),
-        description=(
-            "Hypothesisの旧版に依存するため、現在版の探索済み実績には使わない"
-            "既存ToolRequest ID。要求・結果自体は監査用に保持する。"
-        ),
-    )
     evidence: tuple[Evidence, ...] = ()
     dependency_decisions: tuple[DependencyDecision, ...] = ()
     graph_candidate_reviews: tuple[GraphCandidateReview, ...] = ()
@@ -959,45 +937,62 @@ class CaseState(FrameworkModel):
             raise ValueError(
                 "hypothesis revision cycle cannot exceed research cycle count"
             )
-        if len(self.invalidated_tool_request_ids) != len(
-            set(self.invalidated_tool_request_ids)
-        ):
-            raise ValueError("invalidated tool request IDs must be unique")
-        known_request_ids = {item.request_id for item in self.tool_requests}
-        unknown_invalidated_ids = (
-            set(self.invalidated_tool_request_ids) - known_request_ids
-        )
-        if unknown_invalidated_ids:
-            raise ValueError(
-                "invalidated tool request IDs must reference existing requests"
-            )
-        history_keys = [
-            (item.hypothesis.hypothesis_id, item.version)
-            for item in self.hypothesis_history
-        ]
-        if len(history_keys) != len(set(history_keys)):
-            raise ValueError("hypothesis history versions must be unique")
         current_by_id = {
             item.hypothesis_id: item for item in self.hypotheses
         }
-        for item in self.hypothesis_history:
-            current = current_by_id.get(item.hypothesis.hypothesis_id)
-            if current is None:
-                raise ValueError("hypothesis history requires a current version")
-            if current.work_item_id != item.hypothesis.work_item_id:
-                raise ValueError("hypothesis history cannot change WorkItem")
-            if item.revised_cycle > self.research_cycle_count:
-                raise ValueError("hypothesis history cycle cannot exceed current cycle")
+        replacement_targets = [
+            item.replaces_hypothesis_id
+            for item in self.hypotheses
+            if item.replaces_hypothesis_id is not None
+        ]
+        if len(replacement_targets) != len(set(replacement_targets)):
+            raise ValueError("a Hypothesis may have only one direct replacement")
+        for item in self.hypotheses:
+            replaced_id = item.replaces_hypothesis_id
+            if replaced_id is None:
+                continue
+            replaced = current_by_id.get(replaced_id)
+            if replaced is None:
+                raise ValueError("replaced Hypothesis must exist")
+            if replaced_id == item.hypothesis_id:
+                raise ValueError("Hypothesis cannot replace itself")
+            if replaced.work_item_id != item.work_item_id:
+                raise ValueError("Hypothesis replacement must remain in one WorkItem")
+            seen = {item.hypothesis_id}
+            ancestor = replaced
+            while ancestor.replaces_hypothesis_id is not None:
+                if ancestor.hypothesis_id in seen:
+                    raise ValueError("Hypothesis replacement cycle detected")
+                seen.add(ancestor.hypothesis_id)
+                next_ancestor = current_by_id.get(ancestor.replaces_hypothesis_id)
+                if next_ancestor is None:
+                    raise ValueError("replaced Hypothesis must exist")
+                ancestor = next_ancestor
         return self
 
 
-def tool_request_matches_current_hypotheses(
-    state: CaseState,
-    request: ToolRequest,
-) -> bool:
-    """Tool要求が参照Hypothesisの現在版に対するものかを返す。"""
+def active_hypothesis_ids(state: CaseState) -> frozenset[str]:
+    """別Hypothesisに置換されていない、通常処理対象のIDを返す。"""
 
-    return request.request_id not in state.invalidated_tool_request_ids
+    replaced_ids = {
+        item.replaces_hypothesis_id
+        for item in state.hypotheses
+        if item.replaces_hypothesis_id is not None
+    }
+    return frozenset(
+        item.hypothesis_id
+        for item in state.hypotheses
+        if item.hypothesis_id not in replaced_ids
+    )
+
+
+def active_hypotheses(state: CaseState) -> tuple[Hypothesis, ...]:
+    """通常の探索・統合へ投影するHypothesisを返す。"""
+
+    active_ids = active_hypothesis_ids(state)
+    return tuple(
+        item for item in state.hypotheses if item.hypothesis_id in active_ids
+    )
 
 
 def fetched_article_ids_by_work_item(

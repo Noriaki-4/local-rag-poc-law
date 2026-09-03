@@ -1,13 +1,17 @@
 {
+  "effectiveReasoningEffort": null,
+  "effectiveReasoningMode": null,
   "inputHash": "db630c94d109b7e53b89187e630c9b124dcbddb9f6fa0df45df38c8a31ccfd13",
-  "instructionsHash": "d2f18acf029d548406289fcf571d745fdb4260be6de456a6f17a5e7601c8aad0",
+  "instructionsHash": "859ab10056998cc6ef8e6790f74ca8566ef3358fe95bc5d6bff9a4d784363424",
   "model": "gpt-4o-mini",
-  "normalizedSchemaHash": "ed0bef2a8ae0186b15d48996fbf7d32d0cdda1d579842b18fb0bcec8c2196d4d",
+  "normalizedSchemaHash": "256e7a58afbee5cb17e015610c35056455b63324febcfe1c661ca6528a7605f1",
   "outputSchemaHash": "694600d32c7ce2e9ca33a70c861e9ab2740c101e906f0b80cca373c2166e7514",
   "profileName": "legal-default",
-  "profileVersion": "494",
+  "profileVersion": "510",
   "promptAssets": [],
   "provider": "openai",
-  "requestHash": "50718048d83d82bc040459a4917f38e9e721913eb76d83110ec2e61a5ff5a2ea",
-  "stage": "search_planning_research_search"
+  "requestHash": "e7bd70ef6d914693b7fb8a07541e8cc5cde11549b46466514796e35ab2cfecfa",
+  "requestedReasoningEffort": null,
+  "stage": "search_planning_research_search",
+  "thinkingBudgetTokens": null
 }

@@ -103,97 +103,36 @@ class QuestionReadinessRequest(BaseModel):
     )
 
 
-class QuestionClarificationChoice(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-
-    choice_id: str = Field(
-        min_length=1,
-        max_length=80,
-        pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$",
-        description="確認候補を参照するための、この応答内で一意なID。",
-    )
-    label: str = Field(
-        min_length=1,
-        max_length=200,
-        description=(
-            "利用者が解釈の違いを選べる、法的結論を含まない短い表示文。"
-        ),
-    )
-    refined_question: str = Field(
-        min_length=1,
-        max_length=4000,
-        description=(
-            "この候補を選んだ場合に一回の検索へ渡す修正後の質問。曖昧さを"
-            "解消する場合は元の明示要求を保持する。複数の主体・行為ペアから"
-            "一つを選ぶ場合は、必要な共通事実を保持して選択したペアの調査要求"
-            "だけに絞り、質問にない事実を追加しない。"
-        ),
-    )
-
-
 class QuestionReadiness(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    decision: Literal["ready", "clarification_required"] = Field(
+    decision: Literal["ready", "clarification_recommended"] = Field(
         description=(
             "readyは一つの主たる主体と、検索対象を特定できる行為を原文から"
-            "読み取って調査を開始できることを示す。clarification_requiredは、"
+            "読み取って調査を開始でき、検索向けの質問文を提案できることを示す。"
+            "clarification_recommendedは、"
             "主体、行為若しくは行為対象の欠落・曖昧さ、又は独立した検索単位の"
-            "混在により利用者確認が必要であることを示す。"
+            "混在により、質問文の明確化が検索精度の向上に役立つことを示す。"
         )
     )
     reason: str = Field(
         min_length=1,
         max_length=1000,
         description=(
-            "判断理由。clarification_requiredでは、何が不足又は混在し、検索対象を"
+            "判断理由。clarification_recommendedでは、何が不足又は混在し、検索対象を"
             "どう変え得るかを法的結論を断定せず説明する。通常UIには表示せず、"
             "診断又はtraceで確認する。"
         ),
     )
-    clarification_question: str | None = Field(
-        max_length=600,
+    recommendation: str = Field(
+        min_length=1,
+        max_length=4000,
         description=(
-            "利用者へ一度に尋ねる最重要の確認質問。readyではnull。"
+            "readyでは、原文の意味と確認事項を保ち、検索対象を明確にした質問文案。"
+            "clarification_recommendedでは、質問文で不足又は曖昧な最も重要な一点を"
+            "示す短い指摘文。どちらも利用者への質問にはしない。"
         ),
     )
-    choices: list[QuestionClarificationChoice] = Field(
-        max_length=4,
-        description=(
-            "原文から作れる、確認質問に対する相互に区別できる解釈候補。"
-            "readyでは空配列。clarification_requiredでも、安全な候補を推測なしで"
-            "作れない場合は空配列とし、候補を返す場合は2件から4件とする。"
-            "利用者は元の質問入力欄を直接修正できる。"
-        ),
-    )
-
-    @model_validator(mode="after")
-    def validate_decision_shape(self):
-        if self.decision == "ready":
-            if self.clarification_question is not None or self.choices:
-                raise ValueError(
-                    "ready question readiness must not include clarification"
-                )
-            return self
-
-        if not self.clarification_question:
-            raise ValueError(
-                "clarification_required must include clarification_question"
-            )
-        if len(self.choices) == 1:
-            raise ValueError(
-                "clarification_required choices must be empty or include at least 2 choices"
-            )
-        choice_ids = [choice.choice_id for choice in self.choices]
-        labels = [choice.label for choice in self.choices]
-        refined_questions = [choice.refined_question for choice in self.choices]
-        if len(choice_ids) != len(set(choice_ids)):
-            raise ValueError("question readiness choice IDs must be unique")
-        if len(labels) != len(set(labels)):
-            raise ValueError("question readiness choice labels must be unique")
-        if len(refined_questions) != len(set(refined_questions)):
-            raise ValueError("refined questions must be unique")
-        return self
 
 
 class FrameworkAuditRequest(BaseModel):

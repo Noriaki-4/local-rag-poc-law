@@ -115,6 +115,10 @@ def write_model_call_artifacts(
     profile_name: str,
     profile_version: str,
     model: str,
+    requested_reasoning_effort: str | None = None,
+    effective_reasoning_mode: str | None = None,
+    effective_reasoning_effort: str | None = None,
+    thinking_budget_tokens: int | None = None,
 ) -> tuple[Path, ...]:
     """レビュー可能な成果物を出力する。生成物は手編集しない。"""
 
@@ -125,6 +129,10 @@ def write_model_call_artifacts(
         profile_name=profile_name,
         profile_version=profile_version,
         model=model,
+        requested_reasoning_effort=requested_reasoning_effort,
+        effective_reasoning_mode=effective_reasoning_mode,
+        effective_reasoning_effort=effective_reasoning_effort,
+        thinking_budget_tokens=thinking_budget_tokens,
     )
     written: list[Path] = []
     for name, content in files.items():
@@ -141,6 +149,10 @@ def model_call_artifact_contents(
     profile_name: str,
     profile_version: str,
     model: str,
+    requested_reasoning_effort: str | None = None,
+    effective_reasoning_mode: str | None = None,
+    effective_reasoning_effort: str | None = None,
+    thinking_budget_tokens: int | None = None,
 ) -> dict[str, str]:
     """ファイル書込みと差分検査が共有する成果物本文。"""
 
@@ -157,6 +169,10 @@ def model_call_artifact_contents(
                 "profileName": profile_name,
                 "profileVersion": profile_version,
                 "model": model,
+                "requestedReasoningEffort": requested_reasoning_effort,
+                "effectiveReasoningMode": effective_reasoning_mode,
+                "effectiveReasoningEffort": effective_reasoning_effort,
+                "thinkingBudgetTokens": thinking_budget_tokens,
                 "prompt": rendered.request,
                 "outputSchema": rendered.output_schema,
                 "normalizedSchema": rendered.normalized_schema,
@@ -181,6 +197,10 @@ def model_call_artifact_contents(
                 "profileName": profile_name,
                 "profileVersion": profile_version,
                 "model": model,
+                "requestedReasoningEffort": requested_reasoning_effort,
+                "effectiveReasoningMode": effective_reasoning_mode,
+                "effectiveReasoningEffort": effective_reasoning_effort,
+                "thinkingBudgetTokens": thinking_budget_tokens,
                 "instructionsHash": rendered.instructions_hash,
                 "inputHash": rendered.input_hash,
                 "outputSchemaHash": rendered.output_schema_hash,

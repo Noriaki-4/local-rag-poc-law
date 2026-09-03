@@ -12,6 +12,8 @@ from threading import RLock
 from time import monotonic
 from typing import Any, Literal
 
+from app.config import settings
+
 from .context import SolverActionFeedback, SolverContext
 from .contracts import SolverDecision
 from .cycle_audit import build_cycle_checkpoint, cycle_number
@@ -80,6 +82,7 @@ class AgentDiagnostics:
             "stateStatus": _state_status(state),
             "contextStatus": _context_status(context),
             "model": profile.model,
+            "requestedReasoningEffort": profile.reasoning_effort,
             "maxOutputTokens": profile.max_output_tokens,
             "timeoutSec": profile.timeout_sec,
             "profileName": self._profile_name,
@@ -369,6 +372,8 @@ class AgentDiagnostics:
             "event": "reviewer_input",
             "caseId": view.case_id,
             "model": profile.model,
+            "requestedReasoningEffort": profile.reasoning_effort,
+            **_effective_reasoning_settings(provider, profile),
             "workItemCount": len(view.work_items),
             "hypothesisCount": len(view.hypotheses),
             "dependencyDecisionCount": len(view.dependency_decisions),
@@ -543,7 +548,10 @@ class AgentDiagnostics:
             "caseId": context.case_id,
             "transportAttempt": repair_index + 1,
             "transportStage": transport_stage,
+            "modelCallStage": rendered.stage,
             "model": profile.model,
+            "requestedReasoningEffort": profile.reasoning_effort,
+            **_effective_reasoning_settings(provider, profile),
             "promptChars": len(rendered.request),
             "schemaChars": len(schema_json),
             "promptHash": rendered.request_hash,
@@ -610,6 +618,16 @@ class AgentDiagnostics:
                 profile_name=self._profile_name or "unknown",
                 profile_version=self._profile_version or "unknown",
                 model=profile.model,
+                requested_reasoning_effort=profile.reasoning_effort,
+                effective_reasoning_mode=_effective_reasoning_mode(
+                    provider, profile.model, profile.reasoning_effort
+                ),
+                effective_reasoning_effort=_effective_reasoning_effort(
+                    provider, profile
+                ),
+                thinking_budget_tokens=_effective_thinking_budget_tokens(
+                    provider, profile
+                ),
             )
         except OSError:
             logger.warning(
@@ -740,6 +758,11 @@ def load_diagnostic_records(
 
 
 def _state_status(state: CaseState) -> dict[str, Any]:
+    replaced_ids = {
+        item.replaces_hypothesis_id
+        for item in state.hypotheses
+        if item.replaces_hypothesis_id is not None
+    }
     return {
         "runStatus": state.run_status,
         "stopReason": state.stop_reason,
@@ -754,6 +777,8 @@ def _state_status(state: CaseState) -> dict[str, Any]:
                 "workItemId": item.work_item_id,
                 "judgment": item.judgment,
                 "evidenceCount": len(item.evidence_ids),
+                "replacesHypothesisId": item.replaces_hypothesis_id,
+                "active": item.hypothesis_id not in replaced_ids,
             }
             for item in state.hypotheses
         ],
@@ -781,6 +806,10 @@ def _context_status(context: SolverContext) -> dict[str, Any]:
         "finalizeOnly": context.finalize_only,
         "workItemCount": len(context.work_tree),
         "hypothesisCount": len(context.hypotheses),
+        "hypothesisExplorationSets": [
+            item.model_dump(mode="json")
+            for item in context.hypothesis_exploration_sets
+        ],
         "materialEvidenceCount": len(context.material_evidence),
         "materialEvidenceChars": sum(
             len(item.content) for item in context.material_evidence
@@ -857,6 +886,66 @@ def _decision_scope(decision: SolverDecision) -> dict[str, list[str]]:
     return {
         "workItemIds": list(dict.fromkeys(work_item_ids)),
         "hypothesisIds": list(dict.fromkeys(hypothesis_ids)),
+    }
+
+
+def _effective_reasoning_mode(
+    provider: str | None,
+    model: str,
+    reasoning_effort: str | None = None,
+) -> str:
+    normalized = model.lower().replace("_", "-")
+    if provider == "anthropic" and reasoning_effort == "none":
+        return "disabled"
+    if provider == "openai":
+        return "reasoning_effort"
+    if provider == "anthropic" and "haiku-4-5" in normalized:
+        return "manual_extended_thinking"
+    if provider == "anthropic" and "sonnet-4-6" in normalized:
+        return "adaptive_thinking_with_effort"
+    return "provider_default"
+
+
+def _effective_reasoning_effort(
+    provider: str | None,
+    profile: ModelCallProfile,
+) -> str | None:
+    mode = _effective_reasoning_mode(
+        provider, profile.model, profile.reasoning_effort
+    )
+    if mode in {"reasoning_effort", "adaptive_thinking_with_effort"}:
+        return profile.reasoning_effort
+    return None
+
+
+def _effective_thinking_budget_tokens(
+    provider: str | None,
+    profile: ModelCallProfile,
+) -> int | None:
+    if (
+        _effective_reasoning_mode(
+            provider, profile.model, profile.reasoning_effort
+        )
+        != "manual_extended_thinking"
+    ):
+        return None
+    budget = min(
+        settings.anthropic_thinking_budget_tokens,
+        profile.max_output_tokens - 1024,
+    )
+    return budget if budget >= 1024 else None
+
+
+def _effective_reasoning_settings(
+    provider: str | None,
+    profile: ModelCallProfile,
+) -> dict[str, Any]:
+    return {
+        "effectiveReasoningMode": _effective_reasoning_mode(
+            provider, profile.model, profile.reasoning_effort
+        ),
+        "effectiveReasoningEffort": _effective_reasoning_effort(provider, profile),
+        "thinkingBudgetTokens": _effective_thinking_budget_tokens(provider, profile),
     }
 
 

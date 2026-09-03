@@ -26,38 +26,24 @@ def _readiness_response(url, **kwargs):
     if "提出対象不明" in question:
         return _Response(
             {
-                "decision": "clarification_required",
+                "decision": "clarification_recommended",
                 "reason": "提出対象がなく検索対象を特定できません。",
-                "clarification_question": "何を提出する場合について調べますか。",
-                "choices": [],
+                "recommendation": "提出する文書を質問文に加えると検索精度が上がります。",
             }
         )
     if "曖昧" in question:
         return _Response(
             {
-                "decision": "clarification_required",
+                "decision": "clarification_recommended",
                 "reason": "主体によって検索経路が分かれます。",
-                "clarification_question": "誰が行いますか。",
-                "choices": [
-                    {
-                        "choice_id": "company",
-                        "label": "会社",
-                        "refined_question": "会社が行う場合の要件は何ですか。",
-                    },
-                    {
-                        "choice_id": "person",
-                        "label": "個人",
-                        "refined_question": "個人が行う場合の要件は何ですか。",
-                    },
-                ],
+                "recommendation": "行為をする主体を質問文で明確にすると検索精度が上がります。",
             }
         )
     return _Response(
         {
             "decision": "ready",
             "reason": "一般論として調査できます。",
-            "clarification_question": None,
-            "choices": [],
+            "recommendation": "会社が報告書を提出する一般的な要件は何ですか。",
         }
     )
 
@@ -99,9 +85,28 @@ class QuestionReadinessFlowTest(unittest.TestCase):
         self.assertEqual(post.call_count, 1)
         self.assertTrue(post.call_args_list[0].args[0].endswith("/question/readiness"))
         self.assertFalse(any(item.value == "回答" for item in app.subheader))
-        self.assertTrue(any("検索を開始できます" in item.value for item in app.success))
+        self.assertTrue(any("調査を開始できます" in item.value for item in app.success))
+        self.assertTrue(
+            any("会社が報告書を提出する" in item.value for item in app.info)
+        )
         self.assertTrue(any(item.label == "このまま調べる" for item in app.button))
-        self.assertFalse(any(item.label == "この内容で調べる" for item in app.button))
+        self.assertTrue(
+            any(item.label == "この質問案を入力欄へ反映" for item in app.button)
+        )
+
+    @patch("requests.post", side_effect=_readiness_response)
+    def test_ready_suggestion_can_replace_the_main_question(self, _post):
+        app = AppTest.from_file(str(APP_PATH)).run()
+        app.text_area(key="question_text").set_value("一般的な要件は何ですか。")
+        _button(app, "質問を整理する").click().run()
+
+        _button(app, "この質問案を入力欄へ反映").click().run()
+
+        self.assertFalse(app.exception)
+        self.assertEqual(
+            app.text_area(key="question_text").value,
+            "会社が報告書を提出する一般的な要件は何ですか。",
+        )
 
     @patch("requests.post", side_effect=_answer_response)
     def test_direct_research_skips_question_readiness(self, post):
@@ -116,36 +121,29 @@ class QuestionReadinessFlowTest(unittest.TestCase):
         self.assertTrue(any(item.value == "回答" for item in app.subheader))
 
     @patch("requests.post", side_effect=_readiness_response)
-    def test_clarification_choice_updates_existing_question_field(self, _post):
+    def test_clarification_is_shown_as_a_recommendation(self, _post):
         app = AppTest.from_file(str(APP_PATH)).run()
         app.text_area(key="question_text").set_value("曖昧な質問です。")
         _button(app, "質問を整理する").click().run()
 
         self.assertFalse(app.exception)
-        self.assertEqual(app.radio[0].value, "company")
+        self.assertFalse(app.radio)
+        self.assertTrue(
+            any("検索精度を保つため" in item.value for item in app.warning)
+        )
+        self.assertTrue(
+            any("主体を質問文で明確に" in item.value for item in app.info)
+        )
         self.assertTrue(
             any("上の質問入力欄" in item.value for item in app.caption)
         )
         self.assertFalse(
-            any(
-                item.label == "質問を直接修正してください"
-                for item in app.text_area
-            )
+            any(item.label == "この質問案を入力欄へ反映" for item in app.button)
         )
-
-        _button(app, "この質問案を入力欄へ反映").click().run()
-
-        self.assertEqual(
-            app.text_area(key="question_text").value,
-            "会社が行う場合の要件は何ですか。",
-        )
-        self.assertTrue(
-            any(item.label == "質問を整理する" for item in app.button)
-        )
-        self.assertFalse(any(item.label == "この内容で調べる" for item in app.button))
+        self.assertEqual(app.text_area(key="question_text").value, "曖昧な質問です。")
 
     @patch("requests.post", side_effect=_readiness_response)
-    def test_clarification_without_choices_uses_the_main_question_field(self, _post):
+    def test_recommendation_uses_the_main_question_field(self, _post):
         app = AppTest.from_file(str(APP_PATH)).run()
         app.text_area(key="question_text").set_value("提出対象不明の質問です。")
         _button(app, "質問を整理する").click().run()
@@ -153,7 +151,10 @@ class QuestionReadinessFlowTest(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertFalse(app.radio)
         self.assertTrue(
-            any("何を提出する場合" in item.value for item in app.info)
+            any("検索精度を保つため" in item.value for item in app.warning)
+        )
+        self.assertTrue(
+            any("提出する文書を質問文に加える" in item.value for item in app.info)
         )
         self.assertTrue(
             any("上の質問入力欄" in item.value for item in app.caption)

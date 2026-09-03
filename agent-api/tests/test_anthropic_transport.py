@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from app.llm import (
     LLMClient,
     _parse_grounding_review,
@@ -184,7 +186,7 @@ def test_haiku_manual_thinking_keeps_room_for_structured_output(
     }
 
 
-def test_sonnet_json_transport_keeps_supported_effort(monkeypatch) -> None:
+def test_sonnet_46_json_transport_uses_adaptive_thinking_and_effort(monkeypatch) -> None:
     captured: dict = {}
 
     def fake_post(*, payload, timeout_sec):
@@ -213,14 +215,73 @@ def test_sonnet_json_transport_keeps_supported_effort(monkeypatch) -> None:
             "required": [],
             "additionalProperties": False,
         },
-        "claude-sonnet-5",
+        "claude-sonnet-4-6",
         128,
         10,
         effort="medium",
     )
 
     assert captured["payload"]["output_config"]["effort"] == "medium"
+    assert captured["payload"]["thinking"] == {"type": "adaptive"}
+
+
+@pytest.mark.parametrize(
+    "model",
+    ["claude-haiku-4-5-20251001", "claude-sonnet-4-6"],
+)
+def test_none_effort_disables_anthropic_thinking(monkeypatch, model: str) -> None:
+    captured: dict = {}
+
+    def fake_post(*, payload, timeout_sec):
+        captured["payload"] = payload
+        return SimpleNamespace(
+            ok=True,
+            json=lambda: {
+                "content": [{"type": "text", "text": "{}"}],
+                "usage": {},
+                "stop_reason": "end_turn",
+            },
+        )
+
+    monkeypatch.setattr("app.llm.settings.anthropic_api_key", "test-key")
+    monkeypatch.setattr("app.llm._post_anthropic_with_overload_retry", fake_post)
+
+    LLMClient(provider="anthropic")._anthropic_json(
+        "test",
+        {"type": "object", "properties": {}, "additionalProperties": False},
+        model,
+        8192,
+        10,
+        effort="none",
+    )
+
     assert "thinking" not in captured["payload"]
+    assert "effort" not in captured["payload"]["output_config"]
+
+
+def test_anthropic_refusal_is_not_treated_as_invalid_json(monkeypatch) -> None:
+    monkeypatch.setattr("app.llm.settings.anthropic_api_key", "test-key")
+    monkeypatch.setattr(
+        "app.llm._post_anthropic_with_overload_retry",
+        lambda **_kwargs: SimpleNamespace(
+            ok=True,
+            json=lambda: {
+                "content": [],
+                "usage": {},
+                "stop_reason": "refusal",
+            },
+        ),
+    )
+
+    with pytest.raises(ValueError, match="refused"):
+        LLMClient(provider="anthropic")._anthropic_json(
+            "test",
+            {"type": "object", "properties": {}, "additionalProperties": False},
+            "claude-sonnet-4-6",
+            1024,
+            10,
+            effort="high",
+        )
 
 
 def test_anthropic_health_reports_haiku_manual_thinking(

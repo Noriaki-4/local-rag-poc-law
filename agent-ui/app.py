@@ -21,17 +21,6 @@ API_URL = os.getenv("AGENT_API_URL", "http://localhost:8000").rstrip("/")
 DEFAULT_PATTERN = "pattern_4_deepsearch"
 QUESTION_READINESS_TIMEOUT_SEC = 200
 
-
-def _apply_confirmed_question(question: str) -> None:
-    """選択済みの修正版を既存入力欄へ戻す。"""
-
-    normalized = question.strip()
-    if not normalized:
-        return
-    st.session_state.question_text = normalized
-    st.session_state.question_readiness_source = None
-    st.session_state.question_readiness = None
-
 st.set_page_config(page_title="法令RAG 質問デモ", layout="wide")
 st.title("法令RAG 質問デモ")
 st.caption(
@@ -56,6 +45,12 @@ if "question_text" not in st.session_state:
 if "question_readiness" not in st.session_state:
     st.session_state.question_readiness = None
 if "question_readiness_source" not in st.session_state:
+    st.session_state.question_readiness_source = None
+
+
+def apply_question_suggestion(suggestion: str) -> None:
+    st.session_state.question_text = suggestion
+    st.session_state.question_readiness = None
     st.session_state.question_readiness_source = None
 
 with st.expander(f"🧭 法令横断の質問例（Lv.1〜Lv.{LEVELS[-1].level}）", expanded=True):
@@ -94,7 +89,7 @@ question = st.text_area(
     "質問を入力してください",
     key="question_text",
     height=110,
-    help="自然な日本語で質問できます。「根拠条文も示して」と付けると引用条文が明確になります。",
+    help="自然な日本語で質問できます。回答には確認できた根拠条文・資料を表示します。",
 )
 
 with st.expander("詳細設定（開発者向け・通常は変更不要）", expanded=False):
@@ -199,48 +194,32 @@ else:
                 st.error(f"質問確認に失敗しました: {exc}")
 
     if readiness and readiness.get("decision") == "ready":
-        st.success("質問の整理が完了しました。「このまま調べる」で検索を開始できます。")
-    elif readiness and readiness.get("decision") == "clarification_required":
-        clarification_question = (
-            readiness.get("clarification_question") or "質問を確認してください。"
+        suggestion = readiness.get("recommendation") or question
+        st.success(
+            "この質問は調査を開始できます。下記は検索精度を高める質問文案です。"
         )
-        readiness_choices = readiness.get("choices") or []
-        choice_by_id = {
-            item.get("choice_id"): item
-            for item in readiness_choices
-            if item.get("choice_id") and item.get("refined_question")
-        }
-        choice_ids = list(choice_by_id)
-        if choice_ids:
-            current_choice = st.session_state.get("clarification_choice_id")
-            if current_choice not in choice_by_id:
-                st.session_state.clarification_choice_id = choice_ids[0]
-            selected_id = st.radio(
-                clarification_question,
-                options=choice_ids,
-                format_func=lambda choice_id: choice_by_id[choice_id].get(
-                    "label", choice_id
-                ),
-                key="clarification_choice_id",
-            )
-            selected = choice_by_id[selected_id]
-            st.markdown("**選択した場合の質問案**")
-            st.info(selected["refined_question"])
-            st.button(
-                "この質問案を入力欄へ反映",
-                on_click=_apply_confirmed_question,
-                args=(selected["refined_question"],),
-            )
-            st.caption(
-                "選択肢に当てはまらない場合は、上の質問入力欄を直接修正し、"
-                "もう一度「質問を整理する」を押してください。"
-            )
-        else:
-            st.info(clarification_question)
-            st.caption(
-                "不足している内容を上の質問入力欄へ追加し、"
-                "もう一度「質問を整理する」を押してください。"
-            )
+        st.info(suggestion)
+        st.button(
+            "この質問案を入力欄へ反映",
+            on_click=apply_question_suggestion,
+            args=(suggestion,),
+        )
+        st.caption(
+            "質問案を使わず、元の質問のまま「このまま調べる」こともできます。"
+        )
+    elif readiness and readiness.get("decision") == "clarification_recommended":
+        recommendation = (
+            readiness.get("recommendation")
+            or "検索対象となる主体と行為を質問文で明確にすると、検索精度が上がります。"
+        )
+        st.warning(
+            "検索精度を保つため、次の点を質問文に追記または明確化することを推奨します。"
+        )
+        st.info(recommendation)
+        st.caption(
+            "必要に応じて上の質問入力欄を修正し、もう一度「質問を整理する」を押してください。"
+            "修正せず「このまま調べる」こともできます。"
+        )
 
 if answer_requested:
     if not (question or "").strip():

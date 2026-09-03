@@ -1,13 +1,17 @@
 {
+  "effectiveReasoningEffort": null,
+  "effectiveReasoningMode": null,
   "inputHash": "a763100d5e67cfe0d45008ea6b6738d62c3944e41396c1cb1ba548d2fd30d044",
   "instructionsHash": "498a455c6d17b5941f8e04de67560d766d0931fe80213152cf7495460f607680",
   "model": "gpt-4o-mini-2024-07-18",
-  "normalizedSchemaHash": "ed0bef2a8ae0186b15d48996fbf7d32d0cdda1d579842b18fb0bcec8c2196d4d",
+  "normalizedSchemaHash": "256e7a58afbee5cb17e015610c35056455b63324febcfe1c661ca6528a7605f1",
   "outputSchemaHash": "ac2e0bdea2adb94fbf8be03d5ddefe873d44374ee2f80802ad42f3289adaccc9",
   "profileName": "legal-default",
-  "profileVersion": "494",
+  "profileVersion": "510",
   "promptAssets": [],
   "provider": "openai",
   "requestHash": "15e4c01403fcab991bc821a0ed1a74b905905080a2baf9574403aae1c3d60207",
-  "stage": "hypothesis_generation_research_hypothesis"
+  "requestedReasoningEffort": null,
+  "stage": "hypothesis_generation_research_hypothesis",
+  "thinkingBudgetTokens": null
 }

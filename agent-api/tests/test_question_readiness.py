@@ -53,32 +53,30 @@ def test_render_question_readiness_uses_only_question_and_typed_contract() -> No
     )
 
     assert QUESTION_READINESS_PROFILE_NAME == "legal-question-readiness"
-    assert QUESTION_READINESS_PROFILE_VERSION == "8"
+    assert QUESTION_READINESS_PROFILE_VERSION == "11"
     assert question_readiness_profile().name == QUESTION_READINESS_PROFILE_NAME
     assert question_readiness_profile().version == QUESTION_READINESS_PROFILE_VERSION
     assert rendered.stage == "question_readiness"
     assert rendered.input_payload == {
         "question": "会社が株式を買う場合の手続は何ですか。"
     }
-    assert "# 法令調査Solver：検索単位の確認" in rendered.instructions
-    assert "適用される規律を検索できる程度に対象を含めて特定" in rendered.instructions
+    assert "# 法令調査Solver：検索精度の確認" in rendered.instructions
+    assert "検索精度を高める案内" in rendered.instructions
     assert "相手方、対象又は条件" in rendered.instructions
-    assert "回答として求めている未知事項" in rendered.instructions
-    assert "安全に候補を作れる場合だけ" in rendered.instructions
-    assert "`A / X`と`B / Y`" in rendered.instructions
+    assert "回答として調べる内容" in rendered.instructions
+    assert "原文にある確認事項と限定を保ち" in rendered.instructions
+    assert "判断は質問に書かれた内容だけ" in rendered.instructions
     assert "`question`" in rendered.instructions
     assert "<question_readiness_input>" in rendered.request
     assert set(rendered.output_schema["properties"]) == {
         "decision",
         "reason",
-        "clarification_question",
-        "choices",
+        "recommendation",
     }
     assert set(rendered.output_schema["required"]) == {
         "decision",
         "reason",
-        "clarification_question",
-        "choices",
+        "recommendation",
     }
     assert "検索対象を特定できる行為" in rendered.output_schema["properties"][
         "decision"
@@ -100,7 +98,7 @@ def test_question_readiness_model_call_artifacts_are_current() -> None:
     )
     artifact_dir = (
         Path(__file__).parent
-        / "fixtures/model_call_artifacts/legal-question-readiness-v8/openai"
+        / "fixtures/model_call_artifacts/legal-question-readiness-v11/openai"
     )
 
     assert {path.name for path in artifact_dir.iterdir()} == set(expected)
@@ -115,13 +113,14 @@ def test_service_returns_ready_without_changing_the_original_question(
         {
             "decision": "ready",
             "reason": "一般的な制度説明として調査を開始できるため。",
-            "clarification_question": None,
-            "choices": [],
+            "recommendation": (
+                "会社が有価証券報告書を提出する期限はいつですか。"
+            ),
         }
     )
     monkeypatch.setattr(
-        "app.domains.legal.question_readiness.settings.agent_framework_research_model",
-        "test-model",
+        "app.domains.legal.question_readiness.settings.agent_framework_model_tiers",
+        {"low": "test-model", "middle": "middle-model", "high": "high-model"},
     )
 
     result = QuestionReadinessService(client).check(
@@ -131,8 +130,9 @@ def test_service_returns_ready_without_changing_the_original_question(
     )
 
     assert result.decision == "ready"
-    assert result.clarification_question is None
-    assert result.choices == []
+    assert result.recommendation == (
+        "会社が有価証券報告書を提出する期限はいつですか。"
+    )
     assert len(client.calls) == 1
     assert client.calls[0]["model"] == "test-model"
     assert "会社が有価証券報告書を提出する期限はいつですか。" in client.calls[0][
@@ -140,24 +140,12 @@ def test_service_returns_ready_without_changing_the_original_question(
     ]
 
 
-def test_service_returns_distinct_refined_questions_for_clarification() -> None:
+def test_service_returns_a_clarification_recommendation() -> None:
     client = FakeStructuredJSONClient(
         {
-            "decision": "clarification_required",
+            "decision": "clarification_recommended",
             "reason": "取得者によって確認対象となる規律が分かれるため。",
-            "clarification_question": "株式を取得するのは誰ですか。",
-            "choices": [
-                {
-                    "choice_id": "issuer",
-                    "label": "対象会社自身",
-                    "refined_question": "対象会社自身が株式を取得する場合の手続は何ですか。",
-                },
-                {
-                    "choice_id": "third_party",
-                    "label": "第三者",
-                    "refined_question": "第三者が対象会社の株式を取得する場合の手続は何ですか。",
-                },
-            ],
+            "recommendation": "株式を取得する主体を質問文で明確にすると検索精度が上がります。",
         }
     )
 
@@ -165,108 +153,61 @@ def test_service_returns_distinct_refined_questions_for_clarification() -> None:
         QuestionReadinessRequest(question="会社が株式を買う場合の手続は何ですか。")
     )
 
-    assert result.decision == "clarification_required"
-    assert [choice.choice_id for choice in result.choices] == [
-        "issuer",
-        "third_party",
-    ]
+    assert result.decision == "clarification_recommended"
+    assert result.recommendation == (
+        "株式を取得する主体を質問文で明確にすると検索精度が上がります。"
+    )
 
 
-def test_contract_accepts_one_search_question_for_each_independent_pair() -> None:
+def test_contract_accepts_a_recommendation_for_independent_pairs() -> None:
     result = QuestionReadiness.model_validate(
         {
-            "decision": "clarification_required",
+            "decision": "clarification_recommended",
             "reason": "二つの主体・行為ペアは検索を分ける必要があるため。",
-            "clarification_question": "どちらを先に調べますか。",
-            "choices": [
-                {
-                    "choice_id": "company_acquisition",
-                    "label": "会社による株式取得",
-                    "refined_question": (
-                        "会社が株主から株式を取得する場合の手続を調べたい。"
-                    ),
-                },
-                {
-                    "choice_id": "shareholder_transfer",
-                    "label": "株主による株式譲渡",
-                    "refined_question": (
-                        "株主が会社へ株式を譲渡する場合の手続を調べたい。"
-                    ),
-                },
-            ],
+            "recommendation": (
+                "主に調べる主体と行為の組を一つに絞り、残りを別の質問にすると"
+                "検索精度が上がります。"
+            ),
         }
     )
 
-    assert all(
-        "手続を調べたい" in choice.refined_question for choice in result.choices
-    )
+    assert "別の質問" in result.recommendation
 
 
-def test_question_readiness_contract_rejects_clarification_on_ready() -> None:
-    with pytest.raises(ValidationError, match="must not include clarification"):
-        QuestionReadiness.model_validate(
-            {
-                "decision": "ready",
-                "reason": "調査可能",
-                "clarification_question": "誰ですか。",
-                "choices": [],
-            }
-        )
-
-
-def test_question_readiness_contract_rejects_duplicate_choice_ids() -> None:
-    with pytest.raises(ValidationError, match="choice IDs must be unique"):
-        QuestionReadiness.model_validate(
-            {
-                "decision": "clarification_required",
-                "reason": "主体で分かれる",
-                "clarification_question": "誰ですか。",
-                "choices": [
-                    {
-                        "choice_id": "actor",
-                        "label": "会社",
-                        "refined_question": "会社が行う場合はどうか。",
-                    },
-                    {
-                        "choice_id": "actor",
-                        "label": "個人",
-                        "refined_question": "個人が行う場合はどうか。",
-                    },
-                ],
-            }
-        )
-
-
-def test_question_readiness_contract_accepts_clarification_without_choices() -> None:
+def test_question_readiness_contract_accepts_search_question_on_ready() -> None:
     result = QuestionReadiness.model_validate(
         {
-            "decision": "clarification_required",
-            "reason": "提出対象がなく検索対象を特定できないため。",
-            "clarification_question": "何を提出する場合について調べますか。",
-            "choices": [],
+            "decision": "ready",
+            "reason": "調査可能",
+            "recommendation": "会社が株式を取得する場合の手続は何ですか。",
         }
     )
 
-    assert result.decision == "clarification_required"
-    assert result.choices == []
+    assert result.recommendation == "会社が株式を取得する場合の手続は何ですか。"
 
 
-def test_question_readiness_contract_rejects_single_choice() -> None:
-    with pytest.raises(ValidationError, match="must be empty or include at least 2"):
+def test_question_readiness_contract_requires_recommendation() -> None:
+    with pytest.raises(ValidationError):
         QuestionReadiness.model_validate(
             {
-                "decision": "clarification_required",
-                "reason": "確認が必要",
-                "clarification_question": "確認してください。",
-                "choices": [
-                    {
-                        "choice_id": "only",
-                        "label": "唯一の候補",
-                        "refined_question": "唯一の候補を調べる。",
-                    }
-                ],
+                "decision": "clarification_recommended",
+                "reason": "主体で分かれる",
+                "recommendation": None,
             }
         )
+
+
+def test_question_readiness_contract_accepts_declarative_recommendation() -> None:
+    result = QuestionReadiness.model_validate(
+        {
+            "decision": "clarification_recommended",
+            "reason": "提出対象がなく検索対象を特定できないため。",
+            "recommendation": "提出する文書を質問文に加えると検索精度が上がります。",
+        }
+    )
+
+    assert result.decision == "clarification_recommended"
+    assert result.recommendation.endswith("検索精度が上がります。")
 
 
 def test_service_rejects_invalid_provider_output() -> None:
@@ -282,8 +223,7 @@ def test_question_readiness_endpoint_returns_validated_output(monkeypatch) -> No
     expected = QuestionReadiness(
         decision="ready",
         reason="原文のまま調査できるため。",
-        clarification_question=None,
-        choices=[],
+        recommendation="要件を確認してください。",
     )
     monkeypatch.setattr(
         main.question_readiness_service,

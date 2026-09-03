@@ -1,0 +1,91 @@
+{
+  "effectiveReasoningEffort": null,
+  "effectiveReasoningMode": null,
+  "hashes": {
+    "input": "20558b82600853dc8457690e1539a437c7f5cf010b173ea86d4cb99b591e6a71",
+    "instructions": "1f6bd95f93b2a2440e65fc751dae9cc43aa440706721ca5cdc37839d50bcc0d3",
+    "normalizedSchema": "a865ddd20a00e972ce970eba6b155ba279e354ee90477893a65529e3a76f560c",
+    "outputSchema": "a865ddd20a00e972ce970eba6b155ba279e354ee90477893a65529e3a76f560c",
+    "prompt": "763d572089acef0812b42cf9c64957d99eefe5e85adb0bf0c3994e8a184a95a5"
+  },
+  "model": "gpt-4o-mini",
+  "normalizedSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "decision": {
+        "description": "readyは一つの主たる主体と、検索対象を特定できる行為を原文から読み取って調査を開始でき、検索向けの質問文を提案できることを示す。clarification_recommendedは、主体、行為若しくは行為対象の欠落・曖昧さ、又は独立した検索単位の混在により、質問文の明確化が検索精度の向上に役立つことを示す。",
+        "enum": [
+          "ready",
+          "clarification_recommended"
+        ],
+        "title": "Decision",
+        "type": "string"
+      },
+      "reason": {
+        "description": "判断理由。clarification_recommendedでは、何が不足又は混在し、検索対象をどう変え得るかを法的結論を断定せず説明する。通常UIには表示せず、診断又はtraceで確認する。",
+        "maxLength": 1000,
+        "minLength": 1,
+        "title": "Reason",
+        "type": "string"
+      },
+      "recommendation": {
+        "description": "readyでは、原文の意味と確認事項を保ち、検索対象を明確にした質問文案。clarification_recommendedでは、質問文で不足又は曖昧な最も重要な一点を示す短い指摘文。どちらも利用者への質問にはしない。",
+        "maxLength": 4000,
+        "minLength": 1,
+        "title": "Recommendation",
+        "type": "string"
+      }
+    },
+    "required": [
+      "decision",
+      "reason",
+      "recommendation"
+    ],
+    "title": "QuestionReadiness",
+    "type": "object"
+  },
+  "outputSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "decision": {
+        "description": "readyは一つの主たる主体と、検索対象を特定できる行為を原文から読み取って調査を開始でき、検索向けの質問文を提案できることを示す。clarification_recommendedは、主体、行為若しくは行為対象の欠落・曖昧さ、又は独立した検索単位の混在により、質問文の明確化が検索精度の向上に役立つことを示す。",
+        "enum": [
+          "ready",
+          "clarification_recommended"
+        ],
+        "title": "Decision",
+        "type": "string"
+      },
+      "reason": {
+        "description": "判断理由。clarification_recommendedでは、何が不足又は混在し、検索対象をどう変え得るかを法的結論を断定せず説明する。通常UIには表示せず、診断又はtraceで確認する。",
+        "maxLength": 1000,
+        "minLength": 1,
+        "title": "Reason",
+        "type": "string"
+      },
+      "recommendation": {
+        "description": "readyでは、原文の意味と確認事項を保ち、検索対象を明確にした質問文案。clarification_recommendedでは、質問文で不足又は曖昧な最も重要な一点を示す短い指摘文。どちらも利用者への質問にはしない。",
+        "maxLength": 4000,
+        "minLength": 1,
+        "title": "Recommendation",
+        "type": "string"
+      }
+    },
+    "required": [
+      "decision",
+      "reason",
+      "recommendation"
+    ],
+    "title": "QuestionReadiness",
+    "type": "object"
+  },
+  "profileName": "legal-question-readiness",
+  "profileVersion": "11",
+  "prompt": "# 法令調査Solver：検索精度の確認\n\n## 目的\n\n質問を法令検索へ渡す前に、検索対象を特定できるか判定し、検索精度を高める案内を返します。\n\n主体は、質問で扱う行為をする人、会社又は組織です。行為は、その主体が行う売買、提出、届出等の行動又は手続です。「提出する」「取得する」のように対象によって検索先が変わる場合は、その対象も判定に含めます。\n\n## 出力\n\n- 一組の主体と行為を特定できれば`decision=ready`とし、`recommendation`に検索向けの質問文案を書きます。\n- 情報の不足又は曖昧さにより検索先が変わり得る場合は`decision=clarification_recommended`とし、`recommendation`に一つの指摘を書きます。\n\n## 完了条件\n\n- `ready`では、主に調べる一組の主体と行為を読み取れ、原文の確認事項を保った質問文案がある。\n- `clarification_recommended`では、質問文で明確にするとよい最も重要な一点を平叙文で示している。\n\n## 手順\n\n1. 主に調べる主体、行為及び検索先を左右する行為対象を読み取ります。\n2. 一組の主体と行為を特定できれば`ready`にし、それらを明確にした質問文案を作ります。\n3. 主体、行為若しくは行為対象が不明確な場合、又は独立した主体と行為の組が複数ある場合は、検索への影響が最も大きい一点を`recommendation`にします。\n\n## 判断ルール\n\n- 判断は質問に書かれた内容だけに基づきます。\n- 相手方、対象又は条件として登場する者は、その者自身の行為も調べる場合だけ別の組です。\n- 誰が義務を負うか、要件、期限等の回答として調べる内容は、検索対象の情報不足と区別します。\n- `ready`の質問文案は、原文にある確認事項と限定を保ち、原文にない事実や法的結論を加えません。\n- `clarification_recommended`の指摘は、利用者への質問ではなく、明確にするとよい内容を平叙文で示します。\n\n<input_contract>\n以下は今回の入力項目と意味です。\n- `question`: 利用者が入力した確認前の質問。質問に書かれていない事実を補わず、この本文だけから調査開始可能性を判断する。\n</input_contract>\n\n## 入力\n\n<question_readiness_input>{\"question\":\"会社が市場外で株式を買う場合、何か手続が必要ですか。\"}</question_readiness_input>",
+  "promptAssets": [],
+  "provider": "openai",
+  "requestedReasoningEffort": null,
+  "stage": "question_readiness",
+  "thinkingBudgetTokens": null,
+  "transportNote": "promptは実際に送信した結合後テキスト。outputSchemaはProviderへ別項目として送信した構造化出力契約。"
+}

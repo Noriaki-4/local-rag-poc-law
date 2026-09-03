@@ -18,8 +18,10 @@ from app.config import settings
 from app.llm import StructuredJSONResult
 from app.models import QuestionReadiness, QuestionReadinessRequest
 
+from .model_routing import legal_model_for
+
 QUESTION_READINESS_PROFILE_NAME = "legal-question-readiness"
-QUESTION_READINESS_PROFILE_VERSION = "8"
+QUESTION_READINESS_PROFILE_VERSION = "11"
 _PROMPT_PATH = Path(__file__).with_name("prompts") / "solver_question_readiness.md"
 
 
@@ -36,7 +38,7 @@ def question_readiness_profile() -> QuestionReadinessProfile:
     return QuestionReadinessProfile(
         name=QUESTION_READINESS_PROFILE_NAME,
         version=QUESTION_READINESS_PROFILE_VERSION,
-        model=settings.agent_framework_research_model,
+        model=legal_model_for("question_readiness"),
         max_output_tokens=min(settings.agent_framework_research_max_tokens, 2048),
         timeout_sec=settings.agent_framework_model_timeout_sec,
     )

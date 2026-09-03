@@ -22,6 +22,7 @@
 - `search_candidates`とGraph候補はArticleを発見するための情報で、回答根拠ではありません。
 - `fetchable_article_ids`は、本文未取得で`fetch_articles`に指定できる既知Article IDです。
 - `completed_legal_searches`と`completed_graph_searches`は、成功済みscopeの履歴です。
+- `hypothesis_exploration_sets`は、現在Cycleで使用済みの探索と新しい探索セットの残数です。
 - `graph_fetch_completed_hypothesis_ids_this_cycle`は、現在CycleでGraph候補本文を1バッチ取得・統合済みのHypothesisです。
 - `action_feedback`がある場合、`rejected_tool_requests`は成功済みscopeと重複したため実行されていません。そのscopeを除外し、既存結果と未確認事項から行動を選び直します。
 
@@ -41,7 +42,7 @@
 
 #### 次の行動
 
-- Toolは固定順で使いません。未確認事項を最も直接検証できる行動を選び、その理由を`decision_reason`に書きます。
+- 取得済み本文と未評価候補を先に処理します。新しい探索が必要なら、現在セットで未使用のOpenSearch又はGraphを選びます。
 - 提示済み本文や成功済みの検索・Graph scopeを繰り返しません。
 - `action_feedback`を受けた場合もToolの種類は禁止されません。別scopeが妥当なら同じToolを選べます。
 - Graphで得たArticleも、本文確認後にさらに探索が必要と判断すれば次の1ホップ探索の起点にできます。

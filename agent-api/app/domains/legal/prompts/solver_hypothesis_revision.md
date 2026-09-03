@@ -2,31 +2,27 @@
 
 ## 目的
 
-提示された反証済みHypothesisを、取得本文に合う現在版へ見直します。
+提示された反証済みHypothesisについて、取得本文から別の命題が必要か見直します。
 
 ## 出力
 
-- `revise_hypotheses[]`：同じ命題の見立てとgap差分を返す既存Hypothesis。更新がなければ空配列
-- `add_hypotheses[]`：既存命題とは独立して検証する新しい命題。なければ空配列
-- `decision_reason`：更新、追加又は維持した理由の要約
+- `add_hypotheses[]`：旧命題を置き換える命題又は独立して検証する新しい命題。なければ空配列
+- `decision_reason`：追加又は維持した理由の要約
 
 ## ルール
 
 - 入力の`hypotheses[]`は、現在のCycleの本文評価で`contradicted`になったものだけです。
-- 取得本文により既存Hypothesisの見立てを直す場合は、同じ`hypothesis_id`を`revise_hypotheses[]`へ返します。
-- 更新後の`statement`と`judgment`には現在版だけを書きます。旧版を併記しません。
-- 既存の`hypotheses[].gaps[]`はProgramが保持します。新しい未確認事項は`add_gaps[]`、
-  不要又は確認済みとなった既存項目は`resolve_gap_ids[]`で差分だけを返します。
-- 未確認事項の表現を直す場合は、旧`gap_id`を解消し、修正後の内容を追加します。
-- `judgment`は提示本文だけで判断します。本文で確認できない内容が残る場合は`unresolved`にします。
-- 既存Hypothesisと独立して検証する命題だけを`add_hypotheses[]`へ返します。
-- 内容が既存Hypothesisの`statement`又は`gaps[]`に含まれる場合は追加しません。
-- 既存Hypothesisの未確認事項を詳しくした内容や、その結論を支える個別要件は、新しいHypothesisにしません。
-- 取得本文に別の義務、条件、例外、定義又は参照があるというだけでは追加しません。既存Hypothesisを保ったまま説明できる内容は追加しません。
-- 取得本文だけで確認済みの内容や、利用者の具体的事実の確認は追加しません。
-- 更新も追加も不要なら両方を空配列にします。
-- WorkItemの範囲を周辺の義務や手続へ広げません。WorkItemの言い換え、検索語や検索方針の変更、一般的な可能性だけでは追加しません。
-- 新しい命題は、入力にあるWorkItemのIDを1つ指定します。
-- `evidence_ids[]`には提案の必要性を直接示す最小限の取得済みEvidence IDだけを指定します。
-- 追加する命題は未確認として扱い、確認が必要な具体的事項を`gaps[]`へ置きます。
-- 入力にないHypothesisは変更しません。
+- 既存命題の意味を変える場合は、`replaces_hypothesis_id`に旧IDを指定した新しい命題を返します。
+- 旧Hypothesisの内容は変更しません。新Hypothesisは未確認として作成され、旧Evidenceを引き継ぎません。
+- 既存Hypothesisと独立して検証する命題では、`replaces_hypothesis_id`を`null`にします。
+- 既存Hypothesisを保ったまま説明できる内容や言い換えは追加しません。
+- WorkItemの範囲を周辺の義務や手続へ広げません。
+- 新しい命題は入力にあるWorkItemを1つ指定し、確認が必要な具体的事項を`gaps[]`へ置きます。
+- 追加が不要なら`add_hypotheses[]`を空配列にします。
+
+## 出力前の確認
+
+- 命題の意味を変える場合は、置換元IDを返しているか。
+- 置換元Hypothesisと同じWorkItemを指定したか。
+- 既存Hypothesisの言い換えを追加していないか。
+- 指定したHypothesis及びWorkItem IDが入力に存在するか。

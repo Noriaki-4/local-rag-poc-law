@@ -13,6 +13,7 @@ class ModelCallProfile(FrameworkModel):
     model: str = Field(min_length=1, max_length=200)
     max_output_tokens: int = Field(default=4096, ge=256)
     timeout_sec: float = Field(default=30.0, gt=0)
+    reasoning_effort: Literal["none", "low", "medium", "high", "xhigh", "max"] | None = None
     system_prompt: str = Field(min_length=1)
     followup_system_prompt: str | None = None
     completion_check_prompt: str | None = None
@@ -142,6 +143,12 @@ class AgentLimits(FrameworkModel):
         default=3,
         ge=1,
         le=16,
+    )
+    max_exploration_sets_per_hypothesis: int = Field(
+        default=2,
+        ge=1,
+        le=2,
+        description="1 Hypothesisが全Cycleで開始できる探索セット数。",
     )
     max_graph_candidates_per_review_batch: int = Field(default=20, ge=1, le=200)
     max_parallel_tools: int = Field(default=4, ge=1, le=16)

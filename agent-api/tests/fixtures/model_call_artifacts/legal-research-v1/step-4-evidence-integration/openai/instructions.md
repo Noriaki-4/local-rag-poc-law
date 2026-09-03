@@ -6,7 +6,7 @@
 
 ## 出力
 
-- `update_hypotheses[]`：本文評価後の判定、Evidence、gapの追加・解決差分
+- `update_hypotheses[]`：本文評価後の判定、Evidence、gapの追加・破棄・解消差分
 - `dependency_decisions[]`：対象WorkItemの下位規範確認状態
 - `tool_requests[]`：今回の評価から直ちに必要な次のTool。なければ空
 - `decision_reason`：今回の判断の要約
@@ -17,7 +17,7 @@
 - `non_work_item_requirements[]`：根拠の提示等、回答全体に適用する明示要求
 - `work_items[]`：今回確認する事項
 - `hypotheses[]`：現在の命題、判定、確認済みEvidenceと未確認事項
-  - `gaps[].gap_id`：既存の未確認事項を解決するときに返すID
+  - `gaps[].gap_id`：既存の未確認事項を破棄又は解消するときに返すID
   - `gaps[].description`：未確認事項の内容
 - `evidence_hypothesis_candidates[]`：本文取得前の対応候補であり、判定結果ではなく対応先も制限しない
   - `article_id`：`grounding_evidence[].metadata.articleId`と対応する
@@ -33,11 +33,11 @@
 1. 取得本文を全ての提示Hypothesisと照合し、本文取得前の対応候補が不適切なら別のHypothesisへ反映します。
 2. Hypothesisが確認する規律と法的効果について、提示された本文の組合せが`statement`を支持又は否定するか判断します。
 3. WorkItemと`non_work_item_requirements[]`から、回答に必要な結論の範囲を確認します。
-4. 既存の`gaps[]`を1件ずつ本文と照合します。今回の本文で確認できた項目の`gap_id`だけを
-   `resolve_gap_ids[]`へ入れ、新しい未確認事項だけを`add_gaps[]`へ入れます。
+4. 既存の`gaps[]`を1件ずつ本文と照合し、確認できた項目は`resolve_gap_ids[]`、重複、範囲外又は
+   過度に抽象的で探索対象に適さない項目は`discard_gap_ids[]`へ入れます。
 5. 新しい未確認事項は、それが未確認だと手順3の結論を確定又は必要な限定付きで回答できない場合だけ
-   `add_gaps[]`へ入れます。
-6. 未解決の既存gapと`add_gaps[]`から下位規範の状態を判断し、直ちに進められる場合だけ
+   `add_gaps[]`へ入れます。既存gapを具体的な内容へ訂正する場合は、旧IDを破棄し、新しい内容を追加します。
+6. 差分適用後も残るgapから下位規範の状態を判断し、直ちに進められる場合だけ
    次のToolをWorkItemごとに最大1件選びます。
 
 ## Hypothesisの判定
@@ -64,9 +64,8 @@
 - 別規範を追うToolは、現在の`gaps`を直接確認できる未評価の規定を、取得本文又は既知の関係から
   特定できる場合に返します。Toolの`purpose`には、未確認事項と探索根拠を書きます。
 - 委任、定義、例外等の関係は探索経路の手掛かりであり、関係ラベルだけで必要性や結論を決めません。
-- 「府令で定めるところにより」等の委任句が、WorkItemで問う行為、条件、範囲又は方法を修飾する場合は、
-  その委任事項をWorkItemの未確認事項として扱います。上位本文が選択肢又は義務を示していても、
-  委任された実施内容を確認するまで`not_required`にしません。
+- 取得本文に委任があっても、委任された事項のうち、具体化する本文を確認しないとWorkItemへの回答を
+  確定できない又は必要な限定を示せない内容だけを`add_gaps[]`に追加します。
 - 取得本文がWorkItemへ直接答え、同じ事項を別規範へ委任していなければ、予想した詳細を
   `add_gaps[]`又は次の探索理由にしません。
 - 候補対応や同じ語句だけを理由に本文を根拠にしません。
@@ -75,8 +74,8 @@
 - 質問やWorkItemに複数の法令種別が候補として示されていても、取得本文にない委任先を予想しません。
   委任先の法令種別と事項は、取得本文の記載どおりに扱います。
 - 同じArticleの別の要件又は例外を、確認対象の根拠にしません。
-- 本文に委任、準用、定義、参照又は例外があること自体は、新しい未確認事項の理由になりません。
-  その内容を確認しないとWorkItemへの回答が変わる又は必要な限定を示せない場合だけ、`add_gaps[]`に追加します。
+- 準用、定義、参照又は例外も、その内容を確認しないとWorkItemへの回答が変わる又は必要な限定を
+  示せない場合だけ、`add_gaps[]`に追加します。
 - WorkItemが既知規定に関係する規定又は改正影響先の列挙を求める場合、語句検索の候補だけで
   関係範囲を確認済みにしません。起点Articleが分かり、対応するGraph探索が未実施なら、
   Hypothesisに合う関係を指定して`legal_graph_neighbors`で直接関係を確認します。
@@ -86,6 +85,7 @@
 - 行為者の属性だけから、その属性に固有の制限又は特則の有無を追加しません。
 - 上位規定とその具体化規定等が組み合わさって確認事項を示す場合は、一つのArticleだけで完結することを求めません。
 - `add_gaps[]`には未確認事項だけを書き、既存gapや確認済み内容を繰り返しません。
+- 未確認のまま有効な既存gapは差分へ出力せず、Programに保持させます。
 - 各理由は判断を区別できる短い1文とし、`gaps`や本文の要約を繰り返しません。
 - `evidence_ids`と`basis_evidence_ids`には`grounding_evidence[].evidence_id`だけを使います。
 - `basis_evidence_ids`には今回新たに判断へ使ったEvidenceだけを書きます。既存の
@@ -93,18 +93,18 @@
 - `update_hypotheses[].evidence_ids`には今回新たに判断へ使ったEvidenceだけを書きます。既存の
   `hypotheses[].evidence_ids`はProgramが保持するため、繰り返しません。
 - 既存の`hypotheses[].gaps`はProgramが保持します。全体を再出力せず、追加は`add_gaps[]`、
-  解決は`resolve_gap_ids[]`だけで返します。
+  探索対象からの除外は`discard_gap_ids[]`、本文での確認は`resolve_gap_ids[]`で返します。
 - 未確認事項を複数本文の組合せで判断する場合、`hypotheses[].evidence_ids`に対応済みの本文も
   `grounding_evidence[]`へ再表示されます。既存Evidence IDは再追加せず、今回の本文と合わせて
   gapの解消可否を判断します。
 - `terminal_text_confirmed`では、起点規範から末端規範までを上位順に示します。
 - 現在の`gaps`を直接定める別規範が特定され、その本文が未評価なら`terminal_text_missing`です。
   未確認規定を特定できない推測だけを理由にこの状態にしません。
-- 同じWorkItemに未解決の既存gap又は`add_gaps[]`が残る場合は
+- 差分適用後に同じWorkItemのgapが残る場合は
   `terminal_text_missing`です。`terminal_text_confirmed`と併存させません。
 - `not_required`又は`terminal_text_confirmed`では、判断に使った`basis_evidence_ids`を1件以上返します。
 - `terminal_text_missing`のWorkItemでは、別規範で確認する内容を、未解決の既存gap又は
-  `add_gaps[]`として少なくとも1件残します。
+  gapを少なくとも1件残します。
 - 既知候補の本文が必要なら`fetch_articles`、関係と起点を説明できるなら`legal_graph_neighbors`、
   Article又は関係が不明なら`legal_search`、省略済み本文が必要なら`load_evidence`を使います。
 - 全ての既存gapを解決する前に、提示された未取得候補の見出し、要約又は抜粋を確認します。
@@ -128,8 +128,14 @@
 - `search_candidates`とGraph候補は発見情報です。本文確認前に根拠へ使いません。
 - 同一Decisionで複数Articleの本文を取得する場合は、上限内で1つの`fetch_articles`へまとめます。
 - 本文取得済みArticleと、成功済みの検索・Graph scopeは繰り返しません。
-- 検索・Graph scopeは`work_item_id`、`hypothesis_ids`、Tool引数の組です。
+- 検索・Graph scopeはTool名、`work_item_id`、Tool引数の組です。
   `request_id`や`purpose`だけを変えても別scopeにはなりません。
+- `hypothesis_exploration_sets[]`は、各Hypothesisについて現在Cycleで使用済みの探索と、
+  後続Cycleで新しく開始できる探索セットの残数をProgramが計算した値です。
+- `available_tools`には、対象Hypothesisが現在Cycleで実行できるToolだけが提示されます。
+- 同じCycleではOpenSearchとGraphを各1回まで同じ探索セットとして使えます。
+  片方を使用済みなら、`remaining_new_sets_total=0`でも未使用のもう片方は使えます。
+- 両方が未使用で`remaining_new_sets_total=0`なら、新しい探索を開始しません。
 
 ### `legal_search`
 
@@ -161,7 +167,7 @@ Article IDまたは探索すべき関係がまだ分からない場合に、Open
 - `completed_graph_searches[].new_candidate_article_ids`が空でも、法的関係の不存在は確定しません。意味関係から明示参照へ切り替えるか、別検索または限定回答へ進みます。
 - 意味関係と明示参照の両方で新規候補がなければ、引数だけを変えたGraph探索を反復しません。
 - 1要求は1 mode、1探索目的です。`semantic_assertion`では1 predicateと1 directionを指定します。
-- Graphで発見したArticleも、本文確認後に必要なら次の1ホップ探索の起点にできます。
+- Graph探索は1セットにつき起点から1ホップです。次の起点からの探索は、残る探索セットがある後続Cycleで行います。
 - 結果はnavigationです。関係ラベルだけで法的結論を確定しません。
 
 #### 関係と方向
@@ -188,19 +194,22 @@ Caseでは取得済みだが、今回のPromptから省略されたEvidence本�
 ## 出力前の確認
 
 1. Hypothesisの判定とgap差分が、対応する取得本文に基づくか確認します。
-   `resolve_gap_ids[]`には今回の本文で確認できた既存gap IDだけ、`add_gaps[]`には取得本文から
+   `resolve_gap_ids[]`には今回の本文で確認できた既存gap IDだけ、`discard_gap_ids[]`には
+   重複、範囲外、過度に抽象的又は訂正対象の既存gap IDだけ、`add_gaps[]`には取得本文から
    同じHypothesisの判断に新たに必要だと判明した未確認事項だけがあるか確認します。
+   gapの訂正では、旧IDの破棄と新しい内容の追加が組になっているか確認します。
+   未確認のまま有効な既存gapは、破棄又は解消の対象から外します。
    追加した内容を確認しなくてもWorkItemへ必要な限定付きで回答できるなら、その追加を削除します。
    委任、準用、定義、参照又は例外が本文にあることだけを理由に追加していないか、別WorkItemの
    確認事項を重複していないか確認します。
    未確認の既存gap IDを`resolve_gap_ids[]`へ入れていないか確認します。
    行為者の属性だけから、固有の制限又は特則の有無を追加していれば削除します。
-2. 同じWorkItemに未解決の既存gap又は`add_gaps[]`がある場合、
+2. 差分適用後に同じWorkItemのgapが残る場合、
    `terminal_text_missing`になっているか確認します。
    別の根拠条文又は別の手続段階の本文を末端本文としていないか、取得本文又は既知の関係から
    特定できない詳細を別規範の未確認事項としていないかも確認します。
-   WorkItemで問う行為、条件、範囲又は方法を修飾する委任句を見落として、`not_required`にしていないかも確認します。
-3. `terminal_text_missing`なのに、同じWorkItemの既存gapを全て解決し、`add_gaps=[]`にしていないか確認します。
+   委任された事項のうち、WorkItemへの回答に必要な具体化だけを未確認事項に残しているかも確認します。
+3. `terminal_text_missing`なのに、同じWorkItemのgapを全て破棄又は解消し、`add_gaps=[]`にしていないか確認します。
 4. Evidence ID、WorkItem ID、Hypothesis IDが入力と一致するか確認します。
 5. 全ての既存gapを解決する前に、未確認事項へ直接対応する未取得候補を見落としていないか確認します。
    質問に列挙された法令種別だけを理由に、本文にない委任先を未確認事項へ追加していないかも確認します。

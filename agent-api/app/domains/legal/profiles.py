@@ -12,6 +12,8 @@ from app.agent_framework.profiles import (
 )
 from app.config import settings
 
+from .model_routing import legal_model_for
+
 _PROMPT_DIR = Path(__file__).with_name("prompts")
 
 
@@ -20,18 +22,16 @@ def legal_agent_profile() -> AgentProfile:
     common_solver_prompt = _read_prompt("solver_common.md")
     tool_prompt = _read_prompt("solver_tools.md")
     completion_prompt = _read_prompt("solver_completion.md")
-    integration_model = settings.agent_framework_integration_model
-    evidence_integration_model = (
-        settings.agent_framework_evidence_integration_model
-    )
+    integration_model = legal_model_for("integration")
+    evidence_integration_model = legal_model_for("evidence_integration")
     integration_max_tokens = settings.agent_framework_integration_max_tokens
     timeout_sec = settings.agent_framework_model_timeout_sec
     return AgentProfile(
         name="legal-default",
-        version="494",
+        version="510",
         provider=settings.llm_provider,
         solver_research=_model_profile(
-            model=settings.agent_framework_research_model,
+            model=legal_model_for("question_decomposition"),
             max_tokens=settings.agent_framework_research_max_tokens,
             timeout_sec=timeout_sec,
             context_projection="research_decomposition",
@@ -44,7 +44,7 @@ def legal_agent_profile() -> AgentProfile:
             available_tool_names=(),
         ),
         solver_hypothesis_generation=_model_profile(
-            model=settings.agent_framework_research_model,
+            model=legal_model_for("hypothesis_generation"),
             max_tokens=settings.agent_framework_research_max_tokens,
             timeout_sec=timeout_sec,
             context_projection="research_hypothesis",
@@ -57,7 +57,7 @@ def legal_agent_profile() -> AgentProfile:
             available_tool_names=(),
         ),
         solver_hypothesis_revision=_model_profile(
-            model=settings.agent_framework_hypothesis_revision_model,
+            model=legal_model_for("hypothesis_revision"),
             max_tokens=settings.agent_framework_research_max_tokens,
             timeout_sec=timeout_sec,
             context_projection="hypothesis_revision",
@@ -68,7 +68,7 @@ def legal_agent_profile() -> AgentProfile:
             available_tool_names=(),
         ),
         solver_search_planning=_model_profile(
-            model=settings.agent_framework_research_model,
+            model=legal_model_for("search_planning"),
             max_tokens=settings.agent_framework_research_max_tokens,
             timeout_sec=timeout_sec,
             context_projection="research_search",
@@ -106,6 +106,7 @@ def legal_agent_profile() -> AgentProfile:
             model=evidence_integration_model,
             max_output_tokens=integration_max_tokens,
             timeout_sec=timeout_sec,
+            reasoning_effort=settings.agent_framework_reasoning_effort,
             system_prompt=_join_prompts(
                 _read_prompt("solver_evidence_integration.md"),
                 tool_prompt,
@@ -120,7 +121,7 @@ def legal_agent_profile() -> AgentProfile:
                 "solver_dependency_assessment_check.md"
             ),
             dependency_model=(
-                settings.agent_framework_dependency_assessment_model
+                legal_model_for("dependency_assessment")
             ),
             dependency_action_system_prompt=_join_prompts(
                 solver_identity_prompt,
@@ -134,9 +135,10 @@ def legal_agent_profile() -> AgentProfile:
             available_tool_names=None,
         ),
         solver_cycle_close=ModelCallProfile(
-            model=integration_model,
+            model=legal_model_for("cycle_close"),
             max_output_tokens=integration_max_tokens,
             timeout_sec=timeout_sec,
+            reasoning_effort=settings.agent_framework_reasoning_effort,
             system_prompt=_read_prompt("solver_evidence_integration.md"),
             followup_system_prompt=_read_prompt("solver_cycle_close.md"),
             completion_check_prompt=_read_prompt(
@@ -152,13 +154,13 @@ def legal_agent_profile() -> AgentProfile:
                 "solver_dependency_assessment_check.md"
             ),
             dependency_model=(
-                settings.agent_framework_dependency_assessment_model
+                legal_model_for("dependency_assessment")
             ),
             context_projection="cycle_close",
             available_tool_names=None,
         ),
         solver_finalization=_model_profile(
-            model=integration_model,
+            model=legal_model_for("finalization"),
             max_tokens=integration_max_tokens,
             timeout_sec=timeout_sec,
             context_projection="finalization",
@@ -170,7 +172,7 @@ def legal_agent_profile() -> AgentProfile:
             available_tool_names=(),
         ),
         solver_reviewer_revision=_model_profile(
-            model=integration_model,
+            model=legal_model_for("reviewer_revision"),
             max_tokens=integration_max_tokens,
             timeout_sec=timeout_sec,
             prompts=(
@@ -185,9 +187,10 @@ def legal_agent_profile() -> AgentProfile:
             ),
         ),
         solver_search_review=ModelCallProfile(
-            model=integration_model,
+            model=legal_model_for("search_review"),
             max_output_tokens=integration_max_tokens,
             timeout_sec=timeout_sec,
+            reasoning_effort=settings.agent_framework_reasoning_effort,
             system_prompt=_read_prompt("solver_search_selection.md"),
             # 分割済みfixtureの隔離診断互換。実行経路では使用しない。
             followup_system_prompt=_read_prompt(
@@ -201,9 +204,10 @@ def legal_agent_profile() -> AgentProfile:
             ),
         ),
         solver_graph_review=ModelCallProfile(
-            model=integration_model,
+            model=legal_model_for("graph_review"),
             max_output_tokens=integration_max_tokens,
             timeout_sec=timeout_sec,
+            reasoning_effort=settings.agent_framework_reasoning_effort,
             system_prompt=_read_prompt("solver_graph_review.md"),
             completion_check_prompt=_read_prompt(
                 "solver_graph_review_check.md"
@@ -213,9 +217,10 @@ def legal_agent_profile() -> AgentProfile:
         reviewer=ReviewerProfile(
             enabled=settings.agent_framework_reviewer_enabled,
             max_revisions=settings.agent_framework_reviewer_max_revisions,
-            model=settings.agent_framework_reviewer_model,
+            model=legal_model_for("reviewer"),
             max_output_tokens=settings.agent_framework_reviewer_max_tokens,
             timeout_sec=settings.agent_framework_model_timeout_sec,
+            reasoning_effort=settings.agent_framework_reasoning_effort,
             system_prompt=_read_prompt("reviewer.md"),
         ),
         required_dependency_kind="lower_norm",
@@ -244,6 +249,9 @@ def legal_agent_profile() -> AgentProfile:
                 settings.agent_framework_max_selected_frontier_per_step
             ),
             max_graph_articles_per_hypothesis_per_cycle=2,
+            max_exploration_sets_per_hypothesis=(
+                settings.agent_framework_max_exploration_sets_per_hypothesis
+            ),
             max_graph_candidates_per_review_batch=(
                 settings.agent_framework_max_graph_candidates_per_review_batch
             ),
@@ -308,6 +316,7 @@ def _model_profile(
         model=model,
         max_output_tokens=max_tokens,
         timeout_sec=timeout_sec,
+        reasoning_effort=settings.agent_framework_reasoning_effort,
         system_prompt=_join_prompts(*prompts),
         completion_check_prompt=completion_check_prompt,
         context_projection=context_projection,

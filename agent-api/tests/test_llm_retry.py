@@ -90,8 +90,8 @@ def test_structured_json_retries_one_transient_connection_error(
 ):
     calls: list[int] = []
 
-    def fake_transport(prompt, schema, model, max_tokens, timeout):
-        del prompt, schema, model, max_tokens
+    def fake_transport(prompt, schema, model, max_tokens, timeout, *, effort=None):
+        del prompt, schema, model, max_tokens, effort
         calls.append(timeout)
         if len(calls) == 1:
             raise requests.ConnectionError("remote closed connection")

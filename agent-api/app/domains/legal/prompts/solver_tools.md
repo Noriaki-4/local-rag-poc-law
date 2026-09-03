@@ -8,8 +8,14 @@
 - `search_candidates`とGraph候補は発見情報です。本文確認前に根拠へ使いません。
 - 同一Decisionで複数Articleの本文を取得する場合は、上限内で1つの`fetch_articles`へまとめます。
 - 本文取得済みArticleと、成功済みの検索・Graph scopeは繰り返しません。
-- 検索・Graph scopeは`work_item_id`、`hypothesis_ids`、Tool引数の組です。
+- 検索・Graph scopeはTool名、`work_item_id`、Tool引数の組です。
   `request_id`や`purpose`だけを変えても別scopeにはなりません。
+- `hypothesis_exploration_sets[]`は、各Hypothesisについて現在Cycleで使用済みの探索と、
+  後続Cycleで新しく開始できる探索セットの残数をProgramが計算した値です。
+- `available_tools`には、対象Hypothesisが現在Cycleで実行できるToolだけが提示されます。
+- 同じCycleではOpenSearchとGraphを各1回まで同じ探索セットとして使えます。
+  片方を使用済みなら、`remaining_new_sets_total=0`でも未使用のもう片方は使えます。
+- 両方が未使用で`remaining_new_sets_total=0`なら、新しい探索を開始しません。
 
 ### `legal_search`
 
@@ -41,7 +47,7 @@ Article IDまたは探索すべき関係がまだ分からない場合に、Open
 - `completed_graph_searches[].new_candidate_article_ids`が空でも、法的関係の不存在は確定しません。意味関係から明示参照へ切り替えるか、別検索または限定回答へ進みます。
 - 意味関係と明示参照の両方で新規候補がなければ、引数だけを変えたGraph探索を反復しません。
 - 1要求は1 mode、1探索目的です。`semantic_assertion`では1 predicateと1 directionを指定します。
-- Graphで発見したArticleも、本文確認後に必要なら次の1ホップ探索の起点にできます。
+- Graph探索は1セットにつき起点から1ホップです。次の起点からの探索は、残る探索セットがある後続Cycleで行います。
 - 結果はnavigationです。関係ラベルだけで法的結論を確定しません。
 
 #### 関係と方向

@@ -1,4 +1,5 @@
 {
+  "available_tools": [],
   "completed_graph_searches": [],
   "completed_legal_searches": [],
   "cycle_close_required": true,
@@ -353,10 +354,12 @@
       ],
       "hypothesis_id": "h-1",
       "judgment": "unresolved",
+      "replaces_hypothesis_id": null,
       "statement": "上場会社の株式を市場を通さずに多数の株主から買い集める場合、公開買付けの手続が必要になる条件は、株主の数が一定以上であること、または取得する株式の割合が一定以上であることが含まれる。",
       "work_item_id": "wi-1"
     }
   ],
+  "hypothesis_exploration_sets": [],
   "non_work_item_requirements": [
     "公開買付けの手続について説明すること。"
   ],

@@ -6,7 +6,15 @@ import json
 from typing import Any, Iterable
 
 from .contracts import SolverDecision
-from .state import CaseState, Evidence, Hypothesis, ToolRequest, ToolResult, WorkItem
+from .state import (
+    CaseState,
+    Evidence,
+    Hypothesis,
+    ToolRequest,
+    ToolResult,
+    WorkItem,
+    active_hypothesis_ids,
+)
 
 
 def cycle_number(state: CaseState) -> int:
@@ -54,6 +62,7 @@ def build_cycle_checkpoint(
         cycle_results=cycle_results,
         requests=requests,
     )
+    active_ids = active_hypothesis_ids(state_after)
     return {
         "caseId": state_after.case_id,
         "cycleNo": cycle_no,
@@ -68,7 +77,10 @@ def build_cycle_checkpoint(
         "decisionReason": decision.decision_reason,
         "workItems": [_work_item(item) for item in state_after.work_items],
         "workItemChanges": work_item_changes,
-        "hypotheses": [_hypothesis(item) for item in state_after.hypotheses],
+        "hypotheses": [
+            _hypothesis(item, active=item.hypothesis_id in active_ids)
+            for item in state_after.hypotheses
+        ],
         "hypothesisChanges": hypothesis_changes,
         "newEvidence": [_evidence_summary(item) for item in new_evidence],
         "toolExecutions": tool_executions,
@@ -80,7 +92,7 @@ def build_cycle_checkpoint(
         "unresolvedHypotheses": [
             _hypothesis(item)
             for item in state_after.hypotheses
-            if item.requires_follow_up
+            if item.hypothesis_id in active_ids and item.requires_follow_up
         ],
         "findings": findings,
         "modelMetrics": dict(model_metrics),
@@ -137,6 +149,7 @@ def build_cycle_audit_report(
         None,
     )
     model_calls = _model_call_records(record_list)
+    reasoning_configurations = _reasoning_configurations(record_list)
     purpose_metrics = _purpose_metrics(model_calls)
     hypothesis_activity = _hypothesis_activity(model_calls)
     hypothesis_gap_activity = _hypothesis_gap_activity(record_list)
@@ -215,6 +228,7 @@ def build_cycle_audit_report(
         "executionFindings": execution_findings,
         "runMetrics": run_metrics,
         "purposeMetrics": purpose_metrics,
+        "reasoningConfigurations": reasoning_configurations,
         "hypothesisActivity": hypothesis_activity,
         "hypothesisGapActivity": hypothesis_gap_activity,
         "workItemSessionActivity": work_item_session_activity,
@@ -346,6 +360,27 @@ def render_cycle_audit_markdown(report: dict[str, Any]) -> str:
                     output_tokens=item.get("outputTokens", 0),
                 )
             )
+    reasoning_configurations = report.get("reasoningConfigurations", [])
+    if reasoning_configurations:
+        lines.extend(
+            [
+                "",
+                "### Effective model reasoning settings",
+                "",
+                "| Model | Mode | Effort | Thinking budget | Calls |",
+                "|---|---|---|---:|---:|",
+            ]
+        )
+        for item in reasoning_configurations:
+            lines.append(
+                "| {model} | {mode} | {effort} | {budget} | {calls} |".format(
+                    model=_md(item.get("model")),
+                    mode=_md(item.get("mode")),
+                    effort=_md(item.get("effort")),
+                    budget=_md(item.get("thinkingBudgetTokens")),
+                    calls=item.get("callCount", 0),
+                )
+            )
     execution_findings = report.get("executionFindings", [])
     lines.extend(["", "## Execution findings", ""])
     if execution_findings:
@@ -447,19 +482,22 @@ def render_cycle_audit_markdown(report: dict[str, Any]) -> str:
                 "",
                 "## Hypothesis gap activity",
                 "",
-                "| Seq | Cycle | Hypothesis | Added gaps | Resolved gap IDs |",
-                "|---:|---:|---|---|---|",
+                "| Seq | Cycle | Hypothesis | Added gaps | Resolved gap IDs | Discarded gap IDs |",
+                "|---:|---:|---|---|---|---|",
             ]
         )
         for item in gap_activity:
             lines.append(
-                "| {sequence} | {cycle} | `{hypothesis}` | {added} | {resolved} |".format(
+                "| {sequence} | {cycle} | `{hypothesis}` | {added} | {resolved} | {discarded} |".format(
                     sequence=_md(item.get("sequence")),
                     cycle=_md(item.get("cycleNo")),
                     hypothesis=_md(item.get("hypothesisId")),
                     added=_md(" / ".join(item.get("addedGaps", [])) or "-"),
                     resolved=_md(
                         ", ".join(item.get("resolvedGapIds", [])) or "-"
+                    ),
+                    discarded=_md(
+                        ", ".join(item.get("discardedGapIds", [])) or "-"
                     ),
                 )
             )
@@ -613,6 +651,33 @@ def render_cycle_audit_comparison_markdown(comparison: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _reasoning_configurations(
+    records: tuple[dict[str, Any], ...],
+) -> list[dict[str, Any]]:
+    grouped: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for record in records:
+        if record.get("event") != "transport_input":
+            continue
+        key = (
+            record.get("model"),
+            record.get("effectiveReasoningMode"),
+            record.get("effectiveReasoningEffort"),
+            record.get("thinkingBudgetTokens"),
+        )
+        item = grouped.setdefault(
+            key,
+            {
+                "model": key[0],
+                "mode": key[1],
+                "effort": key[2],
+                "thinkingBudgetTokens": key[3],
+                "callCount": 0,
+            },
+        )
+        item["callCount"] += 1
+    return list(grouped.values())
+
+
 def _model_call_records(
     records: tuple[dict[str, Any], ...],
 ) -> list[dict[str, Any]]:
@@ -724,15 +789,14 @@ def _hypothesis_gap_activity(
             continue
         updates = payload.get("update_hypotheses")
         if not isinstance(updates, list):
-            updates = payload.get("revise_hypotheses")
-        if not isinstance(updates, list):
             continue
         for update in updates:
             if not isinstance(update, dict):
                 continue
             additions = update.get("add_gaps") or []
             resolved = update.get("resolve_gap_ids") or []
-            if not additions and not resolved:
+            discarded = update.get("discard_gap_ids") or []
+            if not additions and not resolved and not discarded:
                 continue
             activity.append(
                 {
@@ -749,6 +813,7 @@ def _hypothesis_gap_activity(
                         for item in additions
                     ],
                     "resolvedGapIds": list(resolved),
+                    "discardedGapIds": list(discarded),
                 }
             )
     return activity
@@ -949,6 +1014,43 @@ def _execution_findings(
     model_calls: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
+    work_item_scoped_stages = {
+        "solver_research_hypothesis",
+        "solver_research_search",
+        "search_selection",
+        "observation_integration",
+        "dependency_assessment",
+    }
+    for record in records:
+        if record.get("event") != "transport_input":
+            continue
+        model_call_stage = record.get("modelCallStage")
+        if not isinstance(model_call_stage, str):
+            continue
+        base_stage = model_call_stage.removesuffix("_contract_repair")
+        if base_stage not in work_item_scoped_stages:
+            continue
+        work_item_ids = list(
+            dict.fromkeys(
+                item
+                for item in (record.get("scope") or {}).get(
+                    "workItemIds",
+                    [],
+                )
+                if isinstance(item, str)
+            )
+        )
+        if len(work_item_ids) == 1:
+            continue
+        findings.append(
+            _finding(
+                "WORK_ITEM_MODEL_SCOPE_CONFLICT",
+                "WorkItem単位のLLM処理が単一WorkItemの入力になっていません。",
+                sequence=record.get("sequence"),
+                modelCallStage=model_call_stage,
+                workItemIds=work_item_ids,
+            )
+        )
     for record in records:
         if record.get("event") != "contract_violation":
             continue
@@ -1180,7 +1282,7 @@ def _work_item(item: WorkItem) -> dict[str, Any]:
     }
 
 
-def _hypothesis(item: Hypothesis) -> dict[str, Any]:
+def _hypothesis(item: Hypothesis, *, active: bool = True) -> dict[str, Any]:
     return {
         "hypothesisId": item.hypothesis_id,
         "workItemId": item.work_item_id,
@@ -1188,6 +1290,8 @@ def _hypothesis(item: Hypothesis) -> dict[str, Any]:
         "judgment": item.judgment,
         "gaps": list(item.gaps),
         "evidenceIds": list(item.evidence_ids),
+        "replacesHypothesisId": item.replaces_hypothesis_id,
+        "active": active,
     }
 
 

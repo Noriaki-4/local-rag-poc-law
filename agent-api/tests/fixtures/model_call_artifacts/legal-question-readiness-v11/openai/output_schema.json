@@ -1,0 +1,35 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "decision": {
+      "description": "readyは一つの主たる主体と、検索対象を特定できる行為を原文から読み取って調査を開始でき、検索向けの質問文を提案できることを示す。clarification_recommendedは、主体、行為若しくは行為対象の欠落・曖昧さ、又は独立した検索単位の混在により、質問文の明確化が検索精度の向上に役立つことを示す。",
+      "enum": [
+        "ready",
+        "clarification_recommended"
+      ],
+      "title": "Decision",
+      "type": "string"
+    },
+    "reason": {
+      "description": "判断理由。clarification_recommendedでは、何が不足又は混在し、検索対象をどう変え得るかを法的結論を断定せず説明する。通常UIには表示せず、診断又はtraceで確認する。",
+      "maxLength": 1000,
+      "minLength": 1,
+      "title": "Reason",
+      "type": "string"
+    },
+    "recommendation": {
+      "description": "readyでは、原文の意味と確認事項を保ち、検索対象を明確にした質問文案。clarification_recommendedでは、質問文で不足又は曖昧な最も重要な一点を示す短い指摘文。どちらも利用者への質問にはしない。",
+      "maxLength": 4000,
+      "minLength": 1,
+      "title": "Recommendation",
+      "type": "string"
+    }
+  },
+  "required": [
+    "decision",
+    "reason",
+    "recommendation"
+  ],
+  "title": "QuestionReadiness",
+  "type": "object"
+}

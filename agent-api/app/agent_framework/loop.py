@@ -15,6 +15,7 @@ from .context import (
     GRAPH_REVIEW_FETCH_REQUEST_PREFIX,
     ContextCapacityExceeded,
     GraphReviewBatch,
+    HypothesisExplorationSetStatus,
     SearchCandidateArticle,
     SolverActionFeedback,
     SolverContext,
@@ -39,6 +40,7 @@ from .ports.model import (
 from .ports.tool import ToolDefinition, ToolExecution, ToolRegistry
 from .profiles import AgentProfile, ModelCallProfile, ReviewerProfile
 from .state import (
+    active_hypotheses,
     CaseState,
     DeferredFrontierResolution,
     Evidence,
@@ -87,6 +89,107 @@ LOAD_EVIDENCE_DEFINITION = ToolDefinition(
 )
 MAX_SOLVER_DECISION_ATTEMPTS = 3
 logger = logging.getLogger(__name__)
+
+
+def _follow_up_exploration_statuses(
+    context: SolverContext,
+) -> tuple[HypothesisExplorationSetStatus, ...]:
+    """回答に未確認事項が残るactive Hypothesisの探索状態を返す。"""
+
+    open_work_item_ids = {
+        item.work_item_id for item in context.work_tree if item.state == "open"
+    }
+    follow_up_hypothesis_ids = tuple(
+        item.hypothesis_id
+        for item in context.hypotheses
+        if item.work_item_id in open_work_item_ids and item.requires_follow_up
+    )
+    if not follow_up_hypothesis_ids:
+        return ()
+    status_by_hypothesis = {
+        item.hypothesis_id: item for item in context.hypothesis_exploration_sets
+    }
+    if any(
+        hypothesis_id not in status_by_hypothesis
+        for hypothesis_id in follow_up_hypothesis_ids
+    ):
+        return ()
+    return tuple(
+        status_by_hypothesis[hypothesis_id]
+        for hypothesis_id in follow_up_hypothesis_ids
+    )
+
+
+def _all_open_hypothesis_exploration_exhausted(
+    context: SolverContext,
+) -> bool:
+    """新規セットも現在セットの未使用Toolも残っていないか返す。"""
+
+    statuses = _follow_up_exploration_statuses(context)
+    return bool(statuses) and all(
+        item.remaining_new_sets_total == 0
+        and item.legal_search_used_in_cycle == item.graph_used_in_cycle
+        for item in statuses
+    )
+
+
+def _all_open_hypothesis_new_exploration_sets_exhausted(
+    context: SolverContext,
+) -> bool:
+    """回答に未確認事項が残るactive Hypothesisの新規セットが尽きたか返す。"""
+
+    statuses = _follow_up_exploration_statuses(context)
+    return bool(statuses) and all(
+        item.remaining_new_sets_total == 0 for item in statuses
+    )
+
+
+def _current_cycle_exploration_set_complete(
+    context: SolverContext,
+) -> bool:
+    """未確認Hypothesisが現在Cycleの探索セットを使い終えたか返す。"""
+
+    statuses = _follow_up_exploration_statuses(context)
+    return bool(statuses) and all(
+        item.legal_search_used_in_cycle and item.graph_used_in_cycle
+        for item in statuses
+    )
+
+
+def _project_completed_exploration_set_to_cycle_close(
+    context: SolverContext,
+    *,
+    finalize_only: bool,
+    pending_grounding_observation: bool,
+    pending_known_candidate_processing: bool,
+    revision_ready: bool,
+) -> SolverContext:
+    """処理待ちを残さず使い終えた探索セットをCycle境界へ投影する。"""
+
+    if (
+        finalize_only
+        or pending_grounding_observation
+        or pending_known_candidate_processing
+        or revision_ready
+        or not _current_cycle_exploration_set_complete(context)
+    ):
+        return context
+    return context.model_copy(
+        update={
+            "cycle_close_required": True,
+            "required_dependency_kind": None,
+            "required_dependency_work_item_ids": (),
+        }
+    )
+
+
+def _has_pending_known_candidate_processing(context: SolverContext) -> bool:
+    """現在stepで評価できる検索・Graph候補があるか返す。"""
+
+    return bool(
+        pending_candidate_review_work_item_ids(context)
+        or context.graph_review_batch.candidates
+    )
 
 
 def _observation_decisions_by_work_item(
@@ -222,6 +325,34 @@ def _merge_observation_work_item_decisions(
     )
 
 
+def _without_rejected_tool_requests(
+    decision: SolverDecision,
+    rejected_requests: tuple[ToolRequest, ...],
+) -> SolverDecision:
+    """Programが棄却した行動だけをObservation差分から取り除く。"""
+
+    rejected_request_ids = {
+        request.request_id for request in rejected_requests
+    }
+    if not rejected_request_ids:
+        return decision
+    return decision.model_copy(
+        update={
+            "tool_requests": tuple(
+                request
+                for request in decision.tool_requests
+                if request.request_id not in rejected_request_ids
+            ),
+            "dependency_decisions": tuple(
+                item.model_copy(update={"action_request_id": None})
+                if item.action_request_id in rejected_request_ids
+                else item
+                for item in decision.dependency_decisions
+            ),
+        }
+    )
+
+
 class AgentLoop:
     def __init__(
         self,
@@ -240,15 +371,15 @@ class AgentLoop:
         self._diagnostics = diagnostics
         self._clock = clock
 
-    def _validate_observation_work_item_decision(
+    def _apply_observation_work_item_decision(
         self,
         state: CaseState,
         decision: SolverDecision,
         context: SolverContext,
-    ) -> None:
-        """Observation差分を保存せず、単一WorkItemの契約として検証する。"""
+    ) -> CaseState:
+        """Observation差分を単一WorkItem用の契約で検証して適用する。"""
 
-        apply_solver_decision(
+        return apply_solver_decision(
             state,
             decision,
             limits=self._profile.limits,
@@ -289,6 +420,52 @@ class AgentLoop:
             finalize_only=False,
             allow_dependency_action_without_tool=True,
             allow_parallel_work_item_actions=True,
+        )
+
+    def _validate_observation_work_item_decision(
+        self,
+        state: CaseState,
+        decision: SolverDecision,
+        context: SolverContext,
+    ) -> None:
+        """Observation差分を保存せず、単一WorkItemの契約として検証する。"""
+
+        self._apply_observation_work_item_decision(state, decision, context)
+
+    def _mark_integrated_tool_results(
+        self,
+        candidate: CaseState,
+        context: SolverContext,
+        *,
+        purpose: str,
+    ) -> CaseState:
+        """今回処理したToolResultを再統合対象から外す。"""
+
+        consumed_result_request_ids: tuple[str, ...] = ()
+        if purpose in {"observation_integration", "cycle_close"}:
+            consumed_result_request_ids = tuple(
+                item.request_id for item in context.recent_tool_results
+            )
+        elif purpose == "graph_selection":
+            consumed_result_request_ids = (
+                context.required_graph_review_request_ids
+            )
+        elif purpose == "search_selection":
+            consumed_result_request_ids = (
+                context.required_search_review_request_ids
+            )
+        if not consumed_result_request_ids:
+            return candidate
+        return self._replace_state(
+            candidate,
+            integrated_tool_result_request_ids=tuple(
+                dict.fromkeys(
+                    [
+                        *candidate.integrated_tool_result_request_ids,
+                        *consumed_result_request_ids,
+                    ]
+                )
+            ),
         )
 
     def run(self, case_id: str) -> AgentRunResult:
@@ -465,6 +642,7 @@ class AgentLoop:
                 cycle_limit_reached
                 or time_reserve_reached
                 or state.cycle_step_timeout
+                or state.stop_reason == "exploration_limit_reached"
             )
             stop_reason = None
             if cycle_limit_reached:
@@ -555,22 +733,82 @@ class AgentLoop:
                 pending_candidate_work_item_ids = (
                     pending_candidate_review_work_item_ids(context)
                 )
+                revision_ready = bool(
+                    hypothesis_revision_call
+                    and context.hypothesis_revision_evidence
+                    and not pending_grounding_observation
+                )
+                pending_known_candidate_processing = (
+                    _has_pending_known_candidate_processing(context)
+                )
+                if (
+                    not finalize_only
+                    and not pending_grounding_observation
+                    and not pending_known_candidate_processing
+                    and not revision_ready
+                    and _all_open_hypothesis_exploration_exhausted(context)
+                ):
+                    # 未評価候補と未統合本文を先に処理したうえで、active
+                    # Hypothesisの探索枠が全て尽きたら空のCycleを増やさない。
+                    state = self._replace_state(
+                        state,
+                        stop_reason="exploration_limit_reached",
+                        updated_at=utc_now(),
+                    )
+                    self._store.save(state)
+                    finalize_only = True
+                    dependency_audit_required = False
+                    model_budget = attempt_remaining
+                    context = context.model_copy(
+                        update={
+                            "can_start_next_cycle": False,
+                            "cycle_close_required": True,
+                            "finalize_only": True,
+                            "required_dependency_kind": None,
+                            "required_dependency_work_item_ids": (),
+                        }
+                    )
+                else:
+                    # 後続Cycle用の探索セットが残っていても、現在Cycleの
+                    # OpenSearch・Graphを使い終えた後の境界処理は専用の
+                    # Cycle Closeへ集約する。保留Frontierの引継ぎも同契約で
+                    # 一度だけ確定する。
+                    context = _project_completed_exploration_set_to_cycle_close(
+                        context,
+                        finalize_only=finalize_only,
+                        pending_grounding_observation=(
+                            pending_grounding_observation
+                        ),
+                        pending_known_candidate_processing=(
+                            pending_known_candidate_processing
+                        ),
+                        revision_ready=revision_ready,
+                    )
                 if pending_grounding_observation:
                     # A selected Article has already consumed fetch capacity. Integrate
                     # its text before reviewing more discovery candidates. The complete
                     # Graph/Search pools remain in CaseState and are projected again on
                     # the next loop iteration.
                     context = _grounding_observation_context(context)
-                elif context.cycle_close_required and (
-                    not context.can_start_next_cycle
-                    or not any(item.state == "open" for item in context.work_tree)
+                elif (
+                    (
+                        bool(context.work_tree)
+                        and not any(
+                            item.state == "open" for item in context.work_tree
+                        )
+                    )
+                    or (
+                        context.cycle_close_required
+                        and not context.can_start_next_cycle
+                    )
                 ) and not (
                     hypothesis_revision_call
                     and bool(context.hypothesis_revision_evidence)
                     and not pending_grounding_observation
                 ):
-                    # Cycle Closeは次Cycleへの引継ぎ専用とする。最終回答は
-                    # 専用Finalizationへ十分な時間を残して一度だけ生成させる。
+                    # 全WorkItemが閉じた後は、Cycle Closeや汎用Integrationを
+                    # 再実行せず、確認済み根拠だけを見せるFinalizationで
+                    # 回答を1回だけ生成する。
                     finalize_only = True
                     dependency_audit_required = False
                     model_budget = attempt_remaining
@@ -987,37 +1225,15 @@ class AgentLoop:
                                 or bool(context.required_dependency_work_item_ids)
                             ),
                             allow_parallel_work_item_actions=(
-                                purpose == "observation_integration"
+                                purpose
+                                in {"observation_integration", "search_planning"}
                             ),
                         )
-                    consumed_result_request_ids: tuple[str, ...] = ()
-                    if purpose in {"observation_integration", "cycle_close"}:
-                        consumed_result_request_ids = tuple(
-                            item.request_id for item in context.recent_tool_results
-                        )
-                    elif purpose == "graph_selection":
-                        consumed_result_request_ids = (
-                            context.required_graph_review_request_ids
-                        )
-                    elif purpose == "search_selection":
-                        consumed_result_request_ids = (
-                            context.required_search_review_request_ids
-                        )
-                    if consumed_result_request_ids:
-                        integrated_request_ids = tuple(
-                            dict.fromkeys(
-                                [
-                                    *candidate.integrated_tool_result_request_ids,
-                                    *consumed_result_request_ids,
-                                ]
-                            )
-                        )
-                        candidate = self._replace_state(
-                            candidate,
-                            integrated_tool_result_request_ids=(
-                                integrated_request_ids
-                            ),
-                        )
+                    candidate = self._mark_integrated_tool_results(
+                        candidate,
+                        context,
+                        purpose=purpose,
+                    )
                     if purpose == "hypothesis_revision":
                         candidate = self._replace_state(
                             candidate,
@@ -1055,6 +1271,68 @@ class AgentLoop:
                             decision=solver_call.decision,
                             feedback=rejected_feedback,
                         )
+                    if purpose == "observation_integration":
+                        semantic_decision = _without_rejected_tool_requests(
+                            applied_decision,
+                            exc.rejected_requests,
+                        )
+                        semantic_applied = False
+                        while True:
+                            try:
+                                candidate = (
+                                    self._apply_observation_work_item_decision(
+                                        state,
+                                        semantic_decision,
+                                        context,
+                                    )
+                                )
+                            except ActionRejected as nested_rejection:
+                                reduced_decision = _without_rejected_tool_requests(
+                                    semantic_decision,
+                                    nested_rejection.rejected_requests,
+                                )
+                                if reduced_decision == semantic_decision:
+                                    raise
+                                semantic_decision = reduced_decision
+                                if self._diagnostics is not None:
+                                    self._diagnostics.record_action_rejected(
+                                        state=state,
+                                        purpose=purpose,
+                                        decision_attempt=decision_attempt,
+                                        decision=semantic_decision,
+                                        feedback=SolverActionFeedback(
+                                            code="already_completed",
+                                            message=str(nested_rejection),
+                                            rejected_tool_requests=(
+                                                nested_rejection.rejected_requests
+                                            ),
+                                        ),
+                                    )
+                                continue
+                            except ContractViolation:
+                                # 意味差分自体が不正なら従来どおりLLM修復へ戻す。
+                                break
+                            candidate = self._mark_integrated_tool_results(
+                                candidate,
+                                context,
+                                purpose=purpose,
+                            )
+                            applied_decision = semantic_decision
+                            semantic_applied = True
+                            if self._diagnostics is not None:
+                                self._diagnostics.record_decision_applied(
+                                    state_before=state,
+                                    state_after=candidate,
+                                    context=context,
+                                    purpose=(
+                                        "observation_integration_action_checkpoint"
+                                    ),
+                                    contract_attempt=decision_attempt,
+                                    decision=applied_decision,
+                                )
+                            break
+                        if semantic_applied:
+                            break
                     if decision_attempt == MAX_SOLVER_DECISION_ATTEMPTS - 1:
                         raise
                     contract_feedback = None
@@ -1122,7 +1400,7 @@ class AgentLoop:
                     )
             if cycle_step_timed_out:
                 continue
-            if solver_call.decision.next == "finalize":
+            if applied_decision.next == "finalize":
                 candidate = self._replace_state(
                     candidate,
                     cycle_step_timeout=False,
@@ -1203,22 +1481,40 @@ class AgentLoop:
                 )
 
             if not decision_requests:
+                continue_known_graph_candidates = bool(
+                    applied_decision.unreviewed_graph_resolution is not None
+                    and applied_decision.unreviewed_graph_resolution.action
+                    == "review_next_cycle"
+                )
                 if (
-                    solver_call.decision.start_next_cycle
+                    applied_decision.start_next_cycle
                     and purpose != "hypothesis_revision"
                     and not graph_review_call
                     and not search_review_call
                 ):
-                    candidate = self._replace_state(
-                        candidate,
-                        research_cycle_count=max(
-                            1,
-                            candidate.research_cycle_count + 1,
-                        ),
-                        cycle_step_timeout=False,
-                        stop_reason=None,
-                        updated_at=utc_now(),
-                    )
+                    if (
+                        _all_open_hypothesis_new_exploration_sets_exhausted(
+                            context
+                        )
+                        and not continue_known_graph_candidates
+                    ):
+                        candidate = self._replace_state(
+                            candidate,
+                            cycle_step_timeout=False,
+                            stop_reason="exploration_limit_reached",
+                            updated_at=utc_now(),
+                        )
+                    else:
+                        candidate = self._replace_state(
+                            candidate,
+                            research_cycle_count=max(
+                                1,
+                                candidate.research_cycle_count + 1,
+                            ),
+                            cycle_step_timeout=False,
+                            stop_reason=None,
+                            updated_at=utc_now(),
+                        )
                 self._store.save(candidate)
                 state = candidate
                 continue
@@ -1256,7 +1552,7 @@ class AgentLoop:
                 tool_traces=tool_traces,
                 advance_research_cycle=(
                     state.research_cycle_count == 0
-                    or solver_call.decision.start_next_cycle
+                    or applied_decision.start_next_cycle
                 )
                 and not graph_review_call
                 and not search_review_call,
@@ -1991,7 +2287,7 @@ class AgentLoop:
             answer_options=state.answer_options,
             answer=state.final_answer,
             work_items=state.work_items,
-            hypotheses=state.hypotheses,
+            hypotheses=active_hypotheses(state),
             dependency_decisions=state.dependency_decisions,
             evidence=grounding_evidence,
         )
@@ -2250,7 +2546,7 @@ def _has_current_cycle_contradicted_hypothesis(state: CaseState) -> bool:
         item.work_item_id in active_work_item_ids
         and item.judgment == "contradicted"
         and not current_cycle_evidence_ids.isdisjoint(item.evidence_ids)
-        for item in state.hypotheses
+        for item in active_hypotheses(state)
     )
 
 

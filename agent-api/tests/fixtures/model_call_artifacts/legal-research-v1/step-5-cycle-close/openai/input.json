@@ -33,6 +33,7 @@
       ],
       "hypothesis_id": "h-1",
       "judgment": "unresolved",
+      "replaces_hypothesis_id": null,
       "statement": "上場会社の株式を市場を通さずに多数の株主から買い集める場合、公開買付けの手続が必要になる条件は、株主の数が一定以上であること、または取得する株式の割合が一定以上であることが含まれる。",
       "work_item_id": "wi-1"
     },
@@ -44,6 +45,7 @@
       ],
       "hypothesis_id": "h-2",
       "judgment": "unresolved",
+      "replaces_hypothesis_id": null,
       "statement": "公開買付けの対象となる株券等の範囲は、上場会社が発行する普通株式、優先株式、及びその他の株式に類似する権利を含む。",
       "work_item_id": "wi-2"
     },
@@ -55,6 +57,7 @@
       ],
       "hypothesis_id": "h-3",
       "judgment": "unresolved",
+      "replaces_hypothesis_id": null,
       "statement": "公開買付けに関する主な例外は、特定の条件を満たす場合において、公開買付けを行わずに株式を取得できる特例が存在することが含まれる。",
       "work_item_id": "wi-3"
     },
@@ -66,6 +69,7 @@
       ],
       "hypothesis_id": "h-4",
       "judgment": "unresolved",
+      "replaces_hypothesis_id": null,
       "statement": "公開買付けを行う際に必要な手続は、公告の実施、買付けの条件の提示、及び株主への通知が含まれる。",
       "work_item_id": "wi-4"
     },
@@ -77,6 +81,7 @@
       ],
       "hypothesis_id": "h-5",
       "judgment": "unresolved",
+      "replaces_hypothesis_id": null,
       "statement": "公開買付けに関する根拠となる条文は、金融商品取引法に基づく規定が適用される。",
       "work_item_id": "wi-5"
     }

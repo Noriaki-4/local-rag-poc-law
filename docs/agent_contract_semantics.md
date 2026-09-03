@@ -74,6 +74,11 @@ Observation IntegrationがHypothesis更新、下位規範判断及び直後のTo
 ProgramがWorkItem進捗を導出する。どの法的命題が必要か、本文が命題を
 支持・否定するか、下位規範確認が必要かはSolverが判断し、Programはその意味判断を補わない。
 
+Observation IntegrationのTool要求が重複又は探索上限により実行前に棄却されても、同じDecisionの
+Hypothesis、gap及びEvidenceの差分まで巻き戻さない。Programは棄却対象のTool要求と、それを参照する
+`DependencyDecision.action_request_id`だけを除き、残る意味差分を通常の契約で検証して保存する。
+意味差分自体が契約違反の場合だけ、そのWorkItemをLLM修復へ戻す。
+
 ## 変更時の確認順序
 
 1. `Field.description`で項目の意味とID種別を確定する。

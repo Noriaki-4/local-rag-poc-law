@@ -321,6 +321,13 @@ Reviewer無効時のSolver呼び出しは次の範囲になる。
 最終回答予約以下になった場合だけ`finalize_only=true`とする。LLM呼出しの`timeout_sec`は
 各呼出しの最大待機時間であり、最終回答予約として流用しない。Cycle Close呼出しは
 `cycle_close_reserve_sec`以内に制限し、timeoutしても最終回答予約を消費しない。
+初回のHypothesis立案は、未作成のWorkItemごとに入力と出力を分離し、
+`max_parallel_work_items`の範囲で並列実行する。各呼出しは他のWorkItemを扱わず、
+Programが入力順に結果を結合してHypothesis IDを一意に採番する。
+検索計画とOpenSearch候補選別も同じ境界を使う。各LLM呼出しへ渡すWorkItem、Hypothesis、
+検索要求、検索候補及び本文取得残数は1つのWorkItemに限定し、異なるWorkItemを
+`max_parallel_work_items`の範囲で並列実行する。Programは各出力を個別に契約検証した後、
+既知IDとWorkItem所有関係を保って1つの`SolverDecision`へ結合する。
 Solverは専用のEvidence Integrationで、1つのopen WorkItemとそのHypothesisを直近取得本文と照合し、
 Hypothesisへの反映、同じ確認事項の下位規範確認、直後に必要なToolを最大1件、1回の判断で行う。
 対象WorkItemが複数ある場合は、WorkItem単位の呼出しを最大4件並列実行する。
@@ -1805,15 +1812,16 @@ modelのcontext容量に合わせてProfileで変更し、超過時は候補を�
 
 Legal Profileでは、最大1回のOpenSearchと最大1回のGraph 1ホップを一つの探索セットとする。
 置換されていないHypothesisごとに1 Cycleでは1セットだけ実行し、全Cycle通算上限は
-`max_exploration_sets_per_hypothesis`で設定する。既定値は1とし、必要なら2へ変更できる。
+`max_exploration_sets_per_hypothesis`で設定する。既定値は2とし、必要なら1へ変更できる。
 候補評価、本文取得及びEvidence統合はセット数に含めない。通算上限到達時は未確認事項を保持した
 `unresolved`として扱う。探索scopeの重複防止を含む詳細は
 [仮説単位の法令検索方式](hypothesis_guided_search_design.md)を正とする。
 
 初期実装では、1つのRun内でproviderを統一する。providerをまたぐ役割分担は対象外とする。
 探索セット、Hypothesis、ToolRequest、Evidence及びCycleの正規契約はLuna、Haiku 4.5、Sonnet 4.6で共通にする。
-OpenAIのreasoning effort、Haiku 4.5のmanual extended thinking、Sonnet 4.6のadaptive thinkingとeffort、
-Provider別JSON Schema及び終了理由の差はModel adapter内だけで扱う。詳細な対応条件と修正対象は
+OpenAIのreasoning effort、Anthropicで明示的に有効化した場合のHaiku 4.5のmanual extended thinkingと
+Sonnet 4.6のadaptive thinking及びeffort、Provider別JSON Schema及び終了理由の差はModel adapter内だけで扱う。
+Anthropic thinkingは既定で無効にする。詳細な対応条件と修正対象は
 [仮説単位の法令検索方式](hypothesis_guided_search_design.md)を正とする。
 
 ### 7.2 Promptの配置
@@ -2003,6 +2011,8 @@ Legal Domain Packの共通Promptには次を追加する。
   Cycle上限と参照整合だけを検証する。成功済みscopeとして要求を棄却した後は、そのTool種類を
   修復契約の選択肢から外し、Solverが別種のToolまたは`start_next_cycle=true`を選ぶ。同じCycle内で
   棄却されたToolを再請求させず、Programが代替行動の意味を決めない。
+  Observation Integrationでは、棄却されたTool要求とその参照だけを除外し、同じ出力に含まれる
+  Hypothesis、gap及びEvidenceの有効な差分は保存する。Tool行動の棄却を意味差分の巻戻しに使わない。
   Search ReviewがHypothesisに対応付けた本文未取得候補が残る場合は、Dependency Actionの
   `available_tools`から`legal_search`を外す。候補の対応はLLM判断を正本とし、Programは保存済み対応と
   本文取得状態だけから、既知候補を確認する前の同一検索反復を防ぐ。
@@ -2057,13 +2067,13 @@ Graph Review差分処理やCycle境界処理を混入させず、IntegrationとG
 | `reviewer.md` | ReviewerViewの各状態、検査順序、`accept / revise`、Finding種別、既知IDの使い方を定義する。Reviewerは検索方法やToolRequestを決めない。 |
 | `solver_question_decomposition.md` | 初回Step 1。質問の明示要求を、独立した法的結論を要するWorkItemと`non_work_item_requirements`へ分ける。 |
 | `solver_hypothesis_generation.md` | 初回Step 2。Hypothesisがない既知WorkItemを1件ずつ処理し、検索対象を選べる未確認の法的命題を作って逐次保存する。初回`gaps`は空で初期化し、本文観察後に残る未確認事項だけを後続処理で記録する。 |
-| `solver_search_planning.md` | 初回Step 3。既知Hypothesisに対する今回の`legal_search`要求を作る。 |
+| `solver_search_planning.md` | 初回Step 3。1つのWorkItemとその既知Hypothesisに対する今回の`legal_search`要求を作る。対象WorkItemが複数なら呼出しを並列実行する。 |
 | `solver_integration.md` | 新しいToolResultを評価して状態を逐次更新し、未確認事項に対する次の行動を選ぶ。Graphの関係種別を説明できなければ全種別を要求せず、OpenSearchで根拠または起点を発見する。 |
 | `solver_evidence_integration.md` | 提示された取得本文を既存Hypothesisへ反映し、同じ確認事項の下位規範確認と直後のTool最大1件を判断する。WorkItem完了、Cycle移行、回答は扱わない。 |
 | `solver_cycle_close.md` | 直前の本文評価を前提に、次Cycleで優先するopen WorkItem、active Frontier及び再提示Evidenceの引継ぎだけを扱う。本文再評価、次Cycleの詳細なTool計画及び最終回答は行わない。 |
 | `solver_finalization.md` | 調査終了時に追加Toolを要求せず、確認済み範囲と未確認範囲を分けた最終回答を一度だけ作る。 |
 | `solver_reviewer_revision.md` | 全Findingを本文と照合し、`addressed / disputed`を全件返す。回答修正か追加調査かはSolverが判断する。 |
-| `solver_search_selection.md` | 全検索候補を比較し、選択した候補の内容評価、Hypothesis対応、本文取得判断を一つの出力で返す。非選択候補の詳細評価は出力しない。 |
+| `solver_search_selection.md` | 1つのWorkItemの検索候補を比較し、選択した候補の内容評価、Hypothesis対応、本文取得判断を一つの出力で返す。対象WorkItemが複数なら呼出しを並列実行し、非選択候補の詳細評価は出力しない。 |
 | `solver_graph_review.md` | `graph_review_batch`の`review_trigger`、`prior_review_status`及びLinkを読み、今回のbatchだけを評価・出力する。全ledgerは入力しない。 |
 | `solver_graph_review.md` | 各batchの全候補をWorkItem・Hypothesis別に評価し、最大3件を`select`、関連する残りを`defer`、無関係と判断したものだけを`reject`する。 |
 | `solver_graph_review.md` | `remaining_fetch_capacity=0`なら新たにselectせず、関連候補をdeferしてCycle終了判断へ戻す。Graph Reviewから直接次Cycleの法的方針を決めない。 |
@@ -2072,7 +2082,7 @@ Graph Review差分処理やCycle境界処理を混入させず、IntegrationとG
 | Provider schema | Graph Reviewの判断・出力対象と本文取得へ選べるIDは現在のbatchだけに制限し、出力件数をbatch件数と一致させる。選択上限は`min(3, remaining_fetch_capacity)`とする。`rejected`は新Link差分でbatchへ再提示された場合を除き同じHypothesisで再選択させず、別Hypothesisへの`frontier_re_adoptions`はledgerの既知Nodeと既知のopen WorkItem・Hypothesisだけを許可する。候補の関連性や優先度はschemaまたはProgramで補正しない。 |
 | Provider schema | Deferred解消はledgerの既知IDだけを許可する。Programは全件性と次動作との矛盾だけを拒否し、関連性・必要性を補正しない。 |
 | Provider schema | Graph Reviewモードで必ず空になるre-adoption、deferred解消、answerは空配列またはnullの簡易schemaとし、未使用の動的enumをコンパイルさせない。 |
-| Provider schema | Search Selectionは既知候補全件を入力として比較し、選択上限内の候補だけに内容要約、法的機能、対応Hypothesis、選択理由を返す。Programは既知ID、対応Hypothesis ID、重複、件数を検証し、選択外候補を入力候補との差集合として機械的に`defer`する。非選択候補の意味評価は保存せず、再提示時に改めてLLMが判断する。 |
+| Provider schema | Search Selectionは提示された1つのWorkItemに属する既知候補を比較し、そのWorkItemの選択上限内の候補だけに内容要約、法的機能、対応Hypothesis、選択理由を返す。Programは各出力の既知ID、Hypothesis所有関係、重複、件数を検証してから並列結果を結合し、選択外候補を入力候補との差集合として機械的に`defer`する。非選択候補の意味評価は保存せず、再提示時に改めてLLMが判断する。 |
 | Provider schema | ExplorationIntentのWorkItem・Hypothesis・起点Articleは既知ID enum、Graph mode、predicate、意味方向又は明示参照の探索目的、構造filterはLegal Tool allowlistへ限定する。意味関係は5 predicateと`from_subject / to_subject`、明示参照は2探索目的だけを許可し、空・all・複数predicateの一括指定を許可しない。`APPLIED_BY / MENTIONS`をenumへ含めない。 |
 
 Prompt契約テストでは、共通Prompt、処理モード別Prompt、Provider schemaが上表と同じCommand、status、

@@ -58,7 +58,7 @@ ANSWER_MODEL=claude-haiku-4-5-20251001
 REVIEWER_MODEL=claude-haiku-4-5-20251001
 REVIEWER_MAX_TOKENS=8192
 LLM_RESEARCH_STAGE_MODEL=claude-haiku-4-5-20251001
-LLM_RESEARCH_INTEGRATION_MODEL=claude-sonnet-5
+LLM_RESEARCH_INTEGRATION_MODEL=claude-sonnet-4-6
 PLANNER_MODEL=claude-haiku-4-5-20251001
 PLANNER_MAX_TOKENS=1024
 PLANNER_TIMEOUT_SEC=30
@@ -104,15 +104,16 @@ curl -s https://api.anthropic.com/v1/messages \
 
 `404 model not found` の場合は、そのキーではモデルIDが使えない。契約プランで利用可能な別のモデルIDに変える。
 
-Haiku 4.5で新Frameworkを検証する場合は、manual extended thinkingを使う。Haiku 4.5は
-`output_config.effort`に対応しないため、Lunaの`OPENAI_REASONING_EFFORT`をそのまま移植しない。
-`ANTHROPIC_THINKING_BUDGET_TOKENS`は思考用token数で、0なら無効になる。各呼出しではProgramが
-`max_tokens`から回答本文用に1,024 token以上を残す範囲へ調整する。
+新FrameworkのAnthropic thinkingは既定で無効にする。Haiku 4.5は`output_config.effort`に
+対応しないため、Lunaの`OPENAI_REASONING_EFFORT`をそのまま移植しない。thinkingを比較検証する場合だけ
+`AGENT_FRAMEWORK_ANTHROPIC_REASONING_EFFORT`を`none`以外へ変更する。Haikuではその場合に
+`ANTHROPIC_THINKING_BUDGET_TOKENS`を使い、Programが`max_tokens`から回答本文用に1,024 token以上を
+残す範囲へ調整する。
 
 ```bash
 LLM_PROVIDER=anthropic
 LLM_MODEL=claude-haiku-4-5-20251001
-ANTHROPIC_THINKING_BUDGET_TOKENS=4096
+AGENT_FRAMEWORK_ANTHROPIC_REASONING_EFFORT=none
 ANTHROPIC_MAX_TOKENS=16384
 ANTHROPIC_MAX_TOKENS_CEILING=32768
 ```
@@ -1104,25 +1105,33 @@ Reviewerは`AGENT_FRAMEWORK_REVIEWER_ENABLED=true`を明示した場合だけ有
 `ReviewerView`を機械投影する。Reviewerは`accept`または構造化Findingを返し、差戻し後のSolverは
 全finding IDへ`addressed / disputed`を1回ずつ返す。Programは既知IDと全件性だけを検証し、
 回答修正か追加調査かを決めない。既定の差戻し上限は1回で、再確認も`revise`なら`review_failed`となる。
-検索時LLMの現在の基準検証はOpenAI API `gpt-5.6-luna`、reasoning effort `high`を基本とする。
-`evidence_integration`を含む全Solver処理にLunaを使う。
-`AGENT_FRAMEWORK_EVIDENCE_INTEGRATION_MODEL`は本文評価だけを別モデルで比較する場合の任意設定として残す。
-共通fixtureと公開買付け3問が安定するまでは、
-Haiku比較を同時に進めない。不具合時はモデル性能だけを原因とせず、
-実装、契約の`description`、Prompt、Provider輸送、入力、`trace.agentFramework`を先に調べる。
-Lunaで合格後、必要な場合だけ同じfixtureと合格条件のままHaikuへ変更し、Provider差だけを確認する。
-検索時のLuna利用は、非同期Relation分類とは別の運用である。
-初回の作業分解とTool選択には`AGENT_FRAMEWORK_RESEARCH_MODEL`、ToolResult取得後の意味評価・
-状態統合・追加調査または終了の判断には`AGENT_FRAMEWORK_INTEGRATION_MODEL`を使う。
-`AGENT_FRAMEWORK_EVIDENCE_INTEGRATION_MODEL`を指定した場合だけ、取得本文をHypothesisへ反映する
-`evidence_integration`にそのモデルを使う。未指定時は`AGENT_FRAMEWORK_INTEGRATION_MODEL`へ戻る。
-Cycle Close、通常Integration、最終回答はこの専用設定の対象ではない。
-`AGENT_FRAMEWORK_DEPENDENCY_ASSESSMENT_MODEL`は、取得本文だけで回答できるか、同じ確認事項を
-定める下位規範本文が残るかを判断する完了監査だけを別モデルにする任意設定である。未指定時は
-`AGENT_FRAMEWORK_EVIDENCE_INTEGRATION_MODEL`、さらに未指定なら通常の統合モデルを使う。
-Haikuで複数項目を持つ長い規定の委任先を見落とす場合に限り、この監査をSonnet等で比較する。
-質問分解、探索、本文統合、Cycle Close、最終回答及びLunaの設定には影響しない。
-旧`AGENT_FRAMEWORK_FINALIZE_MODEL`も互換設定として読めるが、新規設定ではintegration名を使う。
+### LLMの3段階routing
+
+全LLM処理のlevelは
+`agent-api/app/domains/legal/model_levels.json`に`low`、`middle`、`high`のいずれかで明示する。
+現在は仮説作成・見直しと本文統合を`middle`、その他を`low`にしている。
+
+Providerごとの既定model対応は次のとおりである。利用環境でmodel IDが異なる場合は、
+`AGENT_FRAMEWORK_LOW_MODEL`、`AGENT_FRAMEWORK_MIDDLE_MODEL`、`AGENT_FRAMEWORK_HIGH_MODEL`で置き換える。
+
+| level | OpenAI | Anthropic |
+|---|---|---|
+| `low` | `gpt-5.6-luna` | `claude-haiku-4-5-20251001` |
+| `middle` | `gpt-5.6-terra` | `claude-sonnet-4-6` |
+| `high` | `gpt-5.6-sol` | `claude-opus-4-8` |
+
+上書きできる処理IDは次のとおりである。
+
+- 質問・仮説: `question_readiness`、`question_decomposition`、`hypothesis_generation`、`hypothesis_revision`
+- 探索: `search_planning`、`search_review`、`graph_review`
+- 統合・依存判断: `integration`、`evidence_integration`、`dependency_assessment`
+- 終了・回答: `cycle_close`、`finalization`、`reviewer_revision`、`reviewer`
+- 診断: `post_run_audit`
+
+処理とlevelの対応は設定ファイル、Providerごとのlevelとmodel IDの対応は上記3環境変数を正本とする。
+旧`AGENT_FRAMEWORK_*_MODEL`は互換設定として残るが、新Frameworkの処理別routingには使用しない。
+不具合時はモデル性能だけを原因とせず、実装、契約の`description`、Prompt、Provider輸送、入力、
+`trace.agentFramework`を先に調べる。検索時のmodel routingは非同期Relation分類とは別の運用である。
 全Solver呼出しへ短い`solver_common.md`を合成する。Toolを使える処理だけへ`solver_tools.md`、
 完了判断を行う処理へ`solver_completion.md`を追加する。実行手順は`research / integration /
 cycle_close / finalization / reviewer_revision / search_selection / graph_selection`別のPromptから一つだけ選ぶ。
@@ -1137,14 +1146,13 @@ Finalizationが取得済み根拠から最終回答を一度だけ生成する�
 また、ローカルのSource、Prompt、契約またはProfileを変更した後は、起動中の`agent-api`をそのまま
 使わない。コンテナの作成時刻が新しく見えても、最後の変更前にbuildされたImageである可能性がある。
 実モデル検証前に、必ず最後の変更を含めて`--build --force-recreate`する。
-次は全Solver処理をLuna `high`にし、診断snapshotを保存する例である。
+次は仮説と統合をTerra、その他をLunaにし、診断snapshotを保存する例である。
 
 ```bash
 AGENT_FRAMEWORK_ACTIVE=true \
 LLM_PROVIDER=openai \
-LLM_MODEL=gpt-5.6-luna \
-AGENT_FRAMEWORK_EVIDENCE_INTEGRATION_MODEL=gpt-5.6-luna \
-OPENAI_REASONING_EFFORT=high \
+AGENT_FRAMEWORK_REASONING_EFFORT=high \
+AGENT_FRAMEWORK_MAX_EXPLORATION_SETS_PER_HYPOTHESIS=2 \
 AGENT_FRAMEWORK_REVIEWER_ENABLED=false \
 AGENT_FRAMEWORK_DIAGNOSTICS_MODE=snapshot \
 AGENT_FRAMEWORK_MODEL_TIMEOUT_SEC=180 \
@@ -1155,6 +1163,17 @@ AGENT_FRAMEWORK_MIN_NEXT_CYCLE_BUDGET_SEC=120 \
 AGENT_FRAMEWORK_MAX_WALL_TIME_SEC=420 \
 docker compose up --build -d --force-recreate agent-api
 ```
+
+`AGENT_FRAMEWORK_MAX_EXPLORATION_SETS_PER_HYPOTHESIS`は、1つのHypothesisが全Cycleを通じて
+新しく開始できる探索セット数で、許可値は`1`または`2`である。各1 Cycleで開始できるのは
+1セットだけで、同じセット内でOpenSearchの後にGraph 1ホップを実行できる。
+
+Claude比較では、共通のSolver契約・Prompt・状態遷移とlevel指定は変えず、再作成コマンドの
+`LLM_PROVIDER=anthropic`だけを切り替える。既定ではHaiku 4.5のmanual extended thinkingと
+Sonnet 4.6のadaptive thinkingをどちらも送らない。比較実験で明示的に有効化した場合だけ、
+Provider adapterがHaikuのmanual thinking又はSonnetのadaptive thinkingへ変換する。
+`snapshot`診断の`transport_input`と`complete_request.json`で、model、要求effort、実効モード、
+Haikuの実効thinking budgetを確認する。
 
 コマンド行で指定した値は、その`docker compose`実行にだけ適用される。検証中にもう一度コンテナを
 再作成する場合も同じ値を明示するか、先に`.env`を検証条件へ変更する。値を省略して再作成すると、
@@ -1342,7 +1361,8 @@ Step 3の`input.json.available_tools`には、本番の`ToolDefinition`から取
 
 Cycle境界の固定成果物は`step-4-evidence-integration`と`step-5-cycle-close`に分ける。
 前者は直前のToolで取得した本文を1つのopen WorkItemに属するHypothesisと照合し、同じ確認事項の下位規範状態と直後のToolを最大1件判断する。対象WorkItemが複数ある場合はWorkItem単位の呼出しを最大4件並列実行する。
-その`input.json`には本文取得候補と検索履歴が含まれ、利用可能Toolの契約は`output_schema.json`に一度だけ含まれる。後者は反映結果を前提に、次Cycleへの
+その`input.json`には本文取得候補、検索履歴及び現在Cycleで利用可能なToolが含まれ、
+`output_schema.json`は同じToolと対象Hypothesisだけを出力可能にする。後者は反映結果を前提に、次Cycleへの
 引継ぎだけを判断し、これらの行動選択用情報や回答用本文を受け取らない。調査終了時の回答は専用Finalizationが生成する。実行時IDの既知性は共通validatorが検証する。
 Evidence Integrationの既知Hypothesis、Evidence、取得可能Article IDは直近の取得結果へ限定されるので、
 未知IDによる再試行を避けるためProvider schemaのenumにも同じ一覧を残す。
@@ -1381,8 +1401,16 @@ LR-004が求める「Cycle 1で3 Article取得直後」のfixtureとは区別す
 承認済みcheckpointから先のSolver呼出しだけをLunaで再生する場合は、次を使う。このコマンドは
 外部APIを呼ぶため通常のpytestやCIには含めない。最終合格は同じmodel設定のE2Eで確認する。
 
+`replay_agent_checkpoint.py`はホストのPythonプロセスとして実行する。実行中コンテナの環境変数は
+継承されないため、先に`.env`を現在のshellへexportし、Providerに対応するAPI keyと設定を渡す。
+リポジトリの仮想環境を使うことで、本番コードと同じ依存関係で再生できる。
+
 ```bash
-python3 scripts/replay_agent_checkpoint.py \
+set -a
+source .env
+set +a
+
+PYTHONPATH=agent-api agent-api/.venv/bin/python scripts/replay_agent_checkpoint.py \
   --fixture agent-api/tests/fixtures/framework/tob_overview_cycle1_after_search_v1.json \
   --provider openai \
   --model gpt-5.6-luna \
@@ -1506,7 +1534,8 @@ Legal ProfileのGraph要求は1回1ホップである。SolverがHypothesisに�
 （現行既定5件）で、WorkItemごと・Cycleごとに制限する。互換用の旧変数
 `AGENT_FRAMEWORK_MAX_FETCHED_RESOURCES_PER_CYCLE`も読み込めるが、新規設定では使わない。
 WorkItem専属のLLM処理の同時実行数は
-`AGENT_FRAMEWORK_MAX_PARALLEL_WORK_ITEMS`（現行既定4）で指定する。
+`AGENT_FRAMEWORK_MAX_PARALLEL_WORK_ITEMS`（現行既定4）で指定する。初回のHypothesis立案と
+Evidence IntegrationはWorkItemごとに入力を分離し、この上限まで並列実行する。
 Legal Profileの1 Solver Decisionは検索系Toolを最大4要求、`fetch_articles`を最大1要求とし、
 合計上限は5要求である。本文取得量の5 Article上限とは別の制約である。
 Graph Reviewから1 stepで選ぶ候補は最大3件とし、残りの関連候補はdeferして後続stepまたは次Cycleへ残す。

@@ -50,7 +50,7 @@ Cycle境界：取得本文と下位規範依存の統合 ──→ Cycleの終�
 |---|---|---|
 | `research` | question_decompositionのみ | 質問の明示要求を、独立した法的結論を要するWorkItemと、それ以外の明示要求へ分ける。 |
 | `hypothesis_generation` | hypothesis_generationのみ | HypothesisがないWorkItemを1件受け取り、検索前の暫定的な法的命題を作る。 |
-| `hypothesis_revision` | hypothesis_revisionのみ | Cycle境界で既存Hypothesisの現在版を更新し、独立した未解決命題だけを追加する。 |
+| `hypothesis_revision` | hypothesis_revisionのみ | Cycle境界で、意味が変わる命題を新しいHypothesis IDで追加し、置換元を明示する。 |
 | `search_planning` | search_planningのみ | 入力済みHypothesisを検証する今回の`legal_search`要求を作る。 |
 | `integration` | 通常はidentity + integration + common + tools + completion。新しい本文がなく既存の下位規範依存だけを進める場合はidentity + dependency_action + tools | 新しい取得本文がない通常Stepでは、状態から次の行動又は完了を決める。既存の未解決依存だけを進める場合は、その依存に対する次のToolRequestだけを専用契約で決める。 |
 | `evidence_integration` | evidence_integrationのみ | 1つのopen WorkItemとそのHypothesisを直近取得本文と照合し、状態差分、下位規範確認及び直後のToolを最大1件返す。対象WorkItemが複数ある場合はWorkItem単位の呼出しを最大4件並列実行する。Programは本文とIDを投影し、既知IDと構造だけを検証する。 |
@@ -94,7 +94,7 @@ Anthropicの「明確で直接的な指示、必要時だけ順序付き手順�
 | `solver_completion.md` | grounding Evidence、citation、下位規範、通常完了と上限時限定回答の共通条件。 |
 | `solver_question_decomposition.md` | 初回Step 1。WorkItemと`non_work_item_requirements`への要求分解。 |
 | `solver_hypothesis_generation.md` | 初回Step 2。Hypothesisがない既知WorkItem 1件から、法的仮説と未確認の`gaps`を立案する。 |
-| `solver_hypothesis_revision.md` | Cycle境界。同じ命題は既存IDの現在版を更新し、独立命題だけを新IDで追加する。 |
+| `solver_hypothesis_revision.md` | Cycle境界。命題の意味が変わる場合は新しいIDで置換し、別の論点は独立したHypothesisとして追加する。 |
 | `solver_search_planning.md` | 初回Step 3。既知Hypothesisに対する`legal_search`要求の作成。 |
 | `solver_integration.md` | 観察結果の評価、状態更新、下位規範監査、次の行動。 |
 | `solver_evidence_integration.md` | 取得本文のHypothesis反映、下位規範確認及び同じWorkItemを直ちに進めるTool最大1件を扱う。Toolを選べるため、完成Promptには`solver_tools.md`も合成する。WorkItem完了、Cycle移行、回答は扱わない。 |
@@ -111,6 +111,12 @@ Anthropicの「明確で直接的な指示、必要時だけ順序付き手順�
 Search Reviewで保留した候補と、本文取得が未完了の選択候補は、次のStep / Cycleでも
 `search_candidates`へ再投影されます。新規未評価候補があるときは新規候補だけをSearch Reviewへ渡し、
 過去の候補は通常の統合処理で再利用します。
+
+`hypothesis_exploration_sets[]`は、置換されていないHypothesisごとに、現在Cycleの
+OpenSearch・Graph使用状況と、後続Cycleで新しく開始できる探索セットの残数を表します。1セットは
+OpenSearch 1回と、そこで見つけた起点からのGraph 1ホップです。候補評価、本文取得、
+Evidence統合はセット数に含めません。Programは上限を検証し、現在Cycleで使えるToolだけを
+`available_tools`と出力schemaへ投影します。
 
 ### モードの選択
 
@@ -149,7 +155,7 @@ Search Reviewで保留した候補と、本文取得が未完了の選択候補�
 実行時入力は`input.json`、実送信内容は`request.txt`で確認します。
 
 成功済みの検索・Graph scopeはProgramが実行前に棄却しますが、契約違反の修復にはしません。
-scopeはWorkItem、Hypothesis、Tool引数の組であり、`request_id`と`purpose`は含みません。
+scopeはTool、WorkItem、正規化したTool引数の組であり、Hypothesis ID、`request_id`、`purpose`は含みません。
 `action_feedback`として、実行しなかった理由と直前のToolRequestだけを同じSolverへ返します。
 棄却後の修復schemaから棄却されたTool種類を外し、別種のToolまたは`start_next_cycle=true`だけを
 選べるようにします。Programは代替Toolを選ばず、ID、引数、成功履歴の完全一致とCycle可否だけを検証します。

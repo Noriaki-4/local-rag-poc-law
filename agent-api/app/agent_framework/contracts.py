@@ -35,17 +35,26 @@ def _validate_hypothesis_gap_diff(
     *,
     additions: tuple[HypothesisGapAddition, ...],
     resolved_gap_ids: tuple[str, ...],
+    discarded_gap_ids: tuple[str, ...],
     legacy_replacement: tuple[str, ...] | None,
 ) -> None:
     """gap差分の重複と旧全置換形式との混在を共通検証する。"""
 
-    if legacy_replacement is not None and (additions or resolved_gap_ids):
+    if legacy_replacement is not None and (
+        additions or resolved_gap_ids or discarded_gap_ids
+    ):
         raise ValueError("legacy gaps cannot be mixed with gap diffs")
     descriptions = [item.description for item in additions]
     if len(descriptions) != len(set(descriptions)):
         raise ValueError("added hypothesis gaps must be unique")
     if len(resolved_gap_ids) != len(set(resolved_gap_ids)):
         raise ValueError("resolved hypothesis gap IDs must be unique")
+    if len(discarded_gap_ids) != len(set(discarded_gap_ids)):
+        raise ValueError("discarded hypothesis gap IDs must be unique")
+    if set(resolved_gap_ids) & set(discarded_gap_ids):
+        raise ValueError(
+            "hypothesis gap IDs cannot be both resolved and discarded"
+        )
 
 
 class WorkItemUpdate(FrameworkModel):
@@ -124,6 +133,15 @@ class HypothesisUpdate(FrameworkModel):
             "未確認の既存gap IDは含めず、解決がなければ空とする。"
         ),
     )
+    discard_gap_ids: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "本文評価後も確認済みではないが、重複、範囲外、過度に抽象的又は"
+            "より適切な未確認事項への訂正により、探索対象から外す既存"
+            "hypotheses[].gaps[].gap_id。訂正する場合は新しい内容を"
+            "add_gapsへ入れる。該当がなければ空とする。"
+        ),
+    )
     legacy_replacement_gaps: tuple[str, ...] | None = Field(
         default=None,
         validation_alias="gaps",
@@ -137,6 +155,7 @@ class HypothesisUpdate(FrameworkModel):
         _validate_hypothesis_gap_diff(
             additions=self.add_gaps,
             resolved_gap_ids=self.resolve_gap_ids,
+            discarded_gap_ids=self.discard_gap_ids,
             legacy_replacement=self.legacy_replacement_gaps,
         )
         return self
@@ -411,15 +430,18 @@ class HypothesisRevisionProposal(FrameworkModel):
         max_length=160,
         description="追加先の既存WorkItem ID。",
     )
+    replaces_hypothesis_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=160,
+        description=(
+            "命題を変更する場合の置換元Hypothesis ID。独立した追加ではnull。"
+        ),
+    )
     statement: str = Field(
         min_length=1,
         max_length=1200,
         description="取得本文から判明した、独立して確認する新しい命題。",
-    )
-    evidence_ids: tuple[str, ...] = Field(
-        default=(),
-        max_length=12,
-        description="この命題の必要性を示した取得済みEvidence ID。",
     )
     gaps: tuple[str, ...] = Field(
         default=(),
@@ -428,71 +450,13 @@ class HypothesisRevisionProposal(FrameworkModel):
     )
 
 
-class HypothesisRevisionUpdate(FrameworkModel):
-    """既存Hypothesisの現在版を同じIDでブラッシュアップする差分。"""
-
-    model_config = ConfigDict(
-        json_schema_extra=_hide_legacy_hypothesis_gap_schema
-    )
-
-    hypothesis_id: str = Field(
-        min_length=1,
-        max_length=160,
-        description="現在版を更新する既存Hypothesis ID。",
-    )
-    statement: str = Field(
-        min_length=1,
-        max_length=1200,
-        description="取得本文を踏まえて修正した、次Cycleで検証する法的命題。",
-    )
-    judgment: HypothesisJudgment = Field(
-        description="更新後の命題について、提示本文から判断した現在の判定。",
-    )
-    evidence_ids: tuple[str, ...] = Field(
-        default=(),
-        max_length=12,
-        description="見立てを更新する必要性を示した取得済みEvidence ID。",
-    )
-    add_gaps: tuple[HypothesisGapAddition, ...] = Field(
-        default=(),
-        max_length=12,
-        description="見直しで新たに判明した未確認事項。追加がなければ空配列。",
-    )
-    resolve_gap_ids: tuple[str, ...] = Field(
-        default=(),
-        max_length=12,
-        description="見直しで不要又は確認済みとなった既存gap ID。",
-    )
-    legacy_replacement_gaps: tuple[str, ...] | None = Field(
-        default=None,
-        validation_alias="gaps",
-        exclude=True,
-        repr=False,
-        description="保存済み旧fixtureを読み込むための内部移行値。",
-    )
-
-    @model_validator(mode="after")
-    def require_unique_gap_diffs(self) -> HypothesisRevisionUpdate:
-        _validate_hypothesis_gap_diff(
-            additions=self.add_gaps,
-            resolved_gap_ids=self.resolve_gap_ids,
-            legacy_replacement=self.legacy_replacement_gaps,
-        )
-        return self
-
-
 class HypothesisRevisionDecision(FrameworkModel):
-    """既存命題の現在版更新と、独立した未解決命題の追加差分。"""
+    """既存命題を置き換える命題又は独立した未解決命題の追加差分。"""
 
     decision_reason: str = Field(
         min_length=1,
         max_length=1200,
         description="Hypothesisを更新、追加又は維持した理由。",
-    )
-    revise_hypotheses: tuple[HypothesisRevisionUpdate, ...] = Field(
-        default=(),
-        max_length=8,
-        description="同じIDの現在版をブラッシュアップする既存Hypothesis。",
     )
     add_hypotheses: tuple[HypothesisRevisionProposal, ...] = Field(
         default=(),

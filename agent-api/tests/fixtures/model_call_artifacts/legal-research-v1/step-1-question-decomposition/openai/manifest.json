@@ -1,13 +1,17 @@
 {
+  "effectiveReasoningEffort": null,
+  "effectiveReasoningMode": null,
   "inputHash": "ac07718e1bdf15a5b16ee9a9f5870b844fb5efc54019546e80f1226daaebaa5b",
   "instructionsHash": "d459952b7b1f9a93046b6dbd1a8e83359fb187dc0341ddb1bdb40916cd9cb0df",
   "model": "gpt-4o-mini",
-  "normalizedSchemaHash": "ed0bef2a8ae0186b15d48996fbf7d32d0cdda1d579842b18fb0bcec8c2196d4d",
+  "normalizedSchemaHash": "256e7a58afbee5cb17e015610c35056455b63324febcfe1c661ca6528a7605f1",
   "outputSchemaHash": "75224d9c24deb47b5c7b41516f1a730e5b69df7c1898059565e4ecfdecb9c686",
   "profileName": "legal-default",
-  "profileVersion": "494",
+  "profileVersion": "510",
   "promptAssets": [],
   "provider": "openai",
   "requestHash": "42a2a861a631d16c58e92795d5902e18db5f41743a6d51da50f1fff8c807c036",
-  "stage": "research_research_decomposition"
+  "requestedReasoningEffort": null,
+  "stage": "research_research_decomposition",
+  "thinkingBudgetTokens": null
 }

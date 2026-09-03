@@ -8,6 +8,7 @@ from .domains.legal.question_readiness import (
     QuestionReadinessModelProtocolError,
     QuestionReadinessService,
 )
+from .domains.legal.model_routing import legal_model_for, legal_model_routing
 from .framework_agent import LegalFrameworkAgentService
 from .framework_audit import (
     AuditContextCapacityError,
@@ -94,11 +95,13 @@ def health() -> dict[str, Any]:
             "reviewerEnabled": settings.agent_framework_reviewer_enabled,
             "diagnosticsMode": settings.agent_framework_diagnostics_mode,
             "postRunAudit": settings.agent_framework_post_run_audit,
-            "researchModel": settings.agent_framework_research_model,
-            "integrationModel": settings.agent_framework_integration_model,
+            "modelTiers": settings.agent_framework_model_tiers,
+            "modelRouting": legal_model_routing(),
+            "researchModel": legal_model_for("question_decomposition"),
+            "integrationModel": legal_model_for("integration"),
             # 旧クライアントとの互換性のため当面残す。
-            "finalizeModel": settings.agent_framework_finalize_model,
-            "reviewerModel": settings.agent_framework_reviewer_model,
+            "finalizeModel": legal_model_for("finalization"),
+            "reviewerModel": legal_model_for("reviewer"),
             "maxResearchCycles": settings.agent_framework_max_research_cycles,
             "maxWallTimeSec": settings.agent_framework_max_wall_time_sec,
         },

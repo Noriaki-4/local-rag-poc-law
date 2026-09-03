@@ -134,6 +134,18 @@
             "maxItems": 12,
             "type": "array"
           },
+          "discard_gap_ids": {
+            "description": "本文評価後も確認済みではないが、重複、範囲外、過度に抽象的又はより適切な未確認事項への訂正により、探索対象から外す既存hypotheses[].gaps[].gap_id。訂正する場合は新しい内容をadd_gapsへ入れる。該当がなければ空とする。",
+            "items": {
+              "enum": [
+                "gap-a6b6b031a41bca90",
+                "gap-6dc9a8d9d978f400"
+              ],
+              "type": "string"
+            },
+            "maxItems": 2,
+            "type": "array"
+          },
           "evidence_ids": {
             "description": "今回の本文評価で、現在の判定とgapsの判断に新たに使用したgrounding_evidence[].evidence_idの最小集合。既にHypothesis.evidence_idsにあるIDは再出力しなくてよく、Programが既存IDを保持して追記する。metadata.articleIdやmetadata.sourceContentUnitIdは入れない。関連するだけのParagraph・Itemを全件入れない。unresolvedでも本文で確認できた部分があれば保持できる。",
             "items": {
@@ -208,7 +220,8 @@
           "judgment",
           "evidence_ids",
           "add_gaps",
-          "resolve_gap_ids"
+          "resolve_gap_ids",
+          "discard_gap_ids"
         ],
         "type": "object"
       },

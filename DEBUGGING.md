@@ -118,6 +118,8 @@ Cycle開始時と終了時の`CaseState`から作る監査用の投影です。
 - Toolの引数、結果件数、所要時間
 - LLM呼出し回数、所要時間、入出力token
 - 未解決Hypothesisと`gaps`
+- Hypothesisの置換元IDと、通常処理に渡すactive状態
+- Hypothesisごとの探索セット使用状況と残数
 - 構造上の確認事項
 
 最終回答の合否と探索経路の確認事項を分けます。たとえば最終回答が正しくても、0件だった意味関係Graph検索で
@@ -135,6 +137,14 @@ agent-api/.venv/bin/python scripts/summarize_agent_diagnostic.py \
 報告の`hypothesisGapActivity`には、Hypothesisごとのgap追加内容と解消した`gap_id`を
 sequence順に出力します。Cycle Close前に契約違反やtimeoutで停止し、`cycle_checkpoint`がない場合も、
 それ以前のモデル出力からgap差分を確認できます。
+
+`stateStatus.hypotheses[]`の`active`と`replacesHypothesisId`で置換関係を、
+`contextStatus.hypothesisExplorationSets[]`で現在CycleのOpenSearch・Graphと通算セット数を確認します。
+`transport_input`と生成された`complete_request.json`には、要求したeffortだけでなく、
+Provider adapterが適用した推論モード、実効effort又はthinking budgetも記録します。
+`modelCallStage`はLLM処理の種類を表します。WorkItem単位で実行する処理に複数又は0件の
+`scope.workItemIds`が渡ると、監査報告へ`WORK_ITEM_MODEL_SCOPE_CONFLICT`を出します。
+これにより、並列実行の有無ではなく、各モデル呼出しの入力契約が単一WorkItemに限定されているか確認できます。
 
 警告を見つけたら、該当Cycleの`startSequence`と`decisionSequence`を起点に最小fixtureへ固定します。
 警告を新しい状態値や法令固有の補正条件へ変換しません。

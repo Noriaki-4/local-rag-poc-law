@@ -96,6 +96,15 @@
           "title": "Add Gaps",
           "type": "array"
         },
+        "discard_gap_ids": {
+          "default": [],
+          "description": "本文評価後も確認済みではないが、重複、範囲外、過度に抽象的又はより適切な未確認事項への訂正により、探索対象から外す既存hypotheses[].gaps[].gap_id。訂正する場合は新しい内容をadd_gapsへ入れる。該当がなければ空とする。",
+          "items": {
+            "type": "string"
+          },
+          "title": "Discard Gap Ids",
+          "type": "array"
+        },
         "evidence_ids": {
           "default": [],
           "description": "今回の本文評価で、現在の判定とgapsの判断に新たに使用したgrounding_evidence[].evidence_idの最小集合。既にHypothesis.evidence_idsにあるIDは再出力しなくてよく、Programが既存IDを保持して追記する。metadata.articleIdやmetadata.sourceContentUnitIdは入れない。関連するだけのParagraph・Itemを全件入れない。unresolvedでも本文で確認できた部分があれば保持できる。",

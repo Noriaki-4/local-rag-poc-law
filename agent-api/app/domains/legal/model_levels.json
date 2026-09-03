@@ -1,0 +1,17 @@
+{
+  "question_readiness": "low",
+  "question_decomposition": "low",
+  "hypothesis_generation": "middle",
+  "hypothesis_revision": "middle",
+  "search_planning": "low",
+  "integration": "middle",
+  "evidence_integration": "middle",
+  "dependency_assessment": "low",
+  "cycle_close": "low",
+  "finalization": "middle",
+  "reviewer_revision": "low",
+  "search_review": "low",
+  "graph_review": "low",
+  "reviewer": "low",
+  "post_run_audit": "low"
+}

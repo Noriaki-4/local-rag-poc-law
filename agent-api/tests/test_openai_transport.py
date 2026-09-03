@@ -128,6 +128,31 @@ def test_openai_transport_omits_unsupported_temperature_for_gpt5(
     assert captured["payload"]["reasoning_effort"] == "low"
 
 
+def test_openai_transport_uses_profile_reasoning_effort(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_post(url, *, headers, json, timeout):
+        captured["payload"] = json
+        return SimpleNamespace(
+            ok=True,
+            status_code=200,
+            json=lambda: {
+                "choices": [{"message": {"content": '{}'}, "finish_reason": "stop"}],
+                "usage": {},
+            },
+        )
+
+    monkeypatch.setattr("app.llm.settings.openai_api_key", "test-key")
+    monkeypatch.setattr("app.llm.settings.openai_reasoning_effort", "low")
+    monkeypatch.setattr("app.llm.requests.post", fake_post)
+
+    LLMClient(provider="openai")._openai_json(
+        "prompt", SCHEMA, "gpt-5.6-luna", 4096, 30, effort="high"
+    )
+
+    assert captured["payload"]["reasoning_effort"] == "high"
+
+
 def test_openai_transport_requires_api_key(monkeypatch) -> None:
     monkeypatch.setattr("app.llm.settings.openai_api_key", None)
 

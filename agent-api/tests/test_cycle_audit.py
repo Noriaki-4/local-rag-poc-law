@@ -434,6 +434,39 @@ def test_report_flags_repeated_integration_structure() -> None:
     }
 
 
+def test_cycle_audit_flags_multi_work_item_model_projection() -> None:
+    report = build_cycle_audit_report(
+        (
+            {
+                "sequence": 1,
+                "event": "transport_input",
+                "caseId": "case-parallel-scope",
+                "transportStage": "solver",
+                "modelCallStage": "solver_research_search",
+                "scope": {
+                    "workItemIds": ["wi-1", "wi-2"],
+                    "hypothesisIds": ["h-1", "h-2"],
+                },
+            },
+            {
+                "sequence": 2,
+                "event": "run_complete",
+                "caseId": "case-parallel-scope",
+                "elapsedMs": 10,
+                "stateStatus": {"runStatus": "completed"},
+            },
+        )
+    )
+
+    finding = next(
+        item
+        for item in report["executionFindings"]
+        if item["code"] == "WORK_ITEM_MODEL_SCOPE_CONFLICT"
+    )
+    assert finding["details"]["modelCallStage"] == "solver_research_search"
+    assert finding["details"]["workItemIds"] == ["wi-1", "wi-2"]
+
+
 def test_cycle_audit_reports_gap_diffs_before_cycle_checkpoint() -> None:
     records = (
         {
@@ -450,6 +483,7 @@ def test_cycle_audit_reports_gap_diffs_before_cycle_checkpoint() -> None:
                         "hypothesis_id": "h1",
                         "add_gaps": [{"description": "追加した未確認事項"}],
                         "resolve_gap_ids": ["gap-old"],
+                        "discard_gap_ids": ["gap-obsolete"],
                     }
                 ]
             },
@@ -477,12 +511,14 @@ def test_cycle_audit_reports_gap_diffs_before_cycle_checkpoint() -> None:
             "hypothesisId": "h1",
             "addedGaps": ["追加した未確認事項"],
             "resolvedGapIds": ["gap-old"],
+            "discardedGapIds": ["gap-obsolete"],
         }
     ]
     markdown = render_cycle_audit_markdown(report)
     assert "## Hypothesis gap activity" in markdown
     assert "追加した未確認事項" in markdown
     assert "gap-old" in markdown
+    assert "gap-obsolete" in markdown
 
 
 def test_cycle_audit_allows_observation_iteration_after_scoped_tool_result() -> None:
@@ -838,3 +874,39 @@ def test_cycle_audit_comparison_reports_run_and_purpose_deltas() -> None:
     markdown = render_cycle_audit_comparison_markdown(comparison)
     assert "Agent Diagnostic Comparison" in markdown
     assert "| elapsedMs | 1000 | 1200 | 200 |" in markdown
+
+
+def test_cycle_audit_reports_effective_reasoning_configuration() -> None:
+    report = build_cycle_audit_report(
+        (
+            {
+                "sequence": 1,
+                "event": "transport_input",
+                "model": "claude-haiku-4-5-20251001",
+                "effectiveReasoningMode": "manual_extended_thinking",
+                "effectiveReasoningEffort": None,
+                "thinkingBudgetTokens": 4096,
+            },
+            {
+                "sequence": 2,
+                "event": "transport_input",
+                "model": "claude-haiku-4-5-20251001",
+                "effectiveReasoningMode": "manual_extended_thinking",
+                "effectiveReasoningEffort": None,
+                "thinkingBudgetTokens": 4096,
+            },
+        )
+    )
+
+    assert report["reasoningConfigurations"] == [
+        {
+            "model": "claude-haiku-4-5-20251001",
+            "mode": "manual_extended_thinking",
+            "effort": None,
+            "thinkingBudgetTokens": 4096,
+            "callCount": 2,
+        }
+    ]
+    markdown = render_cycle_audit_markdown(report)
+    assert "Effective model reasoning settings" in markdown
+    assert "manual_extended_thinking" in markdown

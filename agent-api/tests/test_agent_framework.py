@@ -30,6 +30,7 @@ from app.agent_framework.loop import (
     _finalization_decision_context,
     _grounding_observation_context,
     _has_unintegrated_grounding_result,
+    _without_rejected_tool_requests,
 )
 from app.agent_framework.observability import RunTrace
 from app.agent_framework.ports.model import (
@@ -262,6 +263,88 @@ def test_early_finalize_stops_without_tools_or_reviewer() -> None:
     assert len(model.solver_contexts) == 1
     assert model.review_contexts == []
     assert trace.reviewer_enabled is False
+
+
+def test_exhausted_exploration_enters_finalization_without_empty_cycle() -> None:
+    search_request = ToolRequest(
+        request_id="search-1",
+        work_item_id="w1",
+        tool_name="legal_search",
+        arguments={"query": "制度 要件"},
+        purpose="要件を探す",
+        hypothesis_ids=("h1",),
+    )
+    initial = CaseState(
+        case_id="case-exploration-exhausted",
+        question="制度の要件は何か",
+        research_cycle_count=1,
+        work_items=(WorkItem(work_item_id="w1", question="要件を確認する"),),
+        hypotheses=(
+            Hypothesis(
+                hypothesis_id="h1",
+                work_item_id="w1",
+                statement="制度には要件がある",
+                gaps=("具体的な要件",),
+            ),
+        ),
+        tool_requests=(search_request,),
+        tool_results=(
+            ToolResult(
+                request_id=search_request.request_id,
+                status="succeeded",
+                cycle_no=1,
+            ),
+        ),
+        integrated_tool_result_request_ids=(search_request.request_id,),
+    )
+
+    def finalize_at_limit(
+        context: SolverContext,
+        _: ModelCallProfile,
+    ) -> SolverDecision:
+        assert context.finalize_only is True
+        assert context.can_start_next_cycle is False
+        return SolverDecision(
+            next="finalize",
+            answer=FinalAnswer(
+                text="確認できた範囲で回答する",
+                limitations=("具体的な要件は確認できなかった",),
+                unresolved_work_item_ids=("w1",),
+                unresolved_hypothesis_ids=("h1",),
+            ),
+        )
+
+    model = FakeModel(
+        [
+            SolverDecision(
+                next="continue",
+                start_next_cycle=True,
+                next_focus_work_item_ids=("w1",),
+            ),
+            finalize_at_limit,
+        ]
+    )
+    store = InMemoryCaseStore()
+    store.create(initial)
+    profile = _profile().model_copy(
+        update={
+            "limits": _profile().limits.model_copy(
+                update={"max_exploration_sets_per_hypothesis": 1}
+            )
+        }
+    )
+
+    result = AgentLoop(
+        store=store,
+        model=model,
+        tools=ToolRegistry(()),
+        profile=profile,
+    ).run(initial.case_id)
+
+    assert result.state.run_status == "completed"
+    assert result.state.research_cycle_count == 1
+    assert model.solver_contexts[0].finalize_only is False
+    assert len(model.solver_contexts) == 2
 
 
 def test_one_cycle_passes_every_result_to_closing_solver_decision() -> None:
@@ -1662,6 +1745,89 @@ def test_finalization_drops_pending_exploration_requirements() -> None:
     assert projected.fetchable_article_ids == ()
 
 
+def test_resolved_case_uses_verified_evidence_only_finalization() -> None:
+    def finalize(
+        context: SolverContext,
+        profile: ModelCallProfile,
+    ) -> SolverDecision:
+        assert context.finalize_only is True
+        assert profile.context_projection == "finalization"
+        assert context.grounding_evidence_ids == ("e-verified",)
+        assert tuple(item.evidence_id for item in context.material_evidence) == (
+            "e-verified",
+        )
+        return SolverDecision(
+            next="finalize",
+            answer=FinalAnswer(
+                text="確認済み本文に基づく回答",
+                citation_ids=("e-verified",),
+            ),
+        )
+
+    model = FakeModel([finalize])
+    profile = _profile().model_copy(
+        update={
+            "solver_finalization": ModelCallProfile(
+                model="finalization-model",
+                system_prompt="finalization",
+                timeout_sec=180,
+                context_projection="finalization",
+            ),
+        }
+    )
+    store = InMemoryCaseStore()
+    store.create(
+        CaseState(
+            case_id="case-resolved-finalization",
+            question="確認済み事項を回答する",
+            research_cycle_count=1,
+            work_items=(
+                WorkItem(
+                    work_item_id="w1",
+                    question="確認事項",
+                    state="resolved",
+                    resolution="確認済み",
+                    basis_hypothesis_ids=("h1",),
+                ),
+            ),
+            hypotheses=(
+                Hypothesis(
+                    hypothesis_id="h1",
+                    work_item_id="w1",
+                    statement="確認済み命題",
+                    judgment="supported",
+                    evidence_ids=("e-verified",),
+                ),
+            ),
+            evidence=(
+                Evidence(
+                    evidence_id="e-verified",
+                    source_ref="fixture:verified",
+                    content="命題を確認する本文",
+                    created_cycle=1,
+                ),
+                Evidence(
+                    evidence_id="e-unmapped",
+                    source_ref="fixture:unmapped",
+                    content="Hypothesisへ対応付けていない本文",
+                    created_cycle=1,
+                ),
+            ),
+        )
+    )
+
+    result = AgentLoop(
+        store=store,
+        model=model,
+        tools=ToolRegistry(()),
+        profile=profile,
+    ).run("case-resolved-finalization")
+
+    assert result.state.run_status == "completed"
+    assert result.state.final_answer is not None
+    assert result.state.final_answer.citation_ids == ("e-verified",)
+
+
 def test_completed_observation_checkpoint_survives_later_model_timeout() -> None:
     class CheckpointModel(FakeModel):
         def solve(
@@ -2750,6 +2916,115 @@ def test_observation_contract_repair_retries_only_invalid_work_item() -> None:
     ]
 
 
+def test_observation_keeps_semantic_update_when_action_is_rejected() -> None:
+    first_request = _request("r1").model_copy(
+        update={"tool_name": "legal_search"}
+    )
+    duplicate_request = _request("r2").model_copy(
+        update={"tool_name": "legal_search"}
+    )
+    observation = SolverDecision(
+        next="continue",
+        update=CaseUpdate(
+            update_hypotheses=(
+                HypothesisUpdate(
+                    hypothesis_id="h1",
+                    judgment="supported",
+                    evidence_ids=("e_r1",),
+                ),
+            ),
+        ),
+        next_focus_work_item_ids=("w1",),
+        tool_requests=(duplicate_request,),
+    )
+    final = SolverDecision(
+        next="finalize",
+        update=CaseUpdate(
+            update_work_items=(
+                WorkItemUpdate(
+                    work_item_id="w1",
+                    state="resolved",
+                    resolution="取得本文で確認した",
+                    basis_hypothesis_ids=("h1",),
+                ),
+            ),
+        ),
+        answer=FinalAnswer(text="回答", citation_ids=("e_r1",)),
+    )
+    model = FakeModel([_first_research((first_request,)), observation, final])
+    profile = _profile().model_copy(
+        update={
+            "solver_observation_integration": ModelCallProfile(
+                model="observation-model",
+                system_prompt="observation",
+            ),
+            "limits": _profile().limits.model_copy(
+                update={"max_exploration_sets_per_hypothesis": 2}
+            ),
+        }
+    )
+
+    state, trace = _run(
+        model,
+        tools=(FakeReadTool(name="legal_search"),),
+        profile=profile,
+    )
+
+    assert state.run_status == "completed"
+    assert state.hypotheses[0].judgment == "supported"
+    assert state.hypotheses[0].evidence_ids == ("e_r1",)
+    assert state.work_items[0].state == "resolved"
+    assert [item.request_id for item in state.tool_requests] == ["r1"]
+    assert [item.purpose for item in trace.model_calls] == [
+        "research",
+        "observation_integration",
+        "integration",
+    ]
+
+
+def test_rejected_observation_action_keeps_other_actions_and_dependency() -> None:
+    rejected = ToolRequest(
+        request_id="rejected",
+        work_item_id="w1",
+        tool_name="legal_search",
+        purpose="使用済み探索を繰り返す",
+        hypothesis_ids=("h1",),
+    )
+    retained = ToolRequest(
+        request_id="retained",
+        work_item_id="w2",
+        tool_name="legal_graph_neighbors",
+        purpose="別WorkItemの探索を進める",
+        hypothesis_ids=("h2",),
+    )
+    decision = SolverDecision(
+        next="continue",
+        dependency_decisions=(
+            DependencyDecision(
+                dependency_kind="lower_norm",
+                work_item_id="w1",
+                status="needs_action",
+                reason="別の探索が必要",
+                action_request_id="rejected",
+            ),
+            DependencyDecision(
+                dependency_kind="lower_norm",
+                work_item_id="w2",
+                status="needs_action",
+                reason="Graph探索が必要",
+                action_request_id="retained",
+            ),
+        ),
+        tool_requests=(rejected, retained),
+    )
+
+    sanitized = _without_rejected_tool_requests(decision, (rejected,))
+
+    assert sanitized.tool_requests == (retained,)
+    assert sanitized.dependency_decisions[0].action_request_id is None
+    assert sanitized.dependency_decisions[1].action_request_id == "retained"
+
+
 def test_observation_projection_limits_contract_repair_to_failed_work_item() -> None:
     context = build_solver_context(
         CaseState(
@@ -2834,7 +3109,18 @@ def test_repeated_successful_action_returns_normal_feedback() -> None:
         ]
     )
 
-    state, trace = _run(model, tools=(FakeReadTool(name="legal_search"),))
+    profile = _profile().model_copy(
+        update={
+            "limits": _profile().limits.model_copy(
+                update={"max_exploration_sets_per_hypothesis": 2}
+            )
+        }
+    )
+    state, trace = _run(
+        model,
+        tools=(FakeReadTool(name="legal_search"),),
+        profile=profile,
+    )
 
     assert state.run_status == "completed"
     feedback_context = model.solver_contexts[2]

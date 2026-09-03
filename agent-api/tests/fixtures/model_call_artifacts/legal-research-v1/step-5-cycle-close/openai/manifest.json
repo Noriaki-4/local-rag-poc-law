@@ -1,13 +1,17 @@
 {
-  "inputHash": "632e3794f2bc5d3776357e1d4c90ecf73424e81b89ef40ae6bbf763805e6e75e",
+  "effectiveReasoningEffort": null,
+  "effectiveReasoningMode": null,
+  "inputHash": "2064c643a46b8d5e68d2435b1958fb86f1729721c3e3cc49c4ae012d4ba97543",
   "instructionsHash": "ecba1a1df329bb2e858b7e11abb19a717a225922881d663a6c6b1e5df5d135e5",
   "model": "gpt-4o-mini-2024-07-18",
   "normalizedSchemaHash": "7c09e3041c12806beefedbb9a6f2df27ce36222f242dd437020dbd734e989501",
   "outputSchemaHash": "10e1b79dca2f50cf82bcced7e183cbc5dfb78d7d1dd16cfb38c80fd2bf3af06e",
   "profileName": "legal-default",
-  "profileVersion": "494",
+  "profileVersion": "510",
   "promptAssets": [],
   "provider": "openai",
-  "requestHash": "5bde81efaa83ff977afacbd90dcd18b6ba8b23680bdd562cf65b6c5e500793fa",
-  "stage": "cycle_close"
+  "requestHash": "7fcc4b1d9a937e686630a35807ada34118d6bb3dba92be6c23c997940fbdb2f1",
+  "requestedReasoningEffort": null,
+  "stage": "cycle_close",
+  "thinkingBudgetTokens": null
 }

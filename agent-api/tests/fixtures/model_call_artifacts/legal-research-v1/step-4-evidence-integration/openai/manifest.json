@@ -1,13 +1,17 @@
 {
-  "inputHash": "ef5ccdfeeeade927e616fe3ce03bf16d1320d51a487d0e21716c1ce177a8a825",
-  "instructionsHash": "c8a4dac251d6f1da7ce6bc7ba76d419945596064e00bffa5ffb19d34ddd8c513",
+  "effectiveReasoningEffort": null,
+  "effectiveReasoningMode": null,
+  "inputHash": "4f360f7954eb001365f72e5f795bc47783a0eafc0c40409596070f50a8561141",
+  "instructionsHash": "a965b461e6d8672de4f70fb1bb40855ab15f39dcff6e24dcb7a3f6639830ad15",
   "model": "gpt-4o-mini-2024-07-18",
-  "normalizedSchemaHash": "4f751505b8e29d2b27e8417ec4c4fd1c55bcabf05e7e060bdc62a130717da830",
-  "outputSchemaHash": "1ee9f9ff55d945883e2140588530aa041384ca91662320d3627c0039ddc611f7",
+  "normalizedSchemaHash": "cb7aa9205ee7578f2ffb1e9e0353827c2e3c5bbd4b04aa1fedf783bf232ad3a8",
+  "outputSchemaHash": "754856b65df9f6e260a650a57625461f9a79c605bd7c4e15830f764c74908e8d",
   "profileName": "legal-default",
-  "profileVersion": "494",
+  "profileVersion": "510",
   "promptAssets": [],
   "provider": "openai",
-  "requestHash": "b69f2a23409e26cb332c848fbbffc8476e620d221766fc7649c86e39a5f14c00",
-  "stage": "observation_integration"
+  "requestHash": "5050e2daa2b7339709e0051f9f547dd91f96c51613747c90b2faabbf46d1f816",
+  "requestedReasoningEffort": null,
+  "stage": "observation_integration",
+  "thinkingBudgetTokens": null
 }

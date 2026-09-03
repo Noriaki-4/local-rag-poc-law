@@ -11,6 +11,7 @@ from pydantic import Field, model_validator
 from .contracts import SolverDecision
 from .profiles import AgentLimits
 from .state import (
+    active_hypotheses,
     AnswerOption,
     CaseState,
     DeferredFrontierResolutionAction,
@@ -26,7 +27,6 @@ from .state import (
     ToolStatus,
     WorkItem,
     fetched_article_ids_by_work_item,
-    tool_request_matches_current_hypotheses,
 )
 from .tool_contracts import ToolDefinition
 
@@ -411,11 +411,11 @@ class SearchSelectionInput(SearchCandidateInput):
     )
     current_fetch_request_capacity: int = Field(
         ge=0,
-        description="今回すべてのWorkItemで選べるArticle数の合計上限。",
+        description="今回提示されたWorkItemで選べるArticle数の上限。",
     )
     remaining_fetch_capacity_by_work_item: dict[str, int] = Field(
         description=(
-            "各WorkItemが現在Cycleで追加取得できるArticle数。選択Articleは、"
+            "提示されたWorkItemが現在Cycleで追加取得できるArticle数。選択Articleは、"
             "matched_hypothesis_idsが属するWorkItemの残数内に収める。"
         ),
     )
@@ -570,6 +570,24 @@ class CompletedGraphSearch(FrameworkModel):
     )
 
 
+class HypothesisExplorationSetStatus(FrameworkModel):
+    hypothesis_id: str = Field(description="置換されていないHypothesis ID。")
+    legal_search_used_in_cycle: bool = Field(
+        description="現在CycleでOpenSearchが成功済みか。"
+    )
+    graph_used_in_cycle: bool = Field(
+        description="現在CycleでGraph探索が成功済みか。"
+    )
+    used_sets_total: int = Field(ge=0, description="探索を行ったCycle数。")
+    remaining_new_sets_total: int = Field(
+        ge=0,
+        description=(
+            "現在Cycleの終了後に、後続Cycleで新しく開始できる探索セット数。"
+            "現在Cycleで同じ探索Toolを再実行できる回数ではない。"
+        ),
+    )
+
+
 class SolverContext(FrameworkModel):
     case_id: str = Field(description="Programが管理する現在CaseのID。")
     question: str = Field(description="利用者が回答を求めている元の質問。")
@@ -638,6 +656,10 @@ class SolverContext(FrameworkModel):
         description=(
             "同じHypothesisについて1 Cycleで本文取得できるGraph候補Article数上限。"
         ),
+    )
+    hypothesis_exploration_sets: tuple[HypothesisExplorationSetStatus, ...] = Field(
+        default=(),
+        description="Programが成功済み探索から算出したHypothesis別の探索状態。",
     )
 
     @property
@@ -870,6 +892,53 @@ class HypothesisRevisionInput(FrameworkModel):
     )
 
 
+def _hypothesis_exploration_sets(
+    state: CaseState,
+    hypotheses: tuple[Hypothesis, ...],
+    maximum: int,
+) -> tuple[HypothesisExplorationSetStatus, ...]:
+    """成功済みOpenSearch・Graphを、HypothesisごとのCycle集合へ集計する。"""
+
+    succeeded = {
+        item.request_id: item
+        for item in state.tool_results
+        if item.status == "succeeded"
+    }
+    requests_by_hypothesis: dict[str, list[tuple[ToolRequest, ToolResult]]] = {}
+    for request in state.tool_requests:
+        if request.tool_name not in {"legal_search", "legal_graph_neighbors"}:
+            continue
+        result = succeeded.get(request.request_id)
+        if result is None:
+            continue
+        for hypothesis_id in request.hypothesis_ids:
+            requests_by_hypothesis.setdefault(hypothesis_id, []).append(
+                (request, result)
+            )
+    statuses: list[HypothesisExplorationSetStatus] = []
+    for hypothesis in hypotheses:
+        records = requests_by_hypothesis.get(hypothesis.hypothesis_id, [])
+        used_cycles = {result.cycle_no for _, result in records}
+        statuses.append(
+            HypothesisExplorationSetStatus(
+                hypothesis_id=hypothesis.hypothesis_id,
+                legal_search_used_in_cycle=any(
+                    request.tool_name == "legal_search"
+                    and result.cycle_no == state.research_cycle_count
+                    for request, result in records
+                ),
+                graph_used_in_cycle=any(
+                    request.tool_name == "legal_graph_neighbors"
+                    and result.cycle_no == state.research_cycle_count
+                    for request, result in records
+                ),
+                used_sets_total=len(used_cycles),
+                remaining_new_sets_total=max(0, maximum - len(used_cycles)),
+            )
+        )
+    return tuple(statuses)
+
+
 def build_solver_context(
     state: CaseState,
     limits: AgentLimits,
@@ -883,14 +952,18 @@ def build_solver_context(
     required_dependency_work_item_ids: tuple[str, ...] = (),
     available_tools: tuple[ToolDefinition, ...] = (),
 ) -> SolverContext:
+    current_hypotheses = active_hypotheses(state)
+    current_hypothesis_ids = {
+        item.hypothesis_id for item in current_hypotheses
+    }
     hypotheses_by_work: dict[str, list[Hypothesis]] = {}
-    for hypothesis in state.hypotheses:
+    for hypothesis in current_hypotheses:
         hypotheses_by_work.setdefault(hypothesis.work_item_id, []).append(hypothesis)
 
     evidence_by_id = {item.evidence_id: item for item in state.evidence}
     contradicted_ids = {
         item.hypothesis_id
-        for item in state.hypotheses
+        for item in current_hypotheses
         if item.judgment == "contradicted"
     }
     directly_affected_ids = {
@@ -1130,7 +1203,7 @@ def build_solver_context(
         )
     graph_fetch_completed_hypothesis_ids = tuple(
         hypothesis.hypothesis_id
-        for hypothesis in state.hypotheses
+        for hypothesis in current_hypotheses
         if (hypothesis.work_item_id, hypothesis.hypothesis_id)
         in completed_graph_units
     )
@@ -1322,11 +1395,19 @@ def build_solver_context(
         for item in state.tool_results
         if item.status == "succeeded"
     }
+    hypothesis_exploration_sets = _hypothesis_exploration_sets(
+        state,
+        current_hypotheses,
+        limits.max_exploration_sets_per_hypothesis,
+    )
     succeeded_request_ids = set(succeeded_results_by_request)
     completed_legal_searches = tuple(
         CompletedLegalSearch(
             work_item_id=request.work_item_id,
-            hypothesis_ids=request.hypothesis_ids,
+            hypothesis_ids=tuple(
+                item for item in request.hypothesis_ids
+                if item in current_hypothesis_ids
+            ),
             arguments=request.arguments,
         )
         for request in state.tool_requests
@@ -1335,10 +1416,6 @@ def build_solver_context(
             result := succeeded_results_by_request.get(request.request_id)
         )
         is not None
-        and tool_request_matches_current_hypotheses(
-            state,
-            request,
-        )
     )
     completed_load_ids_by_work_item: dict[str, list[str]] = {}
     integrated_request_ids = set(state.integrated_tool_result_request_ids)
@@ -1446,7 +1523,10 @@ def build_solver_context(
     completed_graph_searches = tuple(
         CompletedGraphSearch(
             work_item_id=request.work_item_id,
-            hypothesis_ids=request.hypothesis_ids,
+            hypothesis_ids=tuple(
+                item for item in request.hypothesis_ids
+                if item in current_hypothesis_ids
+            ),
             arguments=request.arguments,
             candidate_article_ids=graph_candidates_by_request.get(
                 request.request_id,
@@ -1463,10 +1543,6 @@ def build_solver_context(
             result := succeeded_results_by_request.get(request.request_id)
         )
         is not None
-        and tool_request_matches_current_hypotheses(
-            state,
-            request,
-        )
     )
     evidence_hypothesis_candidates = _evidence_hypothesis_candidates(
         state,
@@ -1512,6 +1588,7 @@ def build_solver_context(
         max_graph_articles_per_hypothesis_per_cycle=(
             limits.max_graph_articles_per_hypothesis_per_cycle
         ),
+        hypothesis_exploration_sets=hypothesis_exploration_sets,
         cycle_budget_reached=(
             bool(open_work_item_ids)
             and all(value == 0 for value in remaining_by_work_item.values())
@@ -1538,7 +1615,7 @@ def build_solver_context(
             deferred_search_candidate_article_ids
         ),
         work_tree=work_tree,
-        hypotheses=state.hypotheses,
+        hypotheses=current_hypotheses,
         evidence_hypothesis_candidates=evidence_hypothesis_candidates,
         focus_work_items=tuple(
             item for item in state.work_items if item.work_item_id in focus_ids

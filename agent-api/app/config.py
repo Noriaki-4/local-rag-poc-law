@@ -166,7 +166,7 @@ class Settings:
         int(os.getenv("ANTHROPIC_THINKING_BUDGET_TOKENS", "4096")),
     )
     _default_answer_model = (
-        "claude-sonnet-5"
+        "claude-sonnet-4-6"
         if llm_provider == "anthropic"
         else "gpt-5.6-luna"
         if llm_provider == "openai"
@@ -378,6 +378,50 @@ class Settings:
         if _agent_framework_post_run_audit in {"off", "on_demand"}
         else "off"
     )
+    _agent_framework_reasoning_effort = (
+        os.getenv(
+            "AGENT_FRAMEWORK_ANTHROPIC_REASONING_EFFORT",
+            "none",
+        )
+        if llm_provider == "anthropic"
+        else os.getenv(
+            "AGENT_FRAMEWORK_REASONING_EFFORT",
+            openai_reasoning_effort or "high",
+        )
+    ).strip().lower()
+    agent_framework_reasoning_effort = (
+        _agent_framework_reasoning_effort
+        if _agent_framework_reasoning_effort
+        in {"none", "low", "medium", "high", "xhigh", "max"}
+        else None
+    )
+    _agent_framework_default_model_tiers = (
+        {
+            "low": "gpt-5.6-luna",
+            "middle": "gpt-5.6-terra",
+            "high": "gpt-5.6-sol",
+        }
+        if llm_provider == "openai"
+        else {
+            "low": "claude-haiku-4-5-20251001",
+            "middle": "claude-sonnet-4-6",
+            "high": "claude-opus-4-8",
+        }
+        if llm_provider == "anthropic"
+        else {
+            "low": answer_model,
+            "middle": answer_model,
+            "high": answer_model,
+        }
+    )
+    agent_framework_model_tiers = {
+        "low": os.getenv("AGENT_FRAMEWORK_LOW_MODEL", "").strip()
+        or _agent_framework_default_model_tiers["low"],
+        "middle": os.getenv("AGENT_FRAMEWORK_MIDDLE_MODEL", "").strip()
+        or _agent_framework_default_model_tiers["middle"],
+        "high": os.getenv("AGENT_FRAMEWORK_HIGH_MODEL", "").strip()
+        or _agent_framework_default_model_tiers["high"],
+    }
     agent_framework_research_model = (
         llm_model
         or os.getenv("AGENT_FRAMEWORK_RESEARCH_MODEL")
@@ -406,6 +450,11 @@ class Settings:
     agent_framework_reviewer_model = (
         llm_model or os.getenv("AGENT_FRAMEWORK_REVIEWER_MODEL") or reviewer_model
     )
+
+    def agent_framework_model_for_level(self, level: str) -> str:
+        if level not in self.agent_framework_model_tiers:
+            raise KeyError(f"unknown Agent Framework model level: {level}")
+        return self.agent_framework_model_tiers[level]
     agent_framework_research_max_tokens = max(
         1024,
         min(
@@ -484,6 +533,18 @@ class Settings:
         min(
             int(os.getenv("AGENT_FRAMEWORK_MAX_SELECTED_FRONTIER_PER_STEP", "3")),
             16,
+        ),
+    )
+    agent_framework_max_exploration_sets_per_hypothesis = max(
+        1,
+        min(
+            int(
+                os.getenv(
+                    "AGENT_FRAMEWORK_MAX_EXPLORATION_SETS_PER_HYPOTHESIS",
+                    "2",
+                )
+            ),
+            2,
         ),
     )
     agent_framework_max_graph_candidates_per_review_batch = max(
