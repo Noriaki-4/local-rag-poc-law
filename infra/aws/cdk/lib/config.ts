@@ -33,7 +33,9 @@ export interface NeptuneAnalyticsConfig {
 }
 
 export interface BedrockConfig {
-  readonly generationModelId: string;
+  readonly lowModelId: string;
+  readonly middleModelId: string;
+  readonly highModelId: string;
 }
 
 export interface BootstrapDataConfig {
@@ -78,7 +80,7 @@ export type StackConfigurationScope =
   | "runtime";
 
 export interface EnvironmentConfig {
-  readonly schemaVersion: 8;
+  readonly schemaVersion: 9;
   readonly projectName: string;
   readonly environmentName: string;
   readonly account: string;
@@ -135,7 +137,7 @@ const NEPTUNE_ANALYTICS_KEYS = [
   "replicaCount",
   "retainOnDelete",
 ] as const;
-const BEDROCK_KEYS = ["generationModelId"] as const;
+const BEDROCK_KEYS = ["lowModelId", "middleModelId", "highModelId"] as const;
 const BOOTSTRAP_DATA_KEYS = [
   "mode",
   "searchSnapshotId",
@@ -204,8 +206,8 @@ export function validateEnvironmentConfig(
   const config = requireRecord(value, source);
   requireExactKeys(config, TOP_LEVEL_KEYS, source);
 
-  if (config.schemaVersion !== 8) {
-    throw new Error(`${source}.schemaVersion must be 8`);
+  if (config.schemaVersion !== 9) {
+    throw new Error(`${source}.schemaVersion must be 9`);
   }
   const projectName = requireString(
     config.projectName,
@@ -267,7 +269,7 @@ export function validateEnvironmentConfig(
   const tags = validateTags(config.tags, environmentName, source);
 
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     projectName,
     environmentName,
     account,
@@ -327,16 +329,28 @@ function validateNeptuneAnalytics(
 function validateBedrock(value: unknown, source: string): BedrockConfig {
   const config = requireRecord(value, `${source}.bedrock`);
   requireExactKeys(config, BEDROCK_KEYS, `${source}.bedrock`);
-  const generationModelId = requireString(
-    config.generationModelId,
-    `${source}.bedrock.generationModelId`,
-  );
-  if (generationModelId !== "jp.anthropic.claude-haiku-4-5-20251001-v1:0") {
-    throw new Error(
-      `${source}.bedrock.generationModelId must be the Japan Claude Haiku 4.5 inference profile`,
-    );
+  const modelIds = {
+    lowModelId: requireString(
+      config.lowModelId,
+      `${source}.bedrock.lowModelId`,
+    ),
+    middleModelId: requireString(
+      config.middleModelId,
+      `${source}.bedrock.middleModelId`,
+    ),
+    highModelId: requireString(
+      config.highModelId,
+      `${source}.bedrock.highModelId`,
+    ),
+  };
+  for (const [key, modelId] of Object.entries(modelIds)) {
+    if (!/^jp\.anthropic\.claude-[a-z0-9-]+(?::\d+)?$/.test(modelId)) {
+      throw new Error(
+        `${source}.bedrock.${key} must be a Japan Claude inference profile ID`,
+      );
+    }
   }
-  return { generationModelId };
+  return modelIds;
 }
 
 function validateBootstrapData(

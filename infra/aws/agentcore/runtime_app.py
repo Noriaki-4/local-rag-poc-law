@@ -77,6 +77,19 @@ async def _stream_legal_answer(question: str, runtime_session_id: str | None):
     )
     try:
         response = await asyncio.to_thread(_invoke_legal_agent, question)
+        framework_trace = response.get("frameworkTrace")
+        if (
+            isinstance(framework_trace, Mapping)
+            and framework_trace.get("runStatus") != "completed"
+        ):
+            logger.warning(
+                "Legal Agent did not complete session=%s case=%s stop_reason=%s "
+                "failure_code=%s",
+                runtime_session_id,
+                framework_trace.get("caseId"),
+                framework_trace.get("stopReason"),
+                framework_trace.get("failureCode"),
+            )
         answer = render_answer(response)
     except Exception:
         logger.exception("Legal Agent invocation failed session=%s", runtime_session_id)

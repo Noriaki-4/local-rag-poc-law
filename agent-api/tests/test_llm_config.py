@@ -27,6 +27,7 @@ def _load_models(**environment: str) -> dict[str, str]:
         "AGENT_FRAMEWORK_HIGH_MODEL",
         "AGENT_FRAMEWORK_REASONING_EFFORT",
         "AGENT_FRAMEWORK_ANTHROPIC_REASONING_EFFORT",
+        "AGENTCORE_RUNTIME",
     ):
         env.pop(name, None)
     env.update(environment)
@@ -65,6 +66,7 @@ def _load_framework_routing(**environment: str) -> dict[str, object]:
         "AGENT_FRAMEWORK_HIGH_MODEL",
         "AGENT_FRAMEWORK_REASONING_EFFORT",
         "AGENT_FRAMEWORK_ANTHROPIC_REASONING_EFFORT",
+        "AGENTCORE_RUNTIME",
     ):
         env.pop(name, None)
     env.update(environment)
@@ -185,6 +187,25 @@ def test_anthropic_framework_level_uses_provider_tiers() -> None:
         "claude-haiku-4-5-20251001"
     )
     assert routing["reviewer"]["model"] == "claude-haiku-4-5-20251001"
+
+
+def test_bedrock_framework_level_uses_japan_claude_tiers() -> None:
+    config = _load_framework_routing(LLM_PROVIDER="bedrock")
+
+    routing = config["routing"]
+    assert isinstance(routing, dict)
+    assert routing["search_planning"]["model"] == (
+        "jp.anthropic.claude-haiku-4-5-20251001-v1:0"
+    )
+    assert routing["integration"]["model"] == (
+        "jp.anthropic.claude-sonnet-4-6"
+    )
+    assert routing["finalization"]["model"] == (
+        "jp.anthropic.claude-sonnet-4-6"
+    )
+    assert routing["reviewer"]["model"] == (
+        "jp.anthropic.claude-haiku-4-5-20251001-v1:0"
+    )
 
 
 def test_anthropic_framework_thinking_requires_provider_specific_opt_in() -> None:

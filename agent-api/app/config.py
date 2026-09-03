@@ -131,7 +131,15 @@ class Settings:
     )
     rerank_timeout_sec = max(1, min(int(os.getenv("RERANK_TIMEOUT_SEC", "30")), 120))
     rerank_max_chars = max(256, min(int(os.getenv("RERANK_MAX_CHARS", "3000")), 12000))
-    llm_provider = os.getenv("LLM_PROVIDER", "ollama")
+    # AgentCoreではAWS adapterがBedrock transportを提供する。ローカル単体起動は
+    # boto3を含まないため、明示設定がない場合の互換既定値はOllamaのままにする。
+    default_llm_provider = (
+        "bedrock"
+        if os.getenv("AGENTCORE_RUNTIME", "false").lower()
+        in {"1", "true", "yes", "on"}
+        else "ollama"
+    )
+    llm_provider = os.getenv("LLM_PROVIDER", default_llm_provider)
     ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
     anthropic_base_url = os.getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
     anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
@@ -168,6 +176,8 @@ class Settings:
     _default_answer_model = (
         "claude-sonnet-4-6"
         if llm_provider == "anthropic"
+        else "jp.anthropic.claude-sonnet-4-6"
+        if llm_provider == "bedrock"
         else "gpt-5.6-luna"
         if llm_provider == "openai"
         else "gemma4:e4b"
@@ -408,6 +418,12 @@ class Settings:
             "high": "claude-opus-4-8",
         }
         if llm_provider == "anthropic"
+        else {
+            "low": "jp.anthropic.claude-haiku-4-5-20251001-v1:0",
+            "middle": "jp.anthropic.claude-sonnet-4-6",
+            "high": "jp.anthropic.claude-sonnet-4-6",
+        }
+        if llm_provider == "bedrock"
         else {
             "low": answer_model,
             "middle": answer_model,

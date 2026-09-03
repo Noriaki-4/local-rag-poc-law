@@ -16,12 +16,17 @@ LLM clientを初期化せずに応答する。検索中は先に開始eventを�
 Serviceを呼び、確認質問、選択肢、修正版をJSONのtext eventとして返す。検索・回答処理は開始しない。
 
 GenUから渡されるmodelは診断ログにだけ残し、Legal Agentのmodel設定には使用しない。Runtimeは環境設定の
-Japan geo inference profileへ固定する。`aws_adapters.py`は`app.main`より先にprovider境界を差し込み、
+`low` / `middle` / `high`ごとに指定したJapan geo inference profileだけを使用する。処理とlevelの対応は
+`agent-api/app/domains/legal/model_levels.json`を正本とし、現行PoCは`low`をClaude Haiku 4.5、
+`middle`と`high`をClaude Sonnet 4.6へ割り当てる。`aws_adapters.py`は`app.main`より先にprovider境界を差し込み、
 `agent-api/app`の検索・Agentロジックを複製しない。Runtime roleはOpenSearch / NeptuneのreadとBedrock invoke
 だけを持ち、bootstrap write処理は公開endpointから呼び出せない。
 
+全model呼出しはAnthropic APIではなく、東京リージョンのBedrock Runtime `Converse`を経由する。
+`BEDROCK_MODEL_ID`は旧回答経路のfallbackであり、Agent Frameworkの処理別modelを上書きしない。
+
 Bedrock Converseでは可能な限りnative JSON Schema outputを使う。Agent Frameworkの大きいsolver schemaが
-Haiku 4.5のcompiled grammar上限を超えた場合だけ、同じschemaを持つ非strict tool-useへfallbackし、
+選択modelのcompiled grammar上限を超えた場合だけ、同じschemaを持つ非strict tool-useへfallbackし、
 返されたtool inputを既存のapplication schema validatorで検証する。他のValidationExceptionはfallbackせず失敗させる。
 
 ## テスト

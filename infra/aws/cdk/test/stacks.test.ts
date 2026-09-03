@@ -8,7 +8,7 @@ import { NetworkStack } from "../lib/network-stack";
 import { RuntimeStack } from "../lib/runtime-stack";
 
 const CONFIG: EnvironmentConfig = {
-  schemaVersion: 8,
+  schemaVersion: 9,
   projectName: "local-rag-law",
   environmentName: "test",
   account: "123456789012",
@@ -40,7 +40,9 @@ const CONFIG: EnvironmentConfig = {
     retainOnDelete: true,
   },
   bedrock: {
-    generationModelId: "jp.anthropic.claude-haiku-4-5-20251001-v1:0",
+    lowModelId: "jp.anthropic.claude-haiku-4-5-20251001-v1:0",
+    middleModelId: "jp.anthropic.claude-sonnet-4-6",
+    highModelId: "jp.anthropic.claude-sonnet-4-6",
   },
   bootstrapData: {
     mode: "EXISTING_SNAPSHOT",
@@ -222,8 +224,11 @@ test("runtime stack creates a VPC AgentCore Runtime using the configured image",
       AGENTCORE_RUNTIME: "true",
       AWS_REGION: "ap-northeast-1",
       LLM_PROVIDER: "bedrock",
-      BEDROCK_MODEL_ID: "jp.anthropic.claude-haiku-4-5-20251001-v1:0",
-      LLM_MODEL: "jp.anthropic.claude-haiku-4-5-20251001-v1:0",
+      BEDROCK_MODEL_ID: "jp.anthropic.claude-sonnet-4-6",
+      ANSWER_MODEL: "jp.anthropic.claude-sonnet-4-6",
+      AGENT_FRAMEWORK_LOW_MODEL: "jp.anthropic.claude-haiku-4-5-20251001-v1:0",
+      AGENT_FRAMEWORK_MIDDLE_MODEL: "jp.anthropic.claude-sonnet-4-6",
+      AGENT_FRAMEWORK_HIGH_MODEL: "jp.anthropic.claude-sonnet-4-6",
       RERANK_PROVIDER: "none",
       OPENSEARCH_MODE: "serverless",
       OPENSEARCH_AWS_SERVICE: "aoss",
@@ -264,6 +269,9 @@ test("runtime stack creates a VPC AgentCore Runtime using the configured image",
   const renderedPolicies = JSON.stringify(policies);
   expect(renderedPolicies).toContain(
     "inference-profile/jp.anthropic.claude-haiku-4-5-20251001-v1:0",
+  );
+  expect(renderedPolicies).toContain(
+    "inference-profile/jp.anthropic.claude-sonnet-4-6",
   );
   expect(renderedPolicies).toContain(
     "foundation-model/amazon.titan-embed-text-v2:0",

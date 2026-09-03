@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 8,
+  "schemaVersion": 9,
   "projectName": "local-rag-law",
   "environmentName": "poc",
   "account": "035351467732",
@@ -31,7 +31,9 @@
     "retainOnDelete": true
   },
   "bedrock": {
-    "generationModelId": "jp.anthropic.claude-haiku-4-5-20251001-v1:0"
+    "lowModelId": "jp.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "middleModelId": "jp.anthropic.claude-sonnet-4-6",
+    "highModelId": "jp.anthropic.claude-sonnet-4-6"
   },
   "bootstrapData": {
     "mode": "EXISTING_SNAPSHOT",

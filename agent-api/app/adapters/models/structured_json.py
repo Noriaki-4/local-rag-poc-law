@@ -103,6 +103,18 @@ from app.llm import LLMClient
 _SEARCH_REVIEW_BATCH_SIZE = 8
 
 
+def _uses_claude_compact_transport(provider: str | None, model: str) -> bool:
+    """APIの接続先とは独立に、Claude向けcompact schemaの要否を返す。"""
+
+    normalized_provider = (provider or "").strip().lower()
+    if normalized_provider == "anthropic":
+        return True
+    return (
+        normalized_provider == "bedrock"
+        and "anthropic.claude" in model.strip().lower()
+    )
+
+
 def _project_next_hypothesis_work_item(context: SolverContext) -> SolverContext:
     """Hypothesis未作成のWorkItemを1件だけLLMへ提示する。"""
 
@@ -1954,6 +1966,10 @@ def render_solver_model_call(
         projected_context = _project_dependency_action_context(
             projected_context
         )
+    claude_compact_transport = _uses_claude_compact_transport(
+        provider,
+        profile.model,
+    )
     initial_research = profile.context_projection == "initial_research"
     output_schema = (
         _strip_runtime_id_enums(
@@ -1963,7 +1979,7 @@ def render_solver_model_call(
         else _finalization_transport_schema(projected_context)
         if profile.context_projection == "finalization"
         else _solver_anthropic_json_transport_schema(projected_context)
-        if provider == "anthropic"
+        if claude_compact_transport
         else _solver_common_transport_schema(projected_context)
     )
     return _render_solver_model_call(
@@ -1981,7 +1997,7 @@ def render_solver_model_call(
         output_schema=(
             _dependency_action_transport_schema(
                 projected_context,
-                json_transport=provider == "anthropic",
+                json_transport=claude_compact_transport,
             )
             if dependency_action
             else output_schema
@@ -3354,6 +3370,10 @@ def render_observation_integration_model_call(
     work_item_session: WorkItemSession | None = None,
     provider: str | None = None,
 ) -> RenderedModelCall:
+    claude_compact_transport = _uses_claude_compact_transport(
+        provider,
+        profile.model,
+    )
     context = (
         context.model_copy(update={"available_tools": ()})
         if context.cycle_close_required
@@ -3365,7 +3385,7 @@ def render_observation_integration_model_call(
     )
     output_schema = (
         _observation_integration_anthropic_transport_schema(context)
-        if provider == "anthropic"
+        if claude_compact_transport
         else _observation_integration_transport_schema(context)
     )
     transport_instruction = (
@@ -3374,7 +3394,7 @@ def render_observation_integration_model_call(
         "各専用欄へ返し、対象はschemaの既知別名から選びます。"
         "Adapterが復元後に、既知ID、件数、Tool入力を含む共通契約で"
         "完全検証します。\n"
-        if provider == "anthropic"
+        if claude_compact_transport
         else ""
     )
     instructions = (

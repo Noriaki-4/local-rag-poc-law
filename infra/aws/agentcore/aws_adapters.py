@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import os
 import re
@@ -13,6 +14,7 @@ from typing import Any, Iterator
 import requests as http_requests
 
 NEPTUNE_JSON_LIST_PREFIX = "local-rag-json-list:v1:"
+logger = logging.getLogger(__name__)
 
 
 def _region() -> str:
@@ -43,6 +45,14 @@ def _bedrock_converse_with_schema_fallback(
         )
         if not isinstance(schema_text, str):
             raise
+        logger.warning(
+            "Bedrock native JSON schema grammar exceeded the provider limit; "
+            "using validated tool-use fallback model=%s schema_bytes=%d "
+            "schema_sha256=%s",
+            request.get("modelId"),
+            len(schema_text.encode("utf-8")),
+            hashlib.sha256(schema_text.encode("utf-8")).hexdigest(),
+        )
         # Non-strict tool use avoids the native compiled-grammar size limit.
         # The existing LLM client still validates tool input against the same
         # application schema before accepting the decision.
@@ -343,7 +353,10 @@ def _bedrock_llm_class(llm_module: Any) -> type:
         ) -> tuple[str, int, int | None, int | None, str | None]:
             del timeout_sec, effort
             started = perf_counter()
-            model_id = os.environ.get("BEDROCK_MODEL_ID", model)
+            # model_levels.jsonから解決された処理別modelを優先する。
+            # BEDROCK_MODEL_IDは旧回答経路用のfallbackであり、全処理を同じmodelへ
+            # 上書きしてはならない。
+            model_id = model.strip() or os.environ["BEDROCK_MODEL_ID"]
             converse_request = {
                 "modelId": model_id,
                 "messages": [
@@ -456,7 +469,10 @@ def install() -> None:
     global _INSTALLED
     if _INSTALLED:
         return
-    if os.environ.get("LLM_PROVIDER") != "bedrock":
+    # AgentCore RuntimeのLLM既定値はBedrock。明示的に別providerが渡された場合は
+    # AWS adapterで黙って上書きせず、構成誤りとして拒否する。
+    llm_provider = os.environ.setdefault("LLM_PROVIDER", "bedrock")
+    if llm_provider != "bedrock":
         raise ValueError("AgentCore requires LLM_PROVIDER=bedrock")
     if os.environ.get("EMBEDDING_PROVIDER") != "bedrock":
         raise ValueError("AgentCore requires EMBEDDING_PROVIDER=bedrock")

@@ -9,7 +9,7 @@ import {
 } from "../lib/config";
 
 const VALID_CONFIG: EnvironmentConfig = {
-  schemaVersion: 8,
+  schemaVersion: 9,
   projectName: "local-rag-law",
   environmentName: "poc",
   account: "123456789012",
@@ -41,7 +41,9 @@ const VALID_CONFIG: EnvironmentConfig = {
     retainOnDelete: true,
   },
   bedrock: {
-    generationModelId: "jp.anthropic.claude-haiku-4-5-20251001-v1:0",
+    lowModelId: "jp.anthropic.claude-haiku-4-5-20251001-v1:0",
+    middleModelId: "jp.anthropic.claude-sonnet-4-6",
+    highModelId: "jp.anthropic.claude-sonnet-4-6",
   },
   bootstrapData: {
     mode: "EXISTING_SNAPSHOT",
@@ -136,6 +138,18 @@ test("requires Titan V2 1024-dimensional embeddings for the current mapping", ()
       },
     }),
   ).toThrow("embeddingDimensions must be 1024");
+});
+
+test("requires Japan Claude inference profiles for every model level", () => {
+  expect(() =>
+    validateEnvironmentConfig({
+      ...VALID_CONFIG,
+      bedrock: {
+        ...VALID_CONFIG.bedrock,
+        middleModelId: "claude-sonnet-4-6",
+      },
+    }),
+  ).toThrow("middleModelId must be a Japan Claude inference profile ID");
 });
 
 test("rejects an invalid embedding input limit", () => {

@@ -8,7 +8,7 @@ import pytest
 import aws_adapters
 
 
-def test_bedrock_converse_falls_back_when_compiled_grammar_is_too_large():
+def test_bedrock_converse_falls_back_when_compiled_grammar_is_too_large(caplog):
     requests = []
 
     class ValidationException(Exception):
@@ -48,6 +48,10 @@ def test_bedrock_converse_falls_back_when_compiled_grammar_is_too_large():
     assert requests[1]["toolConfig"]["tools"][0]["toolSpec"]["inputSchema"] == {
         "json": {"type": "object"}
     }
+    assert "using validated tool-use fallback" in caplog.text
+    assert "model=haiku" in caplog.text
+    assert "schema_bytes=17" in caplog.text
+    assert "schema_sha256=" in caplog.text
 
 
 def test_bedrock_converse_does_not_hide_other_validation_errors():
@@ -85,6 +89,49 @@ def test_bedrock_response_prefers_tool_input_as_json():
     assert json.loads(aws_adapters._bedrock_response_json_text(response)) == {
         "decision": "search"
     }
+
+
+def test_bedrock_json_transport_respects_the_per_call_model(monkeypatch):
+    requests = []
+
+    class Runtime:
+        def converse(self, **request):
+            requests.append(request)
+            return {
+                "output": {"message": {"content": [{"text": "{}"}]}},
+                "usage": {"inputTokens": 1, "outputTokens": 1},
+                "stopReason": "end_turn",
+            }
+
+    class BaseLLMClient:
+        def __init__(self, *, provider=None, **_kwargs):
+            self.provider = provider
+
+    monkeypatch.setitem(
+        sys.modules,
+        "boto3",
+        SimpleNamespace(client=lambda *_args, **_kwargs: Runtime()),
+    )
+    monkeypatch.setenv("AWS_REGION", "ap-northeast-1")
+    monkeypatch.setenv(
+        "BEDROCK_MODEL_ID",
+        "jp.anthropic.claude-haiku-4-5-20251001-v1:0",
+    )
+    llm_module = SimpleNamespace(
+        LLMClient=BaseLLMClient,
+        _to_anthropic_schema=lambda schema: schema,
+    )
+    client = aws_adapters._bedrock_llm_class(llm_module)()
+
+    client._json_transport(
+        "prompt",
+        {"type": "object"},
+        "jp.anthropic.claude-sonnet-4-6",
+        1024,
+        30,
+    )
+
+    assert requests[0]["modelId"] == "jp.anthropic.claude-sonnet-4-6"
 
 
 def test_neptune_session_adapts_execute_query_results():

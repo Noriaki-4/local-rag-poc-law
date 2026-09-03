@@ -134,6 +134,14 @@ def test_provider_transport_is_explicit_in_artifacts(tmp_path) -> None:
         provider="anthropic",
         stage="research",
     )
+    bedrock_claude = render_solver_model_call(
+        context,
+        profile.model_copy(
+            update={"model": "jp.anthropic.claude-haiku-4-5-20251001-v1:0"}
+        ),
+        provider="bedrock",
+        stage="research",
+    )
 
     assert "decision_json" not in openai.output_schema["properties"]
     assert set(anthropic.output_schema["properties"]) == {
@@ -143,6 +151,8 @@ def test_provider_transport_is_explicit_in_artifacts(tmp_path) -> None:
     assert "transport_values" not in openai.input_payload
     assert "transport_values" not in anthropic.input_payload
     assert openai.normalized_schema == anthropic.normalized_schema
+    assert bedrock_claude.output_schema == anthropic.output_schema
+    assert bedrock_claude.normalized_schema == anthropic.normalized_schema
 
     paths = write_model_call_artifacts(
         openai,

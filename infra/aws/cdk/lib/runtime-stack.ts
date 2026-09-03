@@ -79,7 +79,11 @@ export class RuntimeStack extends cdk.Stack {
         AGENTCORE_RUNTIME: "true",
         AWS_REGION: props.config.region,
         LLM_PROVIDER: "bedrock",
-        BEDROCK_MODEL_ID: props.config.bedrock.generationModelId,
+        BEDROCK_MODEL_ID: props.config.bedrock.middleModelId,
+        ANSWER_MODEL: props.config.bedrock.middleModelId,
+        AGENT_FRAMEWORK_LOW_MODEL: props.config.bedrock.lowModelId,
+        AGENT_FRAMEWORK_MIDDLE_MODEL: props.config.bedrock.middleModelId,
+        AGENT_FRAMEWORK_HIGH_MODEL: props.config.bedrock.highModelId,
         RERANK_PROVIDER: "none",
         KNOWLEDGE_BUCKET_NAME: props.knowledgeBucket.bucketName,
         OPENSEARCH_MODE: "serverless",
@@ -98,7 +102,6 @@ export class RuntimeStack extends cdk.Stack {
         EMBEDDING_MAX_CHARS: String(
           props.config.openSearchServerless.embeddingMaxChars,
         ),
-        LLM_MODEL: props.config.bedrock.generationModelId,
         GRAPH_PROVIDER: "neptune-analytics",
         NEPTUNE_GRAPH_ID: props.neptuneGraph.attrGraphId,
         NEPTUNE_GRAPH_ENDPOINT: props.neptuneGraph.attrEndpoint,
@@ -110,16 +113,29 @@ export class RuntimeStack extends cdk.Stack {
     });
 
     props.knowledgeBucket.grantRead(this.runtime.role);
-    const generationBaseModelId =
-      props.config.bedrock.generationModelId.replace(/^jp\./, "");
+    const generationModelIds = [
+      props.config.bedrock.lowModelId,
+      props.config.bedrock.middleModelId,
+      props.config.bedrock.highModelId,
+    ];
+    const generationResources = new Set<string>();
+    for (const modelId of generationModelIds) {
+      const baseModelId = modelId.replace(/^jp\./, "");
+      generationResources.add(
+        `arn:${cdk.Aws.PARTITION}:bedrock:${props.config.region}:${props.config.account}:inference-profile/${modelId}`,
+      );
+      for (const destinationRegion of ["ap-northeast-1", "ap-northeast-3"]) {
+        generationResources.add(
+          `arn:${cdk.Aws.PARTITION}:bedrock:${destinationRegion}::foundation-model/${baseModelId}`,
+        );
+      }
+    }
     this.runtime.role.addToPrincipalPolicy(
       new iam.PolicyStatement({
         sid: "InvokeFoundationModels",
         actions: ["bedrock:InvokeModel"],
         resources: [
-          `arn:${cdk.Aws.PARTITION}:bedrock:${props.config.region}:${props.config.account}:inference-profile/${props.config.bedrock.generationModelId}`,
-          `arn:${cdk.Aws.PARTITION}:bedrock:ap-northeast-1::foundation-model/${generationBaseModelId}`,
-          `arn:${cdk.Aws.PARTITION}:bedrock:ap-northeast-3::foundation-model/${generationBaseModelId}`,
+          ...generationResources,
           `arn:${cdk.Aws.PARTITION}:bedrock:${props.config.region}::foundation-model/${props.config.openSearchServerless.embeddingModelId}`,
         ],
       }),

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 
 import runtime_app
 
@@ -35,6 +36,40 @@ def test_invocation_streams_strands_events_for_genu(monkeypatch):
     ]
     assert text_deltas == ["質問への回答\n\n参照:\n- 会社法"]
     assert events[-1] == {"messageStop": {"stopReason": "end_turn"}}
+
+
+def test_incomplete_framework_result_is_logged_without_question(monkeypatch, caplog):
+    monkeypatch.setattr(
+        runtime_app,
+        "_invoke_legal_agent",
+        lambda _question: {
+            "answer": "根拠付き回答を完了できませんでした。",
+            "citations": [],
+            "frameworkTrace": {
+                "caseId": "case-1",
+                "runStatus": "failed",
+                "stopReason": "protocol_error",
+                "failureCode": "model_protocol:invalid_json",
+            },
+        },
+    )
+
+    async def collect_events():
+        return [
+            json.loads(line)["event"]
+            async for line in runtime_app._stream_legal_answer(
+                "ログへ残してはいけない質問", "session-1"
+            )
+        ]
+
+    with caplog.at_level(logging.WARNING):
+        events = asyncio.run(collect_events())
+
+    assert events[-1] == {"messageStop": {"stopReason": "end_turn"}}
+    assert "case=case-1" in caplog.text
+    assert "stop_reason=protocol_error" in caplog.text
+    assert "failure_code=model_protocol:invalid_json" in caplog.text
+    assert "ログへ残してはいけない質問" not in caplog.text
 
 
 def test_invocation_failure_is_returned_as_a_safe_stream_event(monkeypatch):
