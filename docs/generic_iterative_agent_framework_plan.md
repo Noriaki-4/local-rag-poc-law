@@ -28,7 +28,7 @@
 - `agent_framework`、`InMemoryCaseStore`、用途別Model Profile、read-only Tool並列実行、
   任意Reviewer、法令Tool Adapter、Feature Flag付き経路は存在する。
 - 共通Model PortはOllama、Anthropic、OpenAI APIを選択できる。`LLM_PROVIDER=openai`の既定modelは
-  `gpt-4o-mini`で、`LLM_MODEL`により同一Runの探索・統合・回答・Reviewerを一括変更できる。
+  `gpt-5.6-luna`で、`LLM_MODEL`により同一Runの探索・統合・回答・Reviewerを一括変更できる。
   `LLM_MODEL`未指定時は従来どおり役割別model設定を使う。同一Run内でproviderを統一する制約は維持する。
 - 現行経路では、主要な`SolverContext / SolverDecision / CaseUpdate / WorkItem / Hypothesis /
   ToolRequest / DependencyDecision / FinalAnswer`の`Field.description`から`contract_glossary`を決定的に生成する。
@@ -458,14 +458,9 @@ class Hypothesis:
     work_item_id: str
     statement: str
     judgment: Literal["supported", "contradicted", "unresolved"]
+    replaces_hypothesis_id: str | None
     evidence_ids: list[str]
     gaps: list[str]
-
-class HypothesisHistoryRecord:
-    hypothesis: Hypothesis
-    version: int
-    revised_cycle: int
-    reason: str
 ```
 
 - Hypothesisは必ず1つのWorkItemへ所属する。
@@ -483,11 +478,13 @@ class HypothesisHistoryRecord:
   元の質問から直接作るopen WorkItemでは通常は空にし、別Hypothesisを前提に作る子WorkItemでは
   その前提IDを設定する。
 - Evidenceは複数HypothesisからIDで共有参照し、WorkItemごとに複製しない。
-- 同じ法的命題の見立てをブラッシュアップする場合は、同じHypothesis IDの現在版を更新し、
-  更新前の完全なsnapshotを`HypothesisHistoryRecord`としてCaseStoreへ保存する。
-  通常のAgentViewには現在版だけを投影する。既存命題とは独立した確認事項だけを新IDで追加する。
+- `statement`の意味が変わる場合は同じHypothesis IDを上書きせず、
+  `replaces_hypothesis_id`を持つ新しいHypothesisを作る。置換前のHypothesisもCaseStoreへ保持し、
+  通常のAgentViewには他のHypothesisから置換されていないHypothesisだけを投影する。
+  `active / superseded`は保存せず、置換関係から導出する。`judgment`、`evidence_ids`及び`gaps`は、
+  命題の意味を変えない状態更新として扱う。
 - 見直しLLMには、当Cycleの本文評価で`contradicted`になったHypothesisと、その判定に直接対応する
-  当CycleのEvidenceだけを投影する。反証されていないHypothesisや旧版履歴は投影しない。
+  当CycleのEvidenceだけを投影する。反証されていないHypothesisや置換済みHypothesisは投影しない。
 - WorkItemのquestionを別の問いへ上書きしない。問いを変更する場合は旧WorkItemを`dropped`にし、
   `replaces_work_item_id`を持つ新しいWorkItemを作る。
 - 親子関係は作業分解を表す。WorkItem間に別の依存関係Graphを作らず、次の対象は
@@ -769,6 +766,9 @@ Programが本文やpredicate名から生成・要約しない。特に`USES_DEFI
 適用scope、定義側、利用側、橋渡しとなる参照箇所を説明へ含める。これにより検索時Solverへ
 `USES_DEFINITION`という広いラベルだけを渡さず、何の定義をどちら側が利用する候補なのかを示せる。
 説明とsupporting quoteは候補選別用であって回答根拠ではなく、検索時Solverは必要なArticle本文を取得して再確認する。
+検索時のProjectorは、保存済みpredicate、方向、両端Article、`relationExplanation`及び確認状態を
+決定的な表示形式へ組み合わせる。法的意味を新たに生成せず、SolverがHypothesisとの関連性と本文取得の要否だけを
+判断できる形にする。
 
 predicateと向きを次に固定する。
 
@@ -1325,12 +1325,13 @@ Hypothesisが`contradicted`になったとき、プログラムは`basis_hypothe
 終了・変更しない。
 
 Solverは「そのWorkItemの`question`を変えずに、引き続き親の問いを解くために使えるか」で判断する。
-仮説、検索語、検索先、根拠候補が誤っていただけならWorkItemを置き換えず、既存Hypothesisの現在版又は
-ToolRequestを更新する。観点が不足していた場合も、既存WorkItemを置き換えず子または兄弟WorkItemを追加する。
+仮説、検索語、検索先、根拠候補が誤っていただけならWorkItemを置き換えない。命題を変える場合は
+既存Hypothesisを置き換える新しいHypothesisを別IDで作り、探索方法だけを変える場合はToolRequestを変更する。
+観点が不足していた場合も、既存WorkItemを置き換えず子または兄弟WorkItemを追加する。
 `replace`は、WorkItemの`question`自体を別の意味へ変えなければ親の問いに寄与できない場合だけに使う。
 質問との無関係または重複が根拠から判明した場合だけ`drop`する。
 
-問いが有効でHypothesisだけが外れた場合は`retain`して同じIDの現在版を更新し、探索方法だけが外れた場合は
+問いが有効でHypothesisだけが外れた場合は`retain`して新しいHypothesisで置き換え、探索方法だけが外れた場合は
 ToolRequestを変更する。不足観点は子または兄弟WorkItemとして追加する。問い自体の意味を変える場合だけ
 `replace`し、無関係または重複の場合だけ`drop`する。
 
@@ -1802,7 +1803,18 @@ modelのcontext容量に合わせてProfileで変更し、超過時は候補を�
 `max_tool_requests_per_step`へ改名し、1 Solver DecisionのToolRequest数だけを検証する。Cycle累計Tool数と
 自動Tool数はtraceで別に数え、本文取得予算と混同しない。
 
+Legal Profileでは、最大1回のOpenSearchと最大1回のGraph 1ホップを一つの探索セットとする。
+置換されていないHypothesisごとに1 Cycleでは1セットだけ実行し、全Cycle通算上限は
+`max_exploration_sets_per_hypothesis`で設定する。既定値は1とし、必要なら2へ変更できる。
+候補評価、本文取得及びEvidence統合はセット数に含めない。通算上限到達時は未確認事項を保持した
+`unresolved`として扱う。探索scopeの重複防止を含む詳細は
+[仮説単位の法令検索方式](hypothesis_guided_search_design.md)を正とする。
+
 初期実装では、1つのRun内でproviderを統一する。providerをまたぐ役割分担は対象外とする。
+探索セット、Hypothesis、ToolRequest、Evidence及びCycleの正規契約はLuna、Haiku 4.5、Sonnet 4.6で共通にする。
+OpenAIのreasoning effort、Haiku 4.5のmanual extended thinking、Sonnet 4.6のadaptive thinkingとeffort、
+Provider別JSON Schema及び終了理由の差はModel adapter内だけで扱う。詳細な対応条件と修正対象は
+[仮説単位の法令検索方式](hypothesis_guided_search_design.md)を正とする。
 
 ### 7.2 Promptの配置
 
@@ -2406,7 +2418,7 @@ Phase 1の主要な実装リスクは`contract_rendering.py`である。Enum、�
 - CaseUpdateに現れなかった別系統のWorkItemと未完了WorkItemが消えない。
 - WorkItemの親子循環、未知basis ID、未知focus IDを拒否する。
 - Hypothesis反証時に、プログラムが影響WorkItemを自動的にdropしない。
-- 仮説だけが反証されたfixtureではWorkItemとHypothesis IDを維持し、現在版を更新して旧版を履歴保存できる。
+- 仮説だけが反証されたfixtureではWorkItemを維持し、別IDの新しいHypothesisで置き換えて旧Hypothesisを保持できる。
 - 不足観点のfixtureでは既存WorkItemをreplaceせず、子または兄弟WorkItemを追加できる。
 - 問い自体が不適切なfixtureだけで旧部分木を閉じ、新しい部分木へreplaceできる。
 - プログラムがHypothesisの意味statusを書き換えない。

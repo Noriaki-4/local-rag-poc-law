@@ -1,6 +1,6 @@
 # 設計文書ガイド
 
-> 更新日: 2026-08-22
+> 更新日: 2026-09-03
 
 このディレクトリには、データ投入、検索、Graph、Agent、評価、将来移行に関する設計文書がある。
 すべてが同じ世代の現行仕様ではないため、本書では各文書の役割と位置づけを整理する。
@@ -10,13 +10,15 @@
 文書間で説明が食い違う場合は、次の順で確認する。
 
 1. ユーザー要望の原本は[requirements/README.md](requirements/README.md)
-2. Agentの目標構造・実装順・完了条件は
+2. 仮説単位の検索、Graph候補提示、探索上限の新しい設計判断は
+   [hypothesis_guided_search_design.md](hypothesis_guided_search_design.md)
+3. Agentの目標構造・実装順・完了条件は
    [generic_iterative_agent_framework_plan.md](generic_iterative_agent_framework_plan.md)
-3. 現行Graph schema version 9のseed仕様は
+4. 現行Graph schema version 9のseed仕様は
    [graph_edge_construction.md](graph_edge_construction.md)
-4. データ原本・e-Gov XML snapshot・投入対象は[dataset_design.md](dataset_design.md)
-5. 実行コマンド、現在のindex名、実測結果は[RUNBOOK.md](../RUNBOOK.md)
-6. 実装済みかどうかの最終確認はコード、テスト、評価成果物
+5. データ原本・e-Gov XML snapshot・投入対象は[dataset_design.md](dataset_design.md)
+6. 実行コマンド、現在のindex名、実測結果は[RUNBOOK.md](../RUNBOOK.md)
+7. 実装済みかどうかの最終確認はコード、テスト、評価成果物
 
 古い文書に残る`MENTIONS / APPLIED_BY`、物理Relationとしての`IMPLEMENTS / EXCEPTION_TO`、
 旧Graph schemaの記述を、schema version 9へ追加する指示として解釈しない。
@@ -71,6 +73,7 @@
 | 文書 | 内容 | 現在の位置づけ |
 |---|---|---|
 | [legal_retrieval_issue_tracker.md](legal_retrieval_issue_tracker.md) | 検索仮説、法令検索表現、OpenSearch反復検索、連続1ホップGraph、完了判断、実モデル評価、全件分類再開条件の課題・優先度・完了条件 | 法令検索の現在地と次の作業を管理する課題台帳。設計判断は各正本文書を優先する |
+| [hypothesis_guided_search_design.md](hypothesis_guided_search_design.md) | Graph候補の読みやすい提示、Hypothesisの不変性、Hypothesis単位の探索上限 | 新しい検索方式の決定事項。未実装項目を含むため、実装状況はコードと課題台帳で確認する |
 | [layered_legal_evidence_retrieval_plan.md](layered_legal_evidence_retrieval_plan.md) | 法律・政令・府省令のレイヤー、法的役割、旧Graphオントロジー、ガイドレーン、反復探索、予算 | 旧法令検索経路の詳細設計と実装記録。schema version 3〜6や旧Relationの記述は現行Graph仕様に使わない |
 | [legal_issue_coverage_retrieval.md](legal_issue_coverage_retrieval.md) | 質問の論点分解、30候補から16件への選抜、論点被覆、再ランキング、Graph候補の論点継承 | 旧経路の回答コンテキスト選択改善。feature flag付き実装 |
 | [legal_rag_project_checklist.md](legal_rag_project_checklist.md) | データ、索引、日本語検索、Graph、ガイド、LLM状態、時間、評価の確認項目 | 横断的なレビュー・品質確認用チェックリスト |
@@ -117,6 +120,7 @@
 │
 ├─ 法令検索Domain
 │  ├─ legal_retrieval_issue_tracker            現在の課題・優先度・完了条件
+│  ├─ hypothesis_guided_search_design           新しい仮説単位検索の決定事項
 │  ├─ layered_legal_evidence_retrieval_plan    旧経路の詳細設計・実装記録
 │  ├─ legal_issue_coverage_retrieval           旧経路のfeature flag実装
 │  └─ legal_rag_project_checklist
@@ -148,17 +152,18 @@
 1. ユーザー要望: [requirements/README.md](requirements/README.md)
 2. 第二期の変更概要: [second_phase_development_memo.md](second_phase_development_memo.md)
 3. 現在の課題と次の作業: [legal_retrieval_issue_tracker.md](legal_retrieval_issue_tracker.md)
-4. Agent全体像: [generic_iterative_agent_framework_plan_visual.md](generic_iterative_agent_framework_plan_visual.md)
-5. Agent実装仕様: [generic_iterative_agent_framework_plan.md](generic_iterative_agent_framework_plan.md)
-6. 投入対象: [dataset_design.md](dataset_design.md)
-7. Graph構築: [graph_edge_construction.md](graph_edge_construction.md)
-8. 現在の実装・再投入・評価結果: [RUNBOOK.md](../RUNBOOK.md)
-9. OpenSearchの基本設計: [retrieval_config.md](retrieval_config.md)
-10. 旧法令検索経路を調べる場合だけ:
+4. 新しい仮説単位検索: [hypothesis_guided_search_design.md](hypothesis_guided_search_design.md)
+5. Agent全体像: [generic_iterative_agent_framework_plan_visual.md](generic_iterative_agent_framework_plan_visual.md)
+6. Agent実装仕様: [generic_iterative_agent_framework_plan.md](generic_iterative_agent_framework_plan.md)
+7. 投入対象: [dataset_design.md](dataset_design.md)
+8. Graph構築: [graph_edge_construction.md](graph_edge_construction.md)
+9. 現在の実装・再投入・評価結果: [RUNBOOK.md](../RUNBOOK.md)
+10. OpenSearchの基本設計: [retrieval_config.md](retrieval_config.md)
+11. 旧法令検索経路を調べる場合だけ:
    [layered_legal_evidence_retrieval_plan.md](layered_legal_evidence_retrieval_plan.md)
-11. QA・検索評価: [evaluation_design.md](evaluation_design.md)
-12. AWS移行課題: [infra/aws/ISSUES.md](../infra/aws/ISSUES.md)
-13. AWS初期データの暫定運用: [infra/aws/BOOTSTRAP-DATA.md](../infra/aws/BOOTSTRAP-DATA.md)
+12. QA・検索評価: [evaluation_design.md](evaluation_design.md)
+13. AWS移行課題: [infra/aws/ISSUES.md](../infra/aws/ISSUES.md)
+14. AWS初期データの暫定運用: [infra/aws/BOOTSTRAP-DATA.md](../infra/aws/BOOTSTRAP-DATA.md)
 
 ## 8. 文書を更新するときの注意
 
