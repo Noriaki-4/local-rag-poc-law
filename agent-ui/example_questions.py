@@ -97,25 +97,6 @@ LEVELS: tuple[QuestionLevel, ...] = (
 EXAMPLE_QUESTIONS: tuple[ExampleQuestion, ...] = (
     ExampleQuestion(
         level=1,
-        title="土地を借りる期間の違い",
-        question=(
-            "建物を建てるために土地を借りる場合と、資材置き場のように建物を建てない目的で"
-            "土地を借りる場合とで、契約できる期間のルールはどう違いますか。"
-            "根拠となる条文も示してください。"
-        ),
-        expected="民法＋借地借家法",
-        required_evidence=(
-            _articles("普通借地権の存続期間（借地借家法3条）", "law-403AC0000000090-article-3"),
-            _articles("賃貸借の最長期間（民法604条）", "law-129AC0000000089-article-604"),
-        ),
-        answer_points=(
-            _point("普通借地権は原則30年", ("30年",), ("三十年",)),
-            _point("建物所有目的でない賃貸借は最長50年", ("50年",), ("五十年",)),
-            _point("建物所有目的の有無で適用法が分かれる", ("建物", "目的"), ("建物所有",)),
-        ),
-    ),
-    ExampleQuestion(
-        level=1,
         title="賃貸住宅を退去するとき",
         question=(
             "アパートの契約が終わるので出ていってほしいと大家から言われました。"
@@ -156,6 +137,25 @@ EXAMPLE_QUESTIONS: tuple[ExampleQuestion, ...] = (
         answer_points=(
             _point("地主の承諾が原則必要", ("承諾", "必要"), ("承諾を得",)),
             _point("承諾に代わる裁判所の許可", ("裁判所", "許可"), ("代わる許可",)),
+        ),
+    ),
+    ExampleQuestion(
+        level=1,
+        title="土地を借りる期間の違い",
+        question=(
+            "建物を建てるために土地を借りる場合と、資材置き場のように建物を建てない目的で"
+            "土地を借りる場合とで、契約できる期間のルールはどう違いますか。"
+            "根拠となる条文も示してください。"
+        ),
+        expected="民法＋借地借家法",
+        required_evidence=(
+            _articles("普通借地権の存続期間（借地借家法3条）", "law-403AC0000000090-article-3"),
+            _articles("賃貸借の最長期間（民法604条）", "law-129AC0000000089-article-604"),
+        ),
+        answer_points=(
+            _point("普通借地権は原則30年", ("30年",), ("三十年",)),
+            _point("建物所有目的でない賃貸借は最長50年", ("50年",), ("五十年",)),
+            _point("建物所有目的の有無で適用法が分かれる", ("建物", "目的"), ("建物所有",)),
         ),
     ),
     ExampleQuestion(
