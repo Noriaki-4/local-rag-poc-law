@@ -15,7 +15,15 @@ def test_invocation_streams_strands_events_for_genu(monkeypatch):
         "_invoke_legal_agent",
         lambda question: {
             "answer": f"{question}への回答",
-            "citations": [{"documentId": "law-1", "title": "会社法"}],
+            "citations": [
+                {
+                    "documentId": "law-1",
+                    "contentUnitId": "law-1-article-1",
+                    "title": "会社法",
+                    "heading": "第一条",
+                    "text": "会社法の条文本文",
+                }
+            ],
         },
     )
 
@@ -34,7 +42,25 @@ def test_invocation_streams_strands_events_for_genu(monkeypatch):
         if "contentBlockDelta" in event
         and "text" in event["contentBlockDelta"]["delta"]
     ]
-    assert text_deltas == ["質問への回答\n\n参照:\n- 会社法"]
+    assert text_deltas == ["質問への回答"]
+    citation_events = [
+        event["legalRagCitations"]
+        for event in events
+        if "legalRagCitations" in event
+    ]
+    assert citation_events == [
+        {
+            "citations": [
+                {
+                    "documentId": "law-1",
+                    "contentUnitId": "law-1-article-1",
+                    "title": "会社法",
+                    "heading": "第一条",
+                    "text": "会社法の条文本文",
+                }
+            ]
+        }
+    ]
     assert events[-1] == {"messageStop": {"stopReason": "end_turn"}}
 
 
@@ -99,16 +125,9 @@ def test_question_readiness_streams_structured_result(monkeypatch):
         runtime_app,
         "_invoke_question_readiness",
         lambda question: {
-            "decision": "clarification_required",
+            "decision": "clarification_recommended",
             "reason": "主体を確認します。",
-            "clarification_question": "誰が行いますか。",
-            "choices": [
-                {
-                    "choice_id": "company",
-                    "label": "会社",
-                    "refined_question": f"会社が行う場合の{question}",
-                }
-            ],
+            "recommendation": f"会社が行う場合の{question}",
         },
     )
 
@@ -128,15 +147,8 @@ def test_question_readiness_streams_structured_result(monkeypatch):
         and "text" in event["contentBlockDelta"]["delta"]
     )
     assert json.loads(text) == {
-        "decision": "clarification_required",
+        "decision": "clarification_recommended",
         "reason": "主体を確認します。",
-        "clarification_question": "誰が行いますか。",
-        "choices": [
-            {
-                "choice_id": "company",
-                "label": "会社",
-                "refined_question": "会社が行う場合の要件は何ですか。",
-            }
-        ],
+        "recommendation": "会社が行う場合の要件は何ですか。",
     }
     assert events[-1] == {"messageStop": {"stopReason": "end_turn"}}

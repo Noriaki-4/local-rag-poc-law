@@ -53,25 +53,46 @@ def extract_question(payload: Mapping[str, Any]) -> str:
 
 
 def render_answer(response: Mapping[str, Any]) -> str:
-    """現行AnswerResponseをGenUのチャット本文へ損失少なく投影する。"""
+    """現行AnswerResponseからGenUのチャット本文を取り出す。"""
 
     answer = response.get("answer")
     if not isinstance(answer, str) or not answer.strip():
         raise AgentCoreContractError("Legal Agent response does not contain answer text")
+    return answer.strip()
 
-    citation_lines: list[str] = []
+
+def render_citations(response: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """AnswerResponseのcitationをGenUへ渡す公開フィールドだけに射影する。"""
+
+    rendered: list[dict[str, Any]] = []
     citations = response.get("citations")
     if isinstance(citations, Sequence) and not isinstance(citations, (str, bytes)):
         for citation in citations:
             if not isinstance(citation, Mapping):
                 continue
-            label = _citation_label(citation)
-            if label and label not in citation_lines:
-                citation_lines.append(label)
+            document_id = citation.get("documentId")
+            if not isinstance(document_id, str) or not document_id.strip():
+                continue
 
-    rendered = answer.strip()
-    if citation_lines:
-        rendered += "\n\n参照:\n" + "\n".join(f"- {line}" for line in citation_lines)
+            item: dict[str, Any] = {"documentId": document_id.strip()}
+            for field in (
+                "contentUnitId",
+                "title",
+                "heading",
+                "sourceObjectUri",
+                "text",
+                "evidenceLane",
+                "evidenceRole",
+            ):
+                value = citation.get(field)
+                if isinstance(value, str) and value.strip():
+                    item[field] = value
+
+            source_page = citation.get("sourcePage")
+            if isinstance(source_page, int) and not isinstance(source_page, bool):
+                item["sourcePage"] = source_page
+            rendered.append(item)
+
     return rendered
 
 
@@ -94,17 +115,3 @@ def _text_from_content(content: Any) -> str:
         if isinstance(text, str) and text.strip():
             parts.append(text.strip())
     return "\n".join(parts)
-
-
-def _citation_label(citation: Mapping[str, Any]) -> str:
-    title = citation.get("title") or citation.get("documentId")
-    if not isinstance(title, str) or not title.strip():
-        return ""
-    parts = [title.strip()]
-    heading = citation.get("heading")
-    if isinstance(heading, str) and heading.strip():
-        parts.append(heading.strip())
-    source_page = citation.get("sourcePage")
-    if isinstance(source_page, int):
-        parts.append(f"p.{source_page}")
-    return " / ".join(parts)

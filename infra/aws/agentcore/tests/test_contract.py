@@ -10,6 +10,7 @@ from contract import (
     extract_operation,
     extract_question,
     render_answer,
+    render_citations,
     unwrap_payload,
 )
 
@@ -68,7 +69,7 @@ def test_rejects_request_without_text():
         extract_question({"prompt": [{"document": {"name": "only.pdf"}}]})
 
 
-def test_renders_answer_with_deduplicated_citations():
+def test_renders_answer_without_flattening_citations_into_text():
     rendered = render_answer(
         {
             "answer": "回答本文",
@@ -88,9 +89,37 @@ def test_renders_answer_with_deduplicated_citations():
             ],
         }
     )
-    assert rendered == (
-        "回答本文\n\n参照:\n- 金融商品取引法 / 第二十七条の二 / p.12"
+    assert rendered == "回答本文"
+
+
+def test_renders_structured_citations_with_text_and_content_unit_id():
+    rendered = render_citations(
+        {
+            "citations": [
+                {
+                    "documentId": "law-1",
+                    "contentUnitId": "law-1-article-27_2",
+                    "title": "金融商品取引法",
+                    "heading": "第二十七条の二",
+                    "sourcePage": 12,
+                    "text": "その条文の本文",
+                    "ignored": "公開しない内部フィールド",
+                },
+                {"title": "documentIdがないため除外"},
+            ]
+        }
     )
+
+    assert rendered == [
+        {
+            "documentId": "law-1",
+            "contentUnitId": "law-1-article-27_2",
+            "title": "金融商品取引法",
+            "heading": "第二十七条の二",
+            "sourcePage": 12,
+            "text": "その条文の本文",
+        }
+    ]
 
 
 def test_encodes_gen_u_strands_event_as_one_json_line():

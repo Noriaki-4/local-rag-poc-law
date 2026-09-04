@@ -12,8 +12,9 @@ GenUからBedrock AgentCore Runtimeとして既存Legal Agentを呼び出すた�
 
 `runtime_app.py`はLegal Agentのimportをinvoke時まで遅延する。これにより`/ping`はOpenSearch、Graph、
 LLM clientを初期化せずに応答する。検索中は先に開始eventを返し、既存Agentの同期処理を別threadで
-実行した後、回答と引用一覧をstreamへ投影する。`operation=question_readiness`では既存の質問確認Domain
-Serviceを呼び、確認質問、選択肢、修正版をJSONのtext eventとして返す。検索・回答処理は開始しない。
+実行した後、回答本文をtext eventへ、引用の見出し・本文・Content Unit ID等を`legalRagCitations` eventへ
+投影する。`operation=question_readiness`では既存の質問確認Domain Serviceを呼び、判定理由と推奨質問文を
+JSONのtext eventとして返す。検索・回答処理は開始しない。
 
 GenUから渡されるmodelは診断ログにだけ残し、Legal Agentのmodel設定には使用しない。Runtimeは環境設定の
 `low` / `middle` / `high`ごとに指定したJapan geo inference profileだけを使用する。処理とlevelの対応は

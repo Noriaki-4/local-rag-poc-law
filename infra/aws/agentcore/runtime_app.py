@@ -18,6 +18,7 @@ from contract import (
     extract_operation,
     extract_question,
     render_answer,
+    render_citations,
     unwrap_payload,
 )
 
@@ -91,6 +92,7 @@ async def _stream_legal_answer(question: str, runtime_session_id: str | None):
                 framework_trace.get("failureCode"),
             )
         answer = render_answer(response)
+        citations = render_citations(response)
     except Exception:
         logger.exception("Legal Agent invocation failed session=%s", runtime_session_id)
         yield encode_stream_event(
@@ -120,6 +122,8 @@ async def _stream_legal_answer(question: str, runtime_session_id: str | None):
         }
     )
     yield encode_stream_event({"contentBlockStop": {"contentBlockIndex": 1}})
+    if citations:
+        yield encode_stream_event({"legalRagCitations": {"citations": citations}})
     yield encode_stream_event({"messageStop": {"stopReason": "end_turn"}})
 
 
