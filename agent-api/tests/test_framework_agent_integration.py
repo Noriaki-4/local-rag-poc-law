@@ -4033,20 +4033,20 @@ def test_legal_profile_applies_model_levels_per_llm_purpose(monkeypatch) -> None
 
     profile = legal_profiles.legal_agent_profile()
 
-    assert profile.solver_research.model == "middle-model"
-    assert profile.solver_search_planning.model == "middle-model"
-    assert profile.solver_hypothesis_generation.model == "high-model"
-    assert profile.solver_hypothesis_revision.model == "high-model"
-    assert profile.solver_integration.model == "high-model"
+    assert profile.solver_research.model == "low-model"
+    assert profile.solver_search_planning.model == "low-model"
+    assert profile.solver_hypothesis_generation.model == "middle-model"
+    assert profile.solver_hypothesis_revision.model == "middle-model"
+    assert profile.solver_integration.model == "middle-model"
     assert profile.solver_observation_integration is not None
-    assert profile.solver_observation_integration.model == "high-model"
-    assert profile.solver_observation_integration.dependency_model == "middle-model"
-    assert profile.solver_cycle_close.dependency_model == "middle-model"
+    assert profile.solver_observation_integration.model == "middle-model"
+    assert profile.solver_observation_integration.dependency_model == "low-model"
+    assert profile.solver_cycle_close.dependency_model == "low-model"
     assert profile.solver_cycle_close is not None
-    assert profile.solver_cycle_close.model == "middle-model"
+    assert profile.solver_cycle_close.model == "low-model"
     assert profile.solver_finalization is not None
-    assert profile.solver_finalization.model == "high-model"
-    assert profile.reviewer.model == "middle-model"
+    assert profile.solver_finalization.model == "middle-model"
+    assert profile.reviewer.model == "low-model"
 
 
 def test_graph_review_prompt_has_one_document_hierarchy() -> None:

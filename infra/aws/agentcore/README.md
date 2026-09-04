@@ -19,7 +19,7 @@ JSONのtext eventとして返す。検索・回答処理は開始しない。
 GenUから渡されるmodelは診断ログにだけ残し、Legal Agentのmodel設定には使用しない。Runtimeは環境設定の
 `low` / `middle` / `high`ごとに指定したJapan geo inference profileだけを使用する。処理とlevelの対応は
 `agent-api/app/domains/legal/model_levels.json`を正本とし、現行PoCは`low`をClaude Haiku 4.5、
-`middle`をClaude Sonnet 4.6、`high`をClaude Opus 4.8へ割り当てる。`aws_adapters.py`は`app.main`より先にprovider境界を差し込み、
+`middle`と`high`をClaude Sonnet 4.6へ割り当てる。`aws_adapters.py`は`app.main`より先にprovider境界を差し込み、
 `agent-api/app`の検索・Agentロジックを複製しない。Runtime roleはOpenSearch / NeptuneのreadとBedrock invoke
 だけを持ち、bootstrap write処理は公開endpointから呼び出せない。
 

@@ -139,7 +139,7 @@ def test_dependency_assessment_model_can_override_evidence_model() -> None:
     } == {"claude-haiku-4-5-20251001"}
 
 
-def test_openai_framework_level_routes_all_purposes_one_tier_higher() -> None:
+def test_openai_framework_level_routes_middle_only_to_selected_purposes() -> None:
     config = _load_framework_routing(
         LLM_PROVIDER="openai",
     )
@@ -152,26 +152,23 @@ def test_openai_framework_level_routes_all_purposes_one_tier_higher() -> None:
     assert config["reasoningEffort"] == "high"
     routing = config["routing"]
     assert isinstance(routing, dict)
-    high_purposes = {
+    middle_purposes = {
         purpose
         for purpose, route in routing.items()
-        if isinstance(route, dict) and route["level"] == "high"
+        if isinstance(route, dict) and route["level"] == "middle"
     }
-    assert high_purposes == {
+    assert middle_purposes == {
         "hypothesis_generation",
         "hypothesis_revision",
         "integration",
         "evidence_integration",
         "finalization",
     }
-    assert {
-        route["level"] for route in routing.values() if isinstance(route, dict)
-    } == {"middle", "high"}
-    assert routing["hypothesis_generation"]["model"] == "gpt-5.6-sol"
-    assert routing["search_planning"]["model"] == "gpt-5.6-terra"
+    assert routing["hypothesis_generation"]["model"] == "gpt-5.6-terra"
+    assert routing["search_planning"]["model"] == "gpt-5.6-luna"
     assert routing["dependency_assessment"] == {
-        "level": "middle",
-        "model": "gpt-5.6-terra",
+        "level": "low",
+        "model": "gpt-5.6-luna",
     }
 
 
@@ -183,11 +180,13 @@ def test_anthropic_framework_level_uses_provider_tiers() -> None:
     routing = config["routing"]
     assert isinstance(routing, dict)
     assert config["reasoningEffort"] == "none"
-    assert routing["search_planning"]["model"] == "claude-sonnet-4-6"
-    assert routing["integration"]["model"] == "claude-opus-4-8"
-    assert routing["finalization"]["model"] == "claude-opus-4-8"
-    assert routing["dependency_assessment"]["model"] == "claude-sonnet-4-6"
-    assert routing["reviewer"]["model"] == "claude-sonnet-4-6"
+    assert routing["search_planning"]["model"] == "claude-haiku-4-5-20251001"
+    assert routing["integration"]["model"] == "claude-sonnet-4-6"
+    assert routing["finalization"]["model"] == "claude-sonnet-4-6"
+    assert routing["dependency_assessment"]["model"] == (
+        "claude-haiku-4-5-20251001"
+    )
+    assert routing["reviewer"]["model"] == "claude-haiku-4-5-20251001"
 
 
 def test_bedrock_framework_level_uses_japan_claude_tiers() -> None:
@@ -195,10 +194,18 @@ def test_bedrock_framework_level_uses_japan_claude_tiers() -> None:
 
     routing = config["routing"]
     assert isinstance(routing, dict)
-    assert routing["search_planning"]["model"] == "jp.anthropic.claude-sonnet-4-6"
-    assert routing["integration"]["model"] == "jp.anthropic.claude-opus-4-8"
-    assert routing["finalization"]["model"] == "jp.anthropic.claude-opus-4-8"
-    assert routing["reviewer"]["model"] == "jp.anthropic.claude-sonnet-4-6"
+    assert routing["search_planning"]["model"] == (
+        "jp.anthropic.claude-haiku-4-5-20251001-v1:0"
+    )
+    assert routing["integration"]["model"] == (
+        "jp.anthropic.claude-sonnet-4-6"
+    )
+    assert routing["finalization"]["model"] == (
+        "jp.anthropic.claude-sonnet-4-6"
+    )
+    assert routing["reviewer"]["model"] == (
+        "jp.anthropic.claude-haiku-4-5-20251001-v1:0"
+    )
 
 
 def test_anthropic_framework_thinking_requires_provider_specific_opt_in() -> None:
