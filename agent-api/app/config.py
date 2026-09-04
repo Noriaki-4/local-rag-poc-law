@@ -421,7 +421,7 @@ class Settings:
         else {
             "low": "jp.anthropic.claude-haiku-4-5-20251001-v1:0",
             "middle": "jp.anthropic.claude-sonnet-4-6",
-            "high": "jp.anthropic.claude-sonnet-4-6",
+            "high": "jp.anthropic.claude-opus-4-8",
         }
         if llm_provider == "bedrock"
         else {

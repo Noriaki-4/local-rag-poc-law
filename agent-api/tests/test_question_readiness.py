@@ -134,7 +134,7 @@ def test_service_returns_ready_without_changing_the_original_question(
         "会社が有価証券報告書を提出する期限はいつですか。"
     )
     assert len(client.calls) == 1
-    assert client.calls[0]["model"] == "test-model"
+    assert client.calls[0]["model"] == "middle-model"
     assert "会社が有価証券報告書を提出する期限はいつですか。" in client.calls[0][
         "prompt"
     ]

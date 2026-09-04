@@ -1109,16 +1109,16 @@ Reviewerは`AGENT_FRAMEWORK_REVIEWER_ENABLED=true`を明示した場合だけ有
 
 全LLM処理のlevelは
 `agent-api/app/domains/legal/model_levels.json`に`low`、`middle`、`high`のいずれかで明示する。
-現在は仮説作成・見直しと本文統合を`middle`、その他を`low`にしている。
+精度比較のため、仮説作成・見直しと本文統合を`high`、その他を`middle`にしている。
 
 Providerごとの既定model対応は次のとおりである。利用環境でmodel IDが異なる場合は、
 `AGENT_FRAMEWORK_LOW_MODEL`、`AGENT_FRAMEWORK_MIDDLE_MODEL`、`AGENT_FRAMEWORK_HIGH_MODEL`で置き換える。
 
-| level | OpenAI | Anthropic |
-|---|---|---|
-| `low` | `gpt-5.6-luna` | `claude-haiku-4-5-20251001` |
-| `middle` | `gpt-5.6-terra` | `claude-sonnet-4-6` |
-| `high` | `gpt-5.6-sol` | `claude-opus-4-8` |
+| level | OpenAI | Anthropic | Bedrock (AWS PoC) |
+|---|---|---|---|
+| `low` | `gpt-5.6-luna` | `claude-haiku-4-5-20251001` | `jp.anthropic.claude-haiku-4-5-20251001-v1:0` |
+| `middle` | `gpt-5.6-terra` | `claude-sonnet-4-6` | `jp.anthropic.claude-sonnet-4-6` |
+| `high` | `gpt-5.6-sol` | `claude-opus-4-8` | `jp.anthropic.claude-opus-4-8` |
 
 上書きできる処理IDは次のとおりである。
 

@@ -42,7 +42,7 @@ const CONFIG: EnvironmentConfig = {
   bedrock: {
     lowModelId: "jp.anthropic.claude-haiku-4-5-20251001-v1:0",
     middleModelId: "jp.anthropic.claude-sonnet-4-6",
-    highModelId: "jp.anthropic.claude-sonnet-4-6",
+    highModelId: "jp.anthropic.claude-opus-4-8",
   },
   bootstrapData: {
     mode: "EXISTING_SNAPSHOT",
@@ -228,7 +228,7 @@ test("runtime stack creates a VPC AgentCore Runtime using the configured image",
       ANSWER_MODEL: "jp.anthropic.claude-sonnet-4-6",
       AGENT_FRAMEWORK_LOW_MODEL: "jp.anthropic.claude-haiku-4-5-20251001-v1:0",
       AGENT_FRAMEWORK_MIDDLE_MODEL: "jp.anthropic.claude-sonnet-4-6",
-      AGENT_FRAMEWORK_HIGH_MODEL: "jp.anthropic.claude-sonnet-4-6",
+      AGENT_FRAMEWORK_HIGH_MODEL: "jp.anthropic.claude-opus-4-8",
       RERANK_PROVIDER: "none",
       OPENSEARCH_MODE: "serverless",
       OPENSEARCH_AWS_SERVICE: "aoss",
@@ -272,6 +272,9 @@ test("runtime stack creates a VPC AgentCore Runtime using the configured image",
   );
   expect(renderedPolicies).toContain(
     "inference-profile/jp.anthropic.claude-sonnet-4-6",
+  );
+  expect(renderedPolicies).toContain(
+    "inference-profile/jp.anthropic.claude-opus-4-8",
   );
   expect(renderedPolicies).toContain(
     "foundation-model/amazon.titan-embed-text-v2:0",
